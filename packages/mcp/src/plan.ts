@@ -150,6 +150,12 @@ export interface ScaffoldOptions {
   /** Platform contract ids; default: the brief's, else the platform's own contract. */
   targets?: string[];
   include_optional?: boolean;
+  /** Style pack id (styles/<id>.yaml); default: the template's default_style. */
+  style?: string;
+  /** Music bed, e.g. `bundled:lofi`; default: the template's default_music. */
+  music?: string;
+  /** Default: the template's voice_mode (narrated unless the archetype has no speech). */
+  voice_mode?: "narrated" | "none";
 }
 
 export interface SceneGuidance {
@@ -235,6 +241,14 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
     target,
   );
 
+  const mode = opts.voice_mode ?? tpl.voice_mode ?? "narrated";
+  const style = opts.style ?? tpl.default_style;
+  const music = opts.music ?? tpl.default_music;
+  if (mode === "none") {
+    notes.push('voice.mode "none": leave voiceover "" in every scene; put the words on screen (on_screen_text or the props) and keep them short enough to read');
+    if (!music) notes.push('no music bed: add audio.music {file: "bundled:<id>"} or the video is silent');
+  }
+
   const scenes: Scene[] = beats.map((b, i) => {
     const scene: Scene = {
       id: `s${String(i + 1).padStart(2, "0")}`,
@@ -264,8 +278,11 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
     target_duration_sec: target,
     language: brief?.language ?? "en-US",
     grounding: "strict",
-    voice: brief?.tone.length ? { style: brief.tone.join(", ") } : {},
-    captions: { preset: tpl.caption_preset, burn_in: true },
+    voice: { ...(mode === "none" ? { mode } : {}), ...(brief?.tone.length ? { style: brief.tone.join(", ") } : {}) },
+    // Without narration there are no speech captions to burn in.
+    captions: { preset: tpl.caption_preset, burn_in: mode !== "none" },
+    ...(style ? { style } : {}),
+    ...(music ? { audio: { music: { file: music } } } : {}),
     scenes,
   };
 
@@ -277,7 +294,8 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
       purpose: b.purpose,
       duration_sec: durations[i]!,
       guidance: b.guidance,
-      word_budget: Math.floor(durations[i]! * tpl.pacing.max_words_per_sec),
+      // Without narration the budget is on-screen words: ~3 words/s after a 1 s settle (lint's rule).
+      word_budget: mode === "none" ? Math.max(3, Math.floor((durations[i]! - 1) * 3)) : Math.floor(durations[i]! * tpl.pacing.max_words_per_sec),
       suggested_visual_strategy: b.suggested_visual_strategy,
       ...(b.suggested_deterministic_kind
         ? { suggested_deterministic_kind: b.suggested_deterministic_kind, props_example: DETERMINISTIC_PROPS_EXAMPLES[b.suggested_deterministic_kind] }

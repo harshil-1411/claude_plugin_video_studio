@@ -7,7 +7,7 @@ import { ffprobe, runFfmpeg, runProcess, getTools } from "@video-studio/media";
 import type { DeterministicKind, Scene } from "@video-studio/schema";
 import { DETERMINISTIC_PROPS_EXAMPLES } from "@video-studio/schema";
 import { layoutZones } from "@video-studio/platforms";
-import { buildFilterGraph, composeScene, createFfmpegRenderer, ffColor, frameCount, motionTiming } from "./ffmpeg-renderer.js";
+import { buildFilterGraph, composeScene, createFfmpegRenderer, ffColor, frameCount, kineticChunks, motionTiming } from "./ffmpeg-renderer.js";
 import { resolveTokens, targetForAspect } from "./tokens.js";
 import type { RenderTarget } from "./types.js";
 
@@ -42,7 +42,18 @@ const PROPS: Record<DeterministicKind, Record<string, unknown>[]> = {
   comparison: [{ left: { label: "Keyword", text: "Matches exact words only" }, right: { label: "Vector", text: "Matches meaning" }, verdict: "Use both" }],
   cta: [{ headline: "Try it today", action: "Install", command: "npm install x", url: "example.com" }],
   end_card: [{ title: "video-studio", subtitle: "knowledge to video" }],
+  quote: [DETERMINISTIC_PROPS_EXAMPLES.quote],
+  stat: [DETERMINISTIC_PROPS_EXAMPLES.stat],
+  timeline: [DETERMINISTIC_PROPS_EXAMPLES.timeline, { events: [{ label: "2019", text: "First prototype" }, { label: "2021" }, { label: "2023", text: "1M users" }], current: 2 }],
+  split_screen: [DETERMINISTIC_PROPS_EXAMPLES.split_screen, { left: { label: "Old", text: "Manual", asset: "a1" }, right: { asset: "a1" } }],
+  lower_third: [DETERMINISTIC_PROPS_EXAMPLES.lower_third],
+  kinetic_text: [DETERMINISTIC_PROPS_EXAMPLES.kinetic_text, { text: "Write once, render everywhere, ship today.", rhythm: "phrase", emphasis: "everywhere" }],
+  map: [DETERMINISTIC_PROPS_EXAMPLES.map],
 };
+
+const NEW_KINDS = ["quote", "stat", "timeline", "split_screen", "lower_third", "kinetic_text", "map"] as const satisfies readonly DeterministicKind[];
+const IMG = { path: "/x.png", width: 160, height: 90 };
+const inputsFor = (kind: DeterministicKind) => (kind === "screenshot" ? { image: IMG } : kind === "split_screen" ? { images: { left: IMG, right: IMG } } : {});
 
 let dir: string;
 const renderer = createFfmpegRenderer({ encodePreset: "ultrafast" });
@@ -85,7 +96,7 @@ describe("pure parts", () => {
   it("lays out every kind inside the frame", () => {
     for (const [kind, list] of Object.entries(PROPS) as [DeterministicKind, Record<string, unknown>[]][]) {
       for (const props of list) {
-        const comp = composeScene(scene(kind, props), target, tokens, kind === "screenshot" ? { image: { path: "/x.png", width: 160, height: 90 } } : {});
+        const comp = composeScene(scene(kind, props), target, tokens, inputsFor(kind));
         expect(comp.elements.length, kind).toBeGreaterThan(0);
         for (const el of comp.elements) {
           if (el.type === "text") continue;
@@ -101,7 +112,7 @@ describe("pure parts", () => {
   it("records a text box for every text block, inside the frame", () => {
     for (const [kind, list] of Object.entries(PROPS) as [DeterministicKind, Record<string, unknown>[]][]) {
       for (const props of list) {
-        const comp = composeScene(scene(kind, props), target, tokens, kind === "screenshot" ? { image: { path: "/x.png", width: 160, height: 90 } } : {});
+        const comp = composeScene(scene(kind, props), target, tokens, inputsFor(kind));
         expect(comp.text_boxes.length, kind).toBeGreaterThan(0);
         for (const b of comp.text_boxes) {
           expect(b.font_px, kind).toBeGreaterThan(0);
@@ -137,6 +148,98 @@ describe("pure parts", () => {
   });
 });
 
+describe("reel grammar kinds", () => {
+  const roles = (kind: DeterministicKind, props: Record<string, unknown> = DETERMINISTIC_PROPS_EXAMPLES[kind]) =>
+    composeScene(scene(kind, props), target, tokens, inputsFor(kind)).text_boxes.map((b) => b.role);
+
+  it("draws natively (no typography fallback) with text boxes inside the safe area", () => {
+    const zones = layoutZones(target);
+    const safe = zones.content;
+    for (const kind of NEW_KINDS) {
+      for (const props of PROPS[kind]) {
+        const comp = composeScene(scene(kind, props), target, tokens, { ...inputsFor(kind), zones });
+        expect(comp.warnings.join(), kind).not.toMatch(/typography card|not implemented/);
+        for (const b of comp.text_boxes) {
+          expect(b.truncated, `${kind} ${b.text}`).toBe(false);
+          expect(b.rect.x, `${kind} ${b.text}`).toBeGreaterThanOrEqual(safe.x);
+          expect(b.rect.y, `${kind} ${b.text}`).toBeGreaterThanOrEqual(safe.y);
+          expect(b.rect.x + b.rect.w, `${kind} ${b.text}`).toBeLessThanOrEqual(safe.x + safe.w);
+          expect(b.rect.y + b.rect.h, `${kind} ${b.text}`).toBeLessThanOrEqual(safe.y + safe.h);
+        }
+      }
+    }
+  });
+
+  it("records sensible roles per kind", () => {
+    expect(roles("quote")).toEqual(["decorative", "headline", "label", "label"]);
+    expect(roles("stat")).toEqual(["headline", "label", "body"]);
+    expect(roles("timeline")).toEqual(["label", "label", "label"]);
+    expect(roles("split_screen")).toEqual(["label", "body", "label", "body"]);
+    expect(roles("lower_third")).toEqual(["headline", "label", "label"]);
+    expect(roles("lower_third", { name: "Ada" })).toEqual(["headline"]);
+    expect(roles("kinetic_text")).toEqual(["headline"]);
+    expect(roles("map")).toEqual(["headline", "label", "label"]);
+    const hook = composeScene({ ...scene("stat"), purpose: "hook" }, target, tokens);
+    expect(hook.text_boxes[0]).toMatchObject({ role: "hook", text: "40%", color: tokens.color_primary });
+  });
+
+  it("highlights the timeline's current event in the primary colour", () => {
+    const comp = composeScene(scene("timeline", { events: [{ label: "A" }, { label: "B" }, { label: "C" }], current: 1 }), target, tokens);
+    const label = (t: string) => comp.text_boxes.find((b) => b.text === t)!;
+    expect(label("B").color).toBe(tokens.color_primary);
+    expect(label("A").color).toBe(tokens.color_text);
+    expect(label("C").color).toBe(tokens.color_text);
+    const texts = comp.elements.filter((e) => e.type === "text");
+    expect(texts.find((e) => e.text === "B")).toMatchObject({ color: tokens.color_primary, beat: 1 });
+    expect(texts.find((e) => e.text === "C")).toMatchObject({ beat: 2 });
+    const out = composeScene(scene("timeline", { events: [{ label: "A" }, { label: "B" }], current: 5 }), target, tokens);
+    expect(out.warnings.join()).toMatch(/current 5 is outside/);
+  });
+
+  it("labels before_after panels and accents the after panel", () => {
+    const comp = composeScene(scene("split_screen", DETERMINISTIC_PROPS_EXAMPLES.split_screen), target, tokens);
+    const labels = comp.text_boxes.filter((b) => b.role === "label");
+    expect(labels.map((b) => b.text)).toEqual(["Before", "After"]);
+    expect(labels[1]!.color).toBe(tokens.color_primary);
+    const custom = composeScene(scene("split_screen", { mode: "before_after", left: { label: "v1", text: "a" }, right: { label: "v2", text: "b" } }), target, tokens);
+    expect(custom.text_boxes.filter((b) => b.role === "label").map((b) => b.text)).toEqual(["v1", "v2"]);
+    const plain = composeScene(scene("split_screen", { left: { text: "a" }, right: { text: "b" } }), target, tokens);
+    expect(plain.text_boxes.map((b) => b.role)).toEqual(["body", "body"]);
+    const withImg = composeScene(scene("split_screen", PROPS.split_screen[1]!), target, tokens, { images: { left: IMG, right: IMG } });
+    expect(withImg.elements.filter((e) => e.type === "image")).toHaveLength(2);
+    const missing = composeScene(scene("split_screen", PROPS.split_screen[1]!), target, tokens, { images: { left: null, right: null } });
+    expect(missing.elements.filter((e) => e.type === "image")).toHaveLength(0);
+    expect(missing.text_boxes.filter((b) => b.role === "decorative")).toHaveLength(2);
+  });
+
+  it("chunks kinetic text by word or phrase, one beat per chunk, with emphasis words in primary", () => {
+    expect(kineticChunks("Docs in. Video out.", "word")).toEqual(["Docs", "in.", "Video", "out."]);
+    expect(kineticChunks("Write once, render everywhere, ship today.", "phrase")).toEqual(["Write once,", "render everywhere,", "ship today."]);
+    const words = composeScene(scene("kinetic_text"), target, tokens).elements.filter((e) => e.type === "text");
+    expect(words.map((e) => e.text)).toEqual(["Docs", "in.", "Video", "out."]);
+    expect(words.map((e) => e.beat)).toEqual([0, 1, 2, 3]);
+    expect(words.filter((e) => e.color === tokens.color_primary).map((e) => e.text)).toEqual(["Video"]);
+    const phrases = composeScene(scene("kinetic_text", PROPS.kinetic_text[1]!), target, tokens).elements.filter((e) => e.type === "text");
+    expect(phrases.map((e) => e.beat)).toEqual([0, 0, 1, 1, 2, 2]);
+    expect(phrases.find((e) => e.text === "everywhere,")?.color).toBe(tokens.color_primary);
+    expect(composeScene(scene("kinetic_text", { text: "a b", emphasis: "zzz" }), target, tokens).warnings.join()).toMatch(/emphasis "zzz" not found/);
+  });
+
+  it("pins map points and draws the route only when asked", () => {
+    const withRoute = composeScene(scene("map"), target, tokens);
+    const without = composeScene(scene("map", { ...DETERMINISTIC_PROPS_EXAMPLES.map, route: false }), target, tokens);
+    const routeDots = (els: typeof withRoute.elements) => els.filter((e) => e.type === "box" && e.color === tokens.color_secondary).length;
+    expect(routeDots(withRoute.elements)).toBeGreaterThan(2);
+    expect(routeDots(without.elements)).toBe(0);
+    const pins = withRoute.elements.filter((e) => e.type === "box" && e.color === tokens.color_primary);
+    expect(pins).toHaveLength(2);
+    // Laptop (0.3, 0.4) is left of and above CI (0.7, 0.6).
+    expect(pins[0]!.x).toBeLessThan(pins[1]!.x);
+    expect(pins[0]!.y).toBeLessThan(pins[1]!.y);
+    expect(withRoute.text_boxes.filter((b) => b.role === "label").map((b) => b.text)).toEqual(["Laptop", "CI"]);
+  });
+});
+
 describe("renders every kind", () => {
   const cases = (Object.entries(PROPS) as [DeterministicKind, Record<string, unknown>[]][]).flatMap(([kind, list]) => list.map((props, i) => ({ kind, props, i })));
   it.each(cases)("$kind #$i → exact dims, frames, duration, no audio", async ({ kind, props, i }) => {
@@ -145,7 +248,8 @@ describe("renders every kind", () => {
     expect(res.duration_ms).toBe(1000);
     expect(res.renderer).toBe("ffmpeg-drawtext");
     expect(res.text_boxes?.length).toBeGreaterThan(0);
-    if (kind === "screenshot") expect(res.warnings.join()).not.toMatch(/could not be resolved/);
+    if (kind === "screenshot" || kind === "split_screen") expect(res.warnings.join()).not.toMatch(/could not be resolved/);
+    expect(res.warnings.join()).not.toMatch(/typography card/);
     const p = await ffprobe(out);
     expect([p.width, p.height]).toEqual([180, 320]);
     expect(p.video_codec).toBe("h264");

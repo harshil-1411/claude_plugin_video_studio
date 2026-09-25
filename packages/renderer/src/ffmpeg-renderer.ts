@@ -1,7 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, isAbsolute, join } from "node:path";
-import { fallbackLines } from "./fallback.js";
 import { codeLabel } from "./hyperframes-highlight.js";
 import { projectPaths, resolveInsideProject } from "@video-studio/core";
 import {
@@ -50,7 +49,7 @@ import type { Availability, LayoutZones, RenderTarget, SceneRenderRequest, Scene
  */
 
 export const FFMPEG_RENDERER_ID = "ffmpeg-drawtext";
-export const FFMPEG_RENDERER_VERSION = "0.2.0";
+export const FFMPEG_RENDERER_VERSION = "0.3.0";
 
 export const FFMPEG_RENDERER_KINDS = [
   "typography",
@@ -61,6 +60,13 @@ export const FFMPEG_RENDERER_KINDS = [
   "comparison",
   "cta",
   "end_card",
+  "quote",
+  "stat",
+  "timeline",
+  "split_screen",
+  "lower_third",
+  "kinetic_text",
+  "map",
 ] as const satisfies readonly DeterministicKind[];
 
 export interface FfmpegEncodeSettings {
@@ -744,11 +750,461 @@ function screenshot(p: Record<string, unknown>, c: Ctx, image: { path: string; w
   return { elements: els, warnings };
 }
 
+// ---------------------------------------------------------------------------------- reel grammar kinds
+
+type Img = { path: string; width: number; height: number };
+
+/** Top y of each block when `heights` (with `gaps` between them) are centred vertically in `area`. */
+function vstack(area: Rect, heights: readonly number[], gap: number): number[] {
+  const total = heights.reduce((a, b) => a + b, 0) + gap * Math.max(0, heights.length - 1);
+  let y = area.y + Math.max(0, (area.h - total) / 2);
+  return heights.map((h) => {
+    const top = r(y);
+    y += h + gap;
+    return top;
+  });
+}
+
+/** A filled rect with stepped corners (drawbox has no radius); reads as rounded at phone size. */
+function roundedBox(rect: Rect, radius: number, color: string, beat: number): BoxEl[] {
+  const k = r(Math.max(0, Math.min(radius, rect.w / 2, rect.h / 2)));
+  if (k < 2) return [{ type: "box", ...rect, color, beat }];
+  const a = r(k * 0.3);
+  return [
+    { type: "box", x: rect.x + k, y: rect.y, w: rect.w - 2 * k, h: rect.h, color, beat },
+    { type: "box", x: rect.x, y: rect.y + k, w: rect.w, h: rect.h - 2 * k, color, beat },
+    { type: "box", x: rect.x + a, y: rect.y + a, w: rect.w - 2 * a, h: rect.h - 2 * a, color, beat },
+  ];
+}
+
+/** Bold-heading glyph advance estimate for placing single words on a line (wider than CHAR_EM for caps). */
+function glyphWidth(text: string, size: number): number {
+  let em = 0;
+  for (const ch of Array.from(text)) {
+    if (ch === " ") em += 0.3;
+    else if (/[ijlI.,;:!'’|]/.test(ch)) em += 0.3;
+    else if (/[frt()]/.test(ch)) em += 0.44;
+    else if (/[MWmw@%]/.test(ch)) em += 0.9;
+    else if (/[A-Z0-9]/.test(ch)) em += 0.7;
+    else em += 0.6;
+  }
+  return em * size;
+}
+
+function imageIn(image: Img, box: Rect, beat: number): ImageEl {
+  const s = Math.min(box.w / image.width, box.h / image.height);
+  const w = Math.max(2, Math.floor((image.width * s) / 2) * 2);
+  const h = Math.max(2, Math.floor((image.height * s) / 2) * 2);
+  return { type: "image", path: image.path, x: r(box.x + (box.w - w) / 2), y: r(box.y + (box.h - h) / 2), w, h, beat };
+}
+
+function quote(p: Record<string, unknown>, c: Ctx): Layout {
+  const warnings: string[] = [];
+  const text = asStr(p.text) ?? "";
+  const attribution = asStr(p.attribution);
+  const source = asStr(p.source);
+  const gap = r(c.u * 0.035);
+  const w = c.safe.w - 2 * r(c.u * 0.02);
+  const markSize = r(c.u * 0.22);
+  // The opening mark glyph sits high in its em box: reserve only its visible part.
+  const markH = r(markSize * 0.4);
+  const af = attribution ? fitText(`— ${attribution}`, { w, h: c.u * 0.08 }, { maxSize: c.u * 0.048, minSize: c.u * 0.025, maxLines: 1 }) : undefined;
+  const sf = source ? fitText(source, { w, h: c.u * 0.07 }, { maxSize: c.u * 0.038, minSize: c.u * 0.022, maxLines: 1 }) : undefined;
+  const foot = [af, sf].filter((x): x is FitResult => !!x);
+  const footH = foot.reduce((a, f) => a + f.height, 0) + (foot.length > 1 ? r(gap / 2) : 0);
+  const qBox = { w, h: c.safe.h - markH - gap - (footH ? footH + gap : 0) };
+  const qf = fitText(text, qBox, { maxSize: c.u * 0.1, minSize: c.u * 0.035 });
+  if (qf.truncated) warnings.push("quote: text truncated to fit");
+  const [markY, textY, footY] = vstack(c.safe, [markH, qf.height, ...(footH ? [footH] : [])], gap);
+  const cx = r(c.safe.x + c.safe.w / 2);
+  const els: El[] = [{ type: "text", text: "“", font: "heading", size: markSize, color: c.colors.primary, x: cx, cx, y: r(markY! - markSize * 0.12), beat: 0, slide: false }];
+  note(c, "decorative", "“", { x: cx - markSize / 2, y: markY!, w: markSize, h: markH }, { fontSize: markSize, truncated: false }, c.colors.primary);
+  const qRect: Rect = { x: r(c.safe.x + (c.safe.w - w) / 2), y: textY!, w, h: r(qf.height) };
+  els.push(...textLines(qf, qRect, { font: "heading", color: c.colors.text, beat: (i) => 0.5 + i * 0.5 }));
+  note(c, c.main, text, qRect, qf, c.colors.text);
+  let y = footY ?? 0;
+  const beat = 1 + qf.lines.length * 0.5;
+  if (af) {
+    const rect: Rect = { x: qRect.x, y, w, h: r(af.height) };
+    els.push(...textLines(af, rect, { font: "body", color: c.colors.text, beat }));
+    note(c, "label", `— ${attribution}`, rect, af, c.colors.text);
+    y += r(af.height + gap / 2);
+  }
+  if (sf) {
+    const rect: Rect = { x: qRect.x, y, w, h: r(sf.height) };
+    els.push(...textLines(sf, rect, { font: "body", color: c.colors.muted, beat: beat + 0.5 }));
+    note(c, "label", source!, rect, sf, c.colors.muted);
+  }
+  return { elements: els, warnings };
+}
+
+function stat(p: Record<string, unknown>, c: Ctx): Layout {
+  const warnings: string[] = [];
+  const raw = p.value;
+  const value = `${typeof raw === "number" ? formatNumber(raw) : (asStr(raw) ?? "")}${typeof p.unit === "string" ? p.unit : ""}`;
+  const label = asStr(p.label);
+  const context = asStr(p.context);
+  const gap = r(c.u * 0.035);
+  const w = c.safe.w;
+  const vf = fitText(value, { w, h: c.safe.h * 0.45 }, { maxSize: c.u * 0.3, minSize: c.u * 0.06, maxLines: 1, lineHeight: 1.1 });
+  if (vf.truncated) warnings.push("stat: value truncated to fit");
+  const lf = label ? fitText(label, { w, h: c.safe.h * 0.25 }, { maxSize: c.u * 0.07, minSize: c.u * 0.03, maxLines: 3 }) : undefined;
+  if (lf?.truncated) warnings.push("stat: label truncated to fit");
+  const cf = context ? fitText(context, { w, h: c.safe.h * 0.15 }, { maxSize: c.u * 0.045, minSize: c.u * 0.024, maxLines: 2 }) : undefined;
+  if (cf?.truncated) warnings.push("stat: context truncated to fit");
+  const barH = Math.max(2, r(c.u * 0.012));
+  const heights = [vf.height, barH, ...(lf ? [lf.height] : []), ...(cf ? [cf.height] : [])];
+  const ys = vstack(c.safe, heights, gap);
+  const els: El[] = [];
+  const vRect: Rect = { x: c.safe.x, y: ys[0]!, w, h: r(vf.height) };
+  els.push(...textLines(vf, vRect, { font: "heading", color: c.colors.primary, beat: 0 }));
+  note(c, c.main, value, vRect, vf, c.colors.primary);
+  const barW = r(c.u * 0.14);
+  els.push({ type: "box", x: r(c.safe.x + (w - barW) / 2), y: ys[1]!, w: barW, h: barH, color: c.colors.primary, beat: 0.5 });
+  let k = 2;
+  if (lf) {
+    const rect: Rect = { x: c.safe.x, y: ys[k++]!, w, h: r(lf.height) };
+    els.push(...textLines(lf, rect, { font: "heading", color: c.colors.text, beat: 1 }));
+    note(c, "label", label!, rect, lf, c.colors.text);
+  }
+  if (cf) {
+    const rect: Rect = { x: c.safe.x, y: ys[k++]!, w, h: r(cf.height) };
+    els.push(...textLines(cf, rect, { font: "body", color: c.colors.muted, beat: 2 }));
+    note(c, "body", context!, rect, cf, c.colors.muted);
+  }
+  return { elements: els, warnings };
+}
+
+const MAX_TIMELINE_EVENTS = 6;
+
+function timeline(p: Record<string, unknown>, c: Ctx): Layout {
+  const warnings: string[] = [];
+  let events = Array.isArray(p.events)
+    ? p.events.flatMap((e): { label: string; text?: string }[] => {
+        if (!e || typeof e !== "object") return [];
+        const o = e as Record<string, unknown>;
+        const label = asStr(o.label);
+        const text = asStr(o.text);
+        return label ? [{ label, ...(text ? { text } : {}) }] : [];
+      })
+    : [];
+  if (events.length === 0) return { elements: [], warnings: ["timeline: no events"] };
+  if (events.length > MAX_TIMELINE_EVENTS) {
+    warnings.push(`timeline: ${events.length} events exceed ${MAX_TIMELINE_EVENTS}; only the first ${MAX_TIMELINE_EVENTS} are drawn`);
+    events = events.slice(0, MAX_TIMELINE_EVENTS);
+  }
+  const n = events.length;
+  let cur = typeof p.current === "number" && Number.isInteger(p.current) ? p.current : undefined;
+  if (cur !== undefined && (cur < 0 || cur >= n)) {
+    warnings.push(`timeline: current ${cur} is outside the ${n} event(s); nothing highlighted`);
+    cur = undefined;
+  }
+  const hasText = events.some((e) => e.text);
+  const th = Math.max(2, r(c.u * 0.008));
+  const dot = Math.max(6, r(c.u * 0.04));
+  const big = Math.max(dot + 4, r(dot * 1.5));
+  const gap = r(c.u * 0.025);
+  const dotColor = (i: number) => (cur === undefined || i <= cur ? c.colors.primary : c.colors.panelEdge);
+  const labelColor = (i: number) => (i === cur ? c.colors.primary : c.colors.text);
+  const els: El[] = [];
+  const pushDot = (cx: number, cy: number, i: number) => {
+    const s = i === cur ? big : dot;
+    if (i === cur) els.push({ type: "box", x: r(cx - s / 2 - th), y: r(cy - s / 2 - th), w: s + 2 * th, h: s + 2 * th, color: c.colors.bg, beat: i });
+    els.push({ type: "box", x: r(cx - s / 2), y: r(cy - s / 2), w: s, h: s, color: dotColor(i), beat: i });
+  };
+  // Text blocks are collected first so labels share one size (and texts another).
+  const drawText = (labelBoxes: Rect[], textBoxes: Rect[], align: "left" | "center") => {
+    const lSize = Math.min(...events.map((e, i) => fitText(e.label, labelBoxes[i]!, { maxSize: c.u * 0.065, minSize: c.u * 0.028, maxLines: 2 }).fontSize));
+    const tSize = hasText ? Math.min(...events.map((e, i) => (e.text ? fitText(e.text, textBoxes[i]!, { maxSize: c.u * 0.042, minSize: c.u * 0.022, maxLines: 3 }).fontSize : Infinity))) : 0;
+    events.forEach((e, i) => {
+      const lb = labelBoxes[i]!;
+      const lf = fitText(e.label, lb, { maxSize: lSize, minSize: lSize, maxLines: 2 });
+      if (lf.truncated) warnings.push(`timeline: label "${e.label}" truncated to fit`);
+      els.push(...textLines(lf, lb, { font: "heading", color: labelColor(i), beat: i, align, valign: "top" }));
+      note(c, "label", e.label, lb, lf, labelColor(i));
+      if (e.text) {
+        const tb = { ...textBoxes[i]!, y: r(lb.y + lf.height + gap / 2) };
+        const tf = fitText(e.text, tb, { maxSize: tSize, minSize: tSize, maxLines: 3 });
+        if (tf.truncated) warnings.push(`timeline: text of "${e.label}" truncated to fit`);
+        els.push(...textLines(tf, tb, { font: "body", color: c.colors.muted, beat: i + 0.3, align, valign: "top" }));
+        note(c, "body", e.text, tb, tf, c.colors.muted);
+      }
+    });
+  };
+  const portrait = c.target.height >= c.target.width;
+  if (portrait) {
+    const rowH = Math.min(c.safe.h / n, c.u * (hasText ? 0.36 : 0.22));
+    const top = c.safe.y + (c.safe.h - rowH * n) / 2;
+    const lineX = r(c.safe.x + big / 2 + th);
+    const textX = r(lineX + big / 2 + c.u * 0.05);
+    const textW = c.safe.x + c.safe.w - textX;
+    const labelH = r(rowH * (hasText ? 0.42 : 0.85));
+    const labelBoxes = events.map((_, i) => ({ x: textX, y: r(top + i * rowH), w: textW, h: labelH }));
+    const textBoxes = labelBoxes.map((b) => ({ ...b, h: r(rowH - labelH - gap) }));
+    // Dots centred on the first label line (cap middle ≈ 0.6 em below the line top).
+    const probe = Math.min(...events.map((e, i) => fitText(e.label, labelBoxes[i]!, { maxSize: c.u * 0.065, minSize: c.u * 0.028, maxLines: 2 }).fontSize));
+    const cy = (i: number) => labelBoxes[i]!.y + probe * 0.6;
+    els.push({ type: "box", x: r(lineX - th / 2), y: r(cy(0)), w: th, h: Math.max(th, r(cy(n - 1) - cy(0))), color: c.colors.panelEdge, beat: 0 });
+    if (cur !== undefined && cur > 0) els.push({ type: "box", x: r(lineX - th / 2), y: r(cy(0)), w: th, h: r(cy(cur) - cy(0)), color: c.colors.primary, beat: cur });
+    events.forEach((_, i) => pushDot(lineX, cy(i), i));
+    drawText(labelBoxes, textBoxes, "left");
+  } else {
+    const cols = splitH(c.safe, events.map(() => 1), gap);
+    const labelH = r(c.u * 0.15);
+    const textH = hasText ? r(c.u * 0.2) : 0;
+    const blockH = big + gap + labelH + (hasText ? textH : 0);
+    const top = c.safe.y + Math.max(0, (c.safe.h - blockH) / 2);
+    const lineY = r(top + big / 2);
+    const cx = (i: number) => cols[i]!.x + cols[i]!.w / 2;
+    els.push({ type: "box", x: r(cx(0)), y: r(lineY - th / 2), w: Math.max(th, r(cx(n - 1) - cx(0))), h: th, color: c.colors.panelEdge, beat: 0 });
+    if (cur !== undefined && cur > 0) els.push({ type: "box", x: r(cx(0)), y: r(lineY - th / 2), w: r(cx(cur) - cx(0)), h: th, color: c.colors.primary, beat: cur });
+    events.forEach((_, i) => pushDot(cx(i), lineY, i));
+    const labelBoxes = cols.map((col) => ({ x: col.x, y: r(top + big + gap), w: col.w, h: labelH }));
+    drawText(labelBoxes, labelBoxes.map((b) => ({ ...b, h: textH })), "center");
+  }
+  return { elements: els, warnings };
+}
+
+function splitScreen(p: Record<string, unknown>, c: Ctx, images: { left?: Img | null; right?: Img | null }): Layout {
+  const warnings: string[] = [];
+  const obj = (v: unknown) => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
+  const beforeAfter = p.mode === "before_after";
+  const sides = [obj(p.left), obj(p.right)];
+  const labels = sides.map((s, i) => asStr(s.label) ?? (beforeAfter ? (i === 0 ? "Before" : "After") : undefined));
+  const accents = beforeAfter ? [c.colors.muted, c.colors.primary] : [c.colors.primary, c.colors.secondary];
+  const labelColors = beforeAfter ? [c.colors.text, c.colors.primary] : accents;
+  const gap = r(c.u * 0.04);
+  const portrait = c.target.height > c.target.width;
+  const panels = portrait ? splitV(c.safe, [1, 1], gap) : splitH(c.safe, [1, 1], gap);
+  const pad = r(c.u * 0.035);
+  const labelH = labels.some(Boolean) ? r(c.u * 0.09) : 0;
+  const content = panels.map((pr) => ({ x: pr.x + pad, y: pr.y + pad + labelH, w: pr.w - 2 * pad, h: pr.h - 2 * pad - labelH }));
+  // Text shares the panel with an image (bottom quarter) or fills it.
+  const areas = sides.map((s, i) => {
+    const hasImg = !!asStr(s.asset);
+    const hasText = !!asStr(s.text);
+    const [imgR, txtR] = hasImg && hasText ? splitV(content[i]!, [3, 1], r(gap / 2)) : hasImg ? [content[i]!, undefined] : [undefined, content[i]!];
+    return { imgR, txtR };
+  });
+  const fits = sides.map((s, i) => (asStr(s.text) && areas[i]!.txtR ? fitText(asStr(s.text)!, areas[i]!.txtR!, { maxSize: c.u * 0.07, minSize: c.u * 0.03 }).fontSize : Infinity));
+  const size = Math.min(...fits);
+  const th = Math.max(2, r(c.u * 0.006));
+  const els: El[] = [];
+  sides.forEach((s, i) => {
+    const pr = panels[i]!;
+    const beat = i * 2;
+    const name = i === 0 ? "left" : "right";
+    els.push({ type: "box", ...pr, color: c.colors.panel, beat });
+    els.push({ type: "box", x: pr.x, y: pr.y, w: pr.w, h: Math.max(2, r(c.u * 0.01)), color: accents[i]!, beat });
+    if (beforeAfter && i === 1) els.push({ type: "box", ...pr, color: c.colors.primary, thickness: th, beat });
+    const label = labels[i];
+    if (label) {
+      const lb = { x: pr.x + pad, y: pr.y + pad, w: pr.w - 2 * pad, h: labelH - r(pad / 2) };
+      const lf = fitText(label, lb, { maxSize: c.u * 0.06, minSize: c.u * 0.03, maxLines: 1 });
+      els.push(...textLines(lf, lb, { font: "heading", color: labelColors[i]!, beat, valign: "top" }));
+      note(c, "label", label, lb, lf, labelColors[i]!, c.colors.panel);
+    }
+    const { imgR, txtR } = areas[i]!;
+    if (imgR) {
+      const img = images[name];
+      if (img) {
+        const el = imageIn(img, imgR, beat + 0.5);
+        els.push(el, { type: "box", x: el.x, y: el.y, w: el.w, h: el.h, color: c.colors.panelEdge, thickness: Math.max(1, r(c.u * 0.004)), beat: beat + 0.5 });
+      } else {
+        const msg = `image "${asStr(s.asset)}" unavailable`;
+        const f = fitText(msg, inset(imgR, pad), { maxSize: c.u * 0.04, minSize: c.u * 0.02 });
+        els.push({ type: "box", ...imgR, color: c.colors.panelEdge, thickness: Math.max(1, r(c.u * 0.004)), beat });
+        els.push(...textLines(f, inset(imgR, pad), { font: "body", color: c.colors.muted, beat, slide: false }));
+        note(c, "decorative", msg, inset(imgR, pad), f, c.colors.muted, c.colors.panel);
+      }
+    }
+    const text = asStr(s.text);
+    if (text && txtR) {
+      const tf = fitText(text, txtR, { maxSize: size, minSize: Math.min(size, c.u * 0.03) });
+      if (tf.truncated) warnings.push(`split_screen: ${name} text truncated to fit`);
+      els.push(...textLines(tf, txtR, { font: "heading", color: c.colors.text, beat: beat + 1, valign: imgR ? "top" : "middle" }));
+      note(c, "body", text, txtR, tf, c.colors.text, c.colors.panel);
+    }
+    if (!text && !imgR) warnings.push(`split_screen: ${name} panel has no text or asset`);
+  });
+  return { elements: els, warnings };
+}
+
+function lowerThird(p: Record<string, unknown>, c: Ctx): Layout {
+  const warnings: string[] = [];
+  const name = asStr(p.name) ?? "";
+  const title = asStr(p.title);
+  const headline = asStr(p.headline);
+  const pad = r(c.u * 0.035);
+  const accentW = Math.max(3, r(c.u * 0.015));
+  const maxW = r(c.safe.w * 0.92) - 2 * pad - accentW;
+  const nf = fitText(name, { w: maxW, h: c.u * 0.12 }, { maxSize: c.u * 0.07, minSize: c.u * 0.03, maxLines: 1 });
+  if (nf.truncated) warnings.push("lower_third: name truncated to fit");
+  const tf = title ? fitText(title, { w: maxW, h: c.u * 0.08 }, { maxSize: c.u * 0.045, minSize: c.u * 0.022, maxLines: 1 }) : undefined;
+  if (tf?.truncated) warnings.push("lower_third: title truncated to fit");
+  const inner = r(c.u * 0.015);
+  const barH = r(2 * pad + nf.height + (tf ? inner + tf.height : 0));
+  const barW = Math.min(c.safe.w, r(Math.max(nf.width, tf?.width ?? 0) + 2 * pad + accentW + c.u * 0.04));
+  // Low in the content area, which already excludes the platform UI masks.
+  const bar: Rect = { x: c.safe.x, y: c.safe.y + c.safe.h - barH, w: barW, h: barH };
+  const els: El[] = [];
+  if (headline) {
+    const gap = r(c.u * 0.06);
+    const hr: Rect = { x: c.safe.x, y: c.safe.y, w: c.safe.w, h: Math.max(0, bar.y - gap - c.safe.y) };
+    const hf = fitText(headline, hr, { maxSize: c.u * 0.1, minSize: c.u * 0.04 });
+    if (hf.truncated) warnings.push("lower_third: headline truncated to fit");
+    els.push(...textLines(hf, hr, { font: "heading", color: c.colors.text, beat: 0 }));
+    note(c, c.main, headline, hr, hf, c.colors.text);
+  }
+  els.push({ type: "box", ...bar, color: c.colors.panel, beat: 1 });
+  els.push({ type: "box", x: bar.x, y: bar.y, w: accentW, h: bar.h, color: c.colors.primary, beat: 1 });
+  const tx = bar.x + accentW + pad;
+  const nr: Rect = { x: tx, y: bar.y + pad, w: maxW, h: r(nf.height) };
+  els.push(...textLines(nf, nr, { font: "heading", color: c.colors.text, beat: 1, align: "left", valign: "top" }));
+  note(c, headline ? "label" : c.main, name, nr, nf, c.colors.text, c.colors.panel);
+  if (tf) {
+    const trr: Rect = { x: tx, y: r(nr.y + nf.height + inner), w: maxW, h: r(tf.height) };
+    els.push(...textLines(tf, trr, { font: "body", color: c.colors.muted, beat: 1.5, align: "left", valign: "top" }));
+    note(c, "label", title!, trr, tf, c.colors.muted, c.colors.panel);
+  }
+  return { elements: els, warnings };
+}
+
+/** Kinetic-text chunks: words, or phrases split after punctuation (exported for tests). */
+export function kineticChunks(text: string, rhythm: "word" | "phrase"): string[] {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (!t) return [];
+  if (rhythm === "word") return t.split(" ");
+  return t
+    .split(/(?<=[.,;:!?…—])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function kineticText(p: Record<string, unknown>, c: Ctx): Layout {
+  const warnings: string[] = [];
+  const text = asStr(p.text) ?? "";
+  const rhythm = p.rhythm === "phrase" ? "phrase" : "word";
+  const chunks = kineticChunks(text, rhythm);
+  const words = chunks.flatMap((ch) => ch.split(" "));
+  const chunkOf = chunks.flatMap((ch, i) => ch.split(" ").map(() => i));
+  const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  const emphasis = asStr(p.emphasis);
+  const emSet = new Set((emphasis ?? "").split(/\s+/).map(norm).filter(Boolean));
+  const box = inset(c.safe, r(c.u * 0.03));
+  // Fit narrower than the box: words are placed one by one with a wider (bold) glyph estimate.
+  const fit = fitText(rhythm === "phrase" ? chunks : [words.join(" ")], { w: box.w * 0.85, h: box.h }, { maxSize: c.u * 0.14, minSize: c.u * 0.045 });
+  if (fit.truncated) warnings.push("kinetic_text: text truncated to fit");
+  const els: El[] = [];
+  let k = 0;
+  let acc = "";
+  let hit = false;
+  for (const line of placeLines(fit, box, "center", "middle")) {
+    const parts = line.text.split(" ").filter(Boolean);
+    const space = glyphWidth(" ", fit.fontSize);
+    const widths = parts.map((w) => glyphWidth(w, fit.fontSize));
+    const lineW = widths.reduce((a, b) => a + b, 0) + space * Math.max(0, parts.length - 1);
+    const scale = lineW > box.w ? box.w / lineW : 1;
+    let x = box.x + (box.w - lineW * scale) / 2;
+    parts.forEach((w, j) => {
+      const beat = chunkOf[Math.min(k, chunkOf.length - 1)] ?? 0;
+      const em = emSet.has(norm(w)) && norm(w) !== "";
+      if (em) hit = true;
+      els.push({ type: "text", text: w, font: "heading", size: fit.fontSize, color: em ? c.colors.primary : c.colors.text, x: r(x), y: line.y, beat, slide: true });
+      x += (widths[j]! + space) * scale;
+      // A hard-broken word spans several pieces: advance once the whole word is consumed.
+      acc += w;
+      if (acc.length >= (words[k]?.length ?? 0)) {
+        k++;
+        acc = "";
+      }
+    });
+  }
+  note(c, c.main, text, box, fit, c.colors.text);
+  if (emphasis && !hit) warnings.push(`kinetic_text: emphasis "${emphasis}" not found in text`);
+  return { elements: els, warnings };
+}
+
+function map(p: Record<string, unknown>, c: Ctx): Layout {
+  const warnings: string[] = [];
+  const title = asStr(p.title);
+  const clamp = (v: number) => Math.min(1, Math.max(0, v));
+  let points = Array.isArray(p.points)
+    ? p.points.flatMap((pt): { label: string; x: number; y: number }[] => {
+        if (!pt || typeof pt !== "object") return [];
+        const o = pt as Record<string, unknown>;
+        return typeof o.x === "number" && typeof o.y === "number" ? [{ label: asStr(o.label) ?? "", x: clamp(o.x), y: clamp(o.y) }] : [];
+      })
+    : [];
+  if (points.length > 8) {
+    warnings.push(`map: ${points.length} points exceed 8; only the first 8 are drawn`);
+    points = points.slice(0, 8);
+  }
+  if (points.length === 0) warnings.push("map: no points");
+  const gap = r(c.u * 0.035);
+  const els: El[] = [];
+  const tf = title ? fitText(title, { w: c.safe.w, h: c.u * 0.18 }, { maxSize: c.u * 0.075, minSize: c.u * 0.03, maxLines: 2 }) : undefined;
+  if (tf?.truncated) warnings.push("map: title truncated to fit");
+  const titleH = tf ? r(tf.height) : 0;
+  const panelH = r(Math.min(c.safe.h - (tf ? titleH + gap : 0), c.safe.w * 1.25));
+  const [titleY, panelY] = tf ? vstack(c.safe, [titleH, panelH], gap) : [undefined, ...vstack(c.safe, [panelH], 0)];
+  const panel: Rect = { x: c.safe.x, y: panelY!, w: c.safe.w, h: panelH };
+  if (tf && title) {
+    const tr: Rect = { x: c.safe.x, y: titleY!, w: c.safe.w, h: titleH };
+    els.push(...textLines(tf, tr, { font: "heading", color: c.colors.text, beat: 0 }));
+    note(c, c.main, title, tr, tf, c.colors.text);
+  }
+  els.push(...roundedBox(panel, c.u * 0.04, c.colors.panel, 0));
+  // A faint grid suggests a map without claiming any geography.
+  const grid = mixColor(c.colors.panel, c.colors.panelEdge, 0.6);
+  const gt = Math.max(1, r(c.u * 0.003));
+  for (let i = 1; i < 4; i++) {
+    els.push({ type: "box", x: r(panel.x + (panel.w * i) / 4), y: panel.y + r(c.u * 0.02), w: gt, h: panel.h - 2 * r(c.u * 0.02), color: grid, beat: 0 });
+    els.push({ type: "box", x: panel.x + r(c.u * 0.02), y: r(panel.y + (panel.h * i) / 4), w: panel.w - 2 * r(c.u * 0.02), h: gt, color: grid, beat: 0 });
+  }
+  const inner = inset(panel, r(c.u * 0.08));
+  const pos = points.map((pt) => ({ ...pt, px: r(inner.x + pt.x * inner.w), py: r(inner.y + pt.y * inner.h) }));
+  if (p.route === true && pos.length > 1) {
+    const d = Math.max(2, r(c.u * 0.012));
+    const step = c.u * 0.03;
+    for (let i = 0; i + 1 < pos.length; i++) {
+      const a = pos[i]!;
+      const b = pos[i + 1]!;
+      const n = Math.max(1, Math.min(60, Math.round(Math.hypot(b.px - a.px, b.py - a.py) / step)));
+      for (let j = 1; j < n; j++) {
+        const t = j / n;
+        els.push({ type: "box", x: r(a.px + (b.px - a.px) * t - d / 2), y: r(a.py + (b.py - a.py) * t - d / 2), w: d, h: d, color: c.colors.secondary, beat: i + 1.5 });
+      }
+    }
+  } else if (p.route === true) warnings.push("map: route needs at least 2 points");
+  const pin = Math.max(6, r(c.u * 0.04));
+  const ring = Math.max(1, r(c.u * 0.006));
+  const size = Math.max(6, r(c.u * 0.04));
+  const border = r(size * 0.35);
+  pos.forEach((pt, i) => {
+    const beat = 1 + i;
+    els.push({ type: "box", x: pt.px - r(pin / 2) - ring, y: pt.py - r(pin / 2) - ring, w: pin + 2 * ring, h: pin + 2 * ring, color: c.colors.bg, beat });
+    els.push({ type: "box", x: pt.px - r(pin / 2), y: pt.py - r(pin / 2), w: pin, h: pin, color: c.colors.primary, beat });
+    if (!pt.label) return;
+    const lines = wrapText(pt.label, size, c.safe.w * 0.5);
+    const text = lines.length > 1 ? `${lines[0]}…` : (lines[0] ?? pt.label);
+    const tw = estimateTextWidth(text, size);
+    const right = pt.px + pin / 2 + ring + border * 2;
+    const x = right + tw + border <= c.safe.x + c.safe.w ? r(right) : r(Math.max(c.safe.x + border, pt.px - pin / 2 - ring - border * 2 - tw));
+    const y = r(Math.min(c.safe.y + c.safe.h - size - border, Math.max(c.safe.y + border, pt.py - size / 2)));
+    els.push({ type: "text", text, font: "body", size, color: c.colors.text, x, y, beat, slide: false, box: { color: ffColor(c.colors.bg, 0.85), border } });
+    note(c, "label", pt.label, { x: x - border, y: y - border, w: tw + 2 * border, h: size + 2 * border }, { fontSize: size, truncated: text !== pt.label }, c.colors.text);
+  });
+  return { elements: els, warnings };
+}
+
 // ---------------------------------------------------------------------------------- public composition
 
 export interface ComposeInputs {
   /** Probed image for screenshot scenes / logo for end cards. */
   image?: { path: string; width: number; height: number } | null;
+  /** Probed panel images for split_screen scenes (null = asset given but unreadable). */
+  images?: { left?: { path: string; width: number; height: number } | null; right?: { path: string; width: number; height: number } | null };
   /** Layout zones for the enabled platform targets (the safe area is `zones.content`). */
   zones?: LayoutZones;
 }
@@ -790,16 +1246,19 @@ function layoutKind(det: NonNullable<Scene["deterministic"]>, c: Ctx, inputs: Co
     case "screenshot":
       return screenshot(p, c, inputs.image ?? null);
     case "quote":
+      return quote(p, c);
     case "stat":
+      return stat(p, c);
     case "timeline":
+      return timeline(p, c);
     case "split_screen":
+      return splitScreen(p, c, inputs.images ?? {});
     case "lower_third":
+      return lowerThird(p, c);
     case "kinetic_text":
-    case "map": {
-      // Not drawn natively yet: a typography card with the props' text.
-      const l = typography({ lines: fallbackLines(p) }, c);
-      return { ...l, warnings: [...l.warnings, `${det.kind}: drawn as a typography card (not implemented in ${FFMPEG_RENDERER_ID} yet)`] };
-    }
+      return kineticText(p, c);
+    case "map":
+      return map(p, c);
     default:
       throw new Error(`${FFMPEG_RENDERER_ID} cannot draw kind "${String((det as { kind: unknown }).kind)}"`);
   }
@@ -1040,7 +1499,19 @@ export function createFfmpegRenderer(opts: FfmpegRendererOptions = {}): SceneRen
         }
       }
 
-      const comp = composeScene(scene, target, tokens, { image, ...(req.zones ? { zones: req.zones } : {}) });
+      const images: NonNullable<ComposeInputs["images"]> = {};
+      if (det.kind === "split_screen") {
+        for (const side of ["left", "right"] as const) {
+          const panel = det.props[side];
+          const id = panel && typeof panel === "object" && typeof (panel as { asset?: unknown }).asset === "string" ? (panel as { asset: string }).asset : "";
+          if (!id) continue;
+          const path = await resolveAsset(id, req.project_dir);
+          images[side] = path ? await probeImage(path, tools) : null;
+          if (!images[side]) warnings.push(`split_screen: ${side} asset "${id}" could not be resolved or read; drew a placeholder`);
+        }
+      }
+
+      const comp = composeScene(scene, target, tokens, { image, images, ...(req.zones ? { zones: req.zones } : {}) });
       warnings.push(...comp.warnings);
       const fonts: FontFiles = {
         // Bold headings, matching the HTML renderer (bundled Inter has a real Bold).

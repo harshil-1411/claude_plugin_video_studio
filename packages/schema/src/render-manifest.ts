@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { AspectRatio, FilePath, Id, IsoDateTime, NonEmptyString, PlatformTargetId, SchemaVersion, Sha256, UsdAmount } from "./common.js";
 import { TimingSource } from "./timing.js";
-import { SceneId } from "./video-spec.js";
+import { AudioLicense, SceneId } from "./video-spec.js";
 
 export const RenderStatus = z.enum(["pending", "submitted", "running", "succeeded", "failed", "cancelled", "cached"]);
 
@@ -157,6 +157,15 @@ export const RenderManifest = z
     voice: VoiceRender.optional(),
     captions: CaptionsRender.optional(),
     cover: CoverRender.optional(),
+    music: z
+      .strictObject({
+        file: FilePath.describe("`bundled:<id>` or the project-relative path from spec.audio.music.file."),
+        sha256: Sha256,
+        title: z.string().optional(),
+        license: AudioLicense.optional(),
+      })
+      .optional()
+      .describe("The music bed mixed into the audio, with its rights."),
     outputs: z.array(FinalOutput),
     qa: QaSummary.optional(),
     settings: RenderSettings.optional(),

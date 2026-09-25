@@ -11,8 +11,10 @@ import {
   type TextRole,
   VideoSpec,
   parseYamlOrJson,
+  propsText,
   resolveMaster,
   resolveTargets,
+  voiceMode,
 } from "@video-studio/schema";
 import { projectSpecPaths } from "./spec-validate.js";
 
@@ -27,6 +29,12 @@ import { projectSpecPaths } from "./spec-validate.js";
 
 /** Words per second above which captions get hard to read (design rule). */
 export const MAX_WORDS_PER_SEC = 3.3;
+/**
+ * On-screen reading speed for videos without narration (design rule): viewers read silently and
+ * the text is the whole message, so allow a little less than spoken captions plus a 1 s settle.
+ */
+export const MAX_ONSCREEN_WORDS_PER_SEC = 3;
+export const ONSCREEN_SETTLE_SEC = 1;
 /** WCAG 2.x contrast minimums (AA): normal text and large text. */
 export const CONTRAST_NORMAL = 4.5;
 export const CONTRAST_LARGE = 3;
@@ -369,6 +377,7 @@ function checkContrast(boxes: Array<{ scene_id: string; box: TextBox }>, H: numb
 }
 
 function checkDensity(spec: VideoSpec, out: LintFinding[]): void {
+  if (voiceMode(spec) === "none") return checkOnScreenDensity(spec, out);
   for (const s of spec.scenes) {
     const words = wordCount(s.voiceover);
     const wps = words / s.duration_sec;
@@ -380,6 +389,23 @@ function checkDensity(spec: VideoSpec, out: LintFinding[]): void {
       scene_id: s.id,
       message: `${words} voiceover words in ${s.duration_sec}s is ${round2(wps)} words/s; captions above ${MAX_WORDS_PER_SEC} words/s are hard to read`,
       fix: `cut scene ${s.id}'s voiceover to at most ${maxWords} words, or raise duration_sec to at least ${Math.ceil((words / MAX_WORDS_PER_SEC) * 10) / 10}`,
+    });
+  }
+}
+
+/** Without narration the text on screen carries the message: check it can be read in the scene's time. */
+function checkOnScreenDensity(spec: VideoSpec, out: LintFinding[]): void {
+  for (const s of spec.scenes) {
+    const text = [s.on_screen_text ?? "", s.deterministic ? propsText(s.deterministic.props) : ""].join(" ");
+    const words = wordCount(text);
+    const readable = Math.max(0, s.duration_sec - ONSCREEN_SETTLE_SEC) * MAX_ONSCREEN_WORDS_PER_SEC;
+    if (words <= Math.max(3, readable)) continue;
+    out.push({
+      id: "reading_density",
+      severity: "warning",
+      scene_id: s.id,
+      message: `${words} on-screen words in ${s.duration_sec}s; without narration viewers read at most about ${MAX_ONSCREEN_WORDS_PER_SEC} words/s after a ${ONSCREEN_SETTLE_SEC}s settle (${Math.floor(readable)} words)`,
+      fix: `cut scene ${s.id}'s on-screen text to at most ${Math.max(3, Math.floor(readable))} words, or raise duration_sec to at least ${Math.ceil((words / MAX_ONSCREEN_WORDS_PER_SEC + ONSCREEN_SETTLE_SEC) * 10) / 10}`,
     });
   }
 }

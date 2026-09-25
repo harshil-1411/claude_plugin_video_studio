@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
-import { type AudioSlot, AUDIO_SAMPLE_RATE, concatAudio, loudnorm2pass, type LoudnessTarget } from "./audio.js";
+import { type AudioSlot, AUDIO_SAMPLE_RATE, concatAudio, loudnorm2pass, type LoudnessTarget, type MusicBedInput, mixMusic, type SpeechInterval } from "./audio.js";
 import { type RunOptions, escapeFilterPath, ffprobe, filterGraph, runFfmpeg, secs } from "./ffmpeg.js";
 
 /** Final delivery encode: H.264 High, CRF 20, preset medium, yuv420p; AAC 192k 48 kHz; `+faststart`. */
@@ -158,6 +158,8 @@ export interface AssembleInput extends TargetFormat {
   audio?: string | readonly AudioSlot[];
   /** Normalise loudness (two-pass) before muxing. Default true. */
   loudness?: LoudnessTarget | false;
+  /** Music bed mixed under the voice (or alone), ducked over `speech`; the mix is what gets normalised. */
+  music?: { bed: MusicBedInput; speech?: readonly SpeechInterval[] };
   /** Clean master output path (no burned captions). */
   master: string;
   /** Captioned reel output path; requires `assPath`. */
@@ -184,14 +186,23 @@ export async function assemble(input: AssembleInput, opts: ComposeOptions = {}):
   try {
     const silentVideo = join(work, "video.mp4");
     const v = await concatVideos(input.segments, silentVideo, input, opts);
-    if (input.audio === undefined) {
+    if (input.audio === undefined && !input.music) {
       // Silent video: add a silent AAC track so players and platforms see a normal file.
       await concatAudio([{ duration_ms: v.duration_ms }], join(work, "silence.wav"), opts);
       await muxAudio(silentVideo, join(work, "silence.wav"), input.master, opts);
     } else {
-      let voice = typeof input.audio === "string" ? input.audio : (await concatAudio(input.audio, join(work, "voice.wav"), opts)).path;
-      if (input.loudness !== false) voice = (await loudnorm2pass(voice, join(work, "voice.norm.wav"), input.loudness ?? {}, opts)).path;
-      await muxAudio(silentVideo, voice, input.master, opts);
+      let track =
+        input.audio === undefined ? undefined : typeof input.audio === "string" ? input.audio : (await concatAudio(input.audio, join(work, "voice.wav"), opts)).path;
+      if (input.music) {
+        track = (
+          await mixMusic(
+            { ...(track ? { voice: track } : {}), music: input.music.bed, duration_ms: v.duration_ms, ...(input.music.speech ? { speech: input.music.speech } : {}), out: join(work, "mix.wav") },
+            opts,
+          )
+        ).path;
+      }
+      if (input.loudness !== false) track = (await loudnorm2pass(track!, join(work, "mix.norm.wav"), input.loudness ?? {}, opts)).path;
+      await muxAudio(silentVideo, track!, input.master, opts);
     }
     let reel: string | undefined;
     if (input.reel) {

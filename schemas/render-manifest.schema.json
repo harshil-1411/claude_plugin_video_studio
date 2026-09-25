@@ -266,6 +266,52 @@
       "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
       "type": "string"
     },
+    "music": {
+      "description": "The music bed mixed into the audio, with its rights.",
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "description": "`bundled:<id>` or the project-relative path from spec.audio.music.file.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "license": {
+          "description": "Rights for an audio file; recorded in the manifest, video.lock and provenance.",
+          "additionalProperties": false,
+          "properties": {
+            "attribution": {
+              "description": "Credit line to show or post, when the licence requires one.",
+              "type": "string"
+            },
+            "id": {
+              "description": "SPDX id (e.g. CC0-1.0, CC-BY-4.0) or user-owned / licensed.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "source": {
+              "description": "Where the track came from (URL or description).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "sha256"
+      ],
+      "type": "object"
+    },
     "outputs": {
       "items": {
         "additionalProperties": false,

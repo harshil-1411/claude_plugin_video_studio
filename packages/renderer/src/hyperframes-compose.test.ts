@@ -2,7 +2,7 @@ import { runInNewContext } from "node:vm";
 import { DETERMINISTIC_PROPS_EXAMPLES, type DeterministicKind, type Scene } from "@video-studio/schema";
 import { layoutZones } from "@video-studio/platforms";
 import { describe, expect, it } from "vitest";
-import { buildComposition, compositionIdFor, fmtNumber, layerNodes, sanitizeFontChain } from "./hyperframes-compose.js";
+import { buildComposition, compositionIdFor, fmtNumber, HYPERFRAMES_KINDS, kineticChunks, layerNodes, sanitizeFontChain } from "./hyperframes-compose.js";
 import { codeLabel, highlightLines, languageFamily, tokenize } from "./hyperframes-highlight.js";
 import type { RenderTarget, SceneRenderRequest, VisualTokens } from "./types.js";
 
@@ -285,6 +285,148 @@ describe("buildComposition: tokens, safe areas, assets", () => {
     const r = req("typography", { lines: ["x"] });
     delete r.scene.deterministic;
     expect(() => buildComposition(r)).toThrow(/no deterministic content/);
+  });
+});
+
+describe("buildComposition: Phase 5 kinds", () => {
+  const NEW_KINDS: DeterministicKind[] = ["quote", "stat", "timeline", "split_screen", "lower_third", "kinetic_text", "map"];
+  const roles = (kind: DeterministicKind, props: Record<string, unknown>, over: Partial<SceneRenderRequest> = {}) =>
+    buildComposition(req(kind, props, over)).text_boxes.map((b) => `${b.role}:${b.text}`);
+  /** The markup after the stylesheet (which names every class). */
+  const body = (html: string) => html.slice(html.indexOf("<body>"));
+
+  it("are drawn natively (no typography fallback) and claimed by the renderer", () => {
+    for (const kind of NEW_KINDS) {
+      expect(HYPERFRAMES_KINDS).toContain(kind);
+      for (const target of [PORTRAIT, LANDSCAPE]) {
+        const c = buildComposition(req(kind, DETERMINISTIC_PROPS_EXAMPLES[kind], { target }));
+        expect(c.warnings, kind).toEqual([]);
+        expect(body(c.html), kind).not.toContain("vs-typography");
+        expect(c.html, `${kind}: duplicate class attribute`).not.toMatch(/<[^>]*\sclass="[^"]*"[^>]*\sclass="/);
+        for (const b of c.text_boxes) {
+          expect(b.truncated, `${kind}: ${b.text}`).toBe(false);
+          expect(b.rect.x, `${kind}: ${b.text}`).toBeGreaterThanOrEqual(0);
+          expect(b.rect.x + b.rect.w, `${kind}: ${b.text}`).toBeLessThanOrEqual(target.width);
+          expect(b.rect.y + b.rect.h, `${kind}: ${b.text}`).toBeLessThanOrEqual(target.height);
+        }
+      }
+    }
+  });
+
+  it("records text boxes with the right roles", () => {
+    expect(roles("quote", DETERMINISTIC_PROPS_EXAMPLES.quote)).toEqual(["decorative:“", "headline:It just works.", "label:— A user", "label:README"]);
+    expect(roles("stat", DETERMINISTIC_PROPS_EXAMPLES.stat)).toEqual(["headline:40%", "body:faster builds", "label:vs. last release"]);
+    expect(roles("timeline", { events: [{ label: "A", text: "first" }, { label: "B" }] })).toEqual(["label:A", "body:first", "label:B"]);
+    expect(roles("split_screen", DETERMINISTIC_PROPS_EXAMPLES.split_screen)).toEqual(["label:Before", "body:Manual edits", "label:After", "body:One command"]);
+    expect(roles("lower_third", DETERMINISTIC_PROPS_EXAMPLES.lower_third)).toEqual(["label:Ada Lovelace", "label:Engineer", "headline:Why we built it"]);
+    expect(roles("kinetic_text", DETERMINISTIC_PROPS_EXAMPLES.kinetic_text)).toEqual(["headline:Docs in. Video out."]);
+    expect(roles("map", DETERMINISTIC_PROPS_EXAMPLES.map)).toEqual(["headline:Where it runs", "label:Laptop", "label:CI"]);
+    const hook = req("quote", DETERMINISTIC_PROPS_EXAMPLES.quote);
+    hook.scene.purpose = "hook";
+    expect(buildComposition(hook).text_boxes.map((b) => b.role)).toContain("hook");
+  });
+
+  it("stat counts numeric values up with discrete frames and shows text values as is", () => {
+    const n = buildComposition(req("stat", { value: 1234, label: "users" })).html;
+    expect(n.match(/class="vs-count-frame/g)).toHaveLength(8);
+    expect(n).toContain(">1,234</span>");
+    const t = buildComposition(req("stat", { value: "10x", label: "faster" })).html;
+    expect(body(t)).not.toContain("vs-count-frame");
+    expect(t).toContain("<span>10x</span>");
+  });
+
+  it("timeline highlights the current event and warns when it is out of range", () => {
+    const c = buildComposition(req("timeline", { events: [{ label: "A" }, { label: "B" }, { label: "C" }], current: 2 }));
+    expect(c.html.match(/class="vs-tl-event vs-tl-current"/g)).toHaveLength(1);
+    expect(c.html).toMatch(/class="vs-tl-event vs-tl-current"[^>]*><div[^>]*><div class="vs-tl-label"[^>]*>C</);
+    expect(c.html.match(/vs-tl-dot vs-tl-past/g)).toHaveLength(2);
+    expect(c.text_boxes.find((b) => b.text === "C")!.color).toBe(TOKENS.color_primary.toUpperCase());
+    const none = buildComposition(req("timeline", { events: [{ label: "A" }, { label: "B" }], current: 5 }));
+    expect(body(none.html)).not.toContain("vs-tl-current");
+    expect(none.warnings.join()).toMatch(/current 5/);
+  });
+
+  it("timeline runs down the side in portrait and across in landscape", () => {
+    const props = { events: [{ label: "A" }, { label: "B" }, { label: "C" }] };
+    const p = buildComposition(req("timeline", props)).text_boxes;
+    expect(new Set(p.map((b) => b.rect.x)).size).toBe(1);
+    expect(p[0]!.rect.y).toBeLessThan(p[1]!.rect.y);
+    expect(body(buildComposition(req("timeline", props)).html)).toContain("vs-grow-y");
+    const l = buildComposition(req("timeline", props, { target: LANDSCAPE }));
+    expect(new Set(l.text_boxes.map((b) => b.rect.y)).size).toBe(1);
+    expect(l.text_boxes[0]!.rect.x).toBeLessThan(l.text_boxes[1]!.rect.x);
+    expect(body(l.html)).toContain("vs-grow-x");
+    expect(body(l.html)).not.toContain("vs-grow-y");
+  });
+
+  it("split_screen labels Before/After unless labels are given, and accents the after panel", () => {
+    const ba = buildComposition(req("split_screen", { mode: "before_after", left: { text: "x" }, right: { label: "Now", text: "y" } }));
+    expect(ba.text_boxes.filter((b) => b.role === "label").map((b) => b.text)).toEqual(["Before", "Now"]);
+    expect(ba.html).toContain("vs-split vs-right vs-after");
+    expect(ba.html).toContain("vs-split-arrow");
+    const sbs = buildComposition(req("split_screen", { left: { text: "x" }, right: { text: "y" } }));
+    expect(sbs.text_boxes.filter((b) => b.role === "label")).toEqual([]);
+    expect(body(sbs.html)).not.toMatch(/vs-after|vs-before|vs-split-arrow/);
+  });
+
+  it("split_screen stacks in portrait, sits side by side in landscape, and loads panel images", () => {
+    const props = { left: { label: "L", text: "x" }, right: { label: "R", text: "y" } };
+    const [pl, , pr] = buildComposition(req("split_screen", props)).text_boxes;
+    expect(pl!.rect.x).toBe(pr!.rect.x);
+    expect(pl!.rect.y).toBeLessThan(pr!.rect.y);
+    const [ll, , lr] = buildComposition(req("split_screen", props, { target: LANDSCAPE })).text_boxes;
+    expect(ll!.rect.y).toBe(lr!.rect.y);
+    expect(ll!.rect.x).toBeLessThan(lr!.rect.x);
+
+    const img = buildComposition(req("split_screen", { left: { asset: "a1", text: "old" }, right: { asset: "a9" } }), { resolveAsset: (id) => (id === "a1" ? "source/a.png" : undefined) });
+    expect(own(img.assets)).toEqual([{ src: "/proj/source/a.png", dest: "assets/split-left-1.png" }]);
+    expect(img.html).toContain('<img src="assets/split-left-1.png"');
+    expect(img.html).toContain("vs-shot-missing");
+    expect(img.warnings.join()).toMatch(/right asset "a9"/);
+  });
+
+  it("lower_third keeps its bar low but inside the safe area", () => {
+    const c = buildComposition(req("lower_third", DETERMINISTIC_PROPS_EXAMPLES.lower_third));
+    const name = c.text_boxes.find((b) => b.text === "Ada Lovelace")!;
+    const head = c.text_boxes.find((b) => b.role === "headline")!;
+    expect(name.rect.y).toBeGreaterThan(180 + 1060 / 2);
+    expect(name.rect.y + name.rect.h).toBeLessThanOrEqual(180 + 1060);
+    expect(head.rect.y + head.rect.h).toBeLessThan(name.rect.y);
+    expect(roles("lower_third", { name: "Solo" })).toEqual(["label:Solo"]);
+  });
+
+  it("kinetic_text reveals words or phrases in order, with the emphasis in primary", () => {
+    expect(kineticChunks("Docs in. Video out.", "word").map((c) => c.text)).toEqual(["Docs", "in.", "Video", "out."]);
+    expect(kineticChunks("Docs in, video out. Done!", "phrase").map((c) => c.text)).toEqual(["Docs in,", "video out.", "Done!"]);
+    expect(kineticChunks("no punctuation here", "phrase").map((c) => c.text)).toEqual(["no punctuation here"]);
+    const word = buildComposition(req("kinetic_text", { text: "Docs in. Video out.", emphasis: "video out" })).html;
+    expect(word.match(/class="vs-kin-chunk /g)).toHaveLength(4);
+    expect(word).toContain('<span class="vs-em">Video</span>');
+    expect(word).toContain('<span class="vs-em">out</span>.');
+    const times = [...word.matchAll(/vs-kin" style="--t:([\d.]+)s/g)].map((m) => Number(m[1]));
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+    expect(new Set(times).size).toBe(4);
+    const phrase = buildComposition(req("kinetic_text", { text: "Docs in. Video out.", rhythm: "phrase" })).html;
+    expect(phrase.match(/class="vs-kin-chunk /g)).toHaveLength(2);
+    expect(phrase).toContain('data-rhythm="phrase"');
+    expect(buildComposition(req("kinetic_text", { text: "abc", emphasis: "zzz" })).warnings.join()).toMatch(/emphasis/);
+  });
+
+  it("map pins points on an abstract panel and draws the route as a polyline in order", () => {
+    const points = [{ label: "A", x: 0, y: 0 }, { label: "B", x: 1, y: 0.5 }, { label: "C", x: 0.5, y: 1 }];
+    const c = buildComposition(req("map", { points, route: true }));
+    expect(c.html.match(/<polyline/g)).toHaveLength(1);
+    const pts = /<polyline points="([^"]+)"/.exec(c.html)![1]!.split(" ").map((p) => p.split(",").map(Number));
+    expect(pts).toHaveLength(3);
+    expect(pts[0]![0]).toBeLessThan(pts[1]![0]!); // A (left) then B (right)
+    expect(pts[2]![1]).toBeGreaterThan(pts[1]![1]!); // then C (bottom)
+    expect(body(c.html).match(/vs-map-pin/g)).toHaveLength(3);
+    expect(c.html).toContain("vs-map-slot vs-map-left"); // B at the right edge labels to its left
+    expect(c.html).not.toMatch(/<image|<img/);
+    expect(buildComposition(req("map", { points, route: false })).html).not.toContain("<polyline");
+    const one = buildComposition(req("map", { points: [points[0]], route: true }));
+    expect(one.html).not.toContain("<polyline");
+    expect(one.warnings.join()).toMatch(/route needs at least 2/);
   });
 });
 

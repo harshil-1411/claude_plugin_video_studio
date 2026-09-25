@@ -284,6 +284,9 @@ export function createServer(options: ServerOptions = {}): McpServer {
           .boolean()
           .optional()
           .describe("Include optional beats (default: only when target >= the template's default duration)"),
+        style: z.string().optional().describe("Style pack id from styles/ (minimal, editorial, technical, energetic); default: the template's"),
+        music: z.string().optional().describe("Music bed, e.g. bundled:lofi (bundled: ambient, lofi, upbeat, minimal) or a project file; default: the template's"),
+        voice_mode: z.enum(["narrated", "none"]).optional().describe("none = no speech (text over music); default: the template's"),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
@@ -296,6 +299,9 @@ export function createServer(options: ServerOptions = {}): McpServer {
         platform?: Platform;
         targets?: string[];
         include_optional?: boolean;
+        style?: string;
+        music?: string;
+        voice_mode?: "narrated" | "none";
       }) => {
         const { project_dir, ...opts } = args;
         const r = await scaffoldSpec(resolveInputPath(project_dir, cwd()), requireTemplatesDir(env), opts);

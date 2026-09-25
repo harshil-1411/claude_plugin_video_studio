@@ -30,6 +30,37 @@ export interface QaExpectations {
   loudness_tolerance?: number;
   /** Default true. */
   require_audio?: boolean;
+  /** The video is silent on purpose (no narration and no music): silence and loudness pass. */
+  intended_silence?: boolean;
+  /**
+   * Scene background colour (#RRGGBB). Dark themes sit near black, so sparse scenes would read as
+   * "black" at blackdetect's default threshold; the threshold is set just below this colour.
+   */
+  background?: string;
+}
+
+/** Default blackdetect pixel threshold (fraction of the luma range). */
+export const BLACK_PIX_TH = 0.1;
+
+/** Normalised limited-range luma (0–1) of a #RRGGBB colour, BT.709. */
+export function lumaOf(hex: string): number | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const n = parseInt(m[1]!, 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+/**
+ * blackdetect pix_th for a background: half its luma (so the background itself is not "black"),
+ * capped at the default. `nearBlack` means the background is too dark to tell a sparse scene from
+ * a blank one, so black intervals can only be a warning.
+ */
+export function blackThreshold(background?: string): { pix_th: number; nearBlack: boolean } {
+  const l = background ? lumaOf(background) : null;
+  if (l === null) return { pix_th: BLACK_PIX_TH, nearBlack: false };
+  const pix_th = Math.min(BLACK_PIX_TH, Math.round((l / 2) * 1000) / 1000);
+  return { pix_th: Math.max(0.005, pix_th), nearBlack: l < 0.02 };
 }
 
 export interface QaMetrics extends LoudnessStats {
@@ -145,7 +176,8 @@ export async function technicalQa(videoPath: string, expect: QaExpectations, opt
 
   // One decode pass for every detector.
   const args = ["-i", videoPath];
-  if (probe.has_video) args.push("-map", "0:v:0", "-vf", "blackdetect=d=0.5:pix_th=0.10,freezedetect=n=-60dB:d=1.0");
+  const black = blackThreshold(expect.background);
+  if (probe.has_video) args.push("-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=${black.pix_th},freezedetect=n=-60dB:d=1.0`);
   if (probe.has_audio) args.push("-map", "0:a:0", "-af", "silencedetect=n=-50dB:d=1.0,ebur128=peak=true:framelog=quiet");
   args.push("-f", "null", "-");
   const { stderr } = await runFfmpeg(args, { ...opts, keepStderr: true });
@@ -158,8 +190,8 @@ export async function technicalQa(videoPath: string, expect: QaExpectations, opt
         ? { id: "black_frames", status: "ok", detail: "no black intervals ≥ 0.5s" }
         : {
             id: "black_frames",
-            status: longest >= BLACK_FAIL_S ? "fail" : "warn",
-            detail: `black at ${fmtRanges(det.black)}`,
+            status: longest >= BLACK_FAIL_S && !black.nearBlack ? "fail" : "warn",
+            detail: `black at ${fmtRanges(det.black)}${black.nearBlack ? " (the background is near black, so sparse scenes can read as black)" : ""}`,
             fix: "Check the scene(s) at those times rendered correctly; re-render them if blank.",
           },
     );
@@ -174,7 +206,10 @@ export async function technicalQa(videoPath: string, expect: QaExpectations, opt
           },
     );
   }
-  if (probe.has_audio) {
+  if (probe.has_audio && expect.intended_silence) {
+    checks.push({ id: "silence", status: "ok", detail: "silent on purpose (no narration, no music)" });
+    checks.push({ id: "loudness", status: "ok", detail: "not measured: silent on purpose" });
+  } else if (probe.has_audio) {
     checks.push(
       det.silence.length === 0
         ? { id: "silence", status: "ok", detail: "no silence ≥ 1s below -50 dB" }

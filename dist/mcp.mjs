@@ -122979,7 +122979,7 @@ var init_each = __esmMin((() => {
 }));
 //#endregion
 //#region ../../node_modules/.pnpm/underscore@1.13.8/node_modules/underscore/modules/map.js
-function map(obj, iteratee, context) {
+function map$1(obj, iteratee, context) {
 	iteratee = cb(iteratee, context);
 	var _keys = !_isArrayLike_default(obj) && keys(obj), length = (_keys || obj).length, results = Array(length);
 	for (var index = 0; index < length; index++) {
@@ -123117,7 +123117,7 @@ var init_invoke = __esmMin((() => {
 			contextPath = path.slice(0, -1);
 			path = path[path.length - 1];
 		}
-		return map(obj, function(context) {
+		return map$1(obj, function(context) {
 			var method = func;
 			if (!method) {
 				if (contextPath && contextPath.length) context = deepGet(context, contextPath);
@@ -123131,7 +123131,7 @@ var init_invoke = __esmMin((() => {
 //#endregion
 //#region ../../node_modules/.pnpm/underscore@1.13.8/node_modules/underscore/modules/pluck.js
 function pluck(obj, key) {
-	return map(obj, property(key));
+	return map$1(obj, property(key));
 }
 var init_pluck = __esmMin((() => {
 	init_map();
@@ -123208,7 +123208,7 @@ function toArray(obj) {
 	if (!obj) return [];
 	if (isArray_default(obj)) return slice.call(obj);
 	if (isString_default(obj)) return obj.match(reStrSymbol);
-	if (_isArrayLike_default(obj)) return map(obj, identity);
+	if (_isArrayLike_default(obj)) return map$1(obj, identity);
 	return values(obj);
 }
 var reStrSymbol;
@@ -123261,7 +123261,7 @@ var init_shuffle = __esmMin((() => {
 function sortBy(obj, iteratee, context) {
 	var index = 0;
 	iteratee = cb(iteratee, context);
-	return pluck(map(obj, function(value, key, list) {
+	return pluck(map$1(obj, function(value, key, list) {
 		return {
 			value,
 			index: index++,
@@ -123400,7 +123400,7 @@ var init_omit = __esmMin((() => {
 			iteratee = negate(iteratee);
 			if (keys.length > 1) context = keys[1];
 		} else {
-			keys = map(flatten$1(keys, false, false), String);
+			keys = map$1(flatten$1(keys, false, false), String);
 			iteratee = function(value, key) {
 				return !contains(keys, key);
 			};
@@ -123687,7 +123687,7 @@ var modules_exports = /* @__PURE__ */ __exportAll({
 	chain: () => chain,
 	chunk: () => chunk,
 	clone: () => clone,
-	collect: () => map,
+	collect: () => map$1,
 	compact: () => compact,
 	compose: () => compose,
 	constant: () => constant,
@@ -123763,7 +123763,7 @@ var modules_exports = /* @__PURE__ */ __exportAll({
 	keys: () => keys,
 	last: () => last,
 	lastIndexOf: () => lastIndexOf_default,
-	map: () => map,
+	map: () => map$1,
 	mapObject: () => mapObject,
 	matcher: () => matcher,
 	matches: () => matcher,
@@ -123973,7 +123973,7 @@ var index_all_exports = /* @__PURE__ */ __exportAll({
 	chain: () => chain,
 	chunk: () => chunk,
 	clone: () => clone,
-	collect: () => map,
+	collect: () => map$1,
 	compact: () => compact,
 	compose: () => compose,
 	constant: () => constant,
@@ -124049,7 +124049,7 @@ var index_all_exports = /* @__PURE__ */ __exportAll({
 	keys: () => keys,
 	last: () => last,
 	lastIndexOf: () => lastIndexOf_default,
-	map: () => map,
+	map: () => map$1,
 	mapObject: () => mapObject,
 	matcher: () => matcher,
 	matches: () => matcher,
@@ -230401,6 +230401,12 @@ const RenderManifest = strictObject({
 	voice: VoiceRender.optional(),
 	captions: CaptionsRender.optional(),
 	cover: CoverRender.optional(),
+	music: strictObject({
+		file: FilePath.describe("`bundled:<id>` or the project-relative path from spec.audio.music.file."),
+		sha256: Sha256,
+		title: string().optional(),
+		license: AudioLicense.optional()
+	}).optional().describe("The music bed mixed into the audio, with its rights."),
 	outputs: array(FinalOutput),
 	qa: QaSummary.optional(),
 	settings: RenderSettings.optional(),
@@ -231923,6 +231929,100 @@ async function concatAudio(slots, out, opts = {}) {
 		duration_ms: Math.round(totalSamples / sr * 1e3)
 	};
 }
+/** Defaults for a music bed under narration (spec.audio.music). */
+const MUSIC_DEFAULTS = {
+	volume_db: -18,
+	duck_db: -10,
+	fade_in_ms: 500,
+	fade_out_ms: 1500,
+	ramp_ms: 150
+};
+/** Merge intervals that overlap or sit closer than `gapMs`, sorted by start. */
+function mergeIntervals(intervals, gapMs) {
+	const sorted = intervals.filter((i) => i.end_ms > i.start_ms).map((i) => ({ ...i })).sort((a, b) => a.start_ms - b.start_ms);
+	const out = [];
+	for (const i of sorted) {
+		const last = out[out.length - 1];
+		if (last && i.start_ms - last.end_ms <= gapMs) last.end_ms = Math.max(last.end_ms, i.end_ms);
+		else out.push(i);
+	}
+	return out;
+}
+/**
+* ffmpeg `volume` expression (eval=frame) that is 1 outside speech and `duckGain` inside it, with
+* linear ramps of `rampMs` before and after each interval. Intervals must not overlap (merge first).
+*/
+function duckExpression(speech, duckGain, rampMs = MUSIC_DEFAULTS.ramp_ms) {
+	if (speech.length === 0) return "1";
+	const r = Math.max(1, rampMs) / 1e3;
+	const f = (n) => String(Math.round(n * 1e3) / 1e3);
+	const terms = speech.map((i) => {
+		const a = i.start_ms / 1e3;
+		const b = i.end_ms / 1e3;
+		return `clip(min((t-${f(a - r)})/${f(r)},(${f(b + r)}-t)/${f(r)}),0,1)`;
+	});
+	return `1-${f(1 - duckGain)}*min(1,${terms.join("+")})`;
+}
+/**
+* Mix a looping, faded music bed under the voice (or alone), ducking it over the speech intervals.
+* The result is exactly `duration_ms` long; loudness normalization happens afterwards on the mix.
+*/
+async function mixMusic(input, opts = {}) {
+	const sr = opts.sampleRate ?? 48e3;
+	const m = input.music;
+	const samples = Math.round(input.duration_ms * sr / 1e3);
+	if (samples <= 0) throw new Error("mixMusic: duration is zero");
+	const dur = samples / sr;
+	const fadeIn = Math.min((m.fade_in_ms ?? MUSIC_DEFAULTS.fade_in_ms) / 1e3, dur / 2);
+	const fadeOut = Math.min((m.fade_out_ms ?? MUSIC_DEFAULTS.fade_out_ms) / 1e3, dur / 2);
+	const fmt = `aformat=sample_fmts=fltp:sample_rates=${sr}:channel_layouts=stereo`;
+	const speech = input.voice ? mergeIntervals(input.speech ?? [], 2 * MUSIC_DEFAULTS.ramp_ms) : [];
+	const duckGain = 10 ** ((m.duck_db ?? MUSIC_DEFAULTS.duck_db) / 20);
+	const musicChain = [
+		`[0:a:0]aresample=${sr}`,
+		fmt,
+		`atrim=end_sample=${samples}`,
+		`apad=whole_len=${samples}`,
+		"asetpts=N/SR/TB",
+		`volume=${m.volume_db ?? MUSIC_DEFAULTS.volume_db}dB`,
+		...speech.length ? [`volume='${duckExpression(speech, duckGain)}':eval=frame`] : [],
+		...fadeIn > 0 ? [`afade=t=in:st=0:d=${fadeIn}`] : [],
+		...fadeOut > 0 ? [`afade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}`] : []
+	];
+	const inputs = [
+		...m.loop ?? true ? ["-stream_loop", "-1"] : [],
+		...m.start_sec ? ["-ss", String(m.start_sec)] : [],
+		"-i",
+		m.path
+	];
+	const chains = [];
+	if (input.voice) {
+		inputs.push("-i", input.voice);
+		chains.push([...musicChain, "anull[m]"]);
+		chains.push([
+			`[1:a:0]aresample=${sr}`,
+			fmt,
+			`apad=whole_len=${samples}`,
+			`atrim=end_sample=${samples}`,
+			"asetpts=N/SR/TB[v]"
+		]);
+		chains.push(["[v][m]amix=inputs=2:duration=first:normalize=0", `atrim=end_sample=${samples}[aout]`]);
+	} else chains.push([...musicChain, "anull[aout]"]);
+	await runFfmpeg([
+		"-y",
+		...inputs,
+		"-filter_complex",
+		filterGraph(chains),
+		"-map",
+		"[aout]",
+		...audioCodecArgs(input.out, sr),
+		input.out
+	], opts);
+	return {
+		path: input.out,
+		duration_ms: Math.round(samples / sr * 1e3)
+	};
+}
 /** Extract the JSON block `loudnorm=print_format=json` writes to stderr. Returns null if absent or non-finite (e.g. digital silence). */
 function parseLoudnormJson(stderr) {
 	const at = stderr.lastIndexOf("[Parsed_loudnorm");
@@ -232764,13 +232864,20 @@ async function assemble(input, opts = {}) {
 	try {
 		const silentVideo = join(work, "video.mp4");
 		const v = await concatVideos(input.segments, silentVideo, input, opts);
-		if (input.audio === void 0) {
+		if (input.audio === void 0 && !input.music) {
 			await concatAudio([{ duration_ms: v.duration_ms }], join(work, "silence.wav"), opts);
 			await muxAudio(silentVideo, join(work, "silence.wav"), input.master, opts);
 		} else {
-			let voice = typeof input.audio === "string" ? input.audio : (await concatAudio(input.audio, join(work, "voice.wav"), opts)).path;
-			if (input.loudness !== false) voice = (await loudnorm2pass(voice, join(work, "voice.norm.wav"), input.loudness ?? {}, opts)).path;
-			await muxAudio(silentVideo, voice, input.master, opts);
+			let track = input.audio === void 0 ? void 0 : typeof input.audio === "string" ? input.audio : (await concatAudio(input.audio, join(work, "voice.wav"), opts)).path;
+			if (input.music) track = (await mixMusic({
+				...track ? { voice: track } : {},
+				music: input.music.bed,
+				duration_ms: v.duration_ms,
+				...input.music.speech ? { speech: input.music.speech } : {},
+				out: join(work, "mix.wav")
+			}, opts)).path;
+			if (input.loudness !== false) track = (await loudnorm2pass(track, join(work, "mix.norm.wav"), input.loudness ?? {}, opts)).path;
+			await muxAudio(silentVideo, track, input.master, opts);
 		}
 		let reel;
 		if (input.reel) {
@@ -232791,6 +232898,39 @@ async function assemble(input, opts = {}) {
 			force: true
 		});
 	}
+}
+//#endregion
+//#region ../media/dist/qa.js
+/** Default blackdetect pixel threshold (fraction of the luma range). */
+const BLACK_PIX_TH = .1;
+/** Normalised limited-range luma (0–1) of a #RRGGBB colour, BT.709. */
+function lumaOf(hex) {
+	const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+	if (!m) return null;
+	const n = parseInt(m[1], 16);
+	const [r, g, b] = [
+		n >> 16 & 255,
+		n >> 8 & 255,
+		n & 255
+	];
+	return (.2126 * r + .7152 * g + .0722 * b) / 255;
+}
+/**
+* blackdetect pix_th for a background: half its luma (so the background itself is not "black"),
+* capped at the default. `nearBlack` means the background is too dark to tell a sparse scene from
+* a blank one, so black intervals can only be a warning.
+*/
+function blackThreshold(background) {
+	const l = background ? lumaOf(background) : null;
+	if (l === null) return {
+		pix_th: BLACK_PIX_TH,
+		nearBlack: false
+	};
+	const pix_th = Math.min(BLACK_PIX_TH, Math.round(l / 2 * 1e3) / 1e3);
+	return {
+		pix_th: Math.max(.005, pix_th),
+		nearBlack: l < .02
+	};
 }
 const r3 = (n) => Math.round(n * 1e3) / 1e3;
 function ranges(stderr, startRe, endRe, totalS) {
@@ -232911,7 +233051,8 @@ async function technicalQa(videoPath, expect, opts = {}) {
 		});
 	}
 	const args = ["-i", videoPath];
-	if (probe.has_video) args.push("-map", "0:v:0", "-vf", "blackdetect=d=0.5:pix_th=0.10,freezedetect=n=-60dB:d=1.0");
+	const black = blackThreshold(expect.background);
+	if (probe.has_video) args.push("-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=${black.pix_th},freezedetect=n=-60dB:d=1.0`);
 	if (probe.has_audio) args.push("-map", "0:a:0", "-af", "silencedetect=n=-50dB:d=1.0,ebur128=peak=true:framelog=quiet");
 	args.push("-f", "null", "-");
 	const { stderr } = await runFfmpeg(args, {
@@ -232927,8 +233068,8 @@ async function technicalQa(videoPath, expect, opts = {}) {
 			detail: "no black intervals ≥ 0.5s"
 		} : {
 			id: "black_frames",
-			status: longest >= 2 ? "fail" : "warn",
-			detail: `black at ${fmtRanges(det.black)}`,
+			status: longest >= 2 && !black.nearBlack ? "fail" : "warn",
+			detail: `black at ${fmtRanges(det.black)}${black.nearBlack ? " (the background is near black, so sparse scenes can read as black)" : ""}`,
 			fix: "Check the scene(s) at those times rendered correctly; re-render them if blank."
 		});
 		checks.push(det.freeze.length === 0 ? {
@@ -232942,7 +233083,18 @@ async function technicalQa(videoPath, expect, opts = {}) {
 			fix: "If those scenes should move, check their animation timelines or generated clips."
 		});
 	}
-	if (probe.has_audio) {
+	if (probe.has_audio && expect.intended_silence) {
+		checks.push({
+			id: "silence",
+			status: "ok",
+			detail: "silent on purpose (no narration, no music)"
+		});
+		checks.push({
+			id: "loudness",
+			status: "ok",
+			detail: "not measured: silent on purpose"
+		});
+	} else if (probe.has_audio) {
 		checks.push(det.silence.length === 0 ? {
 			id: "silence",
 			status: "ok",
@@ -233840,16 +233992,6 @@ function inset(r, dx, dy = dx) {
 	};
 }
 //#endregion
-//#region ../renderer/dist/fallback.js
-/**
-* Lines for drawing a deterministic kind as a plain typography card, used while a renderer does
-* not implement that kind yet. The renderer adds a warning so QA reports the stand-in.
-*/
-function fallbackLines(props) {
-	const lines = propsText(props).split("\n").map((l) => l.trim()).filter(Boolean);
-	return lines.length ? lines : [" "];
-}
-//#endregion
 //#region ../renderer/dist/hyperframes-highlight.js
 /**
 * Tiny deterministic syntax highlighter for the HyperFrames `code` scene kind.
@@ -234125,7 +234267,7 @@ function highlightLines(code, language) {
 * tokens, not the host toolchain.
 */
 const FFMPEG_RENDERER_ID = "ffmpeg-drawtext";
-const FFMPEG_RENDERER_VERSION = "0.2.0";
+const FFMPEG_RENDERER_VERSION = "0.3.0";
 const FFMPEG_RENDERER_KINDS = [
 	"typography",
 	"code",
@@ -234134,7 +234276,14 @@ const FFMPEG_RENDERER_KINDS = [
 	"screenshot",
 	"comparison",
 	"cta",
-	"end_card"
+	"end_card",
+	"quote",
+	"stat",
+	"timeline",
+	"split_screen",
+	"lower_third",
+	"kinetic_text",
+	"map"
 ];
 function rgb(hex) {
 	const h = hex.replace(/^#/, "");
@@ -235141,6 +235290,960 @@ function screenshot(p, c, image) {
 		warnings
 	};
 }
+/** Top y of each block when `heights` (with `gaps` between them) are centred vertically in `area`. */
+function vstack(area, heights, gap) {
+	const total = heights.reduce((a, b) => a + b, 0) + gap * Math.max(0, heights.length - 1);
+	let y = area.y + Math.max(0, (area.h - total) / 2);
+	return heights.map((h) => {
+		const top = r(y);
+		y += h + gap;
+		return top;
+	});
+}
+/** A filled rect with stepped corners (drawbox has no radius); reads as rounded at phone size. */
+function roundedBox(rect, radius, color, beat) {
+	const k = r(Math.max(0, Math.min(radius, rect.w / 2, rect.h / 2)));
+	if (k < 2) return [{
+		type: "box",
+		...rect,
+		color,
+		beat
+	}];
+	const a = r(k * .3);
+	return [
+		{
+			type: "box",
+			x: rect.x + k,
+			y: rect.y,
+			w: rect.w - 2 * k,
+			h: rect.h,
+			color,
+			beat
+		},
+		{
+			type: "box",
+			x: rect.x,
+			y: rect.y + k,
+			w: rect.w,
+			h: rect.h - 2 * k,
+			color,
+			beat
+		},
+		{
+			type: "box",
+			x: rect.x + a,
+			y: rect.y + a,
+			w: rect.w - 2 * a,
+			h: rect.h - 2 * a,
+			color,
+			beat
+		}
+	];
+}
+/** Bold-heading glyph advance estimate for placing single words on a line (wider than CHAR_EM for caps). */
+function glyphWidth(text, size) {
+	let em = 0;
+	for (const ch of Array.from(text)) if (ch === " ") em += .3;
+	else if (/[ijlI.,;:!'’|]/.test(ch)) em += .3;
+	else if (/[frt()]/.test(ch)) em += .44;
+	else if (/[MWmw@%]/.test(ch)) em += .9;
+	else if (/[A-Z0-9]/.test(ch)) em += .7;
+	else em += .6;
+	return em * size;
+}
+function imageIn(image, box, beat) {
+	const s = Math.min(box.w / image.width, box.h / image.height);
+	const w = Math.max(2, Math.floor(image.width * s / 2) * 2);
+	const h = Math.max(2, Math.floor(image.height * s / 2) * 2);
+	return {
+		type: "image",
+		path: image.path,
+		x: r(box.x + (box.w - w) / 2),
+		y: r(box.y + (box.h - h) / 2),
+		w,
+		h,
+		beat
+	};
+}
+function quote(p, c) {
+	const warnings = [];
+	const text = asStr(p.text) ?? "";
+	const attribution = asStr(p.attribution);
+	const source = asStr(p.source);
+	const gap = r(c.u * .035);
+	const w = c.safe.w - 2 * r(c.u * .02);
+	const markSize = r(c.u * .22);
+	const markH = r(markSize * .4);
+	const af = attribution ? fitText(`— ${attribution}`, {
+		w,
+		h: c.u * .08
+	}, {
+		maxSize: c.u * .048,
+		minSize: c.u * .025,
+		maxLines: 1
+	}) : void 0;
+	const sf = source ? fitText(source, {
+		w,
+		h: c.u * .07
+	}, {
+		maxSize: c.u * .038,
+		minSize: c.u * .022,
+		maxLines: 1
+	}) : void 0;
+	const foot = [af, sf].filter((x) => !!x);
+	const footH = foot.reduce((a, f) => a + f.height, 0) + (foot.length > 1 ? r(gap / 2) : 0);
+	const qf = fitText(text, {
+		w,
+		h: c.safe.h - markH - gap - (footH ? footH + gap : 0)
+	}, {
+		maxSize: c.u * .1,
+		minSize: c.u * .035
+	});
+	if (qf.truncated) warnings.push("quote: text truncated to fit");
+	const [markY, textY, footY] = vstack(c.safe, [
+		markH,
+		qf.height,
+		...footH ? [footH] : []
+	], gap);
+	const cx = r(c.safe.x + c.safe.w / 2);
+	const els = [{
+		type: "text",
+		text: "“",
+		font: "heading",
+		size: markSize,
+		color: c.colors.primary,
+		x: cx,
+		cx,
+		y: r(markY - markSize * .12),
+		beat: 0,
+		slide: false
+	}];
+	note(c, "decorative", "“", {
+		x: cx - markSize / 2,
+		y: markY,
+		w: markSize,
+		h: markH
+	}, {
+		fontSize: markSize,
+		truncated: false
+	}, c.colors.primary);
+	const qRect = {
+		x: r(c.safe.x + (c.safe.w - w) / 2),
+		y: textY,
+		w,
+		h: r(qf.height)
+	};
+	els.push(...textLines(qf, qRect, {
+		font: "heading",
+		color: c.colors.text,
+		beat: (i) => .5 + i * .5
+	}));
+	note(c, c.main, text, qRect, qf, c.colors.text);
+	let y = footY ?? 0;
+	const beat = 1 + qf.lines.length * .5;
+	if (af) {
+		const rect = {
+			x: qRect.x,
+			y,
+			w,
+			h: r(af.height)
+		};
+		els.push(...textLines(af, rect, {
+			font: "body",
+			color: c.colors.text,
+			beat
+		}));
+		note(c, "label", `— ${attribution}`, rect, af, c.colors.text);
+		y += r(af.height + gap / 2);
+	}
+	if (sf) {
+		const rect = {
+			x: qRect.x,
+			y,
+			w,
+			h: r(sf.height)
+		};
+		els.push(...textLines(sf, rect, {
+			font: "body",
+			color: c.colors.muted,
+			beat: beat + .5
+		}));
+		note(c, "label", source, rect, sf, c.colors.muted);
+	}
+	return {
+		elements: els,
+		warnings
+	};
+}
+function stat$1(p, c) {
+	const warnings = [];
+	const raw = p.value;
+	const value = `${typeof raw === "number" ? formatNumber(raw) : asStr(raw) ?? ""}${typeof p.unit === "string" ? p.unit : ""}`;
+	const label = asStr(p.label);
+	const context = asStr(p.context);
+	const gap = r(c.u * .035);
+	const w = c.safe.w;
+	const vf = fitText(value, {
+		w,
+		h: c.safe.h * .45
+	}, {
+		maxSize: c.u * .3,
+		minSize: c.u * .06,
+		maxLines: 1,
+		lineHeight: 1.1
+	});
+	if (vf.truncated) warnings.push("stat: value truncated to fit");
+	const lf = label ? fitText(label, {
+		w,
+		h: c.safe.h * .25
+	}, {
+		maxSize: c.u * .07,
+		minSize: c.u * .03,
+		maxLines: 3
+	}) : void 0;
+	if (lf?.truncated) warnings.push("stat: label truncated to fit");
+	const cf = context ? fitText(context, {
+		w,
+		h: c.safe.h * .15
+	}, {
+		maxSize: c.u * .045,
+		minSize: c.u * .024,
+		maxLines: 2
+	}) : void 0;
+	if (cf?.truncated) warnings.push("stat: context truncated to fit");
+	const barH = Math.max(2, r(c.u * .012));
+	const heights = [
+		vf.height,
+		barH,
+		...lf ? [lf.height] : [],
+		...cf ? [cf.height] : []
+	];
+	const ys = vstack(c.safe, heights, gap);
+	const els = [];
+	const vRect = {
+		x: c.safe.x,
+		y: ys[0],
+		w,
+		h: r(vf.height)
+	};
+	els.push(...textLines(vf, vRect, {
+		font: "heading",
+		color: c.colors.primary,
+		beat: 0
+	}));
+	note(c, c.main, value, vRect, vf, c.colors.primary);
+	const barW = r(c.u * .14);
+	els.push({
+		type: "box",
+		x: r(c.safe.x + (w - barW) / 2),
+		y: ys[1],
+		w: barW,
+		h: barH,
+		color: c.colors.primary,
+		beat: .5
+	});
+	let k = 2;
+	if (lf) {
+		const rect = {
+			x: c.safe.x,
+			y: ys[k++],
+			w,
+			h: r(lf.height)
+		};
+		els.push(...textLines(lf, rect, {
+			font: "heading",
+			color: c.colors.text,
+			beat: 1
+		}));
+		note(c, "label", label, rect, lf, c.colors.text);
+	}
+	if (cf) {
+		const rect = {
+			x: c.safe.x,
+			y: ys[k++],
+			w,
+			h: r(cf.height)
+		};
+		els.push(...textLines(cf, rect, {
+			font: "body",
+			color: c.colors.muted,
+			beat: 2
+		}));
+		note(c, "body", context, rect, cf, c.colors.muted);
+	}
+	return {
+		elements: els,
+		warnings
+	};
+}
+const MAX_TIMELINE_EVENTS = 6;
+function timeline(p, c) {
+	const warnings = [];
+	let events = Array.isArray(p.events) ? p.events.flatMap((e) => {
+		if (!e || typeof e !== "object") return [];
+		const o = e;
+		const label = asStr(o.label);
+		const text = asStr(o.text);
+		return label ? [{
+			label,
+			...text ? { text } : {}
+		}] : [];
+	}) : [];
+	if (events.length === 0) return {
+		elements: [],
+		warnings: ["timeline: no events"]
+	};
+	if (events.length > MAX_TIMELINE_EVENTS) {
+		warnings.push(`timeline: ${events.length} events exceed ${MAX_TIMELINE_EVENTS}; only the first ${MAX_TIMELINE_EVENTS} are drawn`);
+		events = events.slice(0, MAX_TIMELINE_EVENTS);
+	}
+	const n = events.length;
+	let cur = typeof p.current === "number" && Number.isInteger(p.current) ? p.current : void 0;
+	if (cur !== void 0 && (cur < 0 || cur >= n)) {
+		warnings.push(`timeline: current ${cur} is outside the ${n} event(s); nothing highlighted`);
+		cur = void 0;
+	}
+	const hasText = events.some((e) => e.text);
+	const th = Math.max(2, r(c.u * .008));
+	const dot = Math.max(6, r(c.u * .04));
+	const big = Math.max(dot + 4, r(dot * 1.5));
+	const gap = r(c.u * .025);
+	const dotColor = (i) => cur === void 0 || i <= cur ? c.colors.primary : c.colors.panelEdge;
+	const labelColor = (i) => i === cur ? c.colors.primary : c.colors.text;
+	const els = [];
+	const pushDot = (cx, cy, i) => {
+		const s = i === cur ? big : dot;
+		if (i === cur) els.push({
+			type: "box",
+			x: r(cx - s / 2 - th),
+			y: r(cy - s / 2 - th),
+			w: s + 2 * th,
+			h: s + 2 * th,
+			color: c.colors.bg,
+			beat: i
+		});
+		els.push({
+			type: "box",
+			x: r(cx - s / 2),
+			y: r(cy - s / 2),
+			w: s,
+			h: s,
+			color: dotColor(i),
+			beat: i
+		});
+	};
+	const drawText = (labelBoxes, textBoxes, align) => {
+		const lSize = Math.min(...events.map((e, i) => fitText(e.label, labelBoxes[i], {
+			maxSize: c.u * .065,
+			minSize: c.u * .028,
+			maxLines: 2
+		}).fontSize));
+		const tSize = hasText ? Math.min(...events.map((e, i) => e.text ? fitText(e.text, textBoxes[i], {
+			maxSize: c.u * .042,
+			minSize: c.u * .022,
+			maxLines: 3
+		}).fontSize : Infinity)) : 0;
+		events.forEach((e, i) => {
+			const lb = labelBoxes[i];
+			const lf = fitText(e.label, lb, {
+				maxSize: lSize,
+				minSize: lSize,
+				maxLines: 2
+			});
+			if (lf.truncated) warnings.push(`timeline: label "${e.label}" truncated to fit`);
+			els.push(...textLines(lf, lb, {
+				font: "heading",
+				color: labelColor(i),
+				beat: i,
+				align,
+				valign: "top"
+			}));
+			note(c, "label", e.label, lb, lf, labelColor(i));
+			if (e.text) {
+				const tb = {
+					...textBoxes[i],
+					y: r(lb.y + lf.height + gap / 2)
+				};
+				const tf = fitText(e.text, tb, {
+					maxSize: tSize,
+					minSize: tSize,
+					maxLines: 3
+				});
+				if (tf.truncated) warnings.push(`timeline: text of "${e.label}" truncated to fit`);
+				els.push(...textLines(tf, tb, {
+					font: "body",
+					color: c.colors.muted,
+					beat: i + .3,
+					align,
+					valign: "top"
+				}));
+				note(c, "body", e.text, tb, tf, c.colors.muted);
+			}
+		});
+	};
+	if (c.target.height >= c.target.width) {
+		const rowH = Math.min(c.safe.h / n, c.u * (hasText ? .36 : .22));
+		const top = c.safe.y + (c.safe.h - rowH * n) / 2;
+		const lineX = r(c.safe.x + big / 2 + th);
+		const textX = r(lineX + big / 2 + c.u * .05);
+		const textW = c.safe.x + c.safe.w - textX;
+		const labelH = r(rowH * (hasText ? .42 : .85));
+		const labelBoxes = events.map((_, i) => ({
+			x: textX,
+			y: r(top + i * rowH),
+			w: textW,
+			h: labelH
+		}));
+		const textBoxes = labelBoxes.map((b) => ({
+			...b,
+			h: r(rowH - labelH - gap)
+		}));
+		const probe = Math.min(...events.map((e, i) => fitText(e.label, labelBoxes[i], {
+			maxSize: c.u * .065,
+			minSize: c.u * .028,
+			maxLines: 2
+		}).fontSize));
+		const cy = (i) => labelBoxes[i].y + probe * .6;
+		els.push({
+			type: "box",
+			x: r(lineX - th / 2),
+			y: r(cy(0)),
+			w: th,
+			h: Math.max(th, r(cy(n - 1) - cy(0))),
+			color: c.colors.panelEdge,
+			beat: 0
+		});
+		if (cur !== void 0 && cur > 0) els.push({
+			type: "box",
+			x: r(lineX - th / 2),
+			y: r(cy(0)),
+			w: th,
+			h: r(cy(cur) - cy(0)),
+			color: c.colors.primary,
+			beat: cur
+		});
+		events.forEach((_, i) => pushDot(lineX, cy(i), i));
+		drawText(labelBoxes, textBoxes, "left");
+	} else {
+		const cols = splitH(c.safe, events.map(() => 1), gap);
+		const labelH = r(c.u * .15);
+		const textH = hasText ? r(c.u * .2) : 0;
+		const blockH = big + gap + labelH + (hasText ? textH : 0);
+		const top = c.safe.y + Math.max(0, (c.safe.h - blockH) / 2);
+		const lineY = r(top + big / 2);
+		const cx = (i) => cols[i].x + cols[i].w / 2;
+		els.push({
+			type: "box",
+			x: r(cx(0)),
+			y: r(lineY - th / 2),
+			w: Math.max(th, r(cx(n - 1) - cx(0))),
+			h: th,
+			color: c.colors.panelEdge,
+			beat: 0
+		});
+		if (cur !== void 0 && cur > 0) els.push({
+			type: "box",
+			x: r(cx(0)),
+			y: r(lineY - th / 2),
+			w: r(cx(cur) - cx(0)),
+			h: th,
+			color: c.colors.primary,
+			beat: cur
+		});
+		events.forEach((_, i) => pushDot(cx(i), lineY, i));
+		const labelBoxes = cols.map((col) => ({
+			x: col.x,
+			y: r(top + big + gap),
+			w: col.w,
+			h: labelH
+		}));
+		drawText(labelBoxes, labelBoxes.map((b) => ({
+			...b,
+			h: textH
+		})), "center");
+	}
+	return {
+		elements: els,
+		warnings
+	};
+}
+function splitScreen(p, c, images) {
+	const warnings = [];
+	const obj = (v) => v && typeof v === "object" ? v : {};
+	const beforeAfter = p.mode === "before_after";
+	const sides = [obj(p.left), obj(p.right)];
+	const labels = sides.map((s, i) => asStr(s.label) ?? (beforeAfter ? i === 0 ? "Before" : "After" : void 0));
+	const accents = beforeAfter ? [c.colors.muted, c.colors.primary] : [c.colors.primary, c.colors.secondary];
+	const labelColors = beforeAfter ? [c.colors.text, c.colors.primary] : accents;
+	const gap = r(c.u * .04);
+	const panels = c.target.height > c.target.width ? splitV(c.safe, [1, 1], gap) : splitH(c.safe, [1, 1], gap);
+	const pad = r(c.u * .035);
+	const labelH = labels.some(Boolean) ? r(c.u * .09) : 0;
+	const content = panels.map((pr) => ({
+		x: pr.x + pad,
+		y: pr.y + pad + labelH,
+		w: pr.w - 2 * pad,
+		h: pr.h - 2 * pad - labelH
+	}));
+	const areas = sides.map((s, i) => {
+		const hasImg = !!asStr(s.asset);
+		const hasText = !!asStr(s.text);
+		const [imgR, txtR] = hasImg && hasText ? splitV(content[i], [3, 1], r(gap / 2)) : hasImg ? [content[i], void 0] : [void 0, content[i]];
+		return {
+			imgR,
+			txtR
+		};
+	});
+	const fits = sides.map((s, i) => asStr(s.text) && areas[i].txtR ? fitText(asStr(s.text), areas[i].txtR, {
+		maxSize: c.u * .07,
+		minSize: c.u * .03
+	}).fontSize : Infinity);
+	const size = Math.min(...fits);
+	const th = Math.max(2, r(c.u * .006));
+	const els = [];
+	sides.forEach((s, i) => {
+		const pr = panels[i];
+		const beat = i * 2;
+		const name = i === 0 ? "left" : "right";
+		els.push({
+			type: "box",
+			...pr,
+			color: c.colors.panel,
+			beat
+		});
+		els.push({
+			type: "box",
+			x: pr.x,
+			y: pr.y,
+			w: pr.w,
+			h: Math.max(2, r(c.u * .01)),
+			color: accents[i],
+			beat
+		});
+		if (beforeAfter && i === 1) els.push({
+			type: "box",
+			...pr,
+			color: c.colors.primary,
+			thickness: th,
+			beat
+		});
+		const label = labels[i];
+		if (label) {
+			const lb = {
+				x: pr.x + pad,
+				y: pr.y + pad,
+				w: pr.w - 2 * pad,
+				h: labelH - r(pad / 2)
+			};
+			const lf = fitText(label, lb, {
+				maxSize: c.u * .06,
+				minSize: c.u * .03,
+				maxLines: 1
+			});
+			els.push(...textLines(lf, lb, {
+				font: "heading",
+				color: labelColors[i],
+				beat,
+				valign: "top"
+			}));
+			note(c, "label", label, lb, lf, labelColors[i], c.colors.panel);
+		}
+		const { imgR, txtR } = areas[i];
+		if (imgR) {
+			const img = images[name];
+			if (img) {
+				const el = imageIn(img, imgR, beat + .5);
+				els.push(el, {
+					type: "box",
+					x: el.x,
+					y: el.y,
+					w: el.w,
+					h: el.h,
+					color: c.colors.panelEdge,
+					thickness: Math.max(1, r(c.u * .004)),
+					beat: beat + .5
+				});
+			} else {
+				const msg = `image "${asStr(s.asset)}" unavailable`;
+				const f = fitText(msg, inset(imgR, pad), {
+					maxSize: c.u * .04,
+					minSize: c.u * .02
+				});
+				els.push({
+					type: "box",
+					...imgR,
+					color: c.colors.panelEdge,
+					thickness: Math.max(1, r(c.u * .004)),
+					beat
+				});
+				els.push(...textLines(f, inset(imgR, pad), {
+					font: "body",
+					color: c.colors.muted,
+					beat,
+					slide: false
+				}));
+				note(c, "decorative", msg, inset(imgR, pad), f, c.colors.muted, c.colors.panel);
+			}
+		}
+		const text = asStr(s.text);
+		if (text && txtR) {
+			const tf = fitText(text, txtR, {
+				maxSize: size,
+				minSize: Math.min(size, c.u * .03)
+			});
+			if (tf.truncated) warnings.push(`split_screen: ${name} text truncated to fit`);
+			els.push(...textLines(tf, txtR, {
+				font: "heading",
+				color: c.colors.text,
+				beat: beat + 1,
+				valign: imgR ? "top" : "middle"
+			}));
+			note(c, "body", text, txtR, tf, c.colors.text, c.colors.panel);
+		}
+		if (!text && !imgR) warnings.push(`split_screen: ${name} panel has no text or asset`);
+	});
+	return {
+		elements: els,
+		warnings
+	};
+}
+function lowerThird(p, c) {
+	const warnings = [];
+	const name = asStr(p.name) ?? "";
+	const title = asStr(p.title);
+	const headline = asStr(p.headline);
+	const pad = r(c.u * .035);
+	const accentW = Math.max(3, r(c.u * .015));
+	const maxW = r(c.safe.w * .92) - 2 * pad - accentW;
+	const nf = fitText(name, {
+		w: maxW,
+		h: c.u * .12
+	}, {
+		maxSize: c.u * .07,
+		minSize: c.u * .03,
+		maxLines: 1
+	});
+	if (nf.truncated) warnings.push("lower_third: name truncated to fit");
+	const tf = title ? fitText(title, {
+		w: maxW,
+		h: c.u * .08
+	}, {
+		maxSize: c.u * .045,
+		minSize: c.u * .022,
+		maxLines: 1
+	}) : void 0;
+	if (tf?.truncated) warnings.push("lower_third: title truncated to fit");
+	const inner = r(c.u * .015);
+	const barH = r(2 * pad + nf.height + (tf ? inner + tf.height : 0));
+	const barW = Math.min(c.safe.w, r(Math.max(nf.width, tf?.width ?? 0) + 2 * pad + accentW + c.u * .04));
+	const bar = {
+		x: c.safe.x,
+		y: c.safe.y + c.safe.h - barH,
+		w: barW,
+		h: barH
+	};
+	const els = [];
+	if (headline) {
+		const gap = r(c.u * .06);
+		const hr = {
+			x: c.safe.x,
+			y: c.safe.y,
+			w: c.safe.w,
+			h: Math.max(0, bar.y - gap - c.safe.y)
+		};
+		const hf = fitText(headline, hr, {
+			maxSize: c.u * .1,
+			minSize: c.u * .04
+		});
+		if (hf.truncated) warnings.push("lower_third: headline truncated to fit");
+		els.push(...textLines(hf, hr, {
+			font: "heading",
+			color: c.colors.text,
+			beat: 0
+		}));
+		note(c, c.main, headline, hr, hf, c.colors.text);
+	}
+	els.push({
+		type: "box",
+		...bar,
+		color: c.colors.panel,
+		beat: 1
+	});
+	els.push({
+		type: "box",
+		x: bar.x,
+		y: bar.y,
+		w: accentW,
+		h: bar.h,
+		color: c.colors.primary,
+		beat: 1
+	});
+	const tx = bar.x + accentW + pad;
+	const nr = {
+		x: tx,
+		y: bar.y + pad,
+		w: maxW,
+		h: r(nf.height)
+	};
+	els.push(...textLines(nf, nr, {
+		font: "heading",
+		color: c.colors.text,
+		beat: 1,
+		align: "left",
+		valign: "top"
+	}));
+	note(c, headline ? "label" : c.main, name, nr, nf, c.colors.text, c.colors.panel);
+	if (tf) {
+		const trr = {
+			x: tx,
+			y: r(nr.y + nf.height + inner),
+			w: maxW,
+			h: r(tf.height)
+		};
+		els.push(...textLines(tf, trr, {
+			font: "body",
+			color: c.colors.muted,
+			beat: 1.5,
+			align: "left",
+			valign: "top"
+		}));
+		note(c, "label", title, trr, tf, c.colors.muted, c.colors.panel);
+	}
+	return {
+		elements: els,
+		warnings
+	};
+}
+/** Kinetic-text chunks: words, or phrases split after punctuation (exported for tests). */
+function kineticChunks$1(text, rhythm) {
+	const t = text.replace(/\s+/g, " ").trim();
+	if (!t) return [];
+	if (rhythm === "word") return t.split(" ");
+	return t.split(/(?<=[.,;:!?…—])\s+/).map((s) => s.trim()).filter(Boolean);
+}
+function kineticText(p, c) {
+	const warnings = [];
+	const text = asStr(p.text) ?? "";
+	const rhythm = p.rhythm === "phrase" ? "phrase" : "word";
+	const chunks = kineticChunks$1(text, rhythm);
+	const words = chunks.flatMap((ch) => ch.split(" "));
+	const chunkOf = chunks.flatMap((ch, i) => ch.split(" ").map(() => i));
+	const norm = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+	const emphasis = asStr(p.emphasis);
+	const emSet = new Set((emphasis ?? "").split(/\s+/).map(norm).filter(Boolean));
+	const box = inset(c.safe, r(c.u * .03));
+	const fit = fitText(rhythm === "phrase" ? chunks : [words.join(" ")], {
+		w: box.w * .85,
+		h: box.h
+	}, {
+		maxSize: c.u * .14,
+		minSize: c.u * .045
+	});
+	if (fit.truncated) warnings.push("kinetic_text: text truncated to fit");
+	const els = [];
+	let k = 0;
+	let acc = "";
+	let hit = false;
+	for (const line of placeLines(fit, box, "center", "middle")) {
+		const parts = line.text.split(" ").filter(Boolean);
+		const space = glyphWidth(" ", fit.fontSize);
+		const widths = parts.map((w) => glyphWidth(w, fit.fontSize));
+		const lineW = widths.reduce((a, b) => a + b, 0) + space * Math.max(0, parts.length - 1);
+		const scale = lineW > box.w ? box.w / lineW : 1;
+		let x = box.x + (box.w - lineW * scale) / 2;
+		parts.forEach((w, j) => {
+			const beat = chunkOf[Math.min(k, chunkOf.length - 1)] ?? 0;
+			const em = emSet.has(norm(w)) && norm(w) !== "";
+			if (em) hit = true;
+			els.push({
+				type: "text",
+				text: w,
+				font: "heading",
+				size: fit.fontSize,
+				color: em ? c.colors.primary : c.colors.text,
+				x: r(x),
+				y: line.y,
+				beat,
+				slide: true
+			});
+			x += (widths[j] + space) * scale;
+			acc += w;
+			if (acc.length >= (words[k]?.length ?? 0)) {
+				k++;
+				acc = "";
+			}
+		});
+	}
+	note(c, c.main, text, box, fit, c.colors.text);
+	if (emphasis && !hit) warnings.push(`kinetic_text: emphasis "${emphasis}" not found in text`);
+	return {
+		elements: els,
+		warnings
+	};
+}
+function map(p, c) {
+	const warnings = [];
+	const title = asStr(p.title);
+	const clamp = (v) => Math.min(1, Math.max(0, v));
+	let points = Array.isArray(p.points) ? p.points.flatMap((pt) => {
+		if (!pt || typeof pt !== "object") return [];
+		const o = pt;
+		return typeof o.x === "number" && typeof o.y === "number" ? [{
+			label: asStr(o.label) ?? "",
+			x: clamp(o.x),
+			y: clamp(o.y)
+		}] : [];
+	}) : [];
+	if (points.length > 8) {
+		warnings.push(`map: ${points.length} points exceed 8; only the first 8 are drawn`);
+		points = points.slice(0, 8);
+	}
+	if (points.length === 0) warnings.push("map: no points");
+	const gap = r(c.u * .035);
+	const els = [];
+	const tf = title ? fitText(title, {
+		w: c.safe.w,
+		h: c.u * .18
+	}, {
+		maxSize: c.u * .075,
+		minSize: c.u * .03,
+		maxLines: 2
+	}) : void 0;
+	if (tf?.truncated) warnings.push("map: title truncated to fit");
+	const titleH = tf ? r(tf.height) : 0;
+	const panelH = r(Math.min(c.safe.h - (tf ? titleH + gap : 0), c.safe.w * 1.25));
+	const [titleY, panelY] = tf ? vstack(c.safe, [titleH, panelH], gap) : [void 0, ...vstack(c.safe, [panelH], 0)];
+	const panel = {
+		x: c.safe.x,
+		y: panelY,
+		w: c.safe.w,
+		h: panelH
+	};
+	if (tf && title) {
+		const tr = {
+			x: c.safe.x,
+			y: titleY,
+			w: c.safe.w,
+			h: titleH
+		};
+		els.push(...textLines(tf, tr, {
+			font: "heading",
+			color: c.colors.text,
+			beat: 0
+		}));
+		note(c, c.main, title, tr, tf, c.colors.text);
+	}
+	els.push(...roundedBox(panel, c.u * .04, c.colors.panel, 0));
+	const grid = mixColor(c.colors.panel, c.colors.panelEdge, .6);
+	const gt = Math.max(1, r(c.u * .003));
+	for (let i = 1; i < 4; i++) {
+		els.push({
+			type: "box",
+			x: r(panel.x + panel.w * i / 4),
+			y: panel.y + r(c.u * .02),
+			w: gt,
+			h: panel.h - 2 * r(c.u * .02),
+			color: grid,
+			beat: 0
+		});
+		els.push({
+			type: "box",
+			x: panel.x + r(c.u * .02),
+			y: r(panel.y + panel.h * i / 4),
+			w: panel.w - 2 * r(c.u * .02),
+			h: gt,
+			color: grid,
+			beat: 0
+		});
+	}
+	const inner = inset(panel, r(c.u * .08));
+	const pos = points.map((pt) => ({
+		...pt,
+		px: r(inner.x + pt.x * inner.w),
+		py: r(inner.y + pt.y * inner.h)
+	}));
+	if (p.route === true && pos.length > 1) {
+		const d = Math.max(2, r(c.u * .012));
+		const step = c.u * .03;
+		for (let i = 0; i + 1 < pos.length; i++) {
+			const a = pos[i];
+			const b = pos[i + 1];
+			const n = Math.max(1, Math.min(60, Math.round(Math.hypot(b.px - a.px, b.py - a.py) / step)));
+			for (let j = 1; j < n; j++) {
+				const t = j / n;
+				els.push({
+					type: "box",
+					x: r(a.px + (b.px - a.px) * t - d / 2),
+					y: r(a.py + (b.py - a.py) * t - d / 2),
+					w: d,
+					h: d,
+					color: c.colors.secondary,
+					beat: i + 1.5
+				});
+			}
+		}
+	} else if (p.route === true) warnings.push("map: route needs at least 2 points");
+	const pin = Math.max(6, r(c.u * .04));
+	const ring = Math.max(1, r(c.u * .006));
+	const size = Math.max(6, r(c.u * .04));
+	const border = r(size * .35);
+	pos.forEach((pt, i) => {
+		const beat = 1 + i;
+		els.push({
+			type: "box",
+			x: pt.px - r(pin / 2) - ring,
+			y: pt.py - r(pin / 2) - ring,
+			w: pin + 2 * ring,
+			h: pin + 2 * ring,
+			color: c.colors.bg,
+			beat
+		});
+		els.push({
+			type: "box",
+			x: pt.px - r(pin / 2),
+			y: pt.py - r(pin / 2),
+			w: pin,
+			h: pin,
+			color: c.colors.primary,
+			beat
+		});
+		if (!pt.label) return;
+		const lines = wrapText(pt.label, size, c.safe.w * .5);
+		const text = lines.length > 1 ? `${lines[0]}…` : lines[0] ?? pt.label;
+		const tw = estimateTextWidth(text, size);
+		const right = pt.px + pin / 2 + ring + border * 2;
+		const x = right + tw + border <= c.safe.x + c.safe.w ? r(right) : r(Math.max(c.safe.x + border, pt.px - pin / 2 - ring - border * 2 - tw));
+		const y = r(Math.min(c.safe.y + c.safe.h - size - border, Math.max(c.safe.y + border, pt.py - size / 2)));
+		els.push({
+			type: "text",
+			text,
+			font: "body",
+			size,
+			color: c.colors.text,
+			x,
+			y,
+			beat,
+			slide: false,
+			box: {
+				color: ffColor(c.colors.bg, .85),
+				border
+			}
+		});
+		note(c, "label", pt.label, {
+			x: x - border,
+			y: y - border,
+			w: tw + 2 * border,
+			h: size + 2 * border
+		}, {
+			fontSize: size,
+			truncated: text !== pt.label
+		}, c.colors.text);
+	});
+	return {
+		elements: els,
+		warnings
+	};
+}
 /** Pure layout of a deterministic scene into draw elements (exported for tests and previews). */
 function composeScene(scene, target, tokens, inputs = {}) {
 	const det = scene.deterministic;
@@ -235170,19 +236273,13 @@ function layoutKind(det, c, inputs) {
 		case "chart": return chart(p, c);
 		case "diagram": return diagram(p, c);
 		case "screenshot": return screenshot(p, c, inputs.image ?? null);
-		case "quote":
-		case "stat":
-		case "timeline":
-		case "split_screen":
-		case "lower_third":
-		case "kinetic_text":
-		case "map": {
-			const l = typography({ lines: fallbackLines(p) }, c);
-			return {
-				...l,
-				warnings: [...l.warnings, `${det.kind}: drawn as a typography card (not implemented in ${FFMPEG_RENDERER_ID} yet)`]
-			};
-		}
+		case "quote": return quote(p, c);
+		case "stat": return stat$1(p, c);
+		case "timeline": return timeline(p, c);
+		case "split_screen": return splitScreen(p, c, inputs.images ?? {});
+		case "lower_third": return lowerThird(p, c);
+		case "kinetic_text": return kineticText(p, c);
+		case "map": return map(p, c);
 		default: throw new Error(`${FFMPEG_RENDERER_ID} cannot draw kind "${String(det.kind)}"`);
 	}
 }
@@ -235436,8 +236533,18 @@ function createFfmpegRenderer(opts = {}) {
 					if (!image) warnings.push(`end_card: logo "${lp}" could not be read; skipped`);
 				}
 			}
+			const images = {};
+			if (det.kind === "split_screen") for (const side of ["left", "right"]) {
+				const panel = det.props[side];
+				const id = panel && typeof panel === "object" && typeof panel.asset === "string" ? panel.asset : "";
+				if (!id) continue;
+				const path = await resolveAsset(id, req.project_dir);
+				images[side] = path ? await probeImage(path, tools) : null;
+				if (!images[side]) warnings.push(`split_screen: ${side} asset "${id}" could not be resolved or read; drew a placeholder`);
+			}
 			const comp = composeScene(scene, target, tokens, {
 				image,
+				images,
 				...req.zones ? { zones: req.zones } : {}
 			});
 			warnings.push(...comp.warnings);
@@ -235707,7 +236814,14 @@ const HYPERFRAMES_KINDS = [
 	"screenshot",
 	"comparison",
 	"cta",
-	"end_card"
+	"end_card",
+	"quote",
+	"stat",
+	"timeline",
+	"split_screen",
+	"lower_third",
+	"kinetic_text",
+	"map"
 ];
 const IMAGE_EXT = /^\.(png|jpe?g|webp|gif|avif|svg)$/i;
 const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
@@ -236416,6 +237530,557 @@ function renderScreenshot(ctx) {
 		listed.length ? `<div class="vs-callouts" style="font-size:${px(fs)}">\n${listed.join("\n")}\n</div>` : ""
 	].filter(Boolean).join("\n");
 }
+/** Text colour at `t` of the way from the background to the text colour (`color-mix` twin). */
+function mutedHex(ctx, t = .72) {
+	return mixHex(ctx.colors.bg, ctx.colors.text, t);
+}
+/** A fitted text block: font fit plus the height it takes (its box when it does not fit). */
+function textBlock(text, w, maxH, maxFs, minFs, lineHeight = 1.2, em = .56) {
+	const fit = fitFontInfo([text], w, maxH, maxFs, minFs, lineHeight, em);
+	const lines = wrapText(text, fit.fs, w).length;
+	return {
+		fit,
+		h: fit.fits ? Math.min(maxH, lines * fit.fs * lineHeight) : maxH
+	};
+}
+/** One font size for several separately boxed texts (the smallest that fits each), and which fit. */
+function sharedFit(texts, boxW, boxH, maxFs, minFs, lineHeight = 1.2) {
+	const fs = Math.min(maxFs, ...texts.filter((t) => t.trim()).map((t) => fitFont([t], boxW, boxH, maxFs, minFs, lineHeight)));
+	return {
+		fs,
+		fits: texts.map((t) => fitFontInfo([t], boxW, boxH, fs, fs, lineHeight).fits)
+	};
+}
+/** Top offsets of blocks stacked with `gap` and centred in `H` (what `.vs-stack` does). */
+function column(heights, gap, H) {
+	const total = heights.reduce((a, h) => a + h, 0) + gap * Math.max(0, heights.length - 1);
+	let y = Math.max(0, (H - total) / 2);
+	return heights.map((h) => {
+		const at = y;
+		y += h + gap;
+		return at;
+	});
+}
+function renderQuote(ctx) {
+	const { stage, props, warnings } = ctx;
+	const text = str$1(props.text) ?? "";
+	if (!text) warnings.push("quote: no `text` to show");
+	const attribution = str$1(props.attribution);
+	const source = str$1(props.source);
+	const { u, safe } = stage;
+	const gap = u * 2.5;
+	const markFs = u * (stage.portrait ? 24 : 18);
+	const markH = markFs * .5;
+	const attr = attribution ? textBlock(`— ${attribution}`, safe.w, safe.h * .12, u * 4.8, u * 2.4) : void 0;
+	const src = source ? textBlock(source, safe.w, safe.h * .1, u * 3.8, u * 2.2) : void 0;
+	const tailH = (attr ? attr.h + gap : 0) + (src ? src.h + gap : 0);
+	const body = textBlock(text, safe.w, safe.h - markH - gap - tailH, u * 8.5, u * 3.2, 1.25);
+	const heights = [
+		markH,
+		body.h,
+		...attr ? [attr.h] : [],
+		...src ? [src.h] : []
+	];
+	const ys = column(heights, gap, safe.h);
+	rec(ctx, "decorative", "“", {
+		y: ys[0],
+		w: markFs * .6,
+		h: markH
+	}, {
+		fs: r2(markFs),
+		fits: true
+	}, ctx.colors.primary);
+	rec(ctx, ctx.main, text, {
+		y: ys[1],
+		w: safe.w,
+		h: body.h
+	}, body.fit, ctx.colors.text);
+	let k = 2;
+	if (attribution && attr) rec(ctx, "label", `— ${attribution}`, {
+		y: ys[k++],
+		w: safe.w,
+		h: attr.h
+	}, attr.fit, ctx.colors.primary);
+	if (source && src) rec(ctx, "label", source, {
+		y: ys[k++],
+		w: safe.w,
+		h: src.h
+	}, src.fit, mutedHex(ctx));
+	const st = stagger(heights.length, stage.dur);
+	let i = 0;
+	return [
+		`<div class="vs-stack vs-quote" style="gap:${px(gap)}">`,
+		`<div ${anim("pop", st.at(i++), st.len, `vs-quote-mark`, `height:${px(markH)};font-size:${px(markFs)}`)}>“</div>`,
+		`<div ${anim("fade-up", st.at(i++), st.len, `vs-quote-text`, `min-height:${px(body.h)};font-size:${px(body.fit.fs)}`)}>${esc(text)}</div>`,
+		attribution && attr ? `<div ${anim("fade-up", st.at(i++), st.len, `vs-quote-attr`, `min-height:${px(attr.h)};font-size:${px(attr.fit.fs)}`)}>— ${esc(attribution)}</div>` : "",
+		source && src ? `<div ${anim("fade", st.at(i++), st.len, `vs-quote-source vs-muted`, `min-height:${px(src.h)};font-size:${px(src.fit.fs)}`)}>${esc(source)}</div>` : "",
+		`</div>`
+	].filter(Boolean).join("\n");
+}
+/** Count-up frames for a numeric value: each shows only inside its own time window. */
+function countUp(value, at, span, frames = 8) {
+	const scale = 10 ** (Number.isInteger(value) ? 0 : Math.min(2, (String(value).split(".")[1] ?? "").length));
+	const dt = span / frames;
+	const out = [];
+	for (let k = 0; k < frames; k++) {
+		const f = 1 - (1 - k / frames) ** 3;
+		const v = Math.round(value * f * scale) / scale;
+		out.push(`<span ${anim("flash", at + k * dt, dt, "vs-count-frame")}>${esc(fmtNumber(v))}</span>`);
+	}
+	return {
+		frames: out.join(""),
+		done: at + span
+	};
+}
+function renderStat(ctx) {
+	const { stage, props } = ctx;
+	const raw = props.value;
+	const numeric = typeof raw === "number" && Number.isFinite(raw) ? raw : void 0;
+	const value = numeric !== void 0 ? fmtNumber(numeric) : str$1(raw) ?? "";
+	const unit = str$1(props.unit) ?? "";
+	const label = str$1(props.label) ?? "";
+	const context = str$1(props.context);
+	const { u, safe } = stage;
+	const gap = u * 3;
+	const vfit = fitFontInfo([value + unit], safe.w, safe.h * .45, u * 30, u * 6, 1, .6);
+	const valueH = vfit.fits ? Math.min(safe.h * .45, wrapText(value + unit, vfit.fs, safe.w, { mono: true }).length * vfit.fs) : safe.h * .45;
+	const lab = label ? textBlock(label, safe.w, safe.h * .22, u * 7, u * 3, 1.15) : void 0;
+	const con = context ? textBlock(context, safe.w, safe.h * .12, u * 4.5, u * 2.2) : void 0;
+	const ys = column([
+		valueH,
+		...lab ? [lab.h] : [],
+		...con ? [con.h] : []
+	], gap, safe.h);
+	rec(ctx, ctx.main, value + unit, {
+		y: ys[0],
+		w: safe.w,
+		h: valueH
+	}, vfit, ctx.colors.primary);
+	if (label && lab) rec(ctx, "body", label, {
+		y: ys[1],
+		w: safe.w,
+		h: lab.h
+	}, lab.fit, ctx.colors.text);
+	if (context && con) rec(ctx, "label", context, {
+		y: ys[lab ? 2 : 1],
+		w: safe.w,
+		h: con.h
+	}, con.fit, mutedHex(ctx));
+	const count = numeric !== void 0 && numeric !== 0 ? countUp(numeric, .1, Math.max(.4, Math.min(1.2, stage.dur * .35))) : void 0;
+	const digits = count ? `<span class="vs-count"><span ${anim("fade", count.done, .001)}>${esc(value)}</span>${count.frames}</span>` : `<span>${esc(value)}</span>`;
+	const labelAt = count ? Math.min(count.done, stage.dur * .5) : .45;
+	return [
+		`<div class="vs-stack vs-stat" style="gap:${px(gap)}">`,
+		`<div ${anim("scale-in", .05, .5, `vs-stat-value`, `min-height:${px(valueH)};font-size:${px(vfit.fs)}`)}>${digits}${unit ? `<span class="vs-stat-unit">${esc(unit)}</span>` : ""}</div>`,
+		label && lab ? `<div ${anim("fade-up", labelAt, .5, `vs-stat-label`, `min-height:${px(lab.h)};font-size:${px(lab.fit.fs)}`)}>${esc(label)}</div>` : "",
+		context && con ? `<div ${anim("fade", labelAt + .25, .5, `vs-stat-context vs-muted`, `min-height:${px(con.h)};font-size:${px(con.fit.fs)}`)}>${esc(context)}</div>` : "",
+		`</div>`
+	].filter(Boolean).join("\n");
+}
+function renderTimeline(ctx) {
+	const { stage, props, warnings } = ctx;
+	let events = (Array.isArray(props.events) ? props.events : []).map((e) => e && typeof e === "object" ? e : {}).map((e) => ({
+		label: str$1(e.label) ?? "",
+		text: str$1(e.text) ?? ""
+	})).filter((e) => e.label || e.text);
+	if (events.length > 6) {
+		warnings.push(`timeline: ${events.length} events do not fit; showing the first 6`);
+		events = events.slice(0, 6);
+	}
+	if (events.length === 0) {
+		warnings.push("timeline: no events");
+		return `<div class="vs-stack"></div>`;
+	}
+	const n = events.length;
+	let current = typeof props.current === "number" && Number.isInteger(props.current) ? props.current : void 0;
+	if (current !== void 0 && (current < 0 || current >= n)) {
+		warnings.push(`timeline: current ${current} is outside the ${n} events; nothing highlighted`);
+		current = void 0;
+	}
+	const { u, safe } = stage;
+	const vertical = stage.portrait || stage.H >= stage.W;
+	const hasText = events.some((e) => e.text);
+	const dotR = u * 1.8;
+	const curR = u * 2.8;
+	const line = Math.max(2, u * .6);
+	let dots;
+	let blocks;
+	let labelH;
+	let textH;
+	let lineRect;
+	if (vertical) {
+		const rowH = safe.h / n;
+		const lineX = curR + u;
+		const textX = lineX + curR + u * 4;
+		const w = safe.w - textX;
+		labelH = Math.min(rowH * (hasText ? .45 : .85), u * 16);
+		textH = hasText ? Math.min(rowH * .5, u * 20) : 0;
+		dots = events.map((_, i) => ({
+			x: lineX,
+			y: rowH * (i + .5)
+		}));
+		blocks = dots.map((d) => ({
+			x: textX,
+			y: d.y - (labelH + textH) / 2,
+			w,
+			h: labelH + textH
+		}));
+		lineRect = {
+			x: lineX - line / 2,
+			y: dots[0].y,
+			w: line,
+			h: dots[n - 1].y - dots[0].y
+		};
+	} else {
+		const colW = safe.w / n;
+		const lineY = safe.h * (hasText ? .3 : .4);
+		const w = colW - u * 3;
+		labelH = safe.h * .18;
+		textH = hasText ? safe.h * .4 : 0;
+		dots = events.map((_, i) => ({
+			x: colW * (i + .5),
+			y: lineY
+		}));
+		blocks = dots.map((d) => ({
+			x: d.x - w / 2,
+			y: lineY + curR + u * 4,
+			w,
+			h: labelH + textH
+		}));
+		lineRect = {
+			x: dots[0].x,
+			y: lineY - line / 2,
+			w: dots[n - 1].x - dots[0].x,
+			h: line
+		};
+	}
+	const lf = sharedFit(events.map((e) => e.label), blocks[0].w, labelH, u * (vertical ? 6 : 5), u * 2.6, 1.15);
+	const tf = sharedFit(events.map((e) => e.text), blocks[0].w, Math.max(1, textH), u * 4.2, u * 2.2, 1.3);
+	const st = stagger(n, stage.dur, .3);
+	const lineDur = Math.max(.3, st.at(n - 1) - .1 + st.len * .5);
+	const muted = mutedHex(ctx, .6);
+	const html = [`<div ${anim(vertical ? "grow-y" : "grow-x", .1, lineDur, `vs-tl-line`, `left:${px(lineRect.x)};top:${px(lineRect.y)};width:${px(lineRect.w)};height:${px(lineRect.h)}`)}></div>`];
+	events.forEach((e, i) => {
+		const state = current === void 0 || i < current ? "vs-tl-past" : i === current ? "vs-tl-current" : "vs-tl-future";
+		const r = i === current ? curR : dotR;
+		const d = dots[i];
+		const b = blocks[i];
+		const labelColour = i === current ? ctx.colors.primary : state === "vs-tl-future" ? muted : ctx.colors.text;
+		rec(ctx, "label", e.label, {
+			x: b.x,
+			y: b.y,
+			w: b.w,
+			h: labelH
+		}, {
+			fs: lf.fs,
+			fits: lf.fits[i]
+		}, labelColour);
+		if (hasText) rec(ctx, "body", e.text, {
+			x: b.x,
+			y: b.y + labelH,
+			w: b.w,
+			h: textH
+		}, {
+			fs: tf.fs,
+			fits: tf.fits[i]
+		}, state === "vs-tl-future" ? muted : ctx.colors.text);
+		html.push(`<div class="vs-tl-pos" style="left:${px(d.x - r)};top:${px(d.y - r)};width:${px(r * 2)};height:${px(r * 2)}"><div ${anim("pop", st.at(i), st.len, `vs-tl-dot ${state}`)}></div></div>`, `<div class="vs-tl-event ${state}${vertical ? "" : " vs-tl-under"}" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)}"><div ${anim(vertical ? "slide-left" : "fade-up", st.at(i), st.len)}><div class="vs-tl-label" style="font-size:${px(lf.fs)}">${esc(e.label)}</div>` + (e.text ? `<div class="vs-tl-text" style="font-size:${px(tf.fs)}">${esc(e.text)}</div>` : "") + `</div></div>`);
+	});
+	return html.join("\n");
+}
+function renderSplitScreen(ctx) {
+	const { stage, props, warnings } = ctx;
+	const mode = str$1(props.mode) ?? "side_by_side";
+	if (mode !== "side_by_side" && mode !== "before_after") warnings.push(`split_screen: unknown mode "${mode}"; drawn side by side`);
+	const beforeAfter = mode === "before_after";
+	const panel = (v, fallbackLabel) => {
+		const o = v && typeof v === "object" ? v : {};
+		return {
+			label: str$1(o.label) ?? (beforeAfter ? fallbackLabel : ""),
+			text: str$1(o.text) ?? "",
+			asset: str$1(o.asset)
+		};
+	};
+	const panels = [panel(props.left, "Before"), panel(props.right, "After")];
+	const { u, safe } = stage;
+	const columns = !stage.portrait && stage.W > stage.H;
+	const gap = u * (beforeAfter ? 8 : 4);
+	const pw = columns ? (safe.w - gap) / 2 : safe.w;
+	const ph = columns ? safe.h * .86 : (safe.h - gap) / 2;
+	const rects = [0, 1].map((i) => columns ? {
+		x: i * (pw + gap),
+		y: (safe.h - ph) / 2,
+		w: pw,
+		h: ph
+	} : {
+		x: 0,
+		y: i * (ph + gap),
+		w: pw,
+		h: ph
+	});
+	const pad = u * 3;
+	const innerW = pw - pad * 2;
+	const labelH = panels.some((p) => p.label) ? Math.min(ph * .16, u * 9) : 0;
+	const hasMedia = panels.map((p) => Boolean(p.asset));
+	const textH = (i) => hasMedia[i] ? panels[i].text ? ph * .2 : 0 : ph - pad * 2 - labelH - u * 2;
+	const lf = sharedFit(panels.map((p) => p.label), innerW, labelH || 1, u * 5.5, u * 2.4, 1.15);
+	const withMedia = panels.filter((_, i) => hasMedia[i]).map((p) => p.text);
+	const bare = panels.filter((_, i) => !hasMedia[i]).map((p) => p.text);
+	const tfMedia = withMedia.length ? sharedFit(withMedia, innerW, ph * .2, u * 4.2, u * 2.2, 1.3) : void 0;
+	const tfBare = bare.length ? sharedFit(bare, innerW, textH(hasMedia.indexOf(false)), u * 6, u * 2.4, 1.3) : void 0;
+	const accents = beforeAfter ? [mutedHex(ctx), ctx.colors.primary] : [ctx.colors.primary, ctx.colors.secondary];
+	const cards = panels.map((p, i) => {
+		const r = rects[i];
+		const fs = (hasMedia[i] ? tfMedia : tfBare).fs;
+		const fits = fitFontInfo([p.text], innerW, Math.max(1, textH(i)), fs, fs, 1.3).fits;
+		rec(ctx, "label", p.label, {
+			x: r.x + pad,
+			y: r.y + pad,
+			w: innerW,
+			h: labelH
+		}, {
+			fs: lf.fs,
+			fits: lf.fits[i]
+		}, accents[i], ctx.colors.panel);
+		const ty = hasMedia[i] ? r.y + ph - pad - textH(i) : r.y + pad + labelH + u * 2;
+		rec(ctx, "body", p.text, {
+			x: r.x + pad,
+			y: ty,
+			w: innerW,
+			h: textH(i)
+		}, {
+			fs,
+			fits
+		}, ctx.colors.text, ctx.colors.panel);
+		let media = "";
+		if (p.asset) {
+			const abs = ctx.resolveAsset(p.asset);
+			if (abs) media = `<div class="vs-split-media"><img src="${esc(ctx.asset(abs, `split-${i === 0 ? "left" : "right"}`))}" alt="" ${anim("zoom", 0, stage.dur, `vs-split-img`)}></div>`;
+			else {
+				warnings.push(`split_screen: ${i === 0 ? "left" : "right"} asset "${p.asset}" could not be resolved to an image in the project; drawing a placeholder`);
+				media = `<div class="vs-split-media"><div class="vs-shot-missing">${esc(p.asset)}</div></div>`;
+				rec(ctx, "decorative", p.asset, {
+					x: r.x + pad,
+					y: r.y + pad + labelH,
+					w: innerW,
+					h: ph - pad * 2 - labelH - textH(i)
+				}, {
+					fs: r2(Math.max(9, u * 3)),
+					fits: true
+				}, ctx.colors.text, ctx.colors.panel);
+			}
+		}
+		const side = i === 0 ? "vs-left" : "vs-right";
+		const effect = columns ? i === 0 ? "slide-right" : "slide-left" : "fade-up";
+		return `<div class="vs-split-pos" style="left:${px(r.x)};top:${px(r.y)};width:${px(r.w)};height:${px(r.h)}"><div ${anim(effect, .15 + i * .3, .5, `vs-split ${side}${beforeAfter ? i === 0 ? " vs-before" : " vs-after" : ""}`)}>` + (p.label ? `<div class="vs-split-label" style="height:${px(labelH)};font-size:${px(lf.fs)}">${esc(p.label)}</div>` : "") + media + (p.text ? `<div class="vs-split-text${hasMedia[i] ? "" : " vs-split-only"}" style="font-size:${px(fs)}">${esc(p.text)}</div>` : "") + `</div></div>`;
+	});
+	let arrow = "";
+	if (beforeAfter) {
+		const s = gap * .9;
+		const cx = columns ? pw + gap / 2 : safe.w / 2;
+		const cy = columns ? safe.h / 2 : ph + gap / 2;
+		const rot = columns ? 0 : 90;
+		arrow = `<svg class="vs-split-arrow" width="${r2(s)}" height="${r2(s)}" viewBox="0 0 24 24" style="left:${px(cx - s / 2)};top:${px(cy - s / 2)}"><g ${anim("pop", .6, .4)}><circle cx="12" cy="12" r="12" fill="var(--vs-primary)"/><path d="M7 12h9M12.5 7.5L17 12l-4.5 4.5" transform="rotate(${rot} 12 12)" fill="none" stroke="var(--vs-bg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g></svg>`;
+	}
+	return [...cards, arrow].filter(Boolean).join("\n");
+}
+function renderLowerThird(ctx) {
+	const { stage, props } = ctx;
+	const name = str$1(props.name) ?? "";
+	const title = str$1(props.title);
+	const headline = str$1(props.headline);
+	const { u, safe } = stage;
+	const barW = stage.portrait ? safe.w : Math.min(safe.w, Math.max(safe.w * .55, u * 90));
+	const stripe = u * 1.4;
+	const pad = u * 3;
+	const innerW = barW - stripe - pad * 2;
+	const nb = textBlock(name, innerW, u * 16, u * 6.5, u * 3, 1.15);
+	const tb = title ? textBlock(title, innerW, u * 10, u * 4.2, u * 2.2) : void 0;
+	const barH = pad * 2 + nb.h + (tb ? u + tb.h : 0);
+	const barY = safe.h - barH - u * 2;
+	const textX = stripe + pad;
+	rec(ctx, "label", name, {
+		x: textX,
+		y: barY + pad,
+		w: innerW,
+		h: nb.h
+	}, nb.fit, ctx.colors.text, ctx.colors.panel);
+	if (title && tb) rec(ctx, "label", title, {
+		x: textX,
+		y: barY + pad + nb.h + u,
+		w: innerW,
+		h: tb.h
+	}, tb.fit, mixHex(ctx.colors.panel, ctx.colors.text, .75), ctx.colors.panel);
+	let head = "";
+	if (headline) {
+		const room = barY - u * 6;
+		const hb = textBlock(headline, safe.w, room, u * 10, u * 3.5, 1.1);
+		const hy = Math.max(0, (room - hb.h) / 2);
+		rec(ctx, ctx.main, headline, {
+			y: hy,
+			w: safe.w,
+			h: hb.h
+		}, hb.fit, ctx.colors.text);
+		head = `<div class="vs-lt-headline" style="left:0;top:${px(hy)};width:${px(safe.w)};height:${px(hb.h)}"><div ${anim("fade-up", .1, .6, `vs-headline`, `font-size:${px(hb.fit.fs)}`)}>${esc(headline)}</div></div>`;
+	}
+	const at = headline ? Math.min(.6, stage.dur * .25) : .1;
+	return [
+		head,
+		`<div class="vs-lt-pos" style="left:0;top:${px(barY)};width:${px(barW)};height:${px(barH)}"><div ${anim("slide-right", at, .5, `vs-lt`)}>`,
+		`<div ${anim("grow-y", at + .1, .4, `vs-lt-stripe`, `width:${px(stripe)}`)}></div>`,
+		`<div class="vs-lt-text" style="padding:${px(pad)}">`,
+		`<div ${anim("fade", at + .2, .4, `vs-lt-name`, `font-size:${px(nb.fit.fs)}`)}>${esc(name)}</div>`,
+		title && tb ? `<div ${anim("fade", at + .35, .4, `vs-lt-title`, `margin-top:${px(u)};font-size:${px(tb.fit.fs)}`)}>${esc(title)}</div>` : "",
+		`</div>`,
+		`</div></div>`
+	].filter(Boolean).join("\n");
+}
+/** Chunks of `text` with their [start, end) offsets: words, or phrases split after punctuation. */
+function kineticChunks(text, rhythm) {
+	const re = rhythm === "phrase" ? /[^.,;:!?…—–]+[.,;:!?…—–]*|[.,;:!?…—–]+/g : /\S+/g;
+	const out = [];
+	for (const m of text.matchAll(re)) {
+		const lead = m[0].length - m[0].trimStart().length;
+		const t = m[0].trim();
+		if (!t) continue;
+		const start = m.index + lead;
+		out.push({
+			text: t,
+			start,
+			end: start + t.length
+		});
+	}
+	return out;
+}
+function renderKineticText(ctx) {
+	const { stage, props, warnings } = ctx;
+	const text = (str$1(props.text) ?? "").replace(/\s+/g, " ").trim();
+	const rhythmRaw = str$1(props.rhythm) ?? "word";
+	if (rhythmRaw !== "word" && rhythmRaw !== "phrase") warnings.push(`kinetic_text: unknown rhythm "${rhythmRaw}"; revealed word by word`);
+	const rhythm = rhythmRaw === "phrase" ? "phrase" : "word";
+	const emphasis = str$1(props.emphasis);
+	const { u, safe } = stage;
+	const chunks = kineticChunks(text, rhythm);
+	if (chunks.length === 0) warnings.push("kinetic_text: no `text` to show");
+	let es = -1;
+	if (emphasis) {
+		es = text.toLowerCase().indexOf(emphasis.toLowerCase());
+		if (es < 0) warnings.push(`kinetic_text: emphasis "${emphasis}" does not occur in the text`);
+	}
+	const ee = es >= 0 && emphasis ? es + emphasis.length : -1;
+	const block = textBlock(text, safe.w, safe.h * .85, u * 12, u * 3.5, 1.15, .58);
+	rec(ctx, ctx.main, text, {
+		y: (safe.h - block.h) / 2,
+		w: safe.w,
+		h: block.h
+	}, block.fit, ctx.colors.text);
+	const first = .15;
+	const step = chunks.length > 1 ? Math.max(.3, stage.dur * .65 - first) / chunks.length : 0;
+	const len = Math.min(.45, Math.max(.15, step * 1.6 || .45));
+	const spans = chunks.map((c, i) => {
+		let html = esc(c.text);
+		const a = Math.max(c.start, es);
+		const b = Math.min(c.end, ee);
+		if (es >= 0 && a < b) html = esc(text.slice(c.start, a)) + `<span class="vs-em">${esc(text.slice(a, b))}</span>` + esc(text.slice(b, c.end));
+		return `<span ${anim("kin", first + i * step, len, `vs-kin-chunk`)}>${html}</span>`;
+	});
+	return `<div class="vs-stack vs-kinetic" data-rhythm="${rhythm}" style="font-size:${px(block.fit.fs)}">\n<div class="vs-kin-line">${spans.join(" ")}</div>\n</div>`;
+}
+function renderMap(ctx) {
+	const { stage, props, warnings } = ctx;
+	const title = str$1(props.title);
+	const clamp01 = (v) => Math.min(1, Math.max(0, v));
+	let points = (Array.isArray(props.points) ? props.points : []).map((p) => p && typeof p === "object" ? p : {}).filter((p) => {
+		const ok = typeof p.x === "number" && Number.isFinite(p.x) && typeof p.y === "number" && Number.isFinite(p.y);
+		if (!ok) warnings.push(`map: point ${JSON.stringify(str$1(p.label) ?? "")} has no numeric x/y; skipped`);
+		return ok;
+	}).map((p) => ({
+		label: str$1(p.label) ?? "",
+		x: clamp01(p.x),
+		y: clamp01(p.y)
+	}));
+	if (points.length > 8) {
+		warnings.push(`map: ${points.length} points do not fit; showing the first 8`);
+		points = points.slice(0, 8);
+	}
+	if (points.length === 0) warnings.push("map: no points");
+	const route = props.route === true && points.length >= 2;
+	if (props.route === true && points.length < 2) warnings.push("map: route needs at least 2 points");
+	const { u, safe } = stage;
+	const gap = u * 3;
+	const tb = title ? textBlock(title, safe.w, safe.h * .16, u * 7, u * 3.2, 1.1) : void 0;
+	const titleH = tb ? tb.h + gap : 0;
+	if (title && tb) rec(ctx, ctx.main, title, {
+		w: safe.w,
+		h: tb.h
+	}, tb.fit, ctx.colors.text);
+	const panel = {
+		x: 0,
+		y: titleH,
+		w: safe.w,
+		h: safe.h - titleH
+	};
+	const pad = u * 7;
+	const P = points.map((p) => ({
+		...p,
+		px: pad + p.x * (panel.w - pad * 2),
+		py: pad + p.y * (panel.h - pad * 2)
+	}));
+	const off = u * 3.4;
+	const labelH = u * 6;
+	const slots = P.map((p) => {
+		const right = p.x <= .62;
+		const w = Math.max(u * 10, right ? panel.w - u * 2 - (p.px + off) : p.px - off - u * 2);
+		return {
+			right,
+			x: right ? p.px + off : p.px - off - w,
+			y: p.py - labelH / 2,
+			w
+		};
+	});
+	const chipPad = u * 1.4;
+	const lfs = Math.min(u * 4, ...P.map((p, i) => p.label ? fitFont([p.label], slots[i].w - chipPad * 2, labelH, u * 4, u * 2.2) : Infinity));
+	P.forEach((p, i) => {
+		const s = slots[i];
+		const fits = fitFontInfo([p.label], s.w - chipPad * 2, labelH, lfs, lfs).fits;
+		rec(ctx, "label", p.label, {
+			x: panel.x + s.x,
+			y: panel.y + s.y,
+			w: s.w,
+			h: labelH
+		}, {
+			fs: r2(lfs),
+			fits
+		}, ctx.colors.text, ctx.colors.bg);
+	});
+	const st = stagger(P.length, stage.dur, .3);
+	const lineLen = Math.max(.6, Math.min(stage.dur * .5, 1.6));
+	let dist = 0;
+	const cum = P.map((p, i) => i === 0 ? 0 : dist += Math.hypot(p.px - P[i - 1].px, p.py - P[i - 1].py));
+	const pinAt = (i) => route ? .3 + (dist ? cum[i] / dist * lineLen : 0) : st.at(i);
+	const grid = [];
+	const cell = u * 12;
+	const inset = u * 3;
+	for (let x = cell; x < panel.w - 1; x += cell) grid.push(`<line x1="${r2(x)}" y1="${r2(inset)}" x2="${r2(x)}" y2="${r2(panel.h - inset)}" class="vs-map-grid"/>`);
+	for (let y = cell; y < panel.h - 1; y += cell) grid.push(`<line x1="${r2(inset)}" y1="${r2(y)}" x2="${r2(panel.w - inset)}" y2="${r2(y)}" class="vs-map-grid"/>`);
+	const routeSvg = route ? `<polyline points="${P.map((p) => `${r2(p.px)},${r2(p.py)}`).join(" ")}" stroke-width="${r2(u * .9)}" ${anim("draw-len", .3, lineLen, "vs-map-route", `--len:${r2(dist)}`)}/>` : "";
+	const pins = P.map((p, i) => `<circle cx="${r2(p.px)}" cy="${r2(p.py)}" r="${r2(u * 3.2)}" ${anim("pop", pinAt(i), .35, "vs-map-halo")}/><circle cx="${r2(p.px)}" cy="${r2(p.py)}" r="${r2(u * 1.7)}" ${anim("pop", pinAt(i), .35, "vs-map-pin")}/>`);
+	const labels = P.map((p, i) => {
+		const s = slots[i];
+		return p.label ? `<div class="vs-map-slot${s.right ? "" : " vs-map-left"}" style="left:${px(panel.x + s.x)};top:${px(panel.y + s.y)};width:${px(s.w)};height:${px(labelH)}"><div ${anim("fade", pinAt(i) + .15, .35, `vs-map-label`, `font-size:${px(lfs)}`)}>${esc(p.label)}</div></div>` : "";
+	});
+	return [
+		title && tb ? `<div class="vs-map-title" style="left:0;top:0;width:${px(safe.w)};height:${px(tb.h)}"><div ${anim("fade-up", .05, .5, `vs-headline`, `font-size:${px(tb.fit.fs)}`)}>${esc(title)}</div></div>` : "",
+		`<svg class="vs-map-svg" width="${r2(panel.w)}" height="${r2(panel.h)}" viewBox="0 0 ${r2(panel.w)} ${r2(panel.h)}" style="left:${px(panel.x)};top:${px(panel.y)}">`,
+		`<g ${anim("scale-in", 0, .5)}><rect x="0" y="0" width="${r2(panel.w)}" height="${r2(panel.h)}" rx="${r2(u * 3)}" class="vs-map-panel"/>`,
+		...grid,
+		`</g>`,
+		routeSvg,
+		...pins,
+		`</svg>`,
+		...labels
+	].filter(Boolean).join("\n");
+}
 const RENDERERS = {
 	typography: renderTypography,
 	code: renderCode,
@@ -236425,24 +238090,14 @@ const RENDERERS = {
 	cta: renderCta,
 	end_card: renderEndCard,
 	screenshot: renderScreenshot,
-	quote: renderFallback("quote"),
-	stat: renderFallback("stat"),
-	timeline: renderFallback("timeline"),
-	split_screen: renderFallback("split_screen"),
-	lower_third: renderFallback("lower_third"),
-	kinetic_text: renderFallback("kinetic_text"),
-	map: renderFallback("map")
+	quote: renderQuote,
+	stat: renderStat,
+	timeline: renderTimeline,
+	split_screen: renderSplitScreen,
+	lower_third: renderLowerThird,
+	kinetic_text: renderKineticText,
+	map: renderMap
 };
-/** A typography card with the props' text, for kinds not implemented here yet. */
-function renderFallback(kind) {
-	return (ctx) => {
-		ctx.warnings.push(`${kind}: drawn as a typography card (not implemented in the HyperFrames composition yet)`);
-		return renderTypography({
-			...ctx,
-			props: { lines: fallbackLines(ctx.props) }
-		});
-	};
-}
 function stylesheet(stage, tokens, fontNames, bundledFaces = "") {
 	const { W, H, u, safe } = stage;
 	const faces = fontNames.map((n) => `@font-face { font-family: "${n}"; src: local("${n}"); }`).join("\n");
@@ -236477,6 +238132,10 @@ html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -236486,6 +238145,10 @@ html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -236541,7 +238204,60 @@ html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--
 .vs-pin-dot { width: 1em; height: 1em; border-radius: 50%; background: var(--vs-primary); box-shadow: 0 0 0 0.3em color-mix(in srgb, var(--vs-primary) 35%, transparent); flex: none; }
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
-.vs-callouts .vs-callout { align-self: flex-start; }`;
+.vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }`;
 }
 /**
 * The registered timeline. It is a GSAP-shaped object (the runtime only requires `duration`,
@@ -236661,7 +238377,7 @@ function buildComposition(req, opts = {}) {
 		if (viaOpt) {
 			const abs = resolve(projectRoot, viaOpt);
 			if (inside(projectRoot, abs) && IMAGE_EXT.test(extname(abs))) return abs;
-			warnings.push(`screenshot: asset "${id}" resolves outside the project or is not an image; ignored`);
+			warnings.push(`${det.kind}: asset "${id}" resolves outside the project or is not an image; ignored`);
 			return;
 		}
 		return /[/\\.]/.test(id) ? projectImage(id) : void 0;
@@ -238901,6 +240617,7 @@ function checkContrast(boxes, H, out) {
 	}
 }
 function checkDensity(spec, out) {
+	if (voiceMode(spec) === "none") return checkOnScreenDensity(spec, out);
 	for (const s of spec.scenes) {
 		const words = wordCount(s.voiceover);
 		const wps = words / s.duration_sec;
@@ -238912,6 +240629,22 @@ function checkDensity(spec, out) {
 			scene_id: s.id,
 			message: `${words} voiceover words in ${s.duration_sec}s is ${round2(wps)} words/s; captions above ${MAX_WORDS_PER_SEC} words/s are hard to read`,
 			fix: `cut scene ${s.id}'s voiceover to at most ${maxWords} words, or raise duration_sec to at least ${Math.ceil(words / MAX_WORDS_PER_SEC * 10) / 10}`
+		});
+	}
+}
+/** Without narration the text on screen carries the message: check it can be read in the scene's time. */
+function checkOnScreenDensity(spec, out) {
+	for (const s of spec.scenes) {
+		const text = [s.on_screen_text ?? "", s.deterministic ? propsText(s.deterministic.props) : ""].join(" ");
+		const words = wordCount(text);
+		const readable = Math.max(0, s.duration_sec - 1) * 3;
+		if (words <= Math.max(3, readable)) continue;
+		out.push({
+			id: "reading_density",
+			severity: "warning",
+			scene_id: s.id,
+			message: `${words} on-screen words in ${s.duration_sec}s; without narration viewers read at most about 3 words/s after a 1s settle (${Math.floor(readable)} words)`,
+			fix: `cut scene ${s.id}'s on-screen text to at most ${Math.max(3, Math.floor(readable))} words, or raise duration_sec to at least ${Math.ceil((words / 3 + 1) * 10) / 10}`
 		});
 	}
 }
@@ -239358,6 +241091,13 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 	notes.push("add cover {headline, focal_time_sec}: a short headline (≤ 6 words) and a moment inside the hook scene", targets.length ? `add publish.<target> {post_caption, hashtags} for ${targets.join(", ")}; post copy is separate from voiceover and captions` : "no platform targets: publish copy is optional");
 	if (dropped > 0) notes.push(`dropped ${dropped} optional beat(s) because target ${target}s < template default ${tpl.default_duration_sec}s`);
 	const durations = allocateDurations(beats.map((b) => b.share), target);
+	const mode = opts.voice_mode ?? tpl.voice_mode ?? "narrated";
+	const style = opts.style ?? tpl.default_style;
+	const music = opts.music ?? tpl.default_music;
+	if (mode === "none") {
+		notes.push("voice.mode \"none\": leave voiceover \"\" in every scene; put the words on screen (on_screen_text or the props) and keep them short enough to read");
+		if (!music) notes.push("no music bed: add audio.music {file: \"bundled:<id>\"} or the video is silent");
+	}
 	const scenes = beats.map((b, i) => {
 		const scene = {
 			id: `s${String(i + 1).padStart(2, "0")}`,
@@ -239392,11 +241132,16 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 		target_duration_sec: target,
 		language: brief?.language ?? "en-US",
 		grounding: "strict",
-		voice: brief?.tone.length ? { style: brief.tone.join(", ") } : {},
+		voice: {
+			...mode === "none" ? { mode } : {},
+			...brief?.tone.length ? { style: brief.tone.join(", ") } : {}
+		},
 		captions: {
 			preset: tpl.caption_preset,
-			burn_in: true
+			burn_in: mode !== "none"
 		},
+		...style ? { style } : {},
+		...music ? { audio: { music: { file: music } } } : {},
 		scenes
 	};
 	return {
@@ -239407,7 +241152,7 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 			purpose: b.purpose,
 			duration_sec: durations[i],
 			guidance: b.guidance,
-			word_budget: Math.floor(durations[i] * tpl.pacing.max_words_per_sec),
+			word_budget: mode === "none" ? Math.max(3, Math.floor((durations[i] - 1) * 3)) : Math.floor(durations[i] * tpl.pacing.max_words_per_sec),
 			suggested_visual_strategy: b.suggested_visual_strategy,
 			...b.suggested_deterministic_kind ? {
 				suggested_deterministic_kind: b.suggested_deterministic_kind,
@@ -240780,6 +242525,73 @@ async function renderCover(o) {
 		warnings
 	};
 }
+//#endregion
+//#region src/music.ts
+/**
+* Music beds: `bundled:<id>` resolves to music/<file> in the plugin (catalog.json, CC0 beds made
+* by scripts/generate-music.mjs); anything else is a file inside the project. The licence is
+* carried into the render state, manifest, lock and provenance.
+*/
+const CATALOG = "catalog.json";
+/** The plugin's music/ directory (CLAUDE_PLUGIN_ROOT first, then walking up from this module). */
+function findMusicDir(env = process.env, from) {
+	const root = env.CLAUDE_PLUGIN_ROOT;
+	if (root && existsSync(join(root, "music", CATALOG))) return join(root, "music");
+	let dir = from ?? dirname(fileURLToPath(import.meta.url));
+	for (let i = 0; i < 6; i++) {
+		const candidate = join(dir, "music");
+		if (existsSync(join(candidate, CATALOG))) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+function loadMusicCatalog(dir) {
+	if (!dir) return null;
+	try {
+		return JSON.parse(readFileSync(join(dir, CATALOG), "utf8"));
+	} catch {
+		return null;
+	}
+}
+/** Resolve spec.audio.music to a file, its hash and licence. Throws an actionable error when it cannot. */
+async function resolveMusic(bed, projectDir, env = process.env) {
+	if (bed.file.startsWith("bundled:")) {
+		const id = bed.file.slice(8);
+		const dir = findMusicDir(env);
+		const catalog = loadMusicCatalog(dir);
+		const track = catalog?.tracks.find((t) => t.id === id);
+		if (!dir || !catalog || !track) {
+			const ids = catalog?.tracks.map((t) => `bundled:${t.id}`).join(", ");
+			throw new Error(`audio.music.file "${bed.file}" is not a bundled track${ids ? `; use one of ${ids}` : " (no music/ catalogue found in the plugin)"}`);
+		}
+		const path = join(dir, track.file);
+		if (!existsSync(path)) throw new Error(`bundled music file ${track.file} is missing from ${dir}; reinstall the plugin or run scripts/generate-music.mjs`);
+		return {
+			ref: bed.file,
+			path,
+			sha256: await hashFile(path),
+			license: bed.license ?? catalog.license,
+			title: track.title,
+			bed
+		};
+	}
+	let path;
+	try {
+		path = await resolveInsideProject(projectPaths(projectDir), bed.file);
+	} catch (e) {
+		throw new Error(`audio.music.file "${bed.file}" must be a file inside the project folder (${e instanceof Error ? e.message : String(e)})`);
+	}
+	if (!existsSync(path)) throw new Error(`audio.music.file "${bed.file}" does not exist in the project folder; add the file or use a bundled track (bundled:lofi, …)`);
+	return {
+		ref: bed.file,
+		path,
+		sha256: await hashFile(path),
+		...bed.license ? { license: bed.license } : {},
+		bed
+	};
+}
 /** Headroom under a bitrate or file-size ceiling (container overhead, VBV overshoot). */
 const LIMIT_HEADROOM = .9;
 const even = (n) => Math.max(2, Math.round(n / 2) * 2);
@@ -240845,6 +242657,8 @@ function transcodeArgs(input, output, plan, preset) {
 		output
 	];
 }
+/** Platforms' trending sounds live in their apps; a file upload cannot carry one. */
+const TRENDING_SOUND_NOTE = "Trending sounds can't be added by video-studio: they live inside the platform's app. To use one, add it in the app when you post (it replaces or mixes with this audio).";
 /** Hashtags are counted by the platform when present in the caption; join them after it. */
 function fullText(caption, hashtags) {
 	const tags = hashtags.filter((t) => !caption.includes(t));
@@ -240925,6 +242739,12 @@ async function packageTargets(i, allTargetIds) {
 				sidecar_formats: c.captions.sidecar_formats,
 				burn_in_recommended: c.captions.burn_in_recommended,
 				files: captionFiles
+			},
+			sound: {
+				...i.music ? { music: i.music.title ?? i.music.ref } : {},
+				...i.music?.license ? { license: i.music.license.id } : {},
+				...i.music?.license?.attribution ? { attribution: i.music.license.attribution } : {},
+				note: TRENDING_SOUND_NOTE
 			},
 			limits: {
 				...c.captions.post_caption_max_chars !== void 0 ? { post_caption_max_chars: c.captions.post_caption_max_chars } : {},
@@ -241142,9 +242962,10 @@ async function renderProject(projectDir, o = {}) {
 		...o.voiceBackends
 	};
 	const voiceCacheDir = o.voiceCacheDir ?? join(resolveDataDir(env).cache, "voice");
-	const sel = await selectBackend(voiceChoice, env, backends);
+	const narrated = voiceMode(spec) !== "none";
+	const sel = narrated ? await selectBackend(voiceChoice, env, backends) : await selectBackend("silent", env, backends);
 	let voice;
-	let voiceReason = sel.reason;
+	let voiceReason = narrated ? sel.reason : "voice.mode is \"none\": no narration";
 	try {
 		voice = await synthesizeSpec(spec, {
 			projectDir: root,
@@ -241157,7 +242978,7 @@ async function renderProject(projectDir, o = {}) {
 		});
 	} catch (e) {
 		if (signal?.aborted) throw e;
-		if (voiceChoice !== "auto" || sel.backend.id === "silent") throw new Error(`voice backend "${sel.backend.id}" failed: ${errMsg(e)}. Re-run with voice "auto" or "silent", or run doctor.`);
+		if (!narrated || voiceChoice !== "auto" || sel.backend.id === "silent") throw new Error(`voice backend "${sel.backend.id}" failed: ${errMsg(e)}. Re-run with voice "auto" or "silent", or run doctor.`);
 		voiceReason = `${sel.reason}; but ${sel.backend.id} failed at synthesis (${errMsg(e).slice(0, 300)}); falling back to silent (no audio)`;
 		voice = await synthesizeSpec(spec, {
 			projectDir: root,
@@ -241307,7 +243128,12 @@ async function renderProject(projectDir, o = {}) {
 		endMs: totalMs
 	}) : void 0;
 	const captionFiles = captionSet?.files;
-	if (!words.length) warnings.push("no voiceover text: captions and transcript skipped");
+	if (!words.length && narrated) warnings.push("no voiceover text: captions and transcript skipped");
+	const music = spec.audio?.music ? await resolveMusic(spec.audio.music, root, env) : void 0;
+	const speech = placements.filter((p) => p.track.audio_path).map((p) => ({
+		start_ms: Math.round(p.scene_start_ms),
+		end_ms: Math.round(p.scene_start_ms + p.track.duration_ms)
+	}));
 	const segments = await Promise.all(ordered.map(async (e, i) => ({
 		path: e.out_path,
 		duration_ms: slotMs[i],
@@ -241336,6 +243162,11 @@ async function renderProject(projectDir, o = {}) {
 			sha: s.sha256,
 			ms: s.duration_ms
 		})) : null,
+		music: music ? {
+			sha: music.sha256,
+			bed: music.bed,
+			speech: hasAudio ? speech : []
+		} : null,
 		burn,
 		ass: burn ? assSha : null,
 		captions: burn ? assOpts : null,
@@ -241367,13 +243198,23 @@ async function renderProject(projectDir, o = {}) {
 				path,
 				duration_ms
 			})),
-			...audio ? {
-				audio,
-				loudness: {
-					I: -14,
-					TP: -1
-				}
-			} : {},
+			...audio ? { audio } : {},
+			...audio || music ? { loudness: {
+				I: -14,
+				TP: -1
+			} } : {},
+			...music ? { music: {
+				bed: {
+					path: music.path,
+					...music.bed.volume_db !== void 0 ? { volume_db: music.bed.volume_db } : {},
+					...music.bed.duck_db !== void 0 ? { duck_db: music.bed.duck_db } : {},
+					...music.bed.fade_in_ms !== void 0 ? { fade_in_ms: music.bed.fade_in_ms } : {},
+					...music.bed.fade_out_ms !== void 0 ? { fade_out_ms: music.bed.fade_out_ms } : {},
+					...music.bed.loop !== void 0 ? { loop: music.bed.loop } : {},
+					...music.bed.start_sec !== void 0 ? { start_sec: music.bed.start_sec } : {}
+				},
+				...hasAudio ? { speech } : {}
+			} } : {},
 			master,
 			...burn ? {
 				reel,
@@ -241532,12 +243373,20 @@ async function renderProject(projectDir, o = {}) {
 		timing_adjustments,
 		warnings,
 		tool_versions,
+		voice_mode: narrated ? "narrated" : "none",
+		background: tokens.color_background,
+		...music ? { music: {
+			ref: music.ref,
+			sha256: music.sha256,
+			...music.title ? { title: music.title } : {},
+			...music.license ? { license: music.license } : {}
+		} } : {},
 		...brandFile ? { brand_path: brandRel(root, brandFile.path) } : {},
 		fonts: lockedFonts
 	};
 	const reelSha = await hashFile(reel);
 	let qa;
-	if (state.qa && state.qa.video_sha256 === reelSha && await exists(join(paths.qa, "report.json"))) qa = {
+	if (state.qa && state.qa.video_sha256 === reelSha && state.qa.version === 2 && await exists(join(paths.qa, "report.json"))) qa = {
 		status: state.qa.status,
 		findings: state.qa.findings,
 		report_json: join(paths.qa, "report.json"),
@@ -241606,7 +243455,9 @@ async function runQaOn(root, state, reelSha) {
 		width: state.target.width,
 		height: state.target.height,
 		duration_s: state.duration_ms / 1e3,
-		require_audio: true
+		require_audio: true,
+		intended_silence: state.voice_mode === "none" && !state.music,
+		...state.background ? { background: state.background } : {}
 	});
 	report.video = state.reel;
 	const files = await writeQaReport(root, report);
@@ -241616,11 +243467,12 @@ async function runQaOn(root, state, reelSha) {
 		detail: c.detail,
 		...c.fix ? { fix: c.fix } : {}
 	}));
-	if (!state.voice.has_audio) {
+	if (!state.voice.has_audio && !state.music) {
 		for (const f of findings) if (f.id === "silence" || f.id === "loudness") f.detail += " (expected: rendered with the silent voice backend)";
 	}
 	const status = QA_MAP[report.status];
 	state.qa = {
+		version: 2,
 		status,
 		video_sha256: reelSha ?? await hashFile(reel),
 		checks: report.checks.map((c) => ({
@@ -241831,7 +243683,12 @@ async function exportFromState(root, state, now) {
 		},
 		...lint ? { lint } : {},
 		...lintError ? { lintError } : {},
-		...state.qa ? { technicalQa: state.qa.status } : {}
+		...state.qa ? { technicalQa: state.qa.status } : {},
+		...state.music ? { music: {
+			ref: state.music.ref,
+			...state.music.title ? { title: state.music.title } : {},
+			...state.music.license ? { license: state.music.license } : {}
+		} } : {}
 	}, allContracts.map((c) => c.id));
 	let source = null;
 	try {
@@ -241848,8 +243705,14 @@ async function exportFromState(root, state, now) {
 			...state.content_ir_sha256 ? { content_ir_sha256: state.content_ir_sha256 } : {},
 			voice: {
 				backend: state.voice.backend,
-				timing_source: state.voice.timing_source
+				timing_source: state.voice.timing_source,
+				...state.voice_mode ? { mode: state.voice_mode } : {}
 			},
+			...state.music ? { music: {
+				file: state.music.ref,
+				...state.music.title ? { title: state.music.title } : {},
+				license: state.music.license ?? null
+			} } : {},
 			scenes: state.scenes.map((s) => ({
 				scene_id: s.scene_id,
 				claim_refs: s.claim_refs,
@@ -242048,6 +243911,12 @@ async function exportFromState(root, state, now) {
 			} : {},
 			files: captionFiles
 		} } : {},
+		...state.music ? { music: {
+			file: state.music.ref,
+			sha256: state.music.sha256,
+			...state.music.title ? { title: state.music.title } : {},
+			...state.music.license ? { license: state.music.license } : {}
+		} } : {},
 		...out.cover && state.cover ? { cover: {
 			path: rel(root, out.cover),
 			...out.cover_square_preview ? { square_preview: rel(root, out.cover_square_preview) } : {},
@@ -242159,7 +244028,10 @@ async function lockFromState(root, state, projectId, outputs) {
 			cache_key: s.cache_key,
 			clip_sha256: s.clip_sha256
 		})),
-		assets: await lockAssets(root, inputs),
+		assets: [...await lockAssets(root, state.music && !state.music.ref.startsWith("bundled:") ? [...inputs, state.music.ref] : inputs), ...state.music?.ref.startsWith("bundled:") ? [{
+			path: state.music.ref,
+			sha256: state.music.sha256
+		}] : []],
 		outputs: outputs.map((o) => ({
 			path: o.path,
 			sha256: o.sha256,
@@ -242832,7 +244704,10 @@ function createServer(options = {}) {
 			aspect_ratio: AspectRatio.optional().describe("Overrides the brief/template aspect ratio"),
 			platform: Platform.optional().describe("Overrides the brief/template platform"),
 			targets: array(PlatformTargetId).optional().describe("Platform contract ids to compile for, e.g. [\"instagram\", \"tiktok\", \"youtube-shorts\"]; overrides the brief. Default: the platform's own contract"),
-			include_optional: boolean().optional().describe("Include optional beats (default: only when target >= the template's default duration)")
+			include_optional: boolean().optional().describe("Include optional beats (default: only when target >= the template's default duration)"),
+			style: string().optional().describe("Style pack id from styles/ (minimal, editorial, technical, energetic); default: the template's"),
+			music: string().optional().describe("Music bed, e.g. bundled:lofi (bundled: ambient, lofi, upbeat, minimal) or a project file; default: the template's"),
+			voice_mode: _enum(["narrated", "none"]).optional().describe("none = no speech (text over music); default: the template's")
 		},
 		annotations: {
 			readOnlyHint: true,

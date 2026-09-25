@@ -45,6 +45,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -54,6 +58,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -110,6 +118,59 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
@@ -218,6 +279,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -227,6 +292,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -283,6 +352,59 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
@@ -393,6 +515,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -402,6 +528,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -458,6 +588,59 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
@@ -569,6 +752,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -578,6 +765,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -634,6 +825,59 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
@@ -743,6 +987,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -752,6 +1000,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -808,6 +1060,59 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
@@ -917,6 +1222,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -926,6 +1235,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -982,6 +1295,59 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
@@ -1091,6 +1457,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -1100,6 +1470,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -1156,15 +1530,67 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-kinetic-text" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-stack vs-typography" style="font-size:118.8px">
-<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">Docs in. Video out.</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">Video</span></div>
+<div class="vs-stack vs-kinetic" data-rhythm="word" style="font-size:129.6px">
+<div class="vs-kin-line"><span class="vs-kin-chunk vs-a vs-kin" style="--t:0.15s;--d:0.45s">Docs</span> <span class="vs-kin-chunk vs-a vs-kin" style="--t:0.6s;--d:0.45s">in.</span> <span class="vs-kin-chunk vs-a vs-kin" style="--t:1.05s;--d:0.45s"><span class="vs-em">Video</span></span> <span class="vs-kin-chunk vs-a vs-kin" style="--t:1.5s;--d:0.45s">out.</span></div>
 </div>
 </div>
 </div>
@@ -1215,9 +1641,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > kinetic_t
     "assets/fonts/Inter-Regular.ttf",
     "assets/fonts/Inter-Bold.ttf",
   ],
-  "warnings": [
-    "kinetic_text: drawn as a typography card (not implemented in the HyperFrames composition yet)",
-  ],
+  "warnings": [],
 }
 `;
 
@@ -1266,6 +1690,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -1275,6 +1703,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -1331,17 +1763,73 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-lower-third" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-stack vs-typography" style="font-size:118.8px">
-<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">Ada Lovelace</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">Engineer</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.46s;--d:0.6s"><span class="vs-line">Why we built it</span></div>
+<div class="vs-lt-headline" style="left:0;top:322.02px;width:936px;height:118.8px"><div class="vs-headline vs-a vs-fade-up" style="--t:0.1s;--d:0.6s;font-size:108px">Why we built it</div></div>
+<div class="vs-lt-pos" style="left:0;top:827.64px;width:936px;height:210.76px"><div class="vs-lt vs-a vs-slide-right" style="--t:0.6s;--d:0.5s">
+<div class="vs-lt-stripe vs-a vs-grow-y" style="--t:0.7s;--d:0.4s;width:15.12px"></div>
+<div class="vs-lt-text" style="padding:32.4px">
+<div class="vs-lt-name vs-a vs-fade" style="--t:0.8s;--d:0.4s;font-size:70.2px">Ada Lovelace</div>
+<div class="vs-lt-title vs-a vs-fade" style="--t:0.95s;--d:0.4s;margin-top:10.8px;font-size:45.36px">Engineer</div>
 </div>
+</div></div>
 </div>
 </div>
 </div>
@@ -1391,9 +1879,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > lower_thi
     "assets/fonts/Inter-Regular.ttf",
     "assets/fonts/Inter-Bold.ttf",
   ],
-  "warnings": [
-    "lower_third: drawn as a typography card (not implemented in the HyperFrames composition yet)",
-  ],
+  "warnings": [],
 }
 `;
 
@@ -1442,6 +1928,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -1451,6 +1941,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -1507,17 +2001,89 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-map" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-stack vs-typography" style="font-size:118.8px">
-<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">Where it runs</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">Laptop</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.46s;--d:0.6s"><span class="vs-line">CI</span></div>
-</div>
+<div class="vs-map-title" style="left:0;top:0;width:936px;height:83.16px"><div class="vs-headline vs-a vs-fade-up" style="--t:0.05s;--d:0.5s;font-size:75.6px">Where it runs</div></div>
+<svg class="vs-map-svg" width="936" height="944.44" viewBox="0 0 936 944.44" style="left:0px;top:115.56px">
+<g class="vs-a vs-scale-in" style="--t:0s;--d:0.5s"><rect x="0" y="0" width="936" height="944.44" rx="32.4" class="vs-map-panel"/>
+<line x1="129.6" y1="32.4" x2="129.6" y2="912.04" class="vs-map-grid"/>
+<line x1="259.2" y1="32.4" x2="259.2" y2="912.04" class="vs-map-grid"/>
+<line x1="388.8" y1="32.4" x2="388.8" y2="912.04" class="vs-map-grid"/>
+<line x1="518.4" y1="32.4" x2="518.4" y2="912.04" class="vs-map-grid"/>
+<line x1="648" y1="32.4" x2="648" y2="912.04" class="vs-map-grid"/>
+<line x1="777.6" y1="32.4" x2="777.6" y2="912.04" class="vs-map-grid"/>
+<line x1="907.2" y1="32.4" x2="907.2" y2="912.04" class="vs-map-grid"/>
+<line x1="32.4" y1="129.6" x2="903.6" y2="129.6" class="vs-map-grid"/>
+<line x1="32.4" y1="259.2" x2="903.6" y2="259.2" class="vs-map-grid"/>
+<line x1="32.4" y1="388.8" x2="903.6" y2="388.8" class="vs-map-grid"/>
+<line x1="32.4" y1="518.4" x2="903.6" y2="518.4" class="vs-map-grid"/>
+<line x1="32.4" y1="648" x2="903.6" y2="648" class="vs-map-grid"/>
+<line x1="32.4" y1="777.6" x2="903.6" y2="777.6" class="vs-map-grid"/>
+<line x1="32.4" y1="907.2" x2="903.6" y2="907.2" class="vs-map-grid"/>
+</g>
+<polyline points="311.04,392.9 624.96,551.54" stroke-width="9.72" class="vs-map-route vs-a vs-draw-len" style="--t:0.3s;--d:1.5s;--len:351.73"/>
+<circle cx="311.04" cy="392.9" r="34.56" class="vs-map-halo vs-a vs-pop" style="--t:0.3s;--d:0.35s"/><circle cx="311.04" cy="392.9" r="18.36" class="vs-map-pin vs-a vs-pop" style="--t:0.3s;--d:0.35s"/>
+<circle cx="624.96" cy="551.54" r="34.56" class="vs-map-halo vs-a vs-pop" style="--t:1.8s;--d:0.35s"/><circle cx="624.96" cy="551.54" r="18.36" class="vs-map-pin vs-a vs-pop" style="--t:1.8s;--d:0.35s"/>
+</svg>
+<div class="vs-map-slot" style="left:347.76px;top:476.06px;width:566.64px;height:64.8px"><div class="vs-map-label vs-a vs-fade" style="--t:0.45s;--d:0.35s;font-size:43.2px">Laptop</div></div>
+<div class="vs-map-slot vs-map-left" style="left:21.6px;top:634.7px;width:566.64px;height:64.8px"><div class="vs-map-label vs-a vs-fade" style="--t:1.95s;--d:0.35s;font-size:43.2px">CI</div></div>
 </div>
 </div>
 </div>
@@ -1567,9 +2133,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > map (9:16
     "assets/fonts/Inter-Regular.ttf",
     "assets/fonts/Inter-Bold.ttf",
   ],
-  "warnings": [
-    "map: drawn as a typography card (not implemented in the HyperFrames composition yet)",
-  ],
+  "warnings": [],
 }
 `;
 
@@ -1618,6 +2182,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -1627,6 +2195,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -1683,16 +2255,70 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-quote" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-stack vs-typography" style="font-size:118.8px">
-<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">It just works.</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">A user</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.46s;--d:0.6s"><span class="vs-line">README</span></div>
+<div class="vs-stack vs-quote" style="gap:27px">
+<div class="vs-quote-mark vs-a vs-pop" style="--t:0.1s;--d:0.6s;height:129.6px;font-size:259.2px">“</div>
+<div class="vs-quote-text vs-a vs-fade-up" style="--t:0.28s;--d:0.6s;min-height:114.75px;font-size:91.8px">It just works.</div>
+<div class="vs-quote-attr vs-a vs-fade-up" style="--t:0.46s;--d:0.6s;min-height:62.21px;font-size:51.84px">— A user</div>
+<div class="vs-quote-source vs-muted vs-a vs-fade" style="--t:0.64s;--d:0.6s;min-height:49.25px;font-size:41.04px">README</div>
 </div>
 </div>
 </div>
@@ -1743,9 +2369,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > quote (9:
     "assets/fonts/Inter-Regular.ttf",
     "assets/fonts/Inter-Bold.ttf",
   ],
-  "warnings": [
-    "quote: drawn as a typography card (not implemented in the HyperFrames composition yet)",
-  ],
+  "warnings": [],
 }
 `;
 
@@ -1794,6 +2418,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -1803,6 +2431,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -1859,6 +2491,59 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
@@ -1971,6 +2656,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -1980,6 +2669,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -2036,16 +2729,68 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-split-screen" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-stack vs-typography" style="font-size:118.8px">
-<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">Manual edits</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">One command</span></div>
-</div>
+<div class="vs-split-pos" style="left:0px;top:0px;width:936px;height:486.8px"><div class="vs-split vs-left vs-before vs-a vs-fade-up" style="--t:0.15s;--d:0.5s"><div class="vs-split-label" style="height:77.89px;font-size:59.4px">Before</div><div class="vs-split-text vs-split-only" style="font-size:64.8px">Manual edits</div></div></div>
+<div class="vs-split-pos" style="left:0px;top:573.2px;width:936px;height:486.8px"><div class="vs-split vs-right vs-after vs-a vs-fade-up" style="--t:0.45s;--d:0.5s"><div class="vs-split-label" style="height:77.89px;font-size:59.4px">After</div><div class="vs-split-text vs-split-only" style="font-size:64.8px">One command</div></div></div>
+<svg class="vs-split-arrow" width="77.76" height="77.76" viewBox="0 0 24 24" style="left:429.12px;top:491.12px"><g class="vs-a vs-pop" style="--t:0.6s;--d:0.4s"><circle cx="12" cy="12" r="12" fill="var(--vs-primary)"/><path d="M7 12h9M12.5 7.5L17 12l-4.5 4.5" transform="rotate(90 12 12)" fill="none" stroke="var(--vs-bg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g></svg>
 </div>
 </div>
 </div>
@@ -2095,9 +2840,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > split_scr
     "assets/fonts/Inter-Regular.ttf",
     "assets/fonts/Inter-Bold.ttf",
   ],
-  "warnings": [
-    "split_screen: drawn as a typography card (not implemented in the HyperFrames composition yet)",
-  ],
+  "warnings": [],
 }
 `;
 
@@ -2146,6 +2889,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -2155,6 +2902,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -2211,17 +2962,69 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-stat" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-stack vs-typography" style="font-size:118.8px">
-<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">40</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">%</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.46s;--d:0.6s"><span class="vs-line">faster builds</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.64s;--d:0.6s"><span class="vs-line">vs. last release</span></div>
+<div class="vs-stack vs-stat" style="gap:32.4px">
+<div class="vs-stat-value vs-a vs-scale-in" style="--t:0.05s;--d:0.5s;min-height:324px;font-size:324px"><span class="vs-count"><span class="vs-a vs-fade" style="--t:1.15s;--d:0.001s">40</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.1s;--d:0.131s">0</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.231s;--d:0.131s">13</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.362s;--d:0.131s">23</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.494s;--d:0.131s">30</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.625s;--d:0.131s">35</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.756s;--d:0.131s">38</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.887s;--d:0.131s">39</span><span class="vs-count-frame vs-a vs-flash" style="--t:1.019s;--d:0.131s">40</span></span><span class="vs-stat-unit">%</span></div>
+<div class="vs-stat-label vs-a vs-fade-up" style="--t:1.15s;--d:0.5s;min-height:86.94px;font-size:75.6px">faster builds</div>
+<div class="vs-stat-context vs-muted vs-a vs-fade" style="--t:1.4s;--d:0.5s;min-height:58.32px;font-size:48.6px">vs. last release</div>
 </div>
 </div>
 </div>
@@ -2272,9 +3075,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > stat (9:1
     "assets/fonts/Inter-Regular.ttf",
     "assets/fonts/Inter-Bold.ttf",
   ],
-  "warnings": [
-    "stat: drawn as a typography card (not implemented in the HyperFrames composition yet)",
-  ],
+  "warnings": [],
 }
 `;
 
@@ -2323,6 +3124,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -2332,6 +3137,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -2388,17 +3197,72 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-timeline" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-stack vs-typography" style="font-size:118.8px">
-<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">Ingest</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">Plan</span></div>
-<div class="vs-a vs-fade-up" style="--t:0.46s;--d:0.6s"><span class="vs-line">Render</span></div>
-</div>
+<div class="vs-tl-line vs-a vs-grow-y" style="--t:0.1s;--d:0.86s;left:37.8px;top:176.67px;width:6.48px;height:706.67px"></div>
+<div class="vs-tl-pos" style="left:21.6px;top:157.23px;width:38.88px;height:38.88px"><div class="vs-tl-dot vs-tl-past vs-a vs-pop" style="--t:0.3s;--d:0.6s"></div></div>
+<div class="vs-tl-event vs-tl-past" style="left:114.48px;top:90.27px;width:821.52px;height:172.8px"><div class="vs-a vs-slide-left" style="--t:0.3s;--d:0.6s"><div class="vs-tl-label" style="font-size:64.8px">Ingest</div></div></div>
+<div class="vs-tl-pos" style="left:10.8px;top:499.76px;width:60.48px;height:60.48px"><div class="vs-tl-dot vs-tl-current vs-a vs-pop" style="--t:0.48s;--d:0.6s"></div></div>
+<div class="vs-tl-event vs-tl-current" style="left:114.48px;top:443.6px;width:821.52px;height:172.8px"><div class="vs-a vs-slide-left" style="--t:0.48s;--d:0.6s"><div class="vs-tl-label" style="font-size:64.8px">Plan</div></div></div>
+<div class="vs-tl-pos" style="left:21.6px;top:863.89px;width:38.88px;height:38.88px"><div class="vs-tl-dot vs-tl-future vs-a vs-pop" style="--t:0.66s;--d:0.6s"></div></div>
+<div class="vs-tl-event vs-tl-future" style="left:114.48px;top:796.93px;width:821.52px;height:172.8px"><div class="vs-a vs-slide-left" style="--t:0.66s;--d:0.6s"><div class="vs-tl-label" style="font-size:64.8px">Render</div></div></div>
 </div>
 </div>
 </div>
@@ -2448,9 +3312,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > timeline 
     "assets/fonts/Inter-Regular.ttf",
     "assets/fonts/Inter-Bold.ttf",
   ],
-  "warnings": [
-    "timeline: drawn as a typography card (not implemented in the HyperFrames composition yet)",
-  ],
+  "warnings": [],
 }
 `;
 
@@ -2499,6 +3361,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -2508,6 +3374,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -2564,6 +3434,59 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
 .vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }
 </style>
 </head>
 <body>

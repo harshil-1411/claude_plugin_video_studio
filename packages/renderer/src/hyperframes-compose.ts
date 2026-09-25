@@ -1,9 +1,8 @@
 import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DeterministicKind, TextBox, TextRole } from "@video-studio/schema";
-import { fallbackLines } from "./fallback.js";
 import { codeLabel, escapeHtml, highlightLines, languageFamily } from "./hyperframes-highlight.js";
-import { safeArea } from "./text-layout.js";
+import { safeArea, wrapText } from "./text-layout.js";
 import { fontFaceCss } from "./tokens.js";
 import type { SceneRenderRequest, VisualTokens } from "./types.js";
 
@@ -65,6 +64,13 @@ export const HYPERFRAMES_KINDS: readonly DeterministicKind[] = [
   "comparison",
   "cta",
   "end_card",
+  "quote",
+  "stat",
+  "timeline",
+  "split_screen",
+  "lower_third",
+  "kinetic_text",
+  "map",
 ];
 
 const IMAGE_EXT = /^\.(png|jpe?g|webp|gif|avif|svg)$/i;
@@ -778,6 +784,437 @@ function renderScreenshot(ctx: KindCtx): string {
     .join("\n");
 }
 
+/** Text colour at `t` of the way from the background to the text colour (`color-mix` twin). */
+function mutedHex(ctx: KindCtx, t = 0.72): string {
+  return mixHex(ctx.colors.bg, ctx.colors.text, t);
+}
+
+/** A fitted text block: font fit plus the height it takes (its box when it does not fit). */
+function textBlock(text: string, w: number, maxH: number, maxFs: number, minFs: number, lineHeight = 1.2, em = 0.56): { fit: FontFit; h: number } {
+  const fit = fitFontInfo([text], w, maxH, maxFs, minFs, lineHeight, em);
+  const lines = wrapText(text, fit.fs, w).length;
+  return { fit, h: fit.fits ? Math.min(maxH, lines * fit.fs * lineHeight) : maxH };
+}
+
+/** One font size for several separately boxed texts (the smallest that fits each), and which fit. */
+function sharedFit(texts: readonly string[], boxW: number, boxH: number, maxFs: number, minFs: number, lineHeight = 1.2): { fs: number; fits: boolean[] } {
+  const fs = Math.min(maxFs, ...texts.filter((t) => t.trim()).map((t) => fitFont([t], boxW, boxH, maxFs, minFs, lineHeight)));
+  return { fs, fits: texts.map((t) => fitFontInfo([t], boxW, boxH, fs, fs, lineHeight).fits) };
+}
+
+/** Top offsets of blocks stacked with `gap` and centred in `H` (what `.vs-stack` does). */
+function column(heights: readonly number[], gap: number, H: number): number[] {
+  const total = heights.reduce((a, h) => a + h, 0) + gap * Math.max(0, heights.length - 1);
+  let y = Math.max(0, (H - total) / 2);
+  return heights.map((h) => {
+    const at = y;
+    y += h + gap;
+    return at;
+  });
+}
+
+function renderQuote(ctx: KindCtx): string {
+  const { stage, props, warnings } = ctx;
+  const text = str(props.text) ?? "";
+  if (!text) warnings.push("quote: no `text` to show");
+  const attribution = str(props.attribution);
+  const source = str(props.source);
+  const { u, safe } = stage;
+  const gap = u * 2.5;
+  const markFs = u * (stage.portrait ? 24 : 18);
+  const markH = markFs * 0.5;
+  const attr = attribution ? textBlock(`— ${attribution}`, safe.w, safe.h * 0.12, u * 4.8, u * 2.4) : undefined;
+  const src = source ? textBlock(source, safe.w, safe.h * 0.1, u * 3.8, u * 2.2) : undefined;
+  const tailH = (attr ? attr.h + gap : 0) + (src ? src.h + gap : 0);
+  const body = textBlock(text, safe.w, safe.h - markH - gap - tailH, u * 8.5, u * 3.2, 1.25);
+  const heights = [markH, body.h, ...(attr ? [attr.h] : []), ...(src ? [src.h] : [])];
+  const ys = column(heights, gap, safe.h);
+  rec(ctx, "decorative", "“", { y: ys[0], w: markFs * 0.6, h: markH }, { fs: r2(markFs), fits: true }, ctx.colors.primary);
+  rec(ctx, ctx.main, text, { y: ys[1], w: safe.w, h: body.h }, body.fit, ctx.colors.text);
+  let k = 2;
+  if (attribution && attr) rec(ctx, "label", `— ${attribution}`, { y: ys[k++], w: safe.w, h: attr.h }, attr.fit, ctx.colors.primary);
+  if (source && src) rec(ctx, "label", source, { y: ys[k++], w: safe.w, h: src.h }, src.fit, mutedHex(ctx));
+  const st = stagger(heights.length, stage.dur);
+  let i = 0;
+  return [
+    `<div class="vs-stack vs-quote" style="gap:${px(gap)}">`,
+    `<div ${anim("pop", st.at(i++), st.len, `vs-quote-mark`, `height:${px(markH)};font-size:${px(markFs)}`)}>“</div>`,
+    `<div ${anim("fade-up", st.at(i++), st.len, `vs-quote-text`, `min-height:${px(body.h)};font-size:${px(body.fit.fs)}`)}>${esc(text)}</div>`,
+    attribution && attr
+      ? `<div ${anim("fade-up", st.at(i++), st.len, `vs-quote-attr`, `min-height:${px(attr.h)};font-size:${px(attr.fit.fs)}`)}>— ${esc(attribution)}</div>`
+      : "",
+    source && src ? `<div ${anim("fade", st.at(i++), st.len, `vs-quote-source vs-muted`, `min-height:${px(src.h)};font-size:${px(src.fit.fs)}`)}>${esc(source)}</div>` : "",
+    `</div>`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Count-up frames for a numeric value: each shows only inside its own time window. */
+function countUp(value: number, at: number, span: number, frames = 8): { frames: string; done: number } {
+  const decimals = Number.isInteger(value) ? 0 : Math.min(2, (String(value).split(".")[1] ?? "").length);
+  const scale = 10 ** decimals;
+  const dt = span / frames;
+  const out: string[] = [];
+  for (let k = 0; k < frames; k++) {
+    const f = 1 - (1 - k / frames) ** 3;
+    const v = Math.round(value * f * scale) / scale;
+    out.push(`<span ${anim("flash", at + k * dt, dt, "vs-count-frame")}>${esc(fmtNumber(v))}</span>`);
+  }
+  return { frames: out.join(""), done: at + span };
+}
+
+function renderStat(ctx: KindCtx): string {
+  const { stage, props } = ctx;
+  const raw = props.value;
+  const numeric = typeof raw === "number" && Number.isFinite(raw) ? raw : undefined;
+  const value = numeric !== undefined ? fmtNumber(numeric) : (str(raw) ?? "");
+  const unit = str(props.unit) ?? "";
+  const label = str(props.label) ?? "";
+  const context = str(props.context);
+  const { u, safe } = stage;
+  const gap = u * 3;
+  const vfit = fitFontInfo([value + unit], safe.w, safe.h * 0.45, u * 30, u * 6, 1, 0.6);
+  const valueH = vfit.fits ? Math.min(safe.h * 0.45, wrapText(value + unit, vfit.fs, safe.w, { mono: true }).length * vfit.fs) : safe.h * 0.45;
+  const lab = label ? textBlock(label, safe.w, safe.h * 0.22, u * 7, u * 3, 1.15) : undefined;
+  const con = context ? textBlock(context, safe.w, safe.h * 0.12, u * 4.5, u * 2.2) : undefined;
+  const heights = [valueH, ...(lab ? [lab.h] : []), ...(con ? [con.h] : [])];
+  const ys = column(heights, gap, safe.h);
+  rec(ctx, ctx.main, value + unit, { y: ys[0], w: safe.w, h: valueH }, vfit, ctx.colors.primary);
+  if (label && lab) rec(ctx, "body", label, { y: ys[1], w: safe.w, h: lab.h }, lab.fit, ctx.colors.text);
+  if (context && con) rec(ctx, "label", context, { y: ys[lab ? 2 : 1], w: safe.w, h: con.h }, con.fit, mutedHex(ctx));
+  // Numbers count up to their value (discrete frames, a pure function of time); text values pop in.
+  const count = numeric !== undefined && numeric !== 0 ? countUp(numeric, 0.1, Math.max(0.4, Math.min(1.2, stage.dur * 0.35))) : undefined;
+  const digits = count
+    ? `<span class="vs-count"><span ${anim("fade", count.done, 0.001)}>${esc(value)}</span>${count.frames}</span>`
+    : `<span>${esc(value)}</span>`;
+  const labelAt = count ? Math.min(count.done, stage.dur * 0.5) : 0.45;
+  return [
+    `<div class="vs-stack vs-stat" style="gap:${px(gap)}">`,
+    `<div ${anim("scale-in", 0.05, 0.5, `vs-stat-value`, `min-height:${px(valueH)};font-size:${px(vfit.fs)}`)}>${digits}${unit ? `<span class="vs-stat-unit">${esc(unit)}</span>` : ""}</div>`,
+    label && lab ? `<div ${anim("fade-up", labelAt, 0.5, `vs-stat-label`, `min-height:${px(lab.h)};font-size:${px(lab.fit.fs)}`)}>${esc(label)}</div>` : "",
+    context && con ? `<div ${anim("fade", labelAt + 0.25, 0.5, `vs-stat-context vs-muted`, `min-height:${px(con.h)};font-size:${px(con.fit.fs)}`)}>${esc(context)}</div>` : "",
+    `</div>`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function renderTimeline(ctx: KindCtx): string {
+  const { stage, props, warnings } = ctx;
+  let events = (Array.isArray(props.events) ? props.events : [])
+    .map((e) => (e && typeof e === "object" ? (e as Record<string, unknown>) : {}))
+    .map((e) => ({ label: str(e.label) ?? "", text: str(e.text) ?? "" }))
+    .filter((e) => e.label || e.text);
+  if (events.length > 6) {
+    warnings.push(`timeline: ${events.length} events do not fit; showing the first 6`);
+    events = events.slice(0, 6);
+  }
+  if (events.length === 0) {
+    warnings.push("timeline: no events");
+    return `<div class="vs-stack"></div>`;
+  }
+  const n = events.length;
+  let current = typeof props.current === "number" && Number.isInteger(props.current) ? props.current : undefined;
+  if (current !== undefined && (current < 0 || current >= n)) {
+    warnings.push(`timeline: current ${current} is outside the ${n} events; nothing highlighted`);
+    current = undefined;
+  }
+  const { u, safe } = stage;
+  const vertical = stage.portrait || stage.H >= stage.W;
+  const hasText = events.some((e) => e.text);
+  const dotR = u * 1.8;
+  const curR = u * 2.8;
+  const line = Math.max(2, u * 0.6);
+  // Event i: dot centre and the text block beside (vertical) or under (horizontal) it.
+  let dots: Array<{ x: number; y: number }>;
+  let blocks: Box[];
+  let labelH: number;
+  let textH: number;
+  let lineRect: Box;
+  if (vertical) {
+    const rowH = safe.h / n;
+    const lineX = curR + u;
+    const textX = lineX + curR + u * 4;
+    const w = safe.w - textX;
+    labelH = Math.min(rowH * (hasText ? 0.45 : 0.85), u * 16);
+    textH = hasText ? Math.min(rowH * 0.5, u * 20) : 0;
+    dots = events.map((_, i) => ({ x: lineX, y: rowH * (i + 0.5) }));
+    blocks = dots.map((d) => ({ x: textX, y: d.y - (labelH + textH) / 2, w, h: labelH + textH }));
+    lineRect = { x: lineX - line / 2, y: dots[0]!.y, w: line, h: dots[n - 1]!.y - dots[0]!.y };
+  } else {
+    const colW = safe.w / n;
+    const lineY = safe.h * (hasText ? 0.3 : 0.4);
+    const w = colW - u * 3;
+    labelH = safe.h * 0.18;
+    textH = hasText ? safe.h * 0.4 : 0;
+    dots = events.map((_, i) => ({ x: colW * (i + 0.5), y: lineY }));
+    blocks = dots.map((d) => ({ x: d.x - w / 2, y: lineY + curR + u * 4, w, h: labelH + textH }));
+    lineRect = { x: dots[0]!.x, y: lineY - line / 2, w: dots[n - 1]!.x - dots[0]!.x, h: line };
+  }
+  const lf = sharedFit(events.map((e) => e.label), blocks[0]!.w, labelH, u * (vertical ? 6 : 5), u * 2.6, 1.15);
+  const tf = sharedFit(events.map((e) => e.text), blocks[0]!.w, Math.max(1, textH), u * 4.2, u * 2.2, 1.3);
+  const st = stagger(n, stage.dur, 0.3);
+  const lineDur = Math.max(0.3, st.at(n - 1) - 0.1 + st.len * 0.5);
+  const muted = mutedHex(ctx, 0.6);
+  const html: string[] = [
+    `<div ${anim(vertical ? "grow-y" : "grow-x", 0.1, lineDur, `vs-tl-line`, `left:${px(lineRect.x)};top:${px(lineRect.y)};width:${px(lineRect.w)};height:${px(lineRect.h)}`)}></div>`,
+  ];
+  events.forEach((e, i) => {
+    const state = current === undefined || i < current ? "vs-tl-past" : i === current ? "vs-tl-current" : "vs-tl-future";
+    const r = i === current ? curR : dotR;
+    const d = dots[i]!;
+    const b = blocks[i]!;
+    const labelColour = i === current ? ctx.colors.primary : state === "vs-tl-future" ? muted : ctx.colors.text;
+    rec(ctx, "label", e.label, { x: b.x, y: b.y, w: b.w, h: labelH }, { fs: lf.fs, fits: lf.fits[i]! }, labelColour);
+    if (hasText) rec(ctx, "body", e.text, { x: b.x, y: b.y + labelH, w: b.w, h: textH }, { fs: tf.fs, fits: tf.fits[i]! }, state === "vs-tl-future" ? muted : ctx.colors.text);
+    html.push(
+      `<div class="vs-tl-pos" style="left:${px(d.x - r)};top:${px(d.y - r)};width:${px(r * 2)};height:${px(r * 2)}"><div ${anim("pop", st.at(i), st.len, `vs-tl-dot ${state}`)}></div></div>`,
+      `<div class="vs-tl-event ${state}${vertical ? "" : " vs-tl-under"}" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)}"><div ${anim(vertical ? "slide-left" : "fade-up", st.at(i), st.len)}>` +
+        `<div class="vs-tl-label" style="font-size:${px(lf.fs)}">${esc(e.label)}</div>` +
+        (e.text ? `<div class="vs-tl-text" style="font-size:${px(tf.fs)}">${esc(e.text)}</div>` : "") +
+        `</div></div>`,
+    );
+  });
+  return html.join("\n");
+}
+
+function renderSplitScreen(ctx: KindCtx): string {
+  const { stage, props, warnings } = ctx;
+  const mode = str(props.mode) ?? "side_by_side";
+  if (mode !== "side_by_side" && mode !== "before_after") warnings.push(`split_screen: unknown mode "${mode}"; drawn side by side`);
+  const beforeAfter = mode === "before_after";
+  const panel = (v: unknown, fallbackLabel: string) => {
+    const o = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+    return { label: str(o.label) ?? (beforeAfter ? fallbackLabel : ""), text: str(o.text) ?? "", asset: str(o.asset) };
+  };
+  const panels = [panel(props.left, "Before"), panel(props.right, "After")];
+  const { u, safe } = stage;
+  const columns = !stage.portrait && stage.W > stage.H;
+  const gap = u * (beforeAfter ? 8 : 4);
+  const pw = columns ? (safe.w - gap) / 2 : safe.w;
+  const ph = columns ? safe.h * 0.86 : (safe.h - gap) / 2;
+  const rects: Box[] = [0, 1].map((i) => (columns ? { x: i * (pw + gap), y: (safe.h - ph) / 2, w: pw, h: ph } : { x: 0, y: i * (ph + gap), w: pw, h: ph }));
+  const pad = u * 3;
+  const innerW = pw - pad * 2;
+  const hasLabel = panels.some((p) => p.label);
+  const labelH = hasLabel ? Math.min(ph * 0.16, u * 9) : 0;
+  const hasMedia = panels.map((p) => Boolean(p.asset));
+  const textH = (i: number) => (hasMedia[i] ? (panels[i]!.text ? ph * 0.2 : 0) : ph - pad * 2 - labelH - u * 2);
+  const lf = sharedFit(panels.map((p) => p.label), innerW, labelH || 1, u * 5.5, u * 2.4, 1.15);
+  const withMedia = panels.filter((_, i) => hasMedia[i]).map((p) => p.text);
+  const bare = panels.filter((_, i) => !hasMedia[i]).map((p) => p.text);
+  const tfMedia = withMedia.length ? sharedFit(withMedia, innerW, ph * 0.2, u * 4.2, u * 2.2, 1.3) : undefined;
+  const tfBare = bare.length ? sharedFit(bare, innerW, textH(hasMedia.indexOf(false)), u * 6, u * 2.4, 1.3) : undefined;
+  const accents = beforeAfter ? [mutedHex(ctx), ctx.colors.primary] : [ctx.colors.primary, ctx.colors.secondary];
+  const cards = panels.map((p, i) => {
+    const r = rects[i]!;
+    const tf = hasMedia[i] ? tfMedia! : tfBare!;
+    const fs = tf.fs;
+    const fits = fitFontInfo([p.text], innerW, Math.max(1, textH(i)), fs, fs, 1.3).fits;
+    rec(ctx, "label", p.label, { x: r.x + pad, y: r.y + pad, w: innerW, h: labelH }, { fs: lf.fs, fits: lf.fits[i]! }, accents[i]!, ctx.colors.panel);
+    const ty = hasMedia[i] ? r.y + ph - pad - textH(i) : r.y + pad + labelH + u * 2;
+    rec(ctx, "body", p.text, { x: r.x + pad, y: ty, w: innerW, h: textH(i) }, { fs, fits }, ctx.colors.text, ctx.colors.panel);
+    let media = "";
+    if (p.asset) {
+      const abs = ctx.resolveAsset(p.asset);
+      if (abs) media = `<div class="vs-split-media"><img src="${esc(ctx.asset(abs, `split-${i === 0 ? "left" : "right"}`))}" alt="" ${anim("zoom", 0, stage.dur, `vs-split-img`)}></div>`;
+      else {
+        warnings.push(`split_screen: ${i === 0 ? "left" : "right"} asset "${p.asset}" could not be resolved to an image in the project; drawing a placeholder`);
+        media = `<div class="vs-split-media"><div class="vs-shot-missing">${esc(p.asset)}</div></div>`;
+        rec(ctx, "decorative", p.asset, { x: r.x + pad, y: r.y + pad + labelH, w: innerW, h: ph - pad * 2 - labelH - textH(i) }, { fs: r2(Math.max(9, u * 3)), fits: true }, ctx.colors.text, ctx.colors.panel);
+      }
+    }
+    const side = i === 0 ? "vs-left" : "vs-right";
+    const effect = columns ? (i === 0 ? "slide-right" : "slide-left") : "fade-up";
+    return (
+      `<div class="vs-split-pos" style="left:${px(r.x)};top:${px(r.y)};width:${px(r.w)};height:${px(r.h)}"><div ${anim(effect, 0.15 + i * 0.3, 0.5, `vs-split ${side}${beforeAfter ? (i === 0 ? " vs-before" : " vs-after") : ""}`)}>` +
+      (p.label ? `<div class="vs-split-label" style="height:${px(labelH)};font-size:${px(lf.fs)}">${esc(p.label)}</div>` : "") +
+      media +
+      (p.text ? `<div class="vs-split-text${hasMedia[i] ? "" : " vs-split-only"}" style="font-size:${px(fs)}">${esc(p.text)}</div>` : "") +
+      `</div></div>`
+    );
+  });
+  // Before → after: an arrow badge on the seam, pointing from the first panel to the second.
+  let arrow = "";
+  if (beforeAfter) {
+    const s = gap * 0.9;
+    const cx = columns ? pw + gap / 2 : safe.w / 2;
+    const cy = columns ? safe.h / 2 : ph + gap / 2;
+    const rot = columns ? 0 : 90;
+    arrow = `<svg class="vs-split-arrow" width="${r2(s)}" height="${r2(s)}" viewBox="0 0 24 24" style="left:${px(cx - s / 2)};top:${px(cy - s / 2)}"><g ${anim("pop", 0.6, 0.4)}><circle cx="12" cy="12" r="12" fill="var(--vs-primary)"/><path d="M7 12h9M12.5 7.5L17 12l-4.5 4.5" transform="rotate(${rot} 12 12)" fill="none" stroke="var(--vs-bg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g></svg>`;
+  }
+  return [...cards, arrow].filter(Boolean).join("\n");
+}
+
+function renderLowerThird(ctx: KindCtx): string {
+  const { stage, props } = ctx;
+  const name = str(props.name) ?? "";
+  const title = str(props.title);
+  const headline = str(props.headline);
+  const { u, safe } = stage;
+  const barW = stage.portrait ? safe.w : Math.min(safe.w, Math.max(safe.w * 0.55, u * 90));
+  const stripe = u * 1.4;
+  const pad = u * 3;
+  const innerW = barW - stripe - pad * 2;
+  const nb = textBlock(name, innerW, u * 16, u * 6.5, u * 3, 1.15);
+  const tb = title ? textBlock(title, innerW, u * 10, u * 4.2, u * 2.2) : undefined;
+  const barH = pad * 2 + nb.h + (tb ? u + tb.h : 0);
+  const barY = safe.h - barH - u * 2;
+  const textX = stripe + pad;
+  rec(ctx, "label", name, { x: textX, y: barY + pad, w: innerW, h: nb.h }, nb.fit, ctx.colors.text, ctx.colors.panel);
+  if (title && tb) rec(ctx, "label", title, { x: textX, y: barY + pad + nb.h + u, w: innerW, h: tb.h }, tb.fit, mixHex(ctx.colors.panel, ctx.colors.text, 0.75), ctx.colors.panel);
+  let head = "";
+  if (headline) {
+    const room = barY - u * 6;
+    const hb = textBlock(headline, safe.w, room, u * 10, u * 3.5, 1.1);
+    const hy = Math.max(0, (room - hb.h) / 2);
+    rec(ctx, ctx.main, headline, { y: hy, w: safe.w, h: hb.h }, hb.fit, ctx.colors.text);
+    head = `<div class="vs-lt-headline" style="left:0;top:${px(hy)};width:${px(safe.w)};height:${px(hb.h)}"><div ${anim("fade-up", 0.1, 0.6, `vs-headline`, `font-size:${px(hb.fit.fs)}`)}>${esc(headline)}</div></div>`;
+  }
+  const at = headline ? Math.min(0.6, stage.dur * 0.25) : 0.1;
+  return [
+    head,
+    `<div class="vs-lt-pos" style="left:0;top:${px(barY)};width:${px(barW)};height:${px(barH)}"><div ${anim("slide-right", at, 0.5, `vs-lt`)}>`,
+    `<div ${anim("grow-y", at + 0.1, 0.4, `vs-lt-stripe`, `width:${px(stripe)}`)}></div>`,
+    `<div class="vs-lt-text" style="padding:${px(pad)}">`,
+    `<div ${anim("fade", at + 0.2, 0.4, `vs-lt-name`, `font-size:${px(nb.fit.fs)}`)}>${esc(name)}</div>`,
+    title && tb ? `<div ${anim("fade", at + 0.35, 0.4, `vs-lt-title`, `margin-top:${px(u)};font-size:${px(tb.fit.fs)}`)}>${esc(title)}</div>` : "",
+    `</div>`,
+    `</div></div>`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Chunks of `text` with their [start, end) offsets: words, or phrases split after punctuation. */
+export function kineticChunks(text: string, rhythm: "word" | "phrase"): Array<{ text: string; start: number; end: number }> {
+  const re = rhythm === "phrase" ? /[^.,;:!?…—–]+[.,;:!?…—–]*|[.,;:!?…—–]+/g : /\S+/g;
+  const out: Array<{ text: string; start: number; end: number }> = [];
+  for (const m of text.matchAll(re)) {
+    const lead = m[0].length - m[0].trimStart().length;
+    const t = m[0].trim();
+    if (!t) continue;
+    const start = m.index + lead;
+    out.push({ text: t, start, end: start + t.length });
+  }
+  return out;
+}
+
+function renderKineticText(ctx: KindCtx): string {
+  const { stage, props, warnings } = ctx;
+  const text = (str(props.text) ?? "").replace(/\s+/g, " ").trim();
+  const rhythmRaw = str(props.rhythm) ?? "word";
+  if (rhythmRaw !== "word" && rhythmRaw !== "phrase") warnings.push(`kinetic_text: unknown rhythm "${rhythmRaw}"; revealed word by word`);
+  const rhythm = rhythmRaw === "phrase" ? "phrase" : "word";
+  const emphasis = str(props.emphasis);
+  const { u, safe } = stage;
+  const chunks = kineticChunks(text, rhythm);
+  if (chunks.length === 0) warnings.push("kinetic_text: no `text` to show");
+  let es = -1;
+  if (emphasis) {
+    es = text.toLowerCase().indexOf(emphasis.toLowerCase());
+    if (es < 0) warnings.push(`kinetic_text: emphasis "${emphasis}" does not occur in the text`);
+  }
+  const ee = es >= 0 && emphasis ? es + emphasis.length : -1;
+  const block = textBlock(text, safe.w, safe.h * 0.85, u * 12, u * 3.5, 1.15, 0.58);
+  rec(ctx, ctx.main, text, { y: (safe.h - block.h) / 2, w: safe.w, h: block.h }, block.fit, ctx.colors.text);
+  // The reveal spreads over ~65% of the scene, so the full text holds for the rest.
+  const first = 0.15;
+  const step = chunks.length > 1 ? Math.max(0.3, stage.dur * 0.65 - first) / chunks.length : 0;
+  const len = Math.min(0.45, Math.max(0.15, step * 1.6 || 0.45));
+  const spans = chunks.map((c, i) => {
+    let html = esc(c.text);
+    const a = Math.max(c.start, es);
+    const b = Math.min(c.end, ee);
+    if (es >= 0 && a < b) {
+      html = esc(text.slice(c.start, a)) + `<span class="vs-em">${esc(text.slice(a, b))}</span>` + esc(text.slice(b, c.end));
+    }
+    return `<span ${anim("kin", first + i * step, len, `vs-kin-chunk`)}>${html}</span>`;
+  });
+  return `<div class="vs-stack vs-kinetic" data-rhythm="${rhythm}" style="font-size:${px(block.fit.fs)}">\n<div class="vs-kin-line">${spans.join(" ")}</div>\n</div>`;
+}
+
+function renderMap(ctx: KindCtx): string {
+  const { stage, props, warnings } = ctx;
+  const title = str(props.title);
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+  let points = (Array.isArray(props.points) ? props.points : [])
+    .map((p) => (p && typeof p === "object" ? (p as Record<string, unknown>) : {}))
+    .filter((p) => {
+      const ok = typeof p.x === "number" && Number.isFinite(p.x) && typeof p.y === "number" && Number.isFinite(p.y);
+      if (!ok) warnings.push(`map: point ${JSON.stringify(str(p.label) ?? "")} has no numeric x/y; skipped`);
+      return ok;
+    })
+    .map((p) => ({ label: str(p.label) ?? "", x: clamp01(p.x as number), y: clamp01(p.y as number) }));
+  if (points.length > 8) {
+    warnings.push(`map: ${points.length} points do not fit; showing the first 8`);
+    points = points.slice(0, 8);
+  }
+  if (points.length === 0) warnings.push("map: no points");
+  const route = props.route === true && points.length >= 2;
+  if (props.route === true && points.length < 2) warnings.push("map: route needs at least 2 points");
+  const { u, safe } = stage;
+  const gap = u * 3;
+  const tb = title ? textBlock(title, safe.w, safe.h * 0.16, u * 7, u * 3.2, 1.1) : undefined;
+  const titleH = tb ? tb.h + gap : 0;
+  if (title && tb) rec(ctx, ctx.main, title, { w: safe.w, h: tb.h }, tb.fit, ctx.colors.text);
+  const panel: Box = { x: 0, y: titleH, w: safe.w, h: safe.h - titleH };
+  const pad = u * 7;
+  const P = points.map((p) => ({ ...p, px: pad + p.x * (panel.w - pad * 2), py: pad + p.y * (panel.h - pad * 2) }));
+  // Labels sit beside their pin, on the side with more room, one line each.
+  const off = u * 3.4;
+  const labelH = u * 6;
+  const slots = P.map((p) => {
+    const right = p.x <= 0.62;
+    const w = Math.max(u * 10, right ? panel.w - u * 2 - (p.px + off) : p.px - off - u * 2);
+    return { right, x: right ? p.px + off : p.px - off - w, y: p.py - labelH / 2, w };
+  });
+  const chipPad = u * 1.4;
+  const lfs = Math.min(u * 4, ...P.map((p, i) => (p.label ? fitFont([p.label], slots[i]!.w - chipPad * 2, labelH, u * 4, u * 2.2) : Infinity)));
+  P.forEach((p, i) => {
+    const s = slots[i]!;
+    const fits = fitFontInfo([p.label], s.w - chipPad * 2, labelH, lfs, lfs).fits;
+    rec(ctx, "label", p.label, { x: panel.x + s.x, y: panel.y + s.y, w: s.w, h: labelH }, { fs: r2(lfs), fits }, ctx.colors.text, ctx.colors.bg);
+  });
+  const st = stagger(P.length, stage.dur, 0.3);
+  const lineLen = Math.max(0.6, Math.min(stage.dur * 0.5, 1.6));
+  let dist = 0;
+  const cum = P.map((p, i) => (i === 0 ? 0 : (dist += Math.hypot(p.px - P[i - 1]!.px, p.py - P[i - 1]!.py))));
+  const pinAt = (i: number) => (route ? 0.3 + (dist ? (cum[i]! / dist) * lineLen : 0) : st.at(i));
+  const grid: string[] = [];
+  const cell = u * 12;
+  const inset = u * 3;
+  for (let x = cell; x < panel.w - 1; x += cell) grid.push(`<line x1="${r2(x)}" y1="${r2(inset)}" x2="${r2(x)}" y2="${r2(panel.h - inset)}" class="vs-map-grid"/>`);
+  for (let y = cell; y < panel.h - 1; y += cell) grid.push(`<line x1="${r2(inset)}" y1="${r2(y)}" x2="${r2(panel.w - inset)}" y2="${r2(y)}" class="vs-map-grid"/>`);
+  const routeSvg = route
+    ? `<polyline points="${P.map((p) => `${r2(p.px)},${r2(p.py)}`).join(" ")}" stroke-width="${r2(u * 0.9)}" ${anim("draw-len", 0.3, lineLen, "vs-map-route", `--len:${r2(dist)}`)}/>`
+    : "";
+  const pins = P.map(
+    (p, i) =>
+      `<circle cx="${r2(p.px)}" cy="${r2(p.py)}" r="${r2(u * 3.2)}" ${anim("pop", pinAt(i), 0.35, "vs-map-halo")}/><circle cx="${r2(p.px)}" cy="${r2(p.py)}" r="${r2(u * 1.7)}" ${anim("pop", pinAt(i), 0.35, "vs-map-pin")}/>`,
+  );
+  const labels = P.map((p, i) => {
+    const s = slots[i]!;
+    return p.label
+      ? `<div class="vs-map-slot${s.right ? "" : " vs-map-left"}" style="left:${px(panel.x + s.x)};top:${px(panel.y + s.y)};width:${px(s.w)};height:${px(labelH)}"><div ${anim("fade", pinAt(i) + 0.15, 0.35, `vs-map-label`, `font-size:${px(lfs)}`)}>${esc(p.label)}</div></div>`
+      : "";
+  });
+  return [
+    title && tb ? `<div class="vs-map-title" style="left:0;top:0;width:${px(safe.w)};height:${px(tb.h)}"><div ${anim("fade-up", 0.05, 0.5, `vs-headline`, `font-size:${px(tb.fit.fs)}`)}>${esc(title)}</div></div>` : "",
+    `<svg class="vs-map-svg" width="${r2(panel.w)}" height="${r2(panel.h)}" viewBox="0 0 ${r2(panel.w)} ${r2(panel.h)}" style="left:${px(panel.x)};top:${px(panel.y)}">`,
+    `<g ${anim("scale-in", 0, 0.5)}><rect x="0" y="0" width="${r2(panel.w)}" height="${r2(panel.h)}" rx="${r2(u * 3)}" class="vs-map-panel"/>`,
+    ...grid,
+    `</g>`,
+    routeSvg,
+    ...pins,
+    `</svg>`,
+    ...labels,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 const RENDERERS: Record<DeterministicKind, (ctx: KindCtx) => string> = {
   typography: renderTypography,
   code: renderCode,
@@ -787,22 +1224,14 @@ const RENDERERS: Record<DeterministicKind, (ctx: KindCtx) => string> = {
   cta: renderCta,
   end_card: renderEndCard,
   screenshot: renderScreenshot,
-  quote: renderFallback("quote"),
-  stat: renderFallback("stat"),
-  timeline: renderFallback("timeline"),
-  split_screen: renderFallback("split_screen"),
-  lower_third: renderFallback("lower_third"),
-  kinetic_text: renderFallback("kinetic_text"),
-  map: renderFallback("map"),
+  quote: renderQuote,
+  stat: renderStat,
+  timeline: renderTimeline,
+  split_screen: renderSplitScreen,
+  lower_third: renderLowerThird,
+  kinetic_text: renderKineticText,
+  map: renderMap,
 };
-
-/** A typography card with the props' text, for kinds not implemented here yet. */
-function renderFallback(kind: DeterministicKind): (ctx: KindCtx) => string {
-  return (ctx) => {
-    ctx.warnings.push(`${kind}: drawn as a typography card (not implemented in the HyperFrames composition yet)`);
-    return renderTypography({ ...ctx, props: { lines: fallbackLines(ctx.props) } });
-  };
-}
 
 // ---------------------------------------------------------------------------------- document
 
@@ -841,6 +1270,10 @@ html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--
 .vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
 .vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
 .vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+.vs-grow-y { animation-name: vs-grow-y; transform-origin: 50% 0; }
+.vs-draw-len { animation-name: vs-draw-len; stroke-dasharray: var(--len); animation-timing-function: linear; }
+.vs-kin { animation-name: vs-kin; }
+.vs-flash { animation-name: vs-flash; animation-fill-mode: none; animation-timing-function: step-end; opacity: 0; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
 @keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
@@ -850,6 +1283,10 @@ html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--
 @keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+@keyframes vs-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes vs-draw-len { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+@keyframes vs-kin { from { opacity: 0; transform: translateY(0.3em) scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes vs-flash { from { opacity: 1; } to { opacity: 1; } }
 .vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
 .vs-line { overflow-wrap: anywhere; }
 .vs-em { color: var(--vs-primary); }
@@ -905,7 +1342,60 @@ html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--
 .vs-pin-dot { width: 1em; height: 1em; border-radius: 50%; background: var(--vs-primary); box-shadow: 0 0 0 0.3em color-mix(in srgb, var(--vs-primary) 35%, transparent); flex: none; }
 .vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
 .vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
-.vs-callouts .vs-callout { align-self: flex-start; }`;
+.vs-callouts .vs-callout { align-self: flex-start; }
+.vs-muted { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-quote { align-items: stretch; text-align: left; }
+.vs-quote-mark { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; overflow: visible; }
+.vs-quote-text { font-family: var(--vs-font-heading); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.vs-quote-attr { font-weight: 700; color: var(--vs-primary); overflow-wrap: anywhere; }
+.vs-quote-source { overflow-wrap: anywhere; }
+.vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
+.vs-stat-context { overflow-wrap: anywhere; }
+.vs-count { position: relative; display: inline-block; }
+.vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
+.vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
+.vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
+.vs-tl-dot { flex: 1; border-radius: 50%; background: var(--vs-primary); border: calc(var(--vs-u) * 0.5) solid var(--vs-primary); }
+.vs-tl-dot.vs-tl-future { background: var(--vs-bg); border-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-tl-dot.vs-tl-current { box-shadow: 0 0 0 calc(var(--vs-u) * 1.2) color-mix(in srgb, var(--vs-primary) 35%, transparent); }
+.vs-tl-event { flex-direction: column; justify-content: center; }
+.vs-tl-event.vs-tl-under { justify-content: flex-start; text-align: center; }
+.vs-tl-label { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-tl-text { line-height: 1.3; margin-top: 0.3em; overflow-wrap: anywhere; }
+.vs-tl-current .vs-tl-label { color: var(--vs-primary); }
+.vs-tl-event.vs-tl-future { color: color-mix(in srgb, var(--vs-text) 60%, var(--vs-bg)); }
+.vs-split { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; }
+.vs-split.vs-right { border-top-color: var(--vs-secondary); }
+.vs-split-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1.15; overflow: hidden; overflow-wrap: anywhere; }
+.vs-split.vs-right .vs-split-label { color: var(--vs-secondary); }
+.vs-split-media { flex: 1; min-height: 0; margin: calc(var(--vs-u) * 1.5) 0; border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-split-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-split-text { line-height: 1.3; overflow-wrap: anywhere; }
+.vs-split-text.vs-split-only { flex: 1; display: flex; align-items: center; font-family: var(--vs-font-heading); font-weight: 700; margin-top: calc(var(--vs-u) * 2); }
+.vs-split.vs-before { border-top-color: color-mix(in srgb, var(--vs-text) 45%, var(--vs-bg)); }
+.vs-split.vs-before .vs-split-label { color: color-mix(in srgb, var(--vs-text) 72%, var(--vs-bg)); }
+.vs-split.vs-after { border-top-color: var(--vs-primary); box-shadow: 0 0 0 calc(var(--vs-u) * 0.4) var(--vs-primary); }
+.vs-split.vs-after .vs-split-label { color: var(--vs-primary); }
+.vs-split-arrow { position: absolute; overflow: visible; }
+.vs-lt-headline { align-items: center; justify-content: center; text-align: center; }
+.vs-lt { flex: 1; display: flex; background: var(--vs-panel); border-radius: calc(var(--vs-u) * 1.2); overflow: hidden; }
+.vs-lt-stripe { flex: none; background: var(--vs-primary); }
+.vs-lt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.vs-lt-name { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.vs-lt-title { line-height: 1.2; color: color-mix(in srgb, var(--vs-text) 75%, var(--vs-panel)); overflow-wrap: anywhere; }
+.vs-kinetic { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-kin-line { overflow-wrap: anywhere; }
+.vs-kin-chunk { display: inline-block; }
+.vs-map-title { align-items: center; justify-content: center; text-align: center; }
+.vs-map-svg { position: absolute; overflow: visible; }
+.vs-map-panel { fill: var(--vs-panel); stroke: color-mix(in srgb, var(--vs-text) 18%, var(--vs-bg)); stroke-width: 2; }
+.vs-map-grid { stroke: var(--vs-text); stroke-opacity: 0.07; stroke-width: 2; }
+.vs-map-route { fill: none; stroke: var(--vs-primary); stroke-linecap: round; stroke-linejoin: round; }
+.vs-map-halo { fill: var(--vs-primary); fill-opacity: 0.25; }
+.vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
+.vs-map-slot { align-items: center; }
+.vs-map-slot.vs-map-left { justify-content: flex-end; }
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }`;
 }
 
 /**
@@ -1024,7 +1514,7 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
     if (viaOpt) {
       const abs = resolve(projectRoot, viaOpt);
       if (inside(projectRoot, abs) && IMAGE_EXT.test(extname(abs))) return abs;
-      warnings.push(`screenshot: asset "${id}" resolves outside the project or is not an image; ignored`);
+      warnings.push(`${det.kind}: asset "${id}" resolves outside the project or is not an image; ignored`);
       return undefined;
     }
     return /[/\\.]/.test(id) ? projectImage(id) : undefined;

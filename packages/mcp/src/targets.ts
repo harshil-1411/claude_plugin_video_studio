@@ -93,7 +93,13 @@ export interface PostJson {
   cover: { mode: PlatformContract["cover"]["mode"]; file?: string; timestamp_ms?: number };
   captions: { sidecar_formats: string[]; burn_in_recommended: boolean; files: string[] };
   limits: { post_caption_max_chars?: number; hashtags_max?: number; mentions_max?: number };
+  /** What is in the audio, and the reminder that in-app trending sounds are chosen when posting. */
+  sound: { music?: string; license?: string; attribution?: string; note: string };
 }
+
+/** Platforms' trending sounds live in their apps; a file upload cannot carry one. */
+export const TRENDING_SOUND_NOTE =
+  "Trending sounds can't be added by video-studio: they live inside the platform's app. To use one, add it in the app when you post (it replaces or mixes with this audio).";
 
 export interface TargetQa {
   target: string;
@@ -143,6 +149,8 @@ export interface PackageTargetsInput {
   generatedCopy: (contract: PlatformContract) => { post_caption: string; hashtags: string[] };
   lint?: LintResult;
   lintError?: string;
+  /** The music bed in the audio, for post.json `sound`. */
+  music?: { title?: string; ref: string; license?: { id: string; attribution?: string } };
   technicalQa?: "pass" | "warn" | "fail";
 }
 
@@ -227,6 +235,12 @@ export async function packageTargets(i: PackageTargetsInput, allTargetIds: reado
       },
       cover: { mode: c.cover.mode, ...(hasCoverFile ? { file: "cover.jpg" } : {}), ...(coverTimestamp !== undefined ? { timestamp_ms: coverTimestamp } : {}) },
       captions: { sidecar_formats: c.captions.sidecar_formats, burn_in_recommended: c.captions.burn_in_recommended, files: captionFiles },
+      sound: {
+        ...(i.music ? { music: i.music.title ?? i.music.ref } : {}),
+        ...(i.music?.license ? { license: i.music.license.id } : {}),
+        ...(i.music?.license?.attribution ? { attribution: i.music.license.attribution } : {}),
+        note: TRENDING_SOUND_NOTE,
+      },
       limits: {
         ...(c.captions.post_caption_max_chars !== undefined ? { post_caption_max_chars: c.captions.post_caption_max_chars } : {}),
         ...(c.captions.hashtags_max !== undefined ? { hashtags_max: c.captions.hashtags_max } : {}),

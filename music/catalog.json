@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "generator": "scripts/generate-music.mjs",
+  "ffmpeg": "8.1.2",
+  "license": {
+    "id": "CC0-1.0",
+    "source": "synthesized by video-studio with ffmpeg aevalsrc (scripts/generate-music.mjs); no samples or third-party recordings"
+  },
+  "tracks": [
+    {
+      "id": "ambient",
+      "title": "Ambient pad",
+      "bpm": 60,
+      "duration_sec": 32,
+      "file": "ambient.m4a",
+      "sha256": "b184309fdd2946ccc4783692744ebabf8ff777e1fd82f7fefcf645e4f7a5424c",
+      "mood": "calm",
+      "loop": true
+    },
+    {
+      "id": "lofi",
+      "title": "Lo-fi beat",
+      "bpm": 80,
+      "duration_sec": 24,
+      "file": "lofi.m4a",
+      "sha256": "7f7d6cb041f260156aef1d99bbedf5d2893dfac9c901f4bbc929b0c84190b4f7",
+      "mood": "relaxed",
+      "loop": true
+    },
+    {
+      "id": "upbeat",
+      "title": "Upbeat pulse",
+      "bpm": 120,
+      "duration_sec": 16,
+      "file": "upbeat.m4a",
+      "sha256": "b6c297632d7b2952f83318cddb70ce8d45ea0977c73696eaa79dd5f6db54d1d0",
+      "mood": "energetic",
+      "loop": true
+    },
+    {
+      "id": "minimal",
+      "title": "Minimal pulse",
+      "bpm": 90,
+      "duration_sec": 21.333,
+      "file": "minimal.m4a",
+      "sha256": "c0d353c88ce803c56012ca2037acce46911096e510f7abc00a4be547d542ffa9",
+      "mood": "focused",
+      "loop": true
+    }
+  ]
+}

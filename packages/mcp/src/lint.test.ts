@@ -136,6 +136,19 @@ describe("lint checks", () => {
     expect((await lintProject(dir)).findings.filter((f) => f.id === "caption_mask")).toEqual([]);
   });
 
+  it("without narration, checks on-screen reading speed instead of voiceover", async () => {
+    const dir = project((s) => {
+      delete s.captions.position;
+      s.voice = { mode: "none" };
+      for (const sc of s.scenes) sc.voiceover = "";
+      s.scenes[0].duration_sec = 2;
+      s.scenes[0].on_screen_text = "one two three four five six seven eight nine ten";
+    });
+    const r = await lintProject(dir);
+    const d = r.findings.filter((f) => f.id === "reading_density");
+    expect(d).toEqual([expect.objectContaining({ scene_id: "s01", message: expect.stringMatching(/on-screen words/) })]);
+  });
+
   it("warns on reading density, post copy limits, cover and banned phrases", async () => {
     const dir = project((s) => {
       delete s.captions.position;

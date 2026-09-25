@@ -66,6 +66,109 @@ export async function concatAudio(slots: readonly AudioSlot[], out: string, opts
   return { path: out, samples: totalSamples, duration_ms: Math.round((totalSamples / sr) * 1000) };
 }
 
+// ---------------------------------------------------------------------------------- music bed
+
+/** Defaults for a music bed under narration (spec.audio.music). */
+export const MUSIC_DEFAULTS = { volume_db: -18, duck_db: -10, fade_in_ms: 500, fade_out_ms: 1500, ramp_ms: 150 } as const;
+
+export interface MusicBedInput {
+  path: string;
+  /** Bed level before ducking, dB. Default -18. */
+  volume_db?: number;
+  /** Extra attenuation while speech plays, dB. Default -10. */
+  duck_db?: number;
+  fade_in_ms?: number;
+  fade_out_ms?: number;
+  /** Loop the file to cover the duration. Default true. */
+  loop?: boolean;
+  start_sec?: number;
+}
+
+export interface SpeechInterval {
+  start_ms: number;
+  end_ms: number;
+}
+
+export interface MixMusicInput {
+  /** Voice track (any format ffmpeg reads); absent for music-only videos. */
+  voice?: string;
+  music: MusicBedInput;
+  duration_ms: number;
+  /** Where speech plays; the bed ducks by `duck_db` there, with short ramps. */
+  speech?: readonly SpeechInterval[];
+  out: string;
+}
+
+/** Merge intervals that overlap or sit closer than `gapMs`, sorted by start. */
+export function mergeIntervals(intervals: readonly SpeechInterval[], gapMs: number): SpeechInterval[] {
+  const sorted = intervals.filter((i) => i.end_ms > i.start_ms).map((i) => ({ ...i })).sort((a, b) => a.start_ms - b.start_ms);
+  const out: SpeechInterval[] = [];
+  for (const i of sorted) {
+    const last = out[out.length - 1];
+    if (last && i.start_ms - last.end_ms <= gapMs) last.end_ms = Math.max(last.end_ms, i.end_ms);
+    else out.push(i);
+  }
+  return out;
+}
+
+/**
+ * ffmpeg `volume` expression (eval=frame) that is 1 outside speech and `duckGain` inside it, with
+ * linear ramps of `rampMs` before and after each interval. Intervals must not overlap (merge first).
+ */
+export function duckExpression(speech: readonly SpeechInterval[], duckGain: number, rampMs: number = MUSIC_DEFAULTS.ramp_ms): string {
+  if (speech.length === 0) return "1";
+  const r = Math.max(1, rampMs) / 1000;
+  const f = (n: number) => String(Math.round(n * 1000) / 1000);
+  // s(t) in [0,1]: how far into a (ramped) speech interval t is; the sum works because intervals are disjoint.
+  const terms = speech.map((i) => {
+    const a = i.start_ms / 1000;
+    const b = i.end_ms / 1000;
+    return `clip(min((t-${f(a - r)})/${f(r)},(${f(b + r)}-t)/${f(r)}),0,1)`;
+  });
+  return `1-${f(1 - duckGain)}*min(1,${terms.join("+")})`;
+}
+
+/**
+ * Mix a looping, faded music bed under the voice (or alone), ducking it over the speech intervals.
+ * The result is exactly `duration_ms` long; loudness normalization happens afterwards on the mix.
+ */
+export async function mixMusic(input: MixMusicInput, opts: ConcatAudioOptions = {}): Promise<{ path: string; duration_ms: number }> {
+  const sr = opts.sampleRate ?? AUDIO_SAMPLE_RATE;
+  const m = input.music;
+  const samples = Math.round((input.duration_ms * sr) / 1000);
+  if (samples <= 0) throw new Error("mixMusic: duration is zero");
+  const dur = samples / sr;
+  const fadeIn = Math.min((m.fade_in_ms ?? MUSIC_DEFAULTS.fade_in_ms) / 1000, dur / 2);
+  const fadeOut = Math.min((m.fade_out_ms ?? MUSIC_DEFAULTS.fade_out_ms) / 1000, dur / 2);
+  const fmt = `aformat=sample_fmts=fltp:sample_rates=${sr}:channel_layouts=stereo`;
+  const speech = input.voice ? mergeIntervals(input.speech ?? [], 2 * MUSIC_DEFAULTS.ramp_ms) : [];
+  const duckGain = 10 ** ((m.duck_db ?? MUSIC_DEFAULTS.duck_db) / 20);
+  const musicChain = [
+    `[0:a:0]aresample=${sr}`,
+    fmt,
+    `atrim=end_sample=${samples}`,
+    `apad=whole_len=${samples}`,
+    "asetpts=N/SR/TB",
+    `volume=${m.volume_db ?? MUSIC_DEFAULTS.volume_db}dB`,
+    ...(speech.length ? [`volume='${duckExpression(speech, duckGain)}':eval=frame`] : []),
+    ...(fadeIn > 0 ? [`afade=t=in:st=0:d=${fadeIn}`] : []),
+    ...(fadeOut > 0 ? [`afade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}`] : []),
+  ];
+  const loop = m.loop ?? true;
+  const inputs = [...(loop ? ["-stream_loop", "-1"] : []), ...(m.start_sec ? ["-ss", String(m.start_sec)] : []), "-i", m.path];
+  const chains: string[][] = [];
+  if (input.voice) {
+    inputs.push("-i", input.voice);
+    chains.push([...musicChain, "anull[m]"]);
+    chains.push([`[1:a:0]aresample=${sr}`, fmt, `apad=whole_len=${samples}`, `atrim=end_sample=${samples}`, "asetpts=N/SR/TB[v]"]);
+    chains.push(["[v][m]amix=inputs=2:duration=first:normalize=0", `atrim=end_sample=${samples}[aout]`]);
+  } else {
+    chains.push([...musicChain, "anull[aout]"]);
+  }
+  await runFfmpeg(["-y", ...inputs, "-filter_complex", filterGraph(chains), "-map", "[aout]", ...audioCodecArgs(input.out, sr), input.out], opts);
+  return { path: input.out, duration_ms: Math.round((samples / sr) * 1000) };
+}
+
 // ---------------------------------------------------------------------------------- loudness
 
 export interface LoudnessTarget {

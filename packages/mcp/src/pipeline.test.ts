@@ -362,6 +362,75 @@ describe("cover and caption styling", () => {
   );
 });
 
+describe("music bed and voice.mode none", () => {
+  it(
+    "renders a text-over-music reel: bundled bed, no speech, rights recorded, no silence warnings",
+    async () => {
+      const s: VideoSpec = structuredClone(spec);
+      s.voice = { mode: "none" };
+      s.audio = { music: { file: "bundled:minimal", fade_in_ms: 200, fade_out_ms: 300 } };
+      for (const sc of s.scenes) {
+        sc.on_screen_text = sc.voiceover;
+        sc.voiceover = "";
+      }
+      const dir = await makeProject("music-none", s);
+      const r = await renderProject(dir, opts({ voice: "auto", voiceBackends: { system: failingSystem, elevenlabs: unavailableEleven } }));
+      expect(r.voice.backend).toBe("silent");
+      expect(r.voice.reason).toMatch(/voice\.mode is "none"/);
+      expect(r.warnings.join("\n")).not.toMatch(/captions and transcript skipped/);
+      const probe = await ffprobe(r.dist.reel);
+      expect(probe.has_audio).toBe(true);
+      expect(r.qa.findings.map((f) => f.id)).not.toContain("silence");
+      const manifest = RenderManifest.parse(JSON.parse(await readFile(join(dir, "dist", "render-manifest.json"), "utf8")));
+      expect(manifest.music).toMatchObject({ file: "bundled:minimal", title: "Minimal pulse", license: { id: "CC0-1.0" } });
+      const lock = JSON.parse(await readFile(join(dir, "dist", "video.lock"), "utf8"));
+      expect(lock.assets.find((a: { path: string }) => a.path === "bundled:minimal")?.sha256).toBe(manifest.music!.sha256);
+      const prov = JSON.parse(await readFile(join(dir, "dist", "provenance.json"), "utf8"));
+      expect(prov.render.music).toMatchObject({ file: "bundled:minimal", license: { id: "CC0-1.0" } });
+      expect(prov.render.voice.mode).toBe("none");
+      const post = JSON.parse(await readFile(join(dir, "dist", "youtube-shorts", "post.json"), "utf8"));
+      expect(post.sound).toMatchObject({ music: "Minimal pulse", license: "CC0-1.0", note: expect.stringMatching(/Trending sounds/) });
+    },
+    T,
+  );
+
+  it(
+    "silent on purpose (voice.mode none, no music) passes silence and loudness QA",
+    async () => {
+      const s: VideoSpec = structuredClone(spec);
+      s.voice = { mode: "none" };
+      for (const sc of s.scenes) sc.voiceover = "";
+      const dir = await makeProject("silent-on-purpose", s);
+      const r = await renderProject(dir, opts());
+      const ids = r.qa.findings.map((f) => f.id);
+      expect(ids).not.toContain("silence");
+      expect(ids).not.toContain("loudness");
+    },
+    T,
+  );
+
+  it(
+    "mixes a user music file under narration and changes the assembly when the bed changes",
+    async () => {
+      const s: VideoSpec = structuredClone(spec);
+      s.audio = { music: { file: "assets/bed.wav", license: { id: "user-owned" } } };
+      const dir = await makeProject("music-narrated", s);
+      await mkdir(join(dir, "assets"), { recursive: true });
+      await runFfmpeg(["-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=1", join(dir, "assets", "bed.wav")]);
+      const r = await renderProject(dir, opts({ voice: "system", voiceBackends: { system: longSystem } }));
+      expect(r.cache.assembly).toBe("assembled");
+      const manifest = RenderManifest.parse(JSON.parse(await readFile(join(dir, "dist", "render-manifest.json"), "utf8")));
+      expect(manifest.music).toMatchObject({ file: "assets/bed.wav", license: { id: "user-owned" } });
+      const again = await renderProject(dir, opts({ voice: "system", voiceBackends: { system: longSystem } }));
+      expect(again.cache.assembly).toBe("reused");
+      s.audio.music!.volume_db = -24;
+      await writeFile(join(dir, "project", "video-spec.json"), JSON.stringify(s, null, 2));
+      expect((await renderProject(dir, opts({ voice: "system", voiceBackends: { system: longSystem } }))).cache.assembly).toBe("assembled");
+    },
+    T,
+  );
+});
+
 describe("voice overrun", () => {
   it(
     "extends the scene in the render plan only and records it",

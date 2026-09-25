@@ -45,10 +45,13 @@ import {
   parseYamlOrJson,
   resolveMaster,
   resolveTargets,
+  voiceMode,
+  type AudioLicense,
 } from "@video-studio/schema";
 import { ZONES_VERSION, findPlatformSpecsDir, layoutZones, loadContracts } from "@video-studio/platforms";
 import { type BackendChoice, type BackendSet, type SynthesizeSpecResult, defaultBackends, selectBackend, synthesizeSpec } from "@video-studio/voice";
 import { COVER_VERSION, renderCover } from "./cover.js";
+import { type ResolvedMusic, resolveMusic } from "./music.js";
 import { type FontRequest, type LockFont, LOCK_FILE, buildLock, listFiles, lockAssets, lockFonts, serializeLock } from "./lock.js";
 import { hyperframesOptions } from "./hyperframes.js";
 import { type LintResult, lintProject } from "./lint.js";
@@ -59,6 +62,8 @@ type Env = Record<string, string | undefined>;
 
 /** Engine version recorded in manifests. Keep in sync with SERVER_VERSION. */
 export const ENGINE_VERSION = "0.1.0";
+/** Bump when technical QA's checks change, so cached QA results are re-run. 2: background-aware black frames, intended silence. */
+export const QA_VERSION = 2;
 /** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. */
 export const ASSEMBLY_VERSION = 2;
 
@@ -230,10 +235,16 @@ interface RenderState {
     crops: Array<{ id: string; targets: string[]; x: number; y: number; w: number; h: number }>;
   };
   assembly_key: string;
-  qa?: { status: "pass" | "warn" | "fail"; video_sha256: string; checks: Array<{ id: string; status: "pass" | "warn" | "fail"; message?: string }>; findings: QaFinding[] };
+  qa?: { version?: number; status: "pass" | "warn" | "fail"; video_sha256: string; checks: Array<{ id: string; status: "pass" | "warn" | "fail"; message?: string }>; findings: QaFinding[] };
   timing_adjustments: TimingAdjustment[];
   warnings: string[];
   tool_versions: Record<string, string>;
+  /** Scene background colour, so QA's black-frame threshold matches the theme. */
+  background?: string;
+  /** spec.voice.mode at render time (absent in older states: narrated). */
+  voice_mode?: "narrated" | "none";
+  /** The music bed mixed in, with its rights. */
+  music?: { ref: string; sha256: string; title?: string; license?: AudioLicense };
   /** Brand file the render read, project-relative (`external/<name>` when outside the project). */
   brand_path?: string;
   /** Font files the render resolved (for video.lock). */
@@ -388,9 +399,11 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   progress({ stage: "voice", message: `synthesizing voice (${voiceChoice})` });
   const backends: BackendSet = { ...defaultBackends(), ...o.voiceBackends };
   const voiceCacheDir = o.voiceCacheDir ?? join(resolveDataDir(env).cache, "voice");
-  const sel = await selectBackend(voiceChoice, env, backends);
+  // voice.mode none: nothing is spoken, so no backend is asked (the silent one yields empty tracks).
+  const narrated = voiceMode(spec) !== "none";
+  const sel = narrated ? await selectBackend(voiceChoice, env, backends) : await selectBackend("silent", env, backends);
   let voice: SynthesizeSpecResult;
-  let voiceReason = sel.reason;
+  let voiceReason = narrated ? sel.reason : 'voice.mode is "none": no narration';
   try {
     voice = await synthesizeSpec(spec, {
       projectDir: root,
@@ -403,7 +416,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     });
   } catch (e) {
     if (signal?.aborted) throw e;
-    if (voiceChoice !== "auto" || sel.backend.id === "silent") {
+    if (!narrated || voiceChoice !== "auto" || sel.backend.id === "silent") {
       throw new Error(`voice backend "${sel.backend.id}" failed: ${errMsg(e)}. Re-run with voice "auto" or "silent", or run doctor.`);
     }
     voiceReason = `${sel.reason}; but ${sel.backend.id} failed at synthesis (${errMsg(e).slice(0, 300)}); falling back to silent (no audio)`;
@@ -513,7 +526,11 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   };
   const captionSet = words.length ? await writeCaptionSet(captionsDir, "captions", words, { ass: assOpts, maxLines: assOpts.maxLines, endMs: totalMs }) : undefined;
   const captionFiles = captionSet?.files;
-  if (!words.length) warnings.push("no voiceover text: captions and transcript skipped");
+  if (!words.length && narrated) warnings.push("no voiceover text: captions and transcript skipped");
+
+  // e'. music bed (spec.audio.music), ducked where speech plays
+  const music: ResolvedMusic | undefined = spec.audio?.music ? await resolveMusic(spec.audio.music, root, env) : undefined;
+  const speech = placements.filter((p) => p.track.audio_path).map((p) => ({ start_ms: Math.round(p.scene_start_ms), end_ms: Math.round(p.scene_start_ms + p.track.duration_ms) }));
 
   // f. assembly (skipped when the inputs are unchanged)
   const segments = await Promise.all(
@@ -535,6 +552,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
       pad: tokens.color_background,
       segments: segments.map((s) => ({ sha: s.sha256, ms: s.duration_ms })),
       audio: hasAudio ? slots.map((s) => ({ sha: s.sha256, ms: s.duration_ms })) : null,
+      music: music ? { sha: music.sha256, bed: music.bed, speech: hasAudio ? speech : [] } : null,
       burn,
       ass: burn ? assSha : null,
       captions: burn ? assOpts : null,
@@ -559,7 +577,24 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
         fit: "pad",
         padColor: tokens.color_background,
         segments: segments.map(({ path, duration_ms }) => ({ path, duration_ms })),
-        ...(audio ? { audio, loudness: { I: -14, TP: -1 } } : {}),
+        ...(audio ? { audio } : {}),
+        ...(audio || music ? { loudness: { I: -14, TP: -1 } } : {}),
+        ...(music
+          ? {
+              music: {
+                bed: {
+                  path: music.path,
+                  ...(music.bed.volume_db !== undefined ? { volume_db: music.bed.volume_db } : {}),
+                  ...(music.bed.duck_db !== undefined ? { duck_db: music.bed.duck_db } : {}),
+                  ...(music.bed.fade_in_ms !== undefined ? { fade_in_ms: music.bed.fade_in_ms } : {}),
+                  ...(music.bed.fade_out_ms !== undefined ? { fade_out_ms: music.bed.fade_out_ms } : {}),
+                  ...(music.bed.loop !== undefined ? { loop: music.bed.loop } : {}),
+                  ...(music.bed.start_sec !== undefined ? { start_sec: music.bed.start_sec } : {}),
+                },
+                ...(hasAudio ? { speech } : {}),
+              },
+            }
+          : {}),
         master,
         ...(burn ? { reel, assPath: captionFiles!.ass!, ...(fontsDir ? { fontsDir } : {}) } : {}),
       },
@@ -674,6 +709,9 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     timing_adjustments,
     warnings,
     tool_versions,
+    voice_mode: narrated ? "narrated" : "none",
+    background: tokens.color_background,
+    ...(music ? { music: { ref: music.ref, sha256: music.sha256, ...(music.title ? { title: music.title } : {}), ...(music.license ? { license: music.license } : {}) } } : {}),
     ...(brandFile ? { brand_path: brandRel(root, brandFile.path) } : {}),
     fonts: lockedFonts,
   };
@@ -681,7 +719,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   // f'. technical QA on the reel (reused when the reel is unchanged)
   const reelSha = await hashFile(reel);
   let qa: QaOutcome;
-  if (state.qa && state.qa.video_sha256 === reelSha && (await exists(join(paths.qa, "report.json")))) {
+  if (state.qa && state.qa.video_sha256 === reelSha && state.qa.version === QA_VERSION && (await exists(join(paths.qa, "report.json")))) {
     qa = { status: state.qa.status, findings: state.qa.findings, report_json: join(paths.qa, "report.json"), report_md: join(paths.qa, "report.md") };
   } else {
     signal?.throwIfAborted();
@@ -731,6 +769,8 @@ async function runQaOn(root: string, state: RenderState, reelSha?: string): Prom
     height: state.target.height,
     duration_s: state.duration_ms / 1000,
     require_audio: true,
+    intended_silence: state.voice_mode === "none" && !state.music,
+    ...(state.background ? { background: state.background } : {}),
   });
   // Relative path in the report so the project folder stays portable.
   report.video = state.reel;
@@ -738,13 +778,14 @@ async function runQaOn(root: string, state: RenderState, reelSha?: string): Prom
   const findings: QaFinding[] = report.checks
     .filter((c) => c.status !== "ok")
     .map((c) => ({ id: c.id, status: c.status as "warn" | "fail", detail: c.detail, ...(c.fix ? { fix: c.fix } : {}) }));
-  if (!state.voice.has_audio) {
+  if (!state.voice.has_audio && !state.music) {
     for (const f of findings) {
       if (f.id === "silence" || f.id === "loudness") f.detail += " (expected: rendered with the silent voice backend)";
     }
   }
   const status = QA_MAP[report.status];
   state.qa = {
+    version: QA_VERSION,
     status,
     video_sha256: reelSha ?? (await hashFile(reel)),
     checks: report.checks.map((c) => ({ id: c.id, status: QA_MAP[c.status], message: c.detail })),
@@ -946,6 +987,7 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
       ...(lint ? { lint } : {}),
       ...(lintError ? { lintError } : {}),
       ...(state.qa ? { technicalQa: state.qa.status } : {}),
+      ...(state.music ? { music: { ref: state.music.ref, ...(state.music.title ? { title: state.music.title } : {}), ...(state.music.license ? { license: state.music.license } : {}) } } : {}),
     },
     allContracts.map((c) => c.id),
   );
@@ -964,7 +1006,8 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
       quality: state.quality,
       spec_sha256: state.spec_sha256,
       ...(state.content_ir_sha256 ? { content_ir_sha256: state.content_ir_sha256 } : {}),
-      voice: { backend: state.voice.backend, timing_source: state.voice.timing_source },
+      voice: { backend: state.voice.backend, timing_source: state.voice.timing_source, ...(state.voice_mode ? { mode: state.voice_mode } : {}) },
+      ...(state.music ? { music: { file: state.music.ref, ...(state.music.title ? { title: state.music.title } : {}), license: state.music.license ?? null } } : {}),
       scenes: state.scenes.map((s) => ({
         scene_id: s.scene_id,
         claim_refs: s.claim_refs,
@@ -1073,6 +1116,7 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
           },
         }
       : {}),
+    ...(state.music ? { music: { file: state.music.ref, sha256: state.music.sha256, ...(state.music.title ? { title: state.music.title } : {}), ...(state.music.license ? { license: state.music.license } : {}) } } : {}),
     ...(out.cover && state.cover
       ? {
           cover: {
@@ -1158,7 +1202,11 @@ async function lockFromState(root: string, state: RenderState, projectId: string
     fonts,
     targets: contracts.filter((c) => targetIds.has(c.id)).map((c) => ({ id: c.id, contract_version: c.contract_version, verified: c.verified })),
     scenes: state.scenes.map((s) => ({ scene_id: s.scene_id, renderer: s.renderer, renderer_version: s.renderer_version, cache_key: s.cache_key, clip_sha256: s.clip_sha256 })),
-    assets: await lockAssets(root, inputs),
+    // A user music file outside assets/ is an input too; a bundled bed is recorded by its ref.
+    assets: [
+      ...(await lockAssets(root, state.music && !state.music.ref.startsWith("bundled:") ? [...inputs, state.music.ref] : inputs)),
+      ...(state.music?.ref.startsWith("bundled:") ? [{ path: state.music.ref, sha256: state.music.sha256 }] : []),
+    ],
     outputs: outputs.map((o) => ({ path: o.path, sha256: o.sha256, ...(o.target ? { target: o.target } : {}) })),
   });
 }
