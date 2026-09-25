@@ -25,6 +25,9 @@ export const SCHEMA_NAMES = [
   "style",
   "experiment-plan",
   "experiment-manifest",
+  "demo-script",
+  "format-grammar",
+  "short-candidates",
 ] as const;
 export type SchemaName = (typeof SCHEMA_NAMES)[number];
 

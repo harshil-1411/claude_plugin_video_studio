@@ -229095,7 +229095,8 @@ const SourceKind = _enum([
 	"docx",
 	"pptx",
 	"repo",
-	"video"
+	"video",
+	"audio"
 ]);
 /**
 * Stable provenance reference into a source, e.g. `repo:src/a.ts#L10-L20`,
@@ -229228,6 +229229,33 @@ const Claim = strictObject({
 	kind: _enum(["quantitative", "qualitative"]),
 	evidence_refs: array(SourceRef).describe("Evidence spans supporting this claim.")
 });
+const Shot = strictObject({
+	start_sec: number().nonnegative(),
+	end_sec: number().positive(),
+	keyframe: Id.optional().describe("Image asset id of a representative frame.")
+});
+const Transcript = strictObject({
+	path: FilePath.describe("Project-relative JSON file with timed words: [{word, start_ms, end_ms}]."),
+	source: _enum([
+		"whisper",
+		"srt",
+		"vtt"
+	]).describe("whisper.cpp (local ASR) or a caption file the user supplied."),
+	model: string().optional().describe("ASR model, e.g. ggml-base.en."),
+	language: string().optional(),
+	words: int().nonnegative()
+}).describe("Timed transcript of the asset's speech.");
+const MediaInfo = strictObject({
+	duration_sec: number().nonnegative(),
+	width: int().positive().optional(),
+	height: int().positive().optional(),
+	fps: number().positive().optional(),
+	has_video: boolean(),
+	has_audio: boolean(),
+	shots: array(Shot).optional().describe("Shot boundaries from scene detection."),
+	transcript: Transcript.optional(),
+	loudness_lufs: number().optional()
+}).describe("Probe results for a video or audio asset.");
 const IrAsset = strictObject({
 	id: Id,
 	kind: _enum([
@@ -229237,7 +229265,8 @@ const IrAsset = strictObject({
 	]),
 	path: FilePath.describe("Project-relative path of the extracted asset."),
 	sha256: Sha256,
-	source_ref: SourceRef.optional()
+	source_ref: SourceRef.optional(),
+	media: MediaInfo.optional().describe("For video and audio assets.")
 });
 const Classification = strictObject({
 	contains_secrets: boolean(),
@@ -229518,6 +229547,43 @@ const Transition = _enum([
 	"whip"
 ]);
 const SceneId = string().regex(/^s\d{2,}$/, "scene id must look like s01, s02, ...");
+const AudioLicense = strictObject({
+	id: NonEmptyString.describe("SPDX id (e.g. CC0-1.0, CC-BY-4.0) or user-owned / licensed."),
+	source: string().optional().describe("Where the track came from (URL or description)."),
+	attribution: string().optional().describe("Credit line to show or post, when the licence requires one.")
+}).describe("Rights for an audio file; recorded in the manifest, video.lock and provenance.");
+const FootageClip = strictObject({
+	asset: Id.describe("ContentIR asset id of a video (or image) the user supplied or recorded."),
+	in_sec: number().nonnegative().describe("Start inside the asset."),
+	out_sec: number().positive().optional().describe("End inside the asset; default in_sec + scene duration."),
+	fit: _enum([
+		"cover",
+		"contain",
+		"blur_pad"
+	]).optional().describe("How the clip fills the frame: crop (default), letterbox, or a blurred copy behind it."),
+	focus: strictObject({
+		x: number().min(0).max(1),
+		y: number().min(0).max(1)
+	}).optional().describe("Crop centre for cover (0–1)."),
+	speed: number().min(.25).max(4).optional().describe("Playback rate (1 = normal)."),
+	loop: boolean().optional().describe("Loop a clip shorter than the scene (default: hold the last frame).")
+}).describe("A span of real footage shown in this scene.");
+const SceneAudio = strictObject({
+	mode: _enum([
+		"native",
+		"music",
+		"mute",
+		"mix"
+	]).describe("native: the clip's own sound; music: the bed only; mute: silence; mix: clip sound under the bed."),
+	native_db: number().min(-60).max(12).optional().describe("Gain on the clip's sound (default 0)."),
+	crossfade_ms: int().min(0).max(3e3).optional().describe("Audio crossfade into this scene.")
+}).describe("What this scene sounds like (footage scenes).");
+const SoundEffect = strictObject({
+	file: NonEmptyString.describe("Project-relative audio file."),
+	at_sec: number().min(0).describe("Offset inside the scene."),
+	volume_db: number().min(-60).max(6).optional(),
+	license: AudioLicense.optional()
+}).describe("A one-shot sound effect.");
 const Scene = strictObject({
 	id: SceneId,
 	duration_sec: number().positive().max(120),
@@ -229528,9 +229594,16 @@ const Scene = strictObject({
 	deterministic: DeterministicScene.optional(),
 	visual_requirements: VisualRequirements,
 	claim_refs: array(NonEmptyString).describe("Evidence source_refs or ContentIR claim ids backing this scene."),
-	transition: Transition.optional()
+	transition: Transition.optional(),
+	footage: FootageClip.optional().describe("Real footage for user_asset / screen_capture scenes; a deterministic block, if any, is drawn over it."),
+	audio: SceneAudio.optional(),
+	sfx: array(SoundEffect).max(8).optional()
 });
-const VoiceMode = _enum(["narrated", "none"]).describe("narrated: scenes carry voiceover (default). none: no speech; timing comes from scene durations and on-screen text, usually over a music bed.");
+const VoiceMode = _enum([
+	"narrated",
+	"none",
+	"native"
+]).describe("narrated: scenes carry voiceover (default). none: no speech; timing comes from scene durations and on-screen text, usually over a music bed. native: the speech is in the footage (talking head, interview); captions come from the asset transcripts.");
 const VoiceSettings = strictObject({
 	mode: VoiceMode.optional(),
 	provider_preference: array(Id).optional().describe("Preferred TTS providers in order; the router may override on policy."),
@@ -229542,21 +229615,22 @@ const CaptionSettings = strictObject({
 	burn_in: boolean(),
 	position: strictObject({ y: number().min(0).max(1).describe("Vertical centre of the caption block as a fraction of frame height.") }).optional().describe("Manual caption placement. Omit to let the caption engine place captions in the platforms' caption zone.")
 });
-const AudioLicense = strictObject({
-	id: NonEmptyString.describe("SPDX id (e.g. CC0-1.0, CC-BY-4.0) or user-owned / licensed."),
-	source: string().optional().describe("Where the track came from (URL or description)."),
-	attribution: string().optional().describe("Credit line to show or post, when the licence requires one.")
-}).describe("Rights for an audio file; recorded in the manifest, video.lock and provenance.");
-const AudioSettings = strictObject({ music: strictObject({
-	file: NonEmptyString.describe("`bundled:<id>` (music/ in the plugin) or a path relative to the project folder."),
-	volume_db: number().min(-60).max(0).optional().describe("Bed level before ducking. Default -18 dB."),
-	duck_db: number().min(-40).max(0).optional().describe("Extra attenuation while speech plays. Default -10 dB; ignored with voice.mode none."),
-	fade_in_ms: int().min(0).max(1e4).optional(),
-	fade_out_ms: int().min(0).max(1e4).optional(),
-	loop: boolean().optional().describe("Loop the track to cover the video (default true)."),
-	start_sec: number().min(0).optional().describe("Offset into the track."),
-	license: AudioLicense.optional().describe("Required for user files; bundled tracks carry their own.")
-}).describe("Background music mixed under the voice.").optional() }).describe("Audio beds beyond the voice.");
+const AudioSettings = strictObject({
+	music: strictObject({
+		file: NonEmptyString.describe("`bundled:<id>` (music/ in the plugin) or a path relative to the project folder."),
+		volume_db: number().min(-60).max(0).optional().describe("Bed level before ducking. Default -18 dB."),
+		duck_db: number().min(-40).max(0).optional().describe("Extra attenuation while speech plays. Default -10 dB; ignored with voice.mode none."),
+		fade_in_ms: int().min(0).max(1e4).optional(),
+		fade_out_ms: int().min(0).max(1e4).optional(),
+		loop: boolean().optional().describe("Loop the track to cover the video (default true)."),
+		start_sec: number().min(0).optional().describe("Offset into the track."),
+		license: AudioLicense.optional().describe("Required for user files; bundled tracks carry their own.")
+	}).describe("Background music mixed under the voice.").optional(),
+	beat_sync: strictObject({
+		enabled: boolean(),
+		tolerance_ms: int().min(0).max(1e3).optional()
+	}).optional().describe("Snap scene cuts to beats detected in the music bed (default tolerance 250 ms).")
+}).describe("Audio beds beyond the voice.");
 const MasterCanvas = strictObject({
 	width: int().min(2).max(7680),
 	height: int().min(2).max(7680),
@@ -230030,6 +230104,46 @@ function validateVideoSpecSemantics(spec, ir) {
 				}
 			}
 		}
+		if ((scene.visual_strategy === "user_asset" || scene.visual_strategy === "screen_capture") && !scene.footage) errors.push({
+			path: `${at}.footage`,
+			message: `${sid}: visual_strategy "${scene.visual_strategy}" needs footage {asset, in_sec}`,
+			fix: "add footage: {asset: <ContentIR video asset id>, in_sec: <start>, out_sec?: <end>} (ingest the video file first)"
+		});
+		if (scene.footage) {
+			const f = scene.footage;
+			if (f.out_sec !== void 0 && f.out_sec <= f.in_sec) errors.push({
+				path: `${at}.footage.out_sec`,
+				message: `${sid}: footage out_sec ${f.out_sec} is not after in_sec ${f.in_sec}`,
+				fix: "set out_sec > in_sec, or omit it to use the scene's duration"
+			});
+			const asset = ir?.assets.find((a) => a.id === f.asset);
+			if (ir && !asset) {
+				const near = closestMatches(f.asset, ir.assets.map((a) => a.id));
+				errors.push({
+					path: `${at}.footage.asset`,
+					message: `${sid}: footage asset "${f.asset}" is not a ContentIR asset id`,
+					fix: near.length ? `use an existing asset id, e.g. ${near.map((x) => `"${x}"`).join(", ")}` : "ingest the video file first"
+				});
+			} else if (asset?.media) {
+				const end = f.out_sec ?? f.in_sec + scene.duration_sec * (f.speed ?? 1);
+				if (f.in_sec >= asset.media.duration_sec) errors.push({
+					path: `${at}.footage.in_sec`,
+					message: `${sid}: footage starts at ${f.in_sec}s, after the end of "${f.asset}" (${asset.media.duration_sec}s)`,
+					fix: `use an in_sec below ${asset.media.duration_sec}`
+				});
+				else if (end > asset.media.duration_sec + .05 && !f.loop) warnings.push({
+					path: `${at}.footage`,
+					message: `${sid}: the clip runs past the end of "${f.asset}" (${asset.media.duration_sec}s); its last frame is held`,
+					fix: "shorten the scene, move in_sec earlier, or set loop: true"
+				});
+				const mode = scene.audio?.mode;
+				if ((mode === "native" || mode === "mix") && !asset.media.has_audio) warnings.push({
+					path: `${at}.audio.mode`,
+					message: `${sid}: audio "${mode}" but "${f.asset}" has no audio track`,
+					fix: "use audio.mode \"music\" or \"mute\""
+				});
+			}
+		}
 		if (scene.visual_strategy === "generated_video" && !scene.visual_requirements.subject) errors.push({
 			path: `${at}.visual_requirements.subject`,
 			message: `${sid}: visual_strategy "generated_video" needs a subject to generate`,
@@ -230134,6 +230248,20 @@ function validateVideoSpecSemantics(spec, ir) {
 			path: `publish.${key}`,
 			message: `publish copy for "${key}", which is not a target (${targets.length ? targets.join(", ") : "none"})`,
 			fix: targets.length ? `add "${key}" to targets, or rename the key to one of ${targets.join(", ")}` : `add "${key}" to targets or remove it`
+		});
+	}
+	if (voiceMode(spec) === "native") {
+		spec.scenes.forEach((scene, i) => {
+			if (scene.voiceover.trim()) errors.push({
+				path: `scenes.${i}.voiceover`,
+				message: `scene ${scene.id} has voiceover, but voice.mode is "native" (speech comes from the footage; nothing is synthesized)`,
+				fix: "set voiceover to \"\" (the transcript provides captions), or set voice.mode to \"narrated\""
+			});
+		});
+		if (!spec.scenes.some((sc) => sc.footage && (sc.audio?.mode ?? "native") !== "mute" && sc.audio?.mode !== "music")) warnings.push({
+			path: "voice.mode",
+			message: "voice.mode is \"native\" but no footage scene plays its own sound",
+			fix: "give footage scenes audio.mode \"native\" or \"mix\""
 		});
 	}
 	if (voiceMode(spec) === "none") {
@@ -230560,6 +230688,117 @@ const ExperimentManifest = strictObject({
 	id: "ExperimentManifest",
 	title: "ExperimentManifest",
 	description: "variants/experiment.json: which variant projects an experiment produced, from which base spec, and their render status."
+});
+//#endregion
+//#region ../schema/dist/footage.js
+/**
+* Phase 6 documents: a demo capture script (the user's running app → a screen recording), a
+* reference video's format grammar (structure only), and long-to-short clip candidates.
+*/
+const DemoStep = discriminatedUnion("action", [
+	strictObject({
+		action: literal("goto"),
+		url: NonEmptyString,
+		wait_ms: int().min(0).max(3e4).optional()
+	}),
+	strictObject({
+		action: literal("click"),
+		selector: NonEmptyString,
+		wait_ms: int().min(0).max(3e4).optional()
+	}),
+	strictObject({
+		action: literal("type"),
+		selector: NonEmptyString,
+		text: string(),
+		delay_ms: int().min(0).max(500).optional()
+	}),
+	strictObject({
+		action: literal("hover"),
+		selector: NonEmptyString
+	}),
+	strictObject({
+		action: literal("scroll"),
+		y: int(),
+		smooth: boolean().optional()
+	}),
+	strictObject({
+		action: literal("zoom"),
+		selector: NonEmptyString.describe("Element to zoom into (applied in post, from its box)."),
+		scale: number().min(1).max(4).optional(),
+		hold_ms: int().min(0).max(1e4).optional()
+	}),
+	strictObject({
+		action: literal("wait"),
+		ms: int().min(0).max(3e4)
+	})
+]);
+strictObject({
+	schema_version: SchemaVersion,
+	id: Id,
+	url: url$1().describe("The app the USER started, e.g. http://localhost:3000. The plugin never starts it."),
+	viewport: strictObject({
+		width: int().min(320).max(3840),
+		height: int().min(320).max(3840)
+	}),
+	steps: array(DemoStep).min(1).max(60),
+	mask_selectors: array(NonEmptyString).optional().describe("Elements blurred in the recording (inputs are always masked)."),
+	max_duration_sec: number().positive().max(300).optional()
+}).meta({
+	id: "DemoScript",
+	title: "DemoScript",
+	description: "project/demo.json: a scripted walk through the user's running app, recorded by the demo tool."
+});
+strictObject({
+	schema_version: SchemaVersion,
+	duration_sec: number().nonnegative(),
+	aspect_ratio: string(),
+	shots: array(strictObject({
+		start_sec: number().nonnegative(),
+		end_sec: number().positive()
+	})),
+	avg_shot_sec: number().nonnegative(),
+	cuts_per_10s: number().nonnegative(),
+	hook_shot_sec: number().nonnegative().describe("Length of the first shot."),
+	has_speech: boolean().optional(),
+	speech_ratio: number().min(0).max(1).optional(),
+	loudness_lufs: number().optional(),
+	caption_band: strictObject({
+		y_from: number().min(0).max(1),
+		y_to: number().min(0).max(1)
+	}).nullable().describe("Where burned-in text most likely sits (normalized), or null when none was found."),
+	pacing: _enum([
+		"slow",
+		"medium",
+		"fast"
+	]),
+	notes: array(string())
+}).meta({
+	id: "FormatGrammar",
+	title: "FormatGrammar",
+	description: "A reference video's structure (shot lengths, pacing, caption band, speech share). Never its words, images or audio."
+});
+const ShortCandidate = strictObject({
+	id: Id,
+	asset: Id,
+	start_sec: number().nonnegative(),
+	end_sec: number().positive(),
+	score: number().min(0).max(1),
+	reasons: array(string()),
+	transcript: string().describe("The words spoken in the span."),
+	hook: string().describe("The first sentence of the span.")
+});
+strictObject({
+	schema_version: SchemaVersion,
+	asset: Id,
+	target_sec: strictObject({
+		min: number().positive(),
+		max: number().positive()
+	}),
+	candidates: array(ShortCandidate)
+}).meta({
+	id: "ShortCandidates",
+	title: "ShortCandidates",
+	description: "Scored spans of a long recording that could stand alone as shorts."
 });
 //#endregion
 //#region ../schema/dist/brand.js
@@ -239891,7 +240130,10 @@ const SCHEMA_NAMES = [
 	"video-lock",
 	"style",
 	"experiment-plan",
-	"experiment-manifest"
+	"experiment-manifest",
+	"demo-script",
+	"format-grammar",
+	"short-candidates"
 ];
 /**
 * Locate the bundled `schemas/` directory: `${CLAUDE_PLUGIN_ROOT}/schemas` first, then
@@ -240139,6 +240381,31 @@ function formatAdapt(r) {
 		...r.validation.errors.map((e) => `- error ${e.path}: ${e.message} (fix: ${e.fix})`),
 		...r.notes.map((n) => `note: ${n}`)
 	].join("\n");
+}
+//#endregion
+//#region src/analyze.ts
+/**
+* analyze: a reference video → its format grammar (structure only: shots, pacing, caption band,
+* speech share). shorts: a long recording's transcript × shots → scored standalone spans.
+*
+* STUB (coordinator): the footage agent implements these.
+*/
+async function analyzeVideo(_path, _opts = {}) {
+	throw new Error("not implemented: analyzeVideo");
+}
+function formatGrammar(_g) {
+	throw new Error("not implemented: formatGrammar");
+}
+async function findShorts(_projectDir, _asset, _opts = {}) {
+	throw new Error("not implemented: findShorts");
+}
+function formatShorts(_s) {
+	throw new Error("not implemented: formatShorts");
+}
+//#endregion
+//#region src/transcribe.ts
+async function transcribeAsset(_projectDir, _asset, _opts = {}) {
+	throw new Error("not implemented: transcribeAsset");
 }
 /**
 * A frame passes when its SSIM against the golden is at least this. Tolerant of encoder and
@@ -245842,6 +246109,67 @@ function createServer(options = {}) {
 		const { project_dir, out_dir, ...opts } = args;
 		const r = await adaptProject(resolveInputPath(project_dir, cwd()), resolveInputPath(out_dir, cwd()), opts);
 		return jsonResult(formatAdapt(r), r);
+	}));
+	server.registerTool("transcribe", {
+		title: "Transcribe a video or audio asset",
+		description: "Produce a timed-word transcript for a ContentIR video/audio asset of <project_dir> with local whisper.cpp (whisper-cli), or import a caption file the user supplied (captions_file: project-relative .srt/.vtt). Writes source/transcripts/<asset>.json and records it on the asset's media.transcript, so captions, shorts and talking-head scenes can use it. The whisper model (~150 MB) is downloaded only with download_model: true; ask the user first. Local only.",
+		inputSchema: {
+			project_dir: string().min(1),
+			asset: string().min(1).describe("ContentIR asset id (see ingest output)"),
+			captions_file: string().min(1).optional().describe("Import this .srt/.vtt instead of running ASR"),
+			download_model: boolean().optional().describe("Consent to download the whisper base.en model into the plugin data dir")
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: true
+		}
+	}, safe(async (args) => {
+		const r = await transcribeAsset(resolveInputPath(args.project_dir, cwd()), args.asset, {
+			...args.captions_file ? { captions_file: args.captions_file } : {},
+			...args.download_model ? { download_model: true } : {},
+			env
+		});
+		return jsonResult(`transcribed ${r.asset} (${r.source}): ${r.words} words → ${r.path}`, r);
+	}));
+	server.registerTool("shorts", {
+		title: "Find standalone shorts in a long recording",
+		description: "Score spans of a transcribed video asset of <project_dir> that could stand alone as shorts (min_sec–max_sec, default 20–60 s): sentence-complete starts and ends, a strong first line, snapped to shot boundaries, dense speech, no overlap. Writes qa/shorts.json. Returns {candidates: [{id, start_sec, end_sec, score, reasons, hook, transcript}]}; turn the chosen ones into talking-head specs (footage scenes with audio.mode native).",
+		inputSchema: {
+			project_dir: string().min(1),
+			asset: string().min(1).describe("Transcribed video asset id"),
+			min_sec: number().positive().optional(),
+			max_sec: number().positive().optional(),
+			count: int().positive().max(10).optional().describe("How many candidates (default 3)")
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async (args) => {
+		const { project_dir, asset, ...opts } = args;
+		const r = await findShorts(resolveInputPath(project_dir, cwd()), asset, opts);
+		return jsonResult(formatShorts(r), r);
+	}));
+	server.registerTool("analyze", {
+		title: "Analyze a reference video's format",
+		description: "Clean-room analysis of a reference video file: shot lengths (scene detection), cuts per 10 s, first-shot length, pacing, speech share, loudness and the band where burned-in text sits. Returns structure only (FormatGrammar), never its words, frames or audio; use it to pick pacing and caption placement for your own video. Local ffmpeg only.",
+		inputSchema: {
+			path: string().min(1).describe("Video file to analyze"),
+			project_dir: string().min(1).optional().describe("Write qa/analysis.{json,md} into this project")
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async (args) => {
+		const g = await analyzeVideo(resolveInputPath(args.path, cwd()), args.project_dir ? { projectDir: resolveInputPath(args.project_dir, cwd()) } : {});
+		return jsonResult(formatGrammar(g), g);
 	}));
 	return server;
 }

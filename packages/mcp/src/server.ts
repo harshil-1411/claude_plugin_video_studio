@@ -10,6 +10,8 @@ import { z } from "zod";
 import { type DoctorDeps, defaultDoctorDeps, formatDoctorReport, runDoctor } from "./doctor.js";
 import { SCHEMA_NAMES, findSchemasDir, resolveInputPath } from "./paths.js";
 import { type AdaptOptions, adaptProject, formatAdapt } from "./adapt.js";
+import { analyzeVideo, findShorts, formatGrammar, formatShorts } from "./analyze.js";
+import { transcribeAsset } from "./transcribe.js";
 import { diffProjects, formatDiff } from "./diff.js";
 import { formatGolden, testProject } from "./golden.js";
 import { formatLint, lintProject } from "./lint.js";
@@ -597,6 +599,70 @@ export function createServer(options: ServerOptions = {}): McpServer {
       const { project_dir, out_dir, ...opts } = args;
       const r = await adaptProject(resolveInputPath(project_dir, cwd()), resolveInputPath(out_dir, cwd()), opts);
       return jsonResult(formatAdapt(r), r as unknown as Record<string, unknown>);
+    }),
+  );
+
+  server.registerTool(
+    "transcribe",
+    {
+      title: "Transcribe a video or audio asset",
+      description:
+        "Produce a timed-word transcript for a ContentIR video/audio asset of <project_dir> with local whisper.cpp (whisper-cli), or import a caption file the user supplied (captions_file: project-relative .srt/.vtt). Writes source/transcripts/<asset>.json and records it on the asset's media.transcript, so captions, shorts and talking-head scenes can use it. The whisper model (~150 MB) is downloaded only with download_model: true; ask the user first. Local only.",
+      inputSchema: {
+        project_dir: z.string().min(1),
+        asset: z.string().min(1).describe("ContentIR asset id (see ingest output)"),
+        captions_file: z.string().min(1).optional().describe("Import this .srt/.vtt instead of running ASR"),
+        download_model: z.boolean().optional().describe("Consent to download the whisper base.en model into the plugin data dir"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    safe(async (args: { project_dir: string; asset: string; captions_file?: string; download_model?: boolean }) => {
+      const r = await transcribeAsset(resolveInputPath(args.project_dir, cwd()), args.asset, {
+        ...(args.captions_file ? { captions_file: args.captions_file } : {}),
+        ...(args.download_model ? { download_model: true } : {}),
+        env,
+      });
+      return jsonResult(`transcribed ${r.asset} (${r.source}): ${r.words} words → ${r.path}`, r as unknown as Record<string, unknown>);
+    }),
+  );
+
+  server.registerTool(
+    "shorts",
+    {
+      title: "Find standalone shorts in a long recording",
+      description:
+        "Score spans of a transcribed video asset of <project_dir> that could stand alone as shorts (min_sec–max_sec, default 20–60 s): sentence-complete starts and ends, a strong first line, snapped to shot boundaries, dense speech, no overlap. Writes qa/shorts.json. Returns {candidates: [{id, start_sec, end_sec, score, reasons, hook, transcript}]}; turn the chosen ones into talking-head specs (footage scenes with audio.mode native).",
+      inputSchema: {
+        project_dir: z.string().min(1),
+        asset: z.string().min(1).describe("Transcribed video asset id"),
+        min_sec: z.number().positive().optional(),
+        max_sec: z.number().positive().optional(),
+        count: z.int().positive().max(10).optional().describe("How many candidates (default 3)"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async (args: { project_dir: string; asset: string; min_sec?: number; max_sec?: number; count?: number }) => {
+      const { project_dir, asset, ...opts } = args;
+      const r = await findShorts(resolveInputPath(project_dir, cwd()), asset, opts);
+      return jsonResult(formatShorts(r), r as unknown as Record<string, unknown>);
+    }),
+  );
+
+  server.registerTool(
+    "analyze",
+    {
+      title: "Analyze a reference video's format",
+      description:
+        "Clean-room analysis of a reference video file: shot lengths (scene detection), cuts per 10 s, first-shot length, pacing, speech share, loudness and the band where burned-in text sits. Returns structure only (FormatGrammar), never its words, frames or audio; use it to pick pacing and caption placement for your own video. Local ffmpeg only.",
+      inputSchema: {
+        path: z.string().min(1).describe("Video file to analyze"),
+        project_dir: z.string().min(1).optional().describe("Write qa/analysis.{json,md} into this project"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async (args: { path: string; project_dir?: string }) => {
+      const g = await analyzeVideo(resolveInputPath(args.path, cwd()), args.project_dir ? { projectDir: resolveInputPath(args.project_dir, cwd()) } : {});
+      return jsonResult(formatGrammar(g), g as unknown as Record<string, unknown>);
     }),
   );
 

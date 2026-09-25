@@ -23,7 +23,7 @@ export const LanguageTag = z
   .string()
   .regex(/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/, "expected a BCP-47 language tag such as en-US");
 
-export const SourceKind = z.enum(["text", "markdown", "url", "pdf", "docx", "pptx", "repo", "video"]);
+export const SourceKind = z.enum(["text", "markdown", "url", "pdf", "docx", "pptx", "repo", "video", "audio"]);
 
 /**
  * Stable provenance reference into a source, e.g. `repo:src/a.ts#L10-L20`,

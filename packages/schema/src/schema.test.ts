@@ -401,6 +401,42 @@ describe("Phase 5: reel grammar, voice mode and music", () => {
   });
 });
 
+describe("Phase 6: footage scenes and native voice", () => {
+  const withIr = (ir: ReturnType<typeof ContentIR.parse>) => (spec: VideoSpecT) => validateVideoSpecSemantics(spec, ir);
+  const baseIr = () => {
+    const r = parseYamlOrJson(ContentIR, read(FIXTURES["content-ir"]));
+    if (!r.ok) throw new Error(r.message);
+    return r.data;
+  };
+
+  it("user_asset scenes need footage from a known video asset, inside its length", () => {
+    const ir = baseIr();
+    ir.assets.push({ id: "v1", kind: "video", path: "source/assets/talk.mp4", sha256: "a".repeat(64), media: { duration_sec: 10, has_video: true, has_audio: false } });
+    const s = clone(loadSpec());
+    const sc = s.scenes[1]!;
+    sc.visual_strategy = "user_asset";
+    delete sc.deterministic;
+    expect(withIr(ir)(s).errors.map((e) => e.path)).toContain("scenes.1.footage");
+    sc.footage = { asset: "v2", in_sec: 0 };
+    expect(withIr(ir)(s).errors.map((e) => e.path)).toContain("scenes.1.footage.asset");
+    sc.footage = { asset: "v1", in_sec: 12 };
+    expect(withIr(ir)(s).errors.map((e) => e.path)).toContain("scenes.1.footage.in_sec");
+    sc.footage = { asset: "v1", in_sec: 1 };
+    sc.audio = { mode: "native" };
+    const r = withIr(ir)(s);
+    expect(r.errors.filter((e) => e.path.startsWith("scenes.1.footage"))).toEqual([]);
+    expect(r.warnings.map((w) => w.path)).toContain("scenes.1.audio.mode"); // v1 has no audio track
+  });
+
+  it("voice.mode native forbids synthesized voiceover", () => {
+    const s = clone(loadSpec());
+    s.voice.mode = "native";
+    const r = validateVideoSpecSemantics(s);
+    expect(r.errors.some((e) => e.path.endsWith(".voiceover"))).toBe(true);
+    expect(r.warnings.map((w) => w.path)).toContain("voice.mode");
+  });
+});
+
 describe("Brand v2 (M4)", () => {
   it("parses the v2 blocks and keeps v1 files valid", () => {
     expect(parseYamlOrJson(Brand, read(FIXTURES.brand)).ok).toBe(true);

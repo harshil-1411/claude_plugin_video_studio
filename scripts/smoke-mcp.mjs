@@ -16,6 +16,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bundle = join(root, "dist/mcp.mjs");
 const expected = [
   "adapt",
+  "analyze",
   "brief_validate",
   "diff",
   "doctor",
@@ -27,12 +28,14 @@ const expected = [
   "qa_run",
   "render_submit",
   "schema_get",
+  "shorts",
   "spec_scaffold",
   "spec_validate",
   "storyboard_render",
   "template_get",
   "template_list",
   "test",
+  "transcribe",
   "variants",
   "verify",
 ];

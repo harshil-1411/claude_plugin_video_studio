@@ -240,7 +240,8 @@
       "description": "Archetypes without speech (e.g. text-over-music) set none.",
       "enum": [
         "narrated",
-        "none"
+        "none",
+        "native"
       ],
       "type": "string"
     }

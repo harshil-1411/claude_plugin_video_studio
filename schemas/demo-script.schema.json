@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:demo-script",
+  "title": "DemoScript",
+  "description": "project/demo.json: a scripted walk through the user's running app, recorded by the demo tool.",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "mask_selectors": {
+      "description": "Elements blurred in the recording (inputs are always masked).",
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "max_duration_sec": {
+      "exclusiveMinimum": 0,
+      "maximum": 300,
+      "type": "number"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    },
+    "steps": {
+      "items": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "goto",
+                "type": "string"
+              },
+              "url": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "wait_ms": {
+                "maximum": 30000,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "action",
+              "url"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "click",
+                "type": "string"
+              },
+              "selector": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "wait_ms": {
+                "maximum": 30000,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "action",
+              "selector"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "type",
+                "type": "string"
+              },
+              "delay_ms": {
+                "maximum": 500,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "selector": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "selector",
+              "text"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "hover",
+                "type": "string"
+              },
+              "selector": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "selector"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "scroll",
+                "type": "string"
+              },
+              "smooth": {
+                "type": "boolean"
+              },
+              "y": {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "action",
+              "y"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "zoom",
+                "type": "string"
+              },
+              "hold_ms": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "scale": {
+                "maximum": 4,
+                "minimum": 1,
+                "type": "number"
+              },
+              "selector": {
+                "description": "Element to zoom into (applied in post, from its box).",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "selector"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "wait",
+                "type": "string"
+              },
+              "ms": {
+                "maximum": 30000,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "action",
+              "ms"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "maxItems": 60,
+      "minItems": 1,
+      "type": "array"
+    },
+    "url": {
+      "description": "The app the USER started, e.g. http://localhost:3000. The plugin never starts it.",
+      "format": "uri",
+      "type": "string"
+    },
+    "viewport": {
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "maximum": 3840,
+          "minimum": 320,
+          "type": "integer"
+        },
+        "width": {
+          "maximum": 3840,
+          "minimum": 320,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "url",
+    "viewport",
+    "steps"
+  ],
+  "type": "object"
+}

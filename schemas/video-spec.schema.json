@@ -22,6 +22,24 @@
       "description": "Audio beds beyond the voice.",
       "additionalProperties": false,
       "properties": {
+        "beat_sync": {
+          "description": "Snap scene cuts to beats detected in the music bed (default tolerance 250 ms).",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "tolerance_ms": {
+              "maximum": 1000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "enabled"
+          ],
+          "type": "object"
+        },
         "music": {
           "description": "Background music mixed under the voice.",
           "additionalProperties": false,
@@ -278,6 +296,38 @@
       "items": {
         "additionalProperties": false,
         "properties": {
+          "audio": {
+            "description": "What this scene sounds like (footage scenes).",
+            "additionalProperties": false,
+            "properties": {
+              "crossfade_ms": {
+                "description": "Audio crossfade into this scene.",
+                "maximum": 3000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "mode": {
+                "description": "native: the clip's own sound; music: the bed only; mute: silence; mix: clip sound under the bed.",
+                "enum": [
+                  "native",
+                  "music",
+                  "mute",
+                  "mix"
+                ],
+                "type": "string"
+              },
+              "native_db": {
+                "description": "Gain on the clip's sound (default 0).",
+                "maximum": 12,
+                "minimum": -60,
+                "type": "number"
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "type": "object"
+          },
           "claim_refs": {
             "description": "Evidence source_refs or ContentIR claim ids backing this scene.",
             "items": {
@@ -330,6 +380,72 @@
             "maximum": 120,
             "type": "number"
           },
+          "footage": {
+            "description": "Real footage for user_asset / screen_capture scenes; a deterministic block, if any, is drawn over it.",
+            "additionalProperties": false,
+            "properties": {
+              "asset": {
+                "description": "ContentIR asset id of a video (or image) the user supplied or recorded.",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                "type": "string"
+              },
+              "fit": {
+                "description": "How the clip fills the frame: crop (default), letterbox, or a blurred copy behind it.",
+                "enum": [
+                  "cover",
+                  "contain",
+                  "blur_pad"
+                ],
+                "type": "string"
+              },
+              "focus": {
+                "description": "Crop centre for cover (0–1).",
+                "additionalProperties": false,
+                "properties": {
+                  "x": {
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "y": {
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "in_sec": {
+                "description": "Start inside the asset.",
+                "minimum": 0,
+                "type": "number"
+              },
+              "loop": {
+                "description": "Loop a clip shorter than the scene (default: hold the last frame).",
+                "type": "boolean"
+              },
+              "out_sec": {
+                "description": "End inside the asset; default in_sec + scene duration.",
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "speed": {
+                "description": "Playback rate (1 = normal).",
+                "maximum": 4,
+                "minimum": 0.25,
+                "type": "number"
+              }
+            },
+            "required": [
+              "asset",
+              "in_sec"
+            ],
+            "type": "object"
+          },
           "id": {
             "pattern": "^s\\d{2,}$",
             "type": "string"
@@ -360,6 +476,59 @@
               "loop_back"
             ],
             "type": "string"
+          },
+          "sfx": {
+            "items": {
+              "description": "A one-shot sound effect.",
+              "additionalProperties": false,
+              "properties": {
+                "at_sec": {
+                  "description": "Offset inside the scene.",
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "file": {
+                  "description": "Project-relative audio file.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "license": {
+                  "description": "Rights for an audio file; recorded in the manifest, video.lock and provenance.",
+                  "additionalProperties": false,
+                  "properties": {
+                    "attribution": {
+                      "description": "Credit line to show or post, when the licence requires one.",
+                      "type": "string"
+                    },
+                    "id": {
+                      "description": "SPDX id (e.g. CC0-1.0, CC-BY-4.0) or user-owned / licensed.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "source": {
+                      "description": "Where the track came from (URL or description).",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "type": "object"
+                },
+                "volume_db": {
+                  "maximum": 6,
+                  "minimum": -60,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "file",
+                "at_sec"
+              ],
+              "type": "object"
+            },
+            "maxItems": 8,
+            "type": "array"
           },
           "transition": {
             "enum": [
@@ -515,10 +684,11 @@
       "additionalProperties": false,
       "properties": {
         "mode": {
-          "description": "narrated: scenes carry voiceover (default). none: no speech; timing comes from scene durations and on-screen text, usually over a music bed.",
+          "description": "narrated: scenes carry voiceover (default). none: no speech; timing comes from scene durations and on-screen text, usually over a music bed. native: the speech is in the footage (talking head, interview); captions come from the asset transcripts.",
           "enum": [
             "narrated",
-            "none"
+            "none",
+            "native"
           ],
           "type": "string"
         },

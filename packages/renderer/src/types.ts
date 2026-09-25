@@ -1,5 +1,5 @@
 import type { LayoutZones } from "@video-studio/platforms";
-import type { AspectRatio, Brand, Scene, TextBox } from "@video-studio/schema";
+import type { AspectRatio, Brand, MediaInfo, Scene, TextBox } from "@video-studio/schema";
 
 /**
  * Renders deterministic (motion_graphic) scenes to silent video clips.
@@ -56,6 +56,8 @@ export interface SceneRenderRequest {
   project_dir: string;
   /** Layout zones for the enabled platform targets. Absent: the renderer's built-in safe area. */
   zones?: LayoutZones;
+  /** Resolved footage for scenes with `footage` (absolute path, hash and probe of the asset). */
+  footage?: { path: string; sha256: string; media: MediaInfo };
 }
 
 export interface SceneRenderResult {

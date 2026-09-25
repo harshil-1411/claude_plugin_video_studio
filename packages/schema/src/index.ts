@@ -5,6 +5,7 @@ export * from "./video-spec.js";
 export * from "./render-manifest.js";
 export * from "./video-lock.js";
 export * from "./experiment.js";
+export * from "./footage.js";
 export * from "./brand.js";
 export * from "./style.js";
 export * from "./platform-contract.js";

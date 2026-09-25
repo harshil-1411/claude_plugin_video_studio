@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:short-candidates",
+  "title": "ShortCandidates",
+  "description": "Scored spans of a long recording that could stand alone as shorts.",
+  "additionalProperties": false,
+  "properties": {
+    "asset": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "candidates": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "asset": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "end_sec": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "hook": {
+            "description": "The first sentence of the span.",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "score": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "start_sec": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "transcript": {
+            "description": "The words spoken in the span.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "asset",
+          "start_sec",
+          "end_sec",
+          "score",
+          "reasons",
+          "transcript",
+          "hook"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    },
+    "target_sec": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "min": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "asset",
+    "target_sec",
+    "candidates"
+  ],
+  "type": "object"
+}

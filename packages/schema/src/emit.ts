@@ -9,6 +9,7 @@ import { PlatformContract } from "./platform-contract.js";
 import { Policy } from "./policy.js";
 import { RenderManifest } from "./render-manifest.js";
 import { ExperimentManifest, ExperimentPlan } from "./experiment.js";
+import { DemoScript, FormatGrammar, ShortCandidates } from "./footage.js";
 import { Style } from "./style.js";
 import { Template } from "./template.js";
 import { VideoLock } from "./video-lock.js";
@@ -28,6 +29,9 @@ export const EMITTED_SCHEMAS = {
   style: Style,
   "experiment-plan": ExperimentPlan,
   "experiment-manifest": ExperimentManifest,
+  "demo-script": DemoScript,
+  "format-grammar": FormatGrammar,
+  "short-candidates": ShortCandidates,
 } as const satisfies Record<string, z.ZodType>;
 
 export type EmittedSchemaName = keyof typeof EMITTED_SCHEMAS;

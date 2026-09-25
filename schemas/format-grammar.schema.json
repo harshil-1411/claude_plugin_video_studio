@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:format-grammar",
+  "title": "FormatGrammar",
+  "description": "A reference video's structure (shot lengths, pacing, caption band, speech share). Never its words, images or audio.",
+  "additionalProperties": false,
+  "properties": {
+    "aspect_ratio": {
+      "type": "string"
+    },
+    "avg_shot_sec": {
+      "minimum": 0,
+      "type": "number"
+    },
+    "caption_band": {
+      "description": "Where burned-in text most likely sits (normalized), or null when none was found.",
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "y_from": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "y_to": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "y_from",
+            "y_to"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "cuts_per_10s": {
+      "minimum": 0,
+      "type": "number"
+    },
+    "duration_sec": {
+      "minimum": 0,
+      "type": "number"
+    },
+    "has_speech": {
+      "type": "boolean"
+    },
+    "hook_shot_sec": {
+      "description": "Length of the first shot.",
+      "minimum": 0,
+      "type": "number"
+    },
+    "loudness_lufs": {
+      "type": "number"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "pacing": {
+      "enum": [
+        "slow",
+        "medium",
+        "fast"
+      ],
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    },
+    "shots": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "end_sec": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "start_sec": {
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "start_sec",
+          "end_sec"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "speech_ratio": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": "number"
+    }
+  },
+  "required": [
+    "schema_version",
+    "duration_sec",
+    "aspect_ratio",
+    "shots",
+    "avg_shot_sec",
+    "cuts_per_10s",
+    "hook_shot_sec",
+    "caption_band",
+    "pacing",
+    "notes"
+  ],
+  "type": "object"
+}

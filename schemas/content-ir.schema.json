@@ -21,6 +21,110 @@
             ],
             "type": "string"
           },
+          "media": {
+            "description": "For video and audio assets.",
+            "additionalProperties": false,
+            "properties": {
+              "duration_sec": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "fps": {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "has_audio": {
+                "type": "boolean"
+              },
+              "has_video": {
+                "type": "boolean"
+              },
+              "height": {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              "loudness_lufs": {
+                "type": "number"
+              },
+              "shots": {
+                "description": "Shot boundaries from scene detection.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "end_sec": {
+                      "exclusiveMinimum": 0,
+                      "type": "number"
+                    },
+                    "keyframe": {
+                      "description": "Image asset id of a representative frame.",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                      "type": "string"
+                    },
+                    "start_sec": {
+                      "minimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "start_sec",
+                    "end_sec"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "transcript": {
+                "description": "Timed transcript of the asset's speech.",
+                "additionalProperties": false,
+                "properties": {
+                  "language": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "description": "ASR model, e.g. ggml-base.en.",
+                    "type": "string"
+                  },
+                  "path": {
+                    "description": "Project-relative JSON file with timed words: [{word, start_ms, end_ms}].",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "source": {
+                    "description": "whisper.cpp (local ASR) or a caption file the user supplied.",
+                    "enum": [
+                      "whisper",
+                      "srt",
+                      "vtt"
+                    ],
+                    "type": "string"
+                  },
+                  "words": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "path",
+                  "source",
+                  "words"
+                ],
+                "type": "object"
+              },
+              "width": {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "duration_sec",
+              "has_video",
+              "has_audio"
+            ],
+            "type": "object"
+          },
           "path": {
             "description": "Project-relative path of the extracted asset.",
             "minLength": 1,
@@ -306,7 +410,8 @@
               "docx",
               "pptx",
               "repo",
-              "video"
+              "video",
+              "audio"
             ],
             "type": "string"
           },

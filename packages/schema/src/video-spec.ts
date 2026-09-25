@@ -96,6 +96,45 @@ export const Transition = z.enum(["cut", "crossfade", "fade_black", "slide", "zo
 
 export const SceneId = z.string().regex(/^s\d{2,}$/, "scene id must look like s01, s02, ...");
 
+export const AudioLicense = z
+  .strictObject({
+    id: NonEmptyString.describe("SPDX id (e.g. CC0-1.0, CC-BY-4.0) or user-owned / licensed."),
+    source: z.string().optional().describe("Where the track came from (URL or description)."),
+    attribution: z.string().optional().describe("Credit line to show or post, when the licence requires one."),
+  })
+  .describe("Rights for an audio file; recorded in the manifest, video.lock and provenance.");
+
+export const FootageClip = z
+  .strictObject({
+    asset: Id.describe("ContentIR asset id of a video (or image) the user supplied or recorded."),
+    in_sec: z.number().nonnegative().describe("Start inside the asset."),
+    out_sec: z.number().positive().optional().describe("End inside the asset; default in_sec + scene duration."),
+    fit: z.enum(["cover", "contain", "blur_pad"]).optional().describe("How the clip fills the frame: crop (default), letterbox, or a blurred copy behind it."),
+    focus: z.strictObject({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).optional().describe("Crop centre for cover (0–1)."),
+    speed: z.number().min(0.25).max(4).optional().describe("Playback rate (1 = normal)."),
+    loop: z.boolean().optional().describe("Loop a clip shorter than the scene (default: hold the last frame)."),
+  })
+  .describe("A span of real footage shown in this scene.");
+
+export const SceneAudioMode = z.enum(["native", "music", "mute", "mix"]);
+
+export const SceneAudio = z
+  .strictObject({
+    mode: SceneAudioMode.describe("native: the clip's own sound; music: the bed only; mute: silence; mix: clip sound under the bed."),
+    native_db: z.number().min(-60).max(12).optional().describe("Gain on the clip's sound (default 0)."),
+    crossfade_ms: z.int().min(0).max(3000).optional().describe("Audio crossfade into this scene."),
+  })
+  .describe("What this scene sounds like (footage scenes).");
+
+export const SoundEffect = z
+  .strictObject({
+    file: NonEmptyString.describe("Project-relative audio file."),
+    at_sec: z.number().min(0).describe("Offset inside the scene."),
+    volume_db: z.number().min(-60).max(6).optional(),
+    license: AudioLicense.optional(),
+  })
+  .describe("A one-shot sound effect.");
+
 export const Scene = z.strictObject({
   id: SceneId,
   duration_sec: z.number().positive().max(120),
@@ -107,11 +146,16 @@ export const Scene = z.strictObject({
   visual_requirements: VisualRequirements,
   claim_refs: z.array(NonEmptyString).describe("Evidence source_refs or ContentIR claim ids backing this scene."),
   transition: Transition.optional(),
+  footage: FootageClip.optional().describe("Real footage for user_asset / screen_capture scenes; a deterministic block, if any, is drawn over it."),
+  audio: SceneAudio.optional(),
+  sfx: z.array(SoundEffect).max(8).optional(),
 });
 
 export const VoiceMode = z
-  .enum(["narrated", "none"])
-  .describe("narrated: scenes carry voiceover (default). none: no speech; timing comes from scene durations and on-screen text, usually over a music bed.");
+  .enum(["narrated", "none", "native"])
+  .describe(
+    "narrated: scenes carry voiceover (default). none: no speech; timing comes from scene durations and on-screen text, usually over a music bed. native: the speech is in the footage (talking head, interview); captions come from the asset transcripts.",
+  );
 
 export const VoiceSettings = z.strictObject({
   mode: VoiceMode.optional(),
@@ -129,14 +173,6 @@ export const CaptionSettings = z.strictObject({
     .describe("Manual caption placement. Omit to let the caption engine place captions in the platforms' caption zone."),
 });
 
-export const AudioLicense = z
-  .strictObject({
-    id: NonEmptyString.describe("SPDX id (e.g. CC0-1.0, CC-BY-4.0) or user-owned / licensed."),
-    source: z.string().optional().describe("Where the track came from (URL or description)."),
-    attribution: z.string().optional().describe("Credit line to show or post, when the licence requires one."),
-  })
-  .describe("Rights for an audio file; recorded in the manifest, video.lock and provenance.");
-
 export const MusicBed = z
   .strictObject({
     file: NonEmptyString.describe("`bundled:<id>` (music/ in the plugin) or a path relative to the project folder."),
@@ -150,7 +186,15 @@ export const MusicBed = z
   })
   .describe("Background music mixed under the voice.");
 
-export const AudioSettings = z.strictObject({ music: MusicBed.optional() }).describe("Audio beds beyond the voice.");
+export const AudioSettings = z
+  .strictObject({
+    music: MusicBed.optional(),
+    beat_sync: z
+      .strictObject({ enabled: z.boolean(), tolerance_ms: z.int().min(0).max(1000).optional() })
+      .optional()
+      .describe("Snap scene cuts to beats detected in the music bed (default tolerance 250 ms)."),
+  })
+  .describe("Audio beds beyond the voice.");
 
 export const MasterCanvas = z
   .strictObject({
@@ -225,6 +269,9 @@ export type VoiceSettings = z.infer<typeof VoiceSettings>;
 export type VoiceMode = z.infer<typeof VoiceMode>;
 export type AudioLicense = z.infer<typeof AudioLicense>;
 export type MusicBed = z.infer<typeof MusicBed>;
+export type FootageClip = z.infer<typeof FootageClip>;
+export type SceneAudio = z.infer<typeof SceneAudio>;
+export type SoundEffect = z.infer<typeof SoundEffect>;
 export type AudioSettings = z.infer<typeof AudioSettings>;
 export type CaptionSettings = z.infer<typeof CaptionSettings>;
 export type MasterCanvas = z.infer<typeof MasterCanvas>;
@@ -603,6 +650,39 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
         }
       }
     }
+    if ((scene.visual_strategy === "user_asset" || scene.visual_strategy === "screen_capture") && !scene.footage) {
+      errors.push({
+        path: `${at}.footage`,
+        message: `${sid}: visual_strategy "${scene.visual_strategy}" needs footage {asset, in_sec}`,
+        fix: "add footage: {asset: <ContentIR video asset id>, in_sec: <start>, out_sec?: <end>} (ingest the video file first)",
+      });
+    }
+    if (scene.footage) {
+      const f = scene.footage;
+      if (f.out_sec !== undefined && f.out_sec <= f.in_sec) {
+        errors.push({ path: `${at}.footage.out_sec`, message: `${sid}: footage out_sec ${f.out_sec} is not after in_sec ${f.in_sec}`, fix: "set out_sec > in_sec, or omit it to use the scene's duration" });
+      }
+      const asset = ir?.assets.find((a) => a.id === f.asset);
+      if (ir && !asset) {
+        const near = closestMatches(f.asset, ir.assets.map((a) => a.id));
+        errors.push({
+          path: `${at}.footage.asset`,
+          message: `${sid}: footage asset "${f.asset}" is not a ContentIR asset id`,
+          fix: near.length ? `use an existing asset id, e.g. ${near.map((x) => `"${x}"`).join(", ")}` : "ingest the video file first",
+        });
+      } else if (asset?.media) {
+        const end = f.out_sec ?? f.in_sec + scene.duration_sec * (f.speed ?? 1);
+        if (f.in_sec >= asset.media.duration_sec) {
+          errors.push({ path: `${at}.footage.in_sec`, message: `${sid}: footage starts at ${f.in_sec}s, after the end of "${f.asset}" (${asset.media.duration_sec}s)`, fix: `use an in_sec below ${asset.media.duration_sec}` });
+        } else if (end > asset.media.duration_sec + 0.05 && !f.loop) {
+          warnings.push({ path: `${at}.footage`, message: `${sid}: the clip runs past the end of "${f.asset}" (${asset.media.duration_sec}s); its last frame is held`, fix: "shorten the scene, move in_sec earlier, or set loop: true" });
+        }
+        const mode = scene.audio?.mode;
+        if ((mode === "native" || mode === "mix") && !asset.media.has_audio) {
+          warnings.push({ path: `${at}.audio.mode`, message: `${sid}: audio "${mode}" but "${f.asset}" has no audio track`, fix: 'use audio.mode "music" or "mute"' });
+        }
+      }
+    }
     if (scene.visual_strategy === "generated_video" && !scene.visual_requirements.subject) {
       errors.push({
         path: `${at}.visual_requirements.subject`,
@@ -732,6 +812,20 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
     }
   }
 
+  if (voiceMode(spec) === "native") {
+    spec.scenes.forEach((scene, i) => {
+      if (scene.voiceover.trim()) {
+        errors.push({
+          path: `scenes.${i}.voiceover`,
+          message: `scene ${scene.id} has voiceover, but voice.mode is "native" (speech comes from the footage; nothing is synthesized)`,
+          fix: 'set voiceover to "" (the transcript provides captions), or set voice.mode to "narrated"',
+        });
+      }
+    });
+    if (!spec.scenes.some((sc) => sc.footage && (sc.audio?.mode ?? "native") !== "mute" && sc.audio?.mode !== "music")) {
+      warnings.push({ path: "voice.mode", message: 'voice.mode is "native" but no footage scene plays its own sound', fix: 'give footage scenes audio.mode "native" or "mix"' });
+    }
+  }
   if (voiceMode(spec) === "none") {
     spec.scenes.forEach((scene, i) => {
       if (scene.voiceover.trim()) {

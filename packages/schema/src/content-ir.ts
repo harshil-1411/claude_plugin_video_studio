@@ -73,12 +73,43 @@ export const Claim = z.strictObject({
   evidence_refs: z.array(SourceRef).describe("Evidence spans supporting this claim."),
 });
 
+export const Shot = z.strictObject({
+  start_sec: z.number().nonnegative(),
+  end_sec: z.number().positive(),
+  keyframe: Id.optional().describe("Image asset id of a representative frame."),
+});
+
+export const Transcript = z
+  .strictObject({
+    path: FilePath.describe("Project-relative JSON file with timed words: [{word, start_ms, end_ms}]."),
+    source: z.enum(["whisper", "srt", "vtt"]).describe("whisper.cpp (local ASR) or a caption file the user supplied."),
+    model: z.string().optional().describe("ASR model, e.g. ggml-base.en."),
+    language: z.string().optional(),
+    words: z.int().nonnegative(),
+  })
+  .describe("Timed transcript of the asset's speech.");
+
+export const MediaInfo = z
+  .strictObject({
+    duration_sec: z.number().nonnegative(),
+    width: z.int().positive().optional(),
+    height: z.int().positive().optional(),
+    fps: z.number().positive().optional(),
+    has_video: z.boolean(),
+    has_audio: z.boolean(),
+    shots: z.array(Shot).optional().describe("Shot boundaries from scene detection."),
+    transcript: Transcript.optional(),
+    loudness_lufs: z.number().optional(),
+  })
+  .describe("Probe results for a video or audio asset.");
+
 export const IrAsset = z.strictObject({
   id: Id,
   kind: z.enum(["image", "video", "audio"]),
   path: FilePath.describe("Project-relative path of the extracted asset."),
   sha256: Sha256,
   source_ref: SourceRef.optional(),
+  media: MediaInfo.optional().describe("For video and audio assets."),
 });
 
 export const Classification = z
@@ -125,6 +156,9 @@ export type EvidenceSpan = z.infer<typeof EvidenceSpan>;
 export type Entity = z.infer<typeof Entity>;
 export type Claim = z.infer<typeof Claim>;
 export type IrAsset = z.infer<typeof IrAsset>;
+export type Shot = z.infer<typeof Shot>;
+export type Transcript = z.infer<typeof Transcript>;
+export type MediaInfo = z.infer<typeof MediaInfo>;
 export type Classification = z.infer<typeof Classification>;
 export type IrWarning = z.infer<typeof IrWarning>;
 export type ContentIR = z.infer<typeof ContentIR>;
