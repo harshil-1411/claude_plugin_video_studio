@@ -49,6 +49,8 @@ import { findPlatformSpecsDir, layoutZones, loadContracts } from "@video-studio/
 import { type BackendChoice, type BackendSet, type SynthesizeSpecResult, defaultBackends, selectBackend, synthesizeSpec } from "@video-studio/voice";
 import { COVER_VERSION, renderCover } from "./cover.js";
 import { hyperframesOptions } from "./hyperframes.js";
+import { type LintResult, lintProject } from "./lint.js";
+import { type TargetDist, packageTargets } from "./targets.js";
 import { type ValidationIssue, projectSpecPaths, validateSpecFile } from "./spec-validate.js";
 
 type Env = Record<string, string | undefined>;
@@ -139,6 +141,11 @@ export interface DistFiles {
   social_copy: string;
   render_manifest: string;
   provenance: string;
+  /** Copy of project/video-spec.json as rendered. */
+  video_spec: string;
+  storyboard?: string;
+  /** One package per target: dist/<target>/. */
+  targets: TargetDist[];
 }
 
 /** Spec failed validation: the render was refused. */
@@ -773,6 +780,20 @@ function firstSentence(text: string): string {
 
 /** Deterministic social copy (title, 2–3 line description, hashtags). Claude refines it in the skill. */
 export function socialCopy(spec: VideoSpec, brief?: CreativeBrief): string {
+  const { title, lines, hashtags } = socialCopyParts(spec, brief);
+  return [
+    "<!-- Generated deterministically from the spec and brief by video-studio. Refine the wording before posting; keep every claim grounded in the sources. -->",
+    `# ${title}`,
+    "",
+    ...lines,
+    "",
+    hashtags.join(" "),
+    "",
+  ].join("\n");
+}
+
+/** The pieces of {@link socialCopy}: title, up to 3 description lines and up to 7 hashtags (with `#`). */
+export function socialCopyParts(spec: VideoSpec, brief?: CreativeBrief): { title: string; lines: string[]; hashtags: string[] } {
   const title = spec.title?.trim() || brief?.chosen_hook || firstSentence(spec.scenes[0]?.voiceover ?? "") || "New video";
   const lines: string[] = [];
   const hook = spec.scenes.find((s) => s.purpose === "hook");
@@ -800,15 +821,7 @@ export function socialCopy(spec: VideoSpec, brief?: CreativeBrief): string {
   for (const w of contentWords(title)) add(w);
   for (const w of repeated.slice(0, 3)) add(w);
   for (const w of [...(PLATFORM_TAGS[spec.platform] ?? []), spec.goal === "explain" ? "explained" : spec.goal]) add(w);
-  return [
-    "<!-- Generated deterministically from the spec and brief by video-studio. Refine the wording before posting; keep every claim grounded in the sources. -->",
-    `# ${title}`,
-    "",
-    ...lines.slice(0, 3),
-    "",
-    tags.slice(0, 7).map((t) => `#${t}`).join(" "),
-    "",
-  ].join("\n");
+  return { title, lines: lines.slice(0, 3), hashtags: tags.slice(0, 7).map((t) => `#${t}`) };
 }
 
 async function exportFromState(root: string, state: RenderState, now: () => Date): Promise<DistFiles> {
@@ -826,6 +839,8 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
     social_copy: d("social-copy.md"),
     render_manifest: d("render-manifest.json"),
     provenance: d("provenance.json"),
+    video_spec: d("video-spec.json"),
+    targets: [],
   };
   await copyFile(join(root, state.reel), out.reel);
   await copyFile(join(root, state.master), out.clean_master);
@@ -851,6 +866,57 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
     }
   }
   await writeFile(out.social_copy, socialCopy(spec, brief));
+  await copyFile(projectSpecPaths(root).spec, out.video_spec);
+  const storyboardSrc = join(root, "project", "storyboard.md");
+  if (await exists(storyboardSrc)) {
+    out.storyboard = d("storyboard.md");
+    await copyFile(storyboardSrc, out.storyboard);
+  } else {
+    await rm(d("storyboard.md"), { force: true });
+  }
+
+  // per-target packages: dist/<target>/
+  let lint: LintResult | undefined;
+  let lintError: string | undefined;
+  try {
+    lint = await lintProject(root, { quality: state.quality });
+  } catch (e) {
+    lintError = errMsg(e);
+  }
+  const specsDir = findPlatformSpecsDir();
+  const allContracts = specsDir ? await loadContracts(specsDir) : [];
+  const wanted = resolveTargets(spec);
+  out.targets = await packageTargets(
+    {
+      root,
+      distDir,
+      renderDir: renderDir(root, state.quality),
+      quality: state.quality,
+      spec,
+      contracts: allContracts.filter((c) => wanted.includes(c.id)),
+      reel: out.reel,
+      reelFacts: {
+        width: state.target.width,
+        height: state.target.height,
+        fps: state.target.fps,
+        duration_sec: state.duration_ms / 1000,
+        bytes: (await stat(out.reel)).size,
+      },
+      ...(out.cover ? { cover: out.cover } : {}),
+      ...(state.cover ? { coverAtMs: state.cover.at_ms } : {}),
+      ...(out.captions_srt ? { captionsSrt: out.captions_srt } : {}),
+      ...(out.captions_vtt ? { captionsVtt: out.captions_vtt } : {}),
+      generatedCopy: (c) => {
+        // Platform hashtags (#Shorts, #Reels, #fyp) follow the target, not the spec's primary platform.
+        const copy = socialCopyParts({ ...spec, platform: c.platform ?? "generic" }, brief);
+        return { post_caption: [copy.title, ...copy.lines].join("\n"), hashtags: copy.hashtags };
+      },
+      ...(lint ? { lint } : {}),
+      ...(lintError ? { lintError } : {}),
+      ...(state.qa ? { technicalQa: state.qa.status } : {}),
+    },
+    allContracts.map((c) => c.id),
+  );
 
   // provenance: copy source/provenance.json and add what this render used
   let source: unknown = null;
@@ -896,6 +962,25 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
   }
   outputs.push({ kind: "social_copy", path: rel(root, out.social_copy), sha256: await sha(out.social_copy) });
   outputs.push({ kind: "provenance", path: rel(root, out.provenance), sha256: await sha(out.provenance) });
+  outputs.push({ kind: "spec", path: rel(root, out.video_spec), sha256: await sha(out.video_spec) });
+  if (out.storyboard) outputs.push({ kind: "other", path: rel(root, out.storyboard), sha256: await sha(out.storyboard) });
+  for (const t of out.targets) {
+    const target = t.id;
+    outputs.push({
+      kind: "final",
+      target,
+      path: rel(root, t.video),
+      sha256: await sha(t.video),
+      width: t.width,
+      height: t.height,
+      duration_sec: state.duration_ms / 1000,
+      ...(t.transcoded ? { transcoded: true } : {}),
+    });
+    if (t.cover) outputs.push({ kind: "thumbnail", target, path: rel(root, t.cover), sha256: await sha(t.cover) });
+    for (const p of [t.captions_srt, t.captions_vtt]) if (p) outputs.push({ kind: "captions", target, path: rel(root, p), sha256: await sha(p) });
+    outputs.push({ kind: "post", target, path: rel(root, t.post), sha256: await sha(t.post) });
+    outputs.push({ kind: "qa", target, path: rel(root, t.qa), sha256: await sha(t.qa) });
+  }
 
   const statusMap: Record<SceneRenderEntry["status"], SceneRender["status"]> = { rendered: "succeeded", cached: "cached", pending: "pending", failed: "failed" };
   const renders: SceneRender[] = state.scenes.map((s) => ({

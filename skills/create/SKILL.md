@@ -3,7 +3,7 @@ name: create
 description: End-to-end video-studio flow - turn free text, a URL, a document or a local repo into a finished video package - plan (brief, grounded scene spec, storyboard), approval, local render with captions, QA and dist/ export. Use when the user runs /video-studio:create, or asks to "make a video", "turn this into a reel/short" or similar from any source.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+).
-allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export Skill Read Write
+allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export Skill Read Write Edit
 ---
 
 # Create a video
@@ -85,10 +85,11 @@ reused.
 ## 7. Final render and export
 
 On approval, `render_submit` with `quality: "final"` and poll to completion.
-Then refine `dist/social-copy.md` (the render skill's step 5) and finish
+Then refine the post copy in `publish.<target>` (the render skill's step 5) and finish
 with a short summary:
 
-- `dist/reel.mp4` (resolution, duration) and the other `dist/` files,
+- `dist/reel.mp4` (resolution, duration), one `dist/<target>/` package per
+  platform with its QA status, and the other `dist/` files,
 - QA status,
 - voice and renderer used,
 - sources and grounding mode, and anything flagged (placeholders, timing

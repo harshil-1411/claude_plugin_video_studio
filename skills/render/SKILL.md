@@ -3,7 +3,7 @@ name: render
 description: Render a planned video-studio project (project/video-spec.json) into a finished package in dist/ - captioned 9:16/16:9 reel, clean master, SRT/VTT captions, transcript, thumbnail, social copy, render manifest and provenance - using only local tools (system TTS or silent voice, HyperFrames or ffmpeg motion graphics). Use when the user runs /video-studio:render, approves a plan, or asks to render, preview or export the video.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+) and ffmpeg with libass and libx264.
-allowed-tools: mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__doctor Read Write
+allowed-tools: mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__doctor Read Write Edit
 ---
 
 # Render a video
@@ -38,8 +38,10 @@ submit again (all finished work is cached).
 
 From `result`:
 
-- **Files**: `dist/reel.mp4` (size, duration, resolution, preview/final) and
-  the other `dist/` files in one line. When the spec has a `cover`, mention
+- **Files**: `dist/reel.mp4` (size, duration, resolution, preview/final),
+  then one line per platform package in `dist.targets[]` (`dist/<id>/`:
+  video, cover, captions, `post.json`, `qa.json` status; say when the video
+  was re-encoded and why), and the other `dist/` files in one line. When the spec has a `cover`, mention
   `dist/cover.jpg` (the headline cover) and `dist/cover-square-preview.jpg`
   (how it looks cropped to a square grid tile); open both with Read to check
   the headline is legible.
@@ -64,11 +66,14 @@ From `result`:
 Ask whether to render the final version. On approval call
 `render_submit {project_dir, quality: "final"}` and poll again.
 
-Then refine `dist/social-copy.md`: it is a deterministic draft (title,
-description lines, hashtags) from the spec and brief. Rewrite it for the
-platform in the brief's tone, keep every claim grounded in the sources, and
-save it with Write. `export {project_dir}` regenerates the draft, so run it
-before your edit, not after. `qa_run {project_dir}` re-checks the reel.
+Then refine the post copy per target. Each `dist/<target>/post.json` has the
+copy for that platform (`source: "generated"` is a deterministic draft) and
+its `limits`. Write the refined copy into `project/video-spec.json` as
+`publish.<target> {post_caption, hashtags, ai_disclosure}` (brief's tone,
+the desired action, 3-6 relevant hashtags, claims only from the sources,
+within `limits`), then run `export` again so every `post.json` picks it up.
+Editing the spec is durable; `dist/` files are regenerated on each export.
+`qa_run {project_dir}` re-checks the reel.
 
 ## Optional: HyperFrames renderer
 

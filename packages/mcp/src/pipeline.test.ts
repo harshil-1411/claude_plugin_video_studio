@@ -184,6 +184,27 @@ describe("renderProject (tiny, silent, ffmpeg)", () => {
       expect(ass).toMatch(/Style: Default,Inter,/); // bundled font family
       // No spec.cover: no cover files, thumbnail as before.
       expect(manifest.outputs.filter((o) => o.kind === "thumbnail").map((o) => o.path)).toEqual(["dist/thumbnail.png"]);
+      // One package for the primary target (youtube_shorts → youtube-shorts), copied, not re-encoded.
+      expect(r.dist.targets.map((t) => [t.id, t.transcoded])).toEqual([["youtube-shorts", false]]);
+      for (const f of ["video.mp4", "captions.srt", "captions.vtt", "post.json", "qa.json"]) {
+        expect((await stat(join(dir, "dist", "youtube-shorts", f))).size, f).toBeGreaterThan(0);
+      }
+      expect(await readFile(join(dir, "dist", "youtube-shorts", "video.mp4"))).toEqual(await readFile(join(dir, "dist", "reel.mp4")));
+      const post = JSON.parse(await readFile(join(dir, "dist", "youtube-shorts", "post.json"), "utf8"));
+      expect(post).toMatchObject({ target: "youtube-shorts", source: "generated", captions: { files: ["captions.srt", "captions.vtt"] } });
+      expect(post.hashtags).toContain("#Shorts");
+      expect(post.full_text).toContain("Vector databases, tiny");
+      const tqa = JSON.parse(await readFile(join(dir, "dist", "youtube-shorts", "qa.json"), "utf8"));
+      expect(tqa).toMatchObject({ target: "youtube-shorts", quality: "preview", lint_report: "qa/lint.json" });
+      expect(tqa.findings.every((f: { target?: string }) => !f.target || f.target === "youtube-shorts")).toBe(true);
+      expect(manifest.outputs.filter((o) => o.target === "youtube-shorts").map((o) => [o.kind, o.path])).toEqual([
+        ["final", "dist/youtube-shorts/video.mp4"],
+        ["captions", "dist/youtube-shorts/captions.srt"],
+        ["captions", "dist/youtube-shorts/captions.vtt"],
+        ["post", "dist/youtube-shorts/post.json"],
+        ["qa", "dist/youtube-shorts/qa.json"],
+      ]);
+      expect(manifest.outputs.find((o) => o.kind === "spec")?.path).toBe("dist/video-spec.json");
 
       const qa = JSON.parse(await readFile(join(dir, "qa", "report.json"), "utf8"));
       expect(qa.checks.find((c: { id: string }) => c.id === "resolution").status).toBe("ok");
@@ -225,6 +246,27 @@ describe("renderProject (tiny, silent, ffmpeg)", () => {
       await rm(join(dir, "dist"), { recursive: true, force: true });
       const e = await exportProject(dir);
       expect((await stat(e.dist.reel)).size).toBeGreaterThan(0);
+
+      // Retarget and re-export without re-rendering: new packages appear, the old one is removed.
+      const specPath = join(dir, "project", "video-spec.json");
+      const s = JSON.parse(await readFile(specPath, "utf8"));
+      s.targets = ["instagram", "tiktok"];
+      s.publish = { tiktok: { post_caption: "Vectors find meaning, not words.", hashtags: ["#vectordb"], ai_disclosure: true } };
+      await writeFile(specPath, JSON.stringify(s, null, 2));
+      const e2 = await exportProject(dir);
+      expect(e2.dist.targets.map((t) => t.id)).toEqual(["instagram", "tiktok"]);
+      await expect(stat(join(dir, "dist", "youtube-shorts"))).rejects.toThrow();
+      const tk = JSON.parse(await readFile(join(dir, "dist", "tiktok", "post.json"), "utf8"));
+      expect(tk).toMatchObject({
+        source: "spec",
+        full_text: "Vectors find meaning, not words.\n\n#vectordb",
+        ai_disclosure: { requested: true, supported: true, field: "is_aigc" },
+        cover: { mode: "frame" },
+      });
+      const ig = JSON.parse(await readFile(join(dir, "dist", "instagram", "post.json"), "utf8"));
+      expect(ig.source).toBe("generated");
+      expect(ig.hashtags).toContain("#Reels");
+      expect(ig.hashtags).not.toContain("#Shorts");
     },
     T,
   );
@@ -254,7 +296,8 @@ describe("cover and caption styling", () => {
       const sq = await ffprobe(r.dist.cover_square_preview!);
       expect([sq.width, sq.height]).toEqual([180, 180]);
       const manifest = RenderManifest.parse(JSON.parse(await readFile(join(dir, "dist", "render-manifest.json"), "utf8")));
-      expect(manifest.outputs.filter((o) => o.kind === "thumbnail").map((o) => o.path)).toEqual(["dist/thumbnail.png", "dist/cover.jpg"]);
+      expect(manifest.outputs.filter((o) => o.kind === "thumbnail" && !o.target).map((o) => o.path)).toEqual(["dist/thumbnail.png", "dist/cover.jpg"]);
+      expect(manifest.outputs.find((o) => o.kind === "thumbnail" && o.target === "youtube-shorts")?.path).toBe("dist/youtube-shorts/cover.jpg");
       expect(manifest.outputs.find((o) => o.path === "dist/cover-square-preview.jpg")).toMatchObject({ kind: "other", width: 180, height: 180 });
       expect(manifest.captions?.max_lines).toBe(1);
       const box = manifest.captions!.box!;

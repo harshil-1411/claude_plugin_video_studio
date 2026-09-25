@@ -192,13 +192,23 @@ function checkEnvelope(spec: VideoSpec, contracts: readonly PlatformContract[], 
         });
       }
     }
-    if (v.fps && ((v.fps.min !== undefined && master.fps < v.fps.min) || (v.fps.max !== undefined && master.fps > v.fps.max))) {
+    if (v.fps?.min !== undefined && master.fps < v.fps.min) {
       out.push({
         id: "envelope_fps",
         severity: "error",
         target,
-        message: `master fps ${master.fps} is outside ${c.name}'s ${v.fps.min ?? "?"}–${v.fps.max ?? "?"} fps`,
-        fix: `set master.fps to a value in ${v.fps.min ?? 1}–${v.fps.max ?? 60} (24, 30 or 60)`,
+        message: `master fps ${master.fps} is below ${c.name}'s ${v.fps.min} fps minimum`,
+        fix: `set master.fps to a value in ${v.fps.min}–${v.fps.max ?? 60} (24, 30 or 60)`,
+      });
+    }
+    // Export re-encodes dist/<target>/video.mp4 down to the ceiling, so exceeding it only costs quality.
+    if (v.fps?.max !== undefined && master.fps > v.fps.max) {
+      out.push({
+        id: "envelope_fps",
+        severity: "warning",
+        target,
+        message: `master fps ${master.fps} is above ${c.name}'s ${v.fps.max} fps; export re-encodes dist/${target}/video.mp4 to ${v.fps.max} fps`,
+        fix: `set master.fps to at most ${v.fps.max} to avoid the re-encode`,
       });
     }
     if (v.min && (master.width < v.min.width || master.height < v.min.height)) {
@@ -213,10 +223,10 @@ function checkEnvelope(spec: VideoSpec, contracts: readonly PlatformContract[], 
     if (v.max_long_side && Math.max(master.width, master.height) > v.max_long_side) {
       out.push({
         id: "envelope_size",
-        severity: "error",
+        severity: "warning",
         target,
-        message: `master ${master.width}x${master.height} exceeds ${c.name}'s ${v.max_long_side}px long side`,
-        fix: `set master to ${v.recommended.width}x${v.recommended.height}`,
+        message: `master ${master.width}x${master.height} exceeds ${c.name}'s ${v.max_long_side}px long side; export downscales dist/${target}/video.mp4`,
+        fix: `set master to ${v.recommended.width}x${v.recommended.height} to avoid the re-encode`,
       });
     }
     if (!c.ui_masks.some((m) => m.aspect_ratio === spec.aspect_ratio)) {

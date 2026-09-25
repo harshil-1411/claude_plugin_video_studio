@@ -288,6 +288,10 @@
               "social_copy",
               "provenance",
               "manifest",
+              "post",
+              "qa",
+              "spec",
+              "lock",
               "other"
             ],
             "type": "string"
@@ -299,6 +303,15 @@
           "sha256": {
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
+          },
+          "target": {
+            "description": "Platform contract id for files in dist/<target>/; absent for shared files.",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "transcoded": {
+            "description": "True when the file was re-encoded to fit the target's envelope rather than copied.",
+            "type": "boolean"
           },
           "width": {
             "exclusiveMinimum": 0,

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AspectRatio, FilePath, Id, IsoDateTime, NonEmptyString, SchemaVersion, Sha256, UsdAmount } from "./common.js";
+import { AspectRatio, FilePath, Id, IsoDateTime, NonEmptyString, PlatformTargetId, SchemaVersion, Sha256, UsdAmount } from "./common.js";
 import { TimingSource } from "./timing.js";
 import { SceneId } from "./video-spec.js";
 
@@ -82,16 +82,22 @@ export const OutputKind = z.enum([
   "social_copy",
   "provenance",
   "manifest",
+  "post",
+  "qa",
+  "spec",
+  "lock",
   "other",
 ]);
 
 export const FinalOutput = z.strictObject({
   kind: OutputKind,
+  target: PlatformTargetId.optional().describe("Platform contract id for files in dist/<target>/; absent for shared files."),
   path: FilePath,
   sha256: Sha256,
   width: z.int().positive().optional(),
   height: z.int().positive().optional(),
   duration_sec: z.number().nonnegative().optional(),
+  transcoded: z.boolean().optional().describe("True when the file was re-encoded to fit the target's envelope rather than copied."),
 });
 
 export const QaStatus = z.enum(["pass", "warn", "fail"]);

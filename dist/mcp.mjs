@@ -230145,13 +230145,19 @@ const FinalOutput = strictObject({
 		"social_copy",
 		"provenance",
 		"manifest",
+		"post",
+		"qa",
+		"spec",
+		"lock",
 		"other"
 	]),
+	target: PlatformTargetId.optional().describe("Platform contract id for files in dist/<target>/; absent for shared files."),
 	path: FilePath,
 	sha256: Sha256,
 	width: int().positive().optional(),
 	height: int().positive().optional(),
-	duration_sec: number().nonnegative().optional()
+	duration_sec: number().nonnegative().optional(),
+	transcoded: boolean().optional().describe("True when the file was re-encoded to fit the target's envelope rather than copied.")
 });
 const QaStatus = _enum([
 	"pass",
@@ -237403,12 +237409,19 @@ function checkEnvelope(spec, contracts, state, out) {
 				fix: `lengthen scenes so the video lasts at least ${min}s`
 			});
 		}
-		if (v.fps && (v.fps.min !== void 0 && master.fps < v.fps.min || v.fps.max !== void 0 && master.fps > v.fps.max)) out.push({
+		if (v.fps?.min !== void 0 && master.fps < v.fps.min) out.push({
 			id: "envelope_fps",
 			severity: "error",
 			target,
-			message: `master fps ${master.fps} is outside ${c.name}'s ${v.fps.min ?? "?"}–${v.fps.max ?? "?"} fps`,
-			fix: `set master.fps to a value in ${v.fps.min ?? 1}–${v.fps.max ?? 60} (24, 30 or 60)`
+			message: `master fps ${master.fps} is below ${c.name}'s ${v.fps.min} fps minimum`,
+			fix: `set master.fps to a value in ${v.fps.min}–${v.fps.max ?? 60} (24, 30 or 60)`
+		});
+		if (v.fps?.max !== void 0 && master.fps > v.fps.max) out.push({
+			id: "envelope_fps",
+			severity: "warning",
+			target,
+			message: `master fps ${master.fps} is above ${c.name}'s ${v.fps.max} fps; export re-encodes dist/${target}/video.mp4 to ${v.fps.max} fps`,
+			fix: `set master.fps to at most ${v.fps.max} to avoid the re-encode`
 		});
 		if (v.min && (master.width < v.min.width || master.height < v.min.height)) out.push({
 			id: "envelope_size",
@@ -237419,10 +237432,10 @@ function checkEnvelope(spec, contracts, state, out) {
 		});
 		if (v.max_long_side && Math.max(master.width, master.height) > v.max_long_side) out.push({
 			id: "envelope_size",
-			severity: "error",
+			severity: "warning",
 			target,
-			message: `master ${master.width}x${master.height} exceeds ${c.name}'s ${v.max_long_side}px long side`,
-			fix: `set master to ${v.recommended.width}x${v.recommended.height}`
+			message: `master ${master.width}x${master.height} exceeds ${c.name}'s ${v.max_long_side}px long side; export downscales dist/${target}/video.mp4`,
+			fix: `set master to ${v.recommended.width}x${v.recommended.height} to avoid the re-encode`
 		});
 		if (!c.ui_masks.some((m) => m.aspect_ratio === spec.aspect_ratio)) out.push({
 			id: "masks_unknown",
@@ -239429,6 +239442,193 @@ async function renderCover(o) {
 		warnings
 	};
 }
+/** Headroom under a bitrate or file-size ceiling (container overhead, VBV overshoot). */
+const LIMIT_HEADROOM = .9;
+const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+/** Decide whether `reel` fits `contract`'s envelope as is, and what to re-encode to if not. */
+function planTargetVideo(contract, reel) {
+	const v = contract.video;
+	const reasons = [];
+	let { width, height, fps } = reel;
+	let maxrate;
+	if (v.fps?.max !== void 0 && fps > v.fps.max) {
+		reasons.push(`fps ${fps} > ${v.fps.max}`);
+		fps = v.fps.max;
+	}
+	const long = Math.max(width, height);
+	if (v.max_long_side && long > v.max_long_side) {
+		const k = v.max_long_side / long;
+		reasons.push(`long side ${long}px > ${v.max_long_side}px`);
+		width = even(width * k);
+		height = even(height * k);
+	}
+	const kbps = reel.duration_sec > 0 ? reel.bytes * 8 / 1e3 / reel.duration_sec : 0;
+	if (v.max_bitrate_mbps && kbps > v.max_bitrate_mbps * 1e3) {
+		reasons.push(`bitrate ${Math.round(kbps)} kbit/s > ${v.max_bitrate_mbps} Mbit/s`);
+		maxrate = v.max_bitrate_mbps * 1e3 * LIMIT_HEADROOM;
+	}
+	if (v.max_size_mb && reel.bytes > v.max_size_mb * 1024 * 1024 && reel.duration_sec > 0) {
+		reasons.push(`file ${(reel.bytes / 1024 / 1024).toFixed(1)} MB > ${v.max_size_mb} MB`);
+		const budget = v.max_size_mb * 1024 * 1024 * 8 / 1e3 / reel.duration_sec * LIMIT_HEADROOM - 192;
+		maxrate = Math.min(maxrate ?? Infinity, Math.max(100, budget));
+	}
+	return {
+		transcode: reasons.length > 0,
+		reasons,
+		width,
+		height,
+		fps,
+		...maxrate !== void 0 ? { maxrate_kbps: Math.floor(maxrate) } : {}
+	};
+}
+function transcodeArgs(input, output, plan, preset) {
+	const vf = [
+		`scale=${plan.width}:${plan.height}:flags=lanczos`,
+		`fps=${plan.fps}`,
+		"setsar=1"
+	].join(",");
+	const rate = plan.maxrate_kbps ? [
+		"-maxrate",
+		`${plan.maxrate_kbps}k`,
+		"-bufsize",
+		`${plan.maxrate_kbps * 2}k`
+	] : [];
+	return [
+		"-y",
+		"-i",
+		input,
+		"-vf",
+		vf,
+		...h264Args({ preset }),
+		...rate,
+		...aacArgs(),
+		"-movflags",
+		"+faststart",
+		output
+	];
+}
+/** Hashtags are counted by the platform when present in the caption; join them after it. */
+function fullText(caption, hashtags) {
+	const tags = hashtags.filter((t) => !caption.includes(t));
+	return [caption.trim(), tags.join(" ")].filter(Boolean).join("\n\n");
+}
+async function cachedTranscode(input, inputSha, cacheDir, id, plan, preset) {
+	const key = sha256Hex(canonicalJson({
+		v: 1,
+		inputSha,
+		plan,
+		preset
+	}));
+	const out = join(cacheDir, `${id}.mp4`);
+	const keyFile = join(cacheDir, `${id}.json`);
+	if ((await readJson(keyFile).catch(() => void 0))?.key === key && await stat(out).catch(() => void 0)) return out;
+	await ensureDir(cacheDir);
+	await runFfmpeg(transcodeArgs(input, out, plan, preset));
+	await writeJsonAtomic(keyFile, {
+		key,
+		plan
+	});
+	return out;
+}
+/** Write dist/<target>/ for every contract, and remove package dirs of targets no longer in the spec. */
+async function packageTargets(i, allTargetIds) {
+	const wanted = new Set(i.contracts.map((c) => c.id));
+	for (const entry of await readdir(i.distDir, { withFileTypes: true }).catch(() => [])) if (entry.isDirectory() && allTargetIds.includes(entry.name) && !wanted.has(entry.name)) await rm(join(i.distDir, entry.name), {
+		recursive: true,
+		force: true
+	});
+	const preset = i.quality === "preview" ? "ultrafast" : "medium";
+	let reelSha;
+	const out = [];
+	for (const c of i.contracts) {
+		const dir = join(i.distDir, c.id);
+		await ensureDir(dir);
+		const f = (name) => join(dir, name);
+		const plan = planTargetVideo(c, i.reelFacts);
+		let src = i.reel;
+		if (plan.transcode) {
+			reelSha ??= await hashFile(i.reel);
+			src = await cachedTranscode(i.reel, reelSha, join(i.renderDir, "targets"), c.id, plan, preset);
+		}
+		await copyFile(src, f("video.mp4"));
+		const hasCoverFile = Boolean(i.cover) && c.cover.mode !== "none";
+		if (hasCoverFile) await copyFile(i.cover, f("cover.jpg"));
+		else await rm(f("cover.jpg"), { force: true });
+		const captionFiles = [];
+		for (const [src, name] of [[i.captionsSrt, "captions.srt"], [i.captionsVtt, "captions.vtt"]]) if (src) {
+			await copyFile(src, f(name));
+			captionFiles.push(name);
+		} else await rm(f(name), { force: true });
+		const publish = i.spec.publish?.[c.id];
+		const draft = publish ? void 0 : i.generatedCopy(c);
+		const caption = publish?.post_caption ?? draft.post_caption;
+		const hashtags = publish ? publish.hashtags ?? [] : draft.hashtags;
+		const coverTimestamp = c.cover.mode === "frame" || c.cover.mode === "file_or_frame" ? Math.round(i.spec.cover ? i.spec.cover.focal_time_sec * 1e3 : i.coverAtMs ?? 0) : void 0;
+		const post = {
+			target: c.id,
+			platform: c.name,
+			route: c.route,
+			contract_version: c.contract_version,
+			source: publish ? "spec" : "generated",
+			post_caption: caption,
+			hashtags,
+			full_text: fullText(caption, hashtags),
+			ai_disclosure: {
+				requested: publish?.ai_disclosure ?? null,
+				supported: c.ai_disclosure?.supported ?? false,
+				...c.ai_disclosure?.field ? { field: c.ai_disclosure.field } : {}
+			},
+			cover: {
+				mode: c.cover.mode,
+				...hasCoverFile ? { file: "cover.jpg" } : {},
+				...coverTimestamp !== void 0 ? { timestamp_ms: coverTimestamp } : {}
+			},
+			captions: {
+				sidecar_formats: c.captions.sidecar_formats,
+				burn_in_recommended: c.captions.burn_in_recommended,
+				files: captionFiles
+			},
+			limits: {
+				...c.captions.post_caption_max_chars !== void 0 ? { post_caption_max_chars: c.captions.post_caption_max_chars } : {},
+				...c.captions.hashtags_max !== void 0 ? { hashtags_max: c.captions.hashtags_max } : {},
+				...c.captions.mentions_max !== void 0 ? { mentions_max: c.captions.mentions_max } : {}
+			}
+		};
+		await writeJsonAtomic(f("post.json"), post);
+		const findings = (i.lint?.findings ?? []).filter((x) => x.target === void 0 || x.target === c.id);
+		const errors = findings.filter((x) => x.severity === "error").length;
+		const qa = {
+			target: c.id,
+			quality: i.quality,
+			status: i.lintError ? "fail" : errors ? "fail" : findings.length ? "warn" : "pass",
+			counts: {
+				errors,
+				warnings: findings.length - errors
+			},
+			findings,
+			lint_report: "qa/lint.json",
+			...i.technicalQa ? { technical_qa: i.technicalQa } : {},
+			...i.lintError ? { lint_error: i.lintError } : {}
+		};
+		await writeJsonAtomic(f("qa.json"), qa);
+		out.push({
+			id: c.id,
+			dir,
+			video: f("video.mp4"),
+			transcoded: plan.transcode,
+			transcode_reasons: plan.reasons,
+			width: plan.width,
+			height: plan.height,
+			fps: plan.fps,
+			...hasCoverFile ? { cover: f("cover.jpg") } : {},
+			...captionFiles.includes("captions.srt") ? { captions_srt: f("captions.srt") } : {},
+			...captionFiles.includes("captions.vtt") ? { captions_vtt: f("captions.vtt") } : {},
+			post: f("post.json"),
+			qa: f("qa.json")
+		});
+	}
+	return out;
+}
 //#endregion
 //#region src/pipeline.ts
 /** Engine version recorded in manifests. Keep in sync with SERVER_VERSION. */
@@ -240114,6 +240314,19 @@ function firstSentence(text) {
 }
 /** Deterministic social copy (title, 2–3 line description, hashtags). Claude refines it in the skill. */
 function socialCopy(spec, brief) {
+	const { title, lines, hashtags } = socialCopyParts(spec, brief);
+	return [
+		"<!-- Generated deterministically from the spec and brief by video-studio. Refine the wording before posting; keep every claim grounded in the sources. -->",
+		`# ${title}`,
+		"",
+		...lines,
+		"",
+		hashtags.join(" "),
+		""
+	].join("\n");
+}
+/** The pieces of {@link socialCopy}: title, up to 3 description lines and up to 7 hashtags (with `#`). */
+function socialCopyParts(spec, brief) {
 	const title = spec.title?.trim() || brief?.chosen_hook || firstSentence(spec.scenes[0]?.voiceover ?? "") || "New video";
 	const lines = [];
 	const hook = spec.scenes.find((s) => s.purpose === "hook");
@@ -240138,15 +240351,11 @@ function socialCopy(spec, brief) {
 	for (const w of contentWords(title)) add(w);
 	for (const w of repeated.slice(0, 3)) add(w);
 	for (const w of [...PLATFORM_TAGS[spec.platform] ?? [], spec.goal === "explain" ? "explained" : spec.goal]) add(w);
-	return [
-		"<!-- Generated deterministically from the spec and brief by video-studio. Refine the wording before posting; keep every claim grounded in the sources. -->",
-		`# ${title}`,
-		"",
-		...lines.slice(0, 3),
-		"",
-		tags.slice(0, 7).map((t) => `#${t}`).join(" "),
-		""
-	].join("\n");
+	return {
+		title,
+		lines: lines.slice(0, 3),
+		hashtags: tags.slice(0, 7).map((t) => `#${t}`)
+	};
 }
 async function exportFromState(root, state, now) {
 	const paths = projectPaths(root);
@@ -240162,7 +240371,9 @@ async function exportFromState(root, state, now) {
 		thumbnail: d("thumbnail.png"),
 		social_copy: d("social-copy.md"),
 		render_manifest: d("render-manifest.json"),
-		provenance: d("provenance.json")
+		provenance: d("provenance.json"),
+		video_spec: d("video-spec.json"),
+		targets: []
 	};
 	await copyFile(join(root, state.reel), out.reel);
 	await copyFile(join(root, state.master), out.clean_master);
@@ -240194,6 +240405,55 @@ async function exportFromState(root, state, now) {
 		out[key] = d(name);
 	} else await rm(d(name), { force: true });
 	await writeFile(out.social_copy, socialCopy(spec, brief));
+	await copyFile(projectSpecPaths(root).spec, out.video_spec);
+	const storyboardSrc = join(root, "project", "storyboard.md");
+	if (await exists(storyboardSrc)) {
+		out.storyboard = d("storyboard.md");
+		await copyFile(storyboardSrc, out.storyboard);
+	} else await rm(d("storyboard.md"), { force: true });
+	let lint;
+	let lintError;
+	try {
+		lint = await lintProject(root, { quality: state.quality });
+	} catch (e) {
+		lintError = errMsg(e);
+	}
+	const specsDir = findPlatformSpecsDir();
+	const allContracts = specsDir ? await loadContracts(specsDir) : [];
+	const wanted = resolveTargets(spec);
+	out.targets = await packageTargets({
+		root,
+		distDir,
+		renderDir: renderDir(root, state.quality),
+		quality: state.quality,
+		spec,
+		contracts: allContracts.filter((c) => wanted.includes(c.id)),
+		reel: out.reel,
+		reelFacts: {
+			width: state.target.width,
+			height: state.target.height,
+			fps: state.target.fps,
+			duration_sec: state.duration_ms / 1e3,
+			bytes: (await stat(out.reel)).size
+		},
+		...out.cover ? { cover: out.cover } : {},
+		...state.cover ? { coverAtMs: state.cover.at_ms } : {},
+		...out.captions_srt ? { captionsSrt: out.captions_srt } : {},
+		...out.captions_vtt ? { captionsVtt: out.captions_vtt } : {},
+		generatedCopy: (c) => {
+			const copy = socialCopyParts({
+				...spec,
+				platform: c.platform ?? "generic"
+			}, brief);
+			return {
+				post_caption: [copy.title, ...copy.lines].join("\n"),
+				hashtags: copy.hashtags
+			};
+		},
+		...lint ? { lint } : {},
+		...lintError ? { lintError } : {},
+		...state.qa ? { technicalQa: state.qa.status } : {}
+	}, allContracts.map((c) => c.id));
 	let source = null;
 	try {
 		source = JSON.parse(await readFile(join(paths.source, "provenance.json"), "utf8"));
@@ -240289,6 +240549,53 @@ async function exportFromState(root, state, now) {
 		path: rel(root, out.provenance),
 		sha256: await sha(out.provenance)
 	});
+	outputs.push({
+		kind: "spec",
+		path: rel(root, out.video_spec),
+		sha256: await sha(out.video_spec)
+	});
+	if (out.storyboard) outputs.push({
+		kind: "other",
+		path: rel(root, out.storyboard),
+		sha256: await sha(out.storyboard)
+	});
+	for (const t of out.targets) {
+		const target = t.id;
+		outputs.push({
+			kind: "final",
+			target,
+			path: rel(root, t.video),
+			sha256: await sha(t.video),
+			width: t.width,
+			height: t.height,
+			duration_sec: state.duration_ms / 1e3,
+			...t.transcoded ? { transcoded: true } : {}
+		});
+		if (t.cover) outputs.push({
+			kind: "thumbnail",
+			target,
+			path: rel(root, t.cover),
+			sha256: await sha(t.cover)
+		});
+		for (const p of [t.captions_srt, t.captions_vtt]) if (p) outputs.push({
+			kind: "captions",
+			target,
+			path: rel(root, p),
+			sha256: await sha(p)
+		});
+		outputs.push({
+			kind: "post",
+			target,
+			path: rel(root, t.post),
+			sha256: await sha(t.post)
+		});
+		outputs.push({
+			kind: "qa",
+			target,
+			path: rel(root, t.qa),
+			sha256: await sha(t.qa)
+		});
+	}
 	const statusMap = {
 		rendered: "succeeded",
 		cached: "cached",
@@ -240828,7 +241135,7 @@ function createServer(options = {}) {
 	}));
 	server.registerTool("render_submit", {
 		title: "Render a planned project (background job)",
-		description: "Start rendering <project_dir>/project/video-spec.json into <project_dir>/dist/ (reel.mp4 with burned captions, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, render-manifest.json, provenance.json) plus qa/report.{json,md}. Validates the spec first and refuses on errors (returned with fixes). Returns {job_id} immediately; poll job_status every 10-20 s. Renders run one at a time; later submissions queue. Everything is cached, so re-submitting after a change only redoes what changed. voice: auto (ElevenLabs if configured, else system TTS, else silent; falls back to silent if synthesis fails) | system | elevenlabs | silent. renderer: auto (HyperFrames if installed and Chrome launches, else ffmpeg) | hyperframes | ffmpeg. quality: preview (half resolution, 15 fps, fast encode; default) | final (1080 short side, 30 fps). placeholder (default true) draws titled cards for scenes that need a video provider. Local only: no paid calls.",
+		description: "Start rendering <project_dir>/project/video-spec.json into <project_dir>/dist/ (reel.mp4 with burned captions, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target {video.mp4, cover.jpg, captions.srt/.vtt, post.json, qa.json}) plus qa/report.{json,md} and qa/lint.{json,md}. Validates the spec first and refuses on errors (returned with fixes). Returns {job_id} immediately; poll job_status every 10-20 s. Renders run one at a time; later submissions queue. Everything is cached, so re-submitting after a change only redoes what changed. voice: auto (ElevenLabs if configured, else system TTS, else silent; falls back to silent if synthesis fails) | system | elevenlabs | silent. renderer: auto (HyperFrames if installed and Chrome launches, else ffmpeg) | hyperframes | ffmpeg. quality: preview (half resolution, 15 fps, fast encode; default) | final (1080 short side, 30 fps). placeholder (default true) draws titled cards for scenes that need a video provider. Local only: no paid calls.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Project folder containing project/video-spec.json"),
 			voice: _enum([
@@ -240939,7 +241246,7 @@ function createServer(options = {}) {
 	}));
 	server.registerTool("export", {
 		title: "Re-export dist/",
-		description: "Rebuild <project_dir>/dist/ from the latest existing render (or the given quality) without rendering: reel.mp4, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md (regenerated from the spec and brief; overwrite it after refining), render-manifest.json and provenance.json.",
+		description: "Rebuild <project_dir>/dist/ from the latest existing render (or the given quality) without rendering: reel.mp4, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target: video.mp4 (copied, or re-encoded only when the target's contract needs lower fps/size/bitrate), cover.jpg, captions.srt/.vtt, post.json (from spec publish.<target>, else a generated draft) and qa.json (lint findings for that target; lint is re-run). Packages of targets no longer in the spec are removed. Returns dist.targets[] {id, transcoded, transcode_reasons, width, height, fps, ...}.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Rendered project folder"),
 			quality: QUALITY.optional().describe("Which render to export (default: the latest)")

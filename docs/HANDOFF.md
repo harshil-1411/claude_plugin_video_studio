@@ -17,9 +17,9 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 | 1 Ingestion | Done: text/markdown/URL/PDF/DOCX/PPTX/repo → ContentIR, secret scanning, 10 golden fixtures | golden snapshots |
 | 2 Planning | Done: 5 templates, `plan`/`create` skills, `brief_validate`, strict-grounding `spec_validate`, `storyboard_render` | `examples/readme-plan` end to end |
 | 3 Local render | Done: voice (`say`/silent/ElevenLabs), FFmpeg + HyperFrames renderers, captions, assembly, QA, `dist/` export, job tools | User's machine: `/video-studio:create "Explain vector DBs in 30s"` → `vector-dbs-explainer/dist/reel.mp4` |
-| 4 Platform compiler | **Steps 1–2 done.** Step 3 next | tests, smoke, visual check |
+| 4 Platform compiler | **Steps 1–2 done; step 3 item 1 (per-platform dist) done.** `video.lock` next | tests, smoke, 3-target render check |
 
-- **Tests:** 456 pass, 2 skipped. The skipped ones are env-gated (`VS_TEST_SAY=1`, `VS_TEST_RENDER=1`) and must run outside the sandbox.
+- **Tests:** 460 pass, 2 skipped. The skipped ones are env-gated (`VS_TEST_SAY=1`, `VS_TEST_RENDER=1`) and must run outside the sandbox.
 - **Smoke:** `node scripts/smoke-mcp.mjs` passes: 15 tools, ingest, templates, and a tiny render.
 - **MCP tools (15):** doctor, project_init, ingest, schema_get, template_list, template_get, spec_scaffold, brief_validate, spec_validate, storyboard_render, render_submit, job_status, qa_run, export, **lint**.
 - **Skills:** create, plan, ingest, validate, render, qa, export, doctor, **lint**.
@@ -78,10 +78,20 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
   It reads `renders/<q>/render-state.json`, and `dist/render-manifest.json` only when the qualities match.
 - **Visual check** (a copy of `vector-dbs-explainer` with 3 targets, 540×960, silent voice + FFmpeg): captions sit on plates above the bottom UI with emphasis, headings are bold Inter, and the cover is clean inside the square crop. Lint passes for instagram, tiktok and youtube-shorts.
 
-## Next: Phase 4 step 3 (all local, no keys)
+## Step 3 item 1: per-platform dist (done)
+
+- `packages/mcp/src/targets.ts` (`packageTargets`, `planTargetVideo`, `TARGET_PACKAGE_VERSION = 1`), called from `exportFromState` in `pipeline.ts`.
+- `dist/<target>/{video.mp4, cover.jpg, captions.srt, captions.vtt, post.json, qa.json}`, plus top-level `video-spec.json` and `storyboard.md` (when `project/storyboard.md` exists). Packages of targets dropped from the spec are removed on export.
+- **Video:** copied from the reel unless the contract needs lower fps, a smaller long side, a lower bitrate or a smaller file; then re-encoded (cached in `renders/<q>/targets/<id>.mp4` with a key file). Aspect, minimum size and duration are left to lint. Lint now reports fps above the max and a long side above the max as **warnings** ("export re-encodes"), not errors.
+- **`post.json`:** `publish.<target>` when present (`source: "spec"`), otherwise a draft from `socialCopyParts` with the target's own platform hashtags (`source: "generated"`); `full_text` = caption + hashtags; `ai_disclosure {requested, supported, field}`; `cover {mode, file?, timestamp_ms?}`; `limits`. `social-copy.md` is still written (transition period).
+- **`qa.json`:** export re-runs `lintProject` for the render's quality and keeps findings for that target plus target-less ones.
+- **Manifest:** `FinalOutput` gained optional `target` and `transcoded`; `OutputKind` gained `post`, `qa`, `spec`, `lock`.
+- **Skills:** render/export/create now refine post copy by editing `publish.<target>` in the spec and re-exporting (durable), not by editing `dist/social-copy.md`.
+
+## Next: Phase 4 step 3, remaining items (all local, no keys)
 
 Suggested as one agent or the coordinator alone, because it all runs through `packages/mcp/src/pipeline.ts` export:
-1. **Per-platform dist (M7):** `dist/<target>/{video.mp4, cover.jpg, captions.srt, captions.vtt, post.json, qa.json}`, plus top-level `video-spec.json`, `video.lock`, `provenance.json` and `storyboard.md`.
+1. ~~**Per-platform dist (M7):**~~ done (see above). Original notes: `dist/<target>/{video.mp4, cover.jpg, captions.srt, captions.vtt, post.json, qa.json}`, plus top-level `video-spec.json`, `video.lock`, `provenance.json` and `storyboard.md`.
    - `post.json` comes from `publish.<target>` and replaces `social-copy.md`; keep `social-copy.md` for a transition period.
    - `qa.json` is the lint findings filtered to that target.
    - Re-mux or copy by default; transcode only where a contract envelope differs (fps, size, bitrate).
