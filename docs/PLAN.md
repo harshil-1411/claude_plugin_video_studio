@@ -151,12 +151,10 @@ Phases 0–3 are done. The Phase 3 exit (interactive `/video-studio:create`) is 
 - SSO and collaboration stay deferred.
 
 ## Immediate next steps
-1. Finish **M9** once the Chrome diagnostic arrives, then re-run the HyperFrames example (Phase 3 exit).
-2. Update `docs/PLAN.md`, `.claude/CLAUDE.md` (Sora stays excluded, repo code is never executed, fonts are bundled, platform specs are data), and memory with this roadmap.
-3. Start Phase 4 with the dependency order:
-   - **Me:** schema M1/M2/M4 and `packages/platforms` skeleton + contract format.
-   - **2 agents in parallel:** agent A does platform specs + safe-area/masks + lint; agent B does the caption engine + fonts + covers.
-   - **1 agent after both:** per-platform dist, `video.lock`, verify/test/diff, CI.
+Updated 2026-09-25. M9 and the Phase 3 exit are done. Phase 4 steps 1–2 are done: M1–M6, M8, platform contracts and lint. See `docs/HANDOFF.md`.
+1. **Phase 4 step 3** (one agent or the coordinator): per-platform `dist/<target>/` (M7), `video.lock`, `verify`/`test`/`diff`, golden frames and CI.
+2. **Phase 4 exit run** by the user outside the sandbox (`/video-studio:create README.md` with three targets).
+3. Then Phase 5.
 
 ## Verification
 - **Every step:** `npx tsc -b`, full `npx vitest run`, `node scripts/smoke-mcp.mjs`, `claude plugin validate --strict .claude-plugin/plugin.json`, and a rebuilt `dist/mcp.mjs`.
