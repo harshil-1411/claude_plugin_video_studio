@@ -99,6 +99,10 @@ export const VoiceSettings = z.strictObject({
 export const CaptionSettings = z.strictObject({
   preset: Id,
   burn_in: z.boolean(),
+  position: z
+    .strictObject({ y: z.number().min(0).max(1).describe("Vertical centre of the caption block as a fraction of frame height.") })
+    .optional()
+    .describe("Manual caption placement. Omit to let the caption engine place captions in the platforms' caption zone."),
 });
 
 export const MasterCanvas = z

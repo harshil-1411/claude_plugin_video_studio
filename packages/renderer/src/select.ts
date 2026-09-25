@@ -1,7 +1,8 @@
 import { rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalJson, ensureDir, readJson, sha256Hex, writeJsonAtomic } from "@video-studio/core";
-import type { DeterministicKind, Scene, VideoSpec } from "@video-studio/schema";
+import type { LayoutZones } from "@video-studio/platforms";
+import type { DeterministicKind, Scene, TextBox, VideoSpec } from "@video-studio/schema";
 import type { Availability, RenderTarget, SceneRenderer, VisualTokens } from "./types.js";
 import { LAYOUT_VERSION } from "./text-layout.js";
 
@@ -92,6 +93,8 @@ export interface SceneRenderEntry {
   from_cache?: boolean;
   reason?: string;
   warnings: string[];
+  /** Text the renderer drew (from the sidecar when cached). */
+  text_boxes?: TextBox[];
 }
 
 export interface RenderScenesOptions {
@@ -101,6 +104,8 @@ export interface RenderScenesOptions {
   renderers: readonly SceneRenderer[];
   tokens: VisualTokens;
   target: RenderTarget;
+  /** Layout zones for the enabled platform targets; part of the cache key when given. */
+  zones?: LayoutZones;
   preference?: RendererPreference;
   /** Scenes rendered in parallel. Default 1 (low-RAM machines). */
   concurrency?: number;
@@ -129,13 +134,23 @@ export interface SceneSidecar {
   duration_ms: number;
   placeholder: boolean;
   warnings: string[];
+  text_boxes?: TextBox[];
 }
 
 export const PENDING_REASON = "provider rendering arrives in Phase 4";
 
-/** Cache key of a scene clip: scene canonical JSON + tokens + target + renderer id/version. */
-export function sceneCacheKey(scene: Scene, tokens: VisualTokens, target: RenderTarget, renderer: Pick<SceneRenderer, "id" | "version">, placeholder = false): string {
-  return sha256Hex(canonicalJson({ v: 1, layout: LAYOUT_VERSION, scene, tokens, target, renderer: { id: renderer.id, version: renderer.version }, placeholder }));
+/** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version. */
+export function sceneCacheKey(
+  scene: Scene,
+  tokens: VisualTokens,
+  target: RenderTarget,
+  renderer: Pick<SceneRenderer, "id" | "version">,
+  placeholder = false,
+  zones?: LayoutZones,
+): string {
+  return sha256Hex(
+    canonicalJson({ v: 1, layout: LAYOUT_VERSION, scene, tokens, target, ...(zones ? { zones } : {}), renderer: { id: renderer.id, version: renderer.version }, placeholder }),
+  );
 }
 
 /** The motion-graphic stand-in drawn for a scene that a provider must render. */
@@ -195,19 +210,30 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
       return { scene_id: orig.id, status: placeholder ? "pending" : "failed", reason: sel.reason, warnings: [] };
     }
     const r = sel.renderer;
-    const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder);
+    const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones);
     const out = join(dir, `${orig.id}.mp4`);
     const sidecarPath = join(dir, `${orig.id}.json`);
     const base = { scene_id: orig.id, renderer: r.id, renderer_version: r.version, cache_key: key, ...(placeholder ? { placeholder: true, reason: `${orig.visual_strategy}: ${PENDING_REASON}` } : {}) };
     if (!o.force) {
       const sc = await readSidecar(sidecarPath);
       if (sc && sc.cache_key === key && (await fileExists(out))) {
-        return { ...base, status: placeholder ? "pending" : "cached", from_cache: true, out_path: out, duration_ms: sc.duration_ms, warnings: sc.warnings };
+        return {
+          ...base,
+          status: placeholder ? "pending" : "cached",
+          from_cache: true,
+          out_path: out,
+          duration_ms: sc.duration_ms,
+          warnings: sc.warnings,
+          ...(sc.text_boxes ? { text_boxes: sc.text_boxes } : {}),
+        };
       }
     }
     const tmp = join(dir, `.${orig.id}.${process.pid}.tmp.mp4`);
     try {
-      const res = await r.render({ scene, target: o.target, tokens: o.tokens, out_path: tmp, project_dir: o.project_dir }, { signal: o.signal });
+      const res = await r.render(
+        { scene, target: o.target, tokens: o.tokens, out_path: tmp, project_dir: o.project_dir, ...(o.zones ? { zones: o.zones } : {}) },
+        { signal: o.signal },
+      );
       await rename(tmp, out);
       const sidecar: SceneSidecar = {
         scene_id: orig.id,
@@ -217,9 +243,17 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
         duration_ms: res.duration_ms,
         placeholder,
         warnings: res.warnings,
+        ...(res.text_boxes ? { text_boxes: res.text_boxes } : {}),
       };
       await writeJsonAtomic(sidecarPath, sidecar);
-      return { ...base, status: placeholder ? "pending" : "rendered", out_path: out, duration_ms: res.duration_ms, warnings: res.warnings };
+      return {
+        ...base,
+        status: placeholder ? "pending" : "rendered",
+        out_path: out,
+        duration_ms: res.duration_ms,
+        warnings: res.warnings,
+        ...(res.text_boxes ? { text_boxes: res.text_boxes } : {}),
+      };
     } catch (err) {
       await rm(tmp, { force: true });
       if (o.signal?.aborted) throw err;

@@ -1,4 +1,5 @@
-import type { AspectRatio, Brand, Scene } from "@video-studio/schema";
+import type { LayoutZones } from "@video-studio/platforms";
+import type { AspectRatio, Brand, Scene, TextBox } from "@video-studio/schema";
 
 /**
  * Renders deterministic (motion_graphic) scenes to silent video clips.
@@ -32,6 +33,8 @@ export interface SceneRenderRequest {
   out_path: string;
   /** Absolute project dir, for resolving scene asset paths (screenshots, logo). */
   project_dir: string;
+  /** Layout zones for the enabled platform targets. Absent: the renderer's built-in safe area. */
+  zones?: LayoutZones;
 }
 
 export interface SceneRenderResult {
@@ -42,6 +45,8 @@ export interface SceneRenderResult {
   renderer_version: string;
   /** Any props the renderer could not honour, surfaced to QA. */
   warnings: string[];
+  /** Every text block drawn, in output pixels, for lint (overflow, mask collisions, contrast). */
+  text_boxes?: TextBox[];
 }
 
 export interface Availability {
@@ -58,4 +63,4 @@ export interface SceneRenderer {
   render(req: SceneRenderRequest, opts?: { signal?: AbortSignal }): Promise<SceneRenderResult>;
 }
 
-export type { Brand };
+export type { Brand, LayoutZones, TextBox };

@@ -5,6 +5,22 @@ import { SceneId } from "./video-spec.js";
 
 export const RenderStatus = z.enum(["pending", "submitted", "running", "succeeded", "failed", "cancelled", "cached"]);
 
+export const PxBox = z.strictObject({ x: z.int(), y: z.int(), w: z.int().nonnegative(), h: z.int().nonnegative() });
+
+export const TextRole = z.enum(["hook", "headline", "body", "label", "code", "caption", "cta", "decorative"]);
+
+export const TextBox = z
+  .strictObject({
+    role: TextRole.describe("hook, headline, caption and cta overflow is an error in lint; decorative is a warning."),
+    text: z.string(),
+    rect: PxBox.describe("Box the text was fitted into, in output pixels."),
+    font_px: z.number().positive(),
+    truncated: z.boolean().describe("fitText could not fit the text without cutting it."),
+    color: z.string().optional().describe("Text colour #RRGGBB."),
+    background: z.string().optional().describe("Colour behind the text #RRGGBB, for contrast checks."),
+  })
+  .describe("One text block a renderer drew.");
+
 export const SceneRender = z.strictObject({
   scene_id: SceneId,
   provider: Id.describe("Adapter id that produced the output, e.g. `mock` or `hyperframes-local`."),
@@ -24,6 +40,7 @@ export const SceneRender = z.strictObject({
   renderer_version: z.string().optional().describe("Version of the local renderer or adapter that produced the output."),
   placeholder: z.boolean().optional().describe("True when the output is a titled stand-in for a scene a provider must still render."),
   warnings: z.array(z.string()).optional(),
+  text_boxes: z.array(TextBox).optional().describe("Text the renderer drew, for lint."),
 });
 
 export const VoiceRender = z.strictObject({
@@ -46,6 +63,8 @@ export const CaptionFormat = z.enum(["json", "srt", "vtt", "ass", "html"]);
 export const CaptionsRender = z.strictObject({
   preset: Id,
   burn_in: z.boolean(),
+  box: PxBox.optional().describe("Region the burned-in captions occupy, in output pixels, for lint."),
+  max_lines: z.int().positive().optional(),
   files: z.array(
     z.strictObject({
       format: CaptionFormat,
@@ -138,6 +157,9 @@ export const RenderManifest = z
 
 export type RenderStatus = z.infer<typeof RenderStatus>;
 export type SceneRender = z.infer<typeof SceneRender>;
+export type PxBox = z.infer<typeof PxBox>;
+export type TextRole = z.infer<typeof TextRole>;
+export type TextBox = z.infer<typeof TextBox>;
 export type VoiceRender = z.infer<typeof VoiceRender>;
 export type CaptionFormat = z.infer<typeof CaptionFormat>;
 export type CaptionsRender = z.infer<typeof CaptionsRender>;

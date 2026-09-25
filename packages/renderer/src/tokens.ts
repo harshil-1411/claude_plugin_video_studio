@@ -85,6 +85,14 @@ export function resolveTokens(brand?: Brand, defaults: Partial<VisualTokens> = {
 
 // ---------------------------------------------------------------------------------- fonts
 
+/**
+ * `@font-face` rules for the bundled fonts used by `tokens`, for the HTML renderer.
+ * Empty until the bundled fonts land (Phase 4 M8); callers can embed it unconditionally.
+ */
+export function fontFaceCss(_tokens: VisualTokens): string {
+  return "";
+}
+
 /** Split a CSS font-family list into names (quotes removed). */
 export function parseFontChain(chain: string): string[] {
   return chain

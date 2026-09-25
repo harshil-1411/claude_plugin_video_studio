@@ -32,6 +32,22 @@
         "burn_in": {
           "type": "boolean"
         },
+        "position": {
+          "description": "Manual caption placement. Omit to let the caption engine place captions in the platforms' caption zone.",
+          "additionalProperties": false,
+          "properties": {
+            "y": {
+              "description": "Vertical centre of the caption block as a fraction of frame height.",
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "y"
+          ],
+          "type": "object"
+        },
         "preset": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
           "type": "string"

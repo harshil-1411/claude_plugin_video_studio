@@ -36,9 +36,13 @@ import {
   type SceneVoiceTrack,
   type TimingAdjustment,
   VideoSpec,
+  type PlatformContract,
+  type TextBox,
   parseYamlOrJson,
   resolveMaster,
+  resolveTargets,
 } from "@video-studio/schema";
+import { findPlatformSpecsDir, layoutZones, loadContracts } from "@video-studio/platforms";
 import { type BackendChoice, type BackendSet, type SynthesizeSpecResult, defaultBackends, selectBackend, synthesizeSpec } from "@video-studio/voice";
 import { hyperframesOptions } from "./hyperframes.js";
 import { type ValidationIssue, projectSpecPaths, validateSpecFile } from "./spec-validate.js";
@@ -174,6 +178,7 @@ interface RenderState {
     finished_at: string;
     claim_refs: string[];
     visual_strategy: string;
+    text_boxes?: TextBox[];
   }>;
   voice: {
     requested: BackendChoice;
@@ -247,6 +252,16 @@ export async function loadValidSpec(projectDir: string): Promise<{ spec: VideoSp
   const parsed = parseYamlOrJson(VideoSpec, await readFile(specPath, "utf8"));
   if (!parsed.ok) throw new SpecInvalidError(parsed.errors.map((e) => ({ ...e, fix: "match the VideoSpec schema", stage: "schema" as const })));
   return { spec: parsed.data, warnings: v.warnings, specPath, irPath: contentIr };
+}
+
+/**
+ * Contracts for the spec's targets that exist in platform-specs/. Unknown ids are skipped here:
+ * spec_validate already reports them as errors once the registry has contracts.
+ */
+export async function loadTargetContracts(spec: Pick<VideoSpec, "platform" | "targets">, dir: string | null = findPlatformSpecsDir()): Promise<PlatformContract[]> {
+  if (!dir) return [];
+  const wanted = new Set(resolveTargets(spec));
+  return (await loadContracts(dir)).filter((c) => wanted.has(c.id));
 }
 
 /** Frame size / fps for a quality. Final: the spec's master canvas. Preview: half resolution, 15 fps (24 when HyperFrames draws, it needs 24/30/60). */
@@ -357,12 +372,14 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     progress({ stage: "scenes", message: `scene ${e.scene_id}: ${e.status}${e.renderer ? ` (${e.renderer})` : ""}`, scene_index: done, scene_count: count, scene_id: e.scene_id });
   };
   for (const s of planScenes) sceneStart.set(s.id, now().toISOString());
+  const zones = layoutZones(target, await loadTargetContracts(spec));
   const baseOpts = {
     project_dir: root,
     dir: scenesDir,
     renderers,
     tokens,
     target,
+    zones,
     placeholder,
     env: env as NodeJS.ProcessEnv,
     ...(signal ? { signal } : {}),
@@ -525,6 +542,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
       finished_at: sceneEnd.get(e.scene_id) ?? started_at,
       claim_refs: spec.scenes[i]!.claim_refs,
       visual_strategy: spec.scenes[i]!.visual_strategy,
+      ...(e.text_boxes ? { text_boxes: e.text_boxes } : {}),
     })),
     voice: {
       requested: voiceChoice,
@@ -807,6 +825,7 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
     renderer_version: s.renderer_version,
     ...(s.placeholder ? { placeholder: true, error: `placeholder: ${s.reason ?? "provider rendering arrives in Phase 4"}` } : {}),
     ...(s.warnings.length ? { warnings: s.warnings } : {}),
+    ...(s.text_boxes?.length ? { text_boxes: s.text_boxes } : {}),
   }));
 
   const captionFiles: NonNullable<RenderManifest["captions"]>["files"] = [];
