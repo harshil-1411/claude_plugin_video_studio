@@ -97,6 +97,8 @@ describe("spec_scaffold", () => {
           s.voiceover = "A short line of narration for this scene.";
           s.on_screen_text = "Key idea";
           if (s.deterministic) s.deterministic.props = structuredClone(DETERMINISTIC_PROPS_EXAMPLES[s.deterministic.kind]);
+          // Example props carry numbers (e.g. a 40% stat), which strict grounding requires a ref for.
+          s.claim_refs = ["ev-1"];
           if (s.visual_strategy === "generated_video") s.visual_requirements.subject = "abstract shapes forming a product";
         }
         expect(VideoSpec.safeParse(filled).success).toBe(true);

@@ -23,6 +23,27 @@ export interface VisualTokens {
   color_primary: string;
   color_secondary: string;
   logo_path?: string;
+  // ---- style pack / brand v2 (all optional: absent means the renderer's defaults)
+  /** Style pack the tokens came from, `<id>@<version>`; part of the scene cache key. */
+  style?: string;
+  weight_heading?: number;
+  weight_body?: number;
+  text_case?: "as_is" | "upper" | "title";
+  /** Multiplier on the heading size the layout picks. */
+  heading_scale?: number;
+  text_align?: "center" | "left";
+  motion?: MotionTokens;
+}
+
+/** Resolved motion tokens (style pack, overridden by brand.motion). */
+export interface MotionTokens {
+  personality: "calm" | "precise" | "friendly" | "energetic" | "playful";
+  easing: "linear" | "ease_out" | "ease_in_out" | "spring" | "snap";
+  enter_ms: number;
+  exit_ms: number;
+  stagger_ms: number;
+  transition: "cut" | "crossfade" | "fade_black" | "slide" | "zoom" | "whip";
+  transition_ms: number;
 }
 
 export interface SceneRenderRequest {

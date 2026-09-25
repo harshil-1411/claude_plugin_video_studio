@@ -22,6 +22,7 @@ export const SCHEMA_NAMES = [
   "template",
   "platform-contract",
   "video-lock",
+  "style",
 ] as const;
 export type SchemaName = (typeof SCHEMA_NAMES)[number];
 

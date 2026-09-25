@@ -54,6 +54,13 @@ const HOSTILE: Record<DeterministicKind, Record<string, unknown>> = {
   end_card: { title: XSS, subtitle: XSS },
   chart: { type: "bar", series: [{ label: XSS, value: 3 }, { label: "b", value: 5 }], unit: XSS, label: XSS },
   screenshot: { asset: XSS, callouts: [XSS, { text: XSS, x: 0.5, y: 0.5 }] },
+  quote: { text: XSS, attribution: XSS, source: XSS },
+  stat: { value: XSS, unit: XSS, label: XSS, context: XSS },
+  timeline: { events: [{ label: XSS, text: XSS }, { label: "b" }], current: 0 },
+  split_screen: { mode: "before_after", left: { label: XSS, text: XSS }, right: { label: XSS, text: XSS } },
+  lower_third: { name: XSS, title: XSS, headline: XSS },
+  kinetic_text: { text: `${XSS} words`, rhythm: "word", emphasis: XSS },
+  map: { title: XSS, points: [{ label: XSS, x: 0.2, y: 0.3 }], route: false },
 };
 
 describe("buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES", () => {

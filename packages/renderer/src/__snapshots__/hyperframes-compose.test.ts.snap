@@ -1046,6 +1046,709 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > end_card 
 }
 `;
 
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > kinetic_text (9:16) 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1080, height=1920">
+<title>s01 kinetic_text</title>
+<style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: local("Inter"); }
+@font-face { font-family: "Helvetica"; src: local("Helvetica"); }
+@font-face { font-family: "Arial"; src: local("Arial"); }
+@font-face { font-family: "Menlo"; src: local("Menlo"); }
+@font-face { font-family: "DejaVu Sans Mono"; src: local("DejaVu Sans Mono"); }
+:root {
+  --vs-bg: #0B0F19;
+  --vs-text: #F5F7FA;
+  --vs-primary: #4F8CFF;
+  --vs-secondary: #22C55E;
+  --vs-font-heading: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-body: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-mono: "Menlo", "DejaVu Sans Mono", monospace;
+  --vs-u: 10.8px;
+  --vs-panel: color-mix(in srgb, var(--vs-text) 7%, var(--vs-bg));
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
+#vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
+.clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
+.vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
+.vs-fade { animation-name: vs-fade; }
+.vs-fade-up { animation-name: vs-fade-up; }
+.vs-scale-in { animation-name: vs-scale-in; }
+.vs-pop { animation-name: vs-pop; transform-box: fill-box; transform-origin: center; }
+.vs-pop-center { animation-name: vs-pop; transform-box: view-box; transform-origin: 50% 0; }
+.vs-slide-right { animation-name: vs-slide-right; }
+.vs-slide-left { animation-name: vs-slide-left; }
+.vs-grow-x { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 0 50%; }
+.vs-grow-x-rev { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 100% 50%; }
+.vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
+.vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
+.vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+@keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
+@keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes vs-pop { 0% { opacity: 0; transform: scale(0.6); } 70% { opacity: 1; transform: scale(1.06); } 100% { opacity: 1; transform: none; } }
+@keyframes vs-slide-right { from { opacity: 0; transform: translateX(calc(var(--vs-u) * -8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-slide-left { from { opacity: 0; transform: translateX(calc(var(--vs-u) * 8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+.vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-line { overflow-wrap: anywhere; }
+.vs-em { color: var(--vs-primary); }
+.vs-code-panel { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); max-height: 90%; overflow: hidden; }
+.vs-code-bar { display: flex; gap: calc(var(--vs-u) * 1.2); align-items: center; margin-bottom: calc(var(--vs-u) * 2); font-family: var(--vs-font-mono); font-size: calc(var(--vs-u) * 2.4); }
+.vs-code-bar span { width: calc(var(--vs-u) * 1.6); height: calc(var(--vs-u) * 1.6); border-radius: 50%; background: var(--vs-text); opacity: 0.25; }
+.vs-code-bar em { margin-left: auto; font-style: normal; opacity: 0.6; }
+.vs-code { font-family: var(--vs-font-mono); line-height: 1.45; white-space: pre; overflow: hidden; }
+.vs-code-line { display: flex; border-left: calc(var(--vs-u) * 0.6) solid transparent; padding-left: calc(var(--vs-u) * 1); }
+.vs-code-line.vs-hl { background: color-mix(in srgb, var(--vs-primary) 22%, transparent); border-left-color: var(--vs-primary); }
+.vs-ln { opacity: 0.4; min-width: 2.5em; text-align: right; padding-right: 1em; user-select: none; }
+.tk-kw { color: var(--vs-primary); font-weight: 700; }
+.tk-str { color: var(--vs-secondary); }
+.tk-num, .tk-lit { color: var(--vs-secondary); font-weight: 700; }
+.tk-com { opacity: 0.55; font-style: italic; }
+.tk-fn { font-weight: 700; }
+.tk-key { color: var(--vs-primary); }
+.vs-chart-title { font-family: var(--vs-font-heading); font-weight: 700; font-size: calc(var(--vs-u) * 5.5); text-align: center; }
+.vs-chart-svg { display: block; margin: 0 auto; overflow: visible; }
+.vs-axis { fill: var(--vs-text); fill-opacity: 0.8; font-family: var(--vs-font-body); }
+.vs-value { fill: var(--vs-text); font-family: var(--vs-font-heading); font-weight: 700; }
+.vs-gridline { stroke: var(--vs-text); stroke-opacity: 0.25; stroke-width: 2; }
+.vs-stat { align-items: center; text-align: center; }
+.vs-stat-value { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; }
+.vs-stat-unit { font-size: 0.5em; margin-left: 0.08em; }
+.vs-stat-label { font-weight: 600; }
+.vs-edges { position: absolute; left: 0; top: 0; overflow: visible; }
+.vs-node { position: absolute; display: flex; }
+.vs-node > div { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 calc(var(--vs-u) * 1); border: calc(var(--vs-u) * 0.45) solid var(--vs-primary); border-radius: calc(var(--vs-u) * 1.6); background: color-mix(in srgb, var(--vs-primary) 14%, var(--vs-bg)); font-family: var(--vs-font-heading); font-weight: 700; overflow: hidden; overflow-wrap: anywhere; line-height: 1.15; }
+.vs-compare { display: flex; gap: calc(var(--vs-u) * 4); }
+.vs-rows { flex-direction: column; }
+.vs-columns > * { flex: 1; }
+.vs-card { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; overflow-wrap: anywhere; }
+.vs-card.vs-right { border-top-color: var(--vs-secondary); }
+.vs-card-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); margin-bottom: 0.4em; }
+.vs-card.vs-right .vs-card-label { color: var(--vs-secondary); }
+.vs-card-text { line-height: 1.3; }
+.vs-verdict { font-family: var(--vs-font-heading); font-weight: 700; text-align: center; padding: calc(var(--vs-u) * 2); border-radius: calc(var(--vs-u) * 1.5); background: color-mix(in srgb, var(--vs-primary) 18%, transparent); overflow-wrap: anywhere; }
+.vs-cta, .vs-end { align-items: center; text-align: center; }
+.vs-headline { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.vs-subtitle { opacity: 0.85; overflow-wrap: anywhere; }
+.vs-action { display: inline-block; background: var(--vs-primary); color: var(--vs-bg); font-family: var(--vs-font-heading); font-weight: 800; padding: 0.45em 1.2em; border-radius: 999px; overflow-wrap: anywhere; }
+.vs-command { font-family: var(--vs-font-mono); background: var(--vs-panel); padding: 0.6em 1em; border-radius: calc(var(--vs-u) * 1.5); max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.vs-prompt { color: var(--vs-secondary); }
+.vs-url { color: var(--vs-secondary); font-weight: 600; overflow-wrap: anywhere; }
+.vs-logo { max-width: 40%; max-height: calc(var(--vs-u) * 14); object-fit: contain; }
+.vs-rule { width: 30%; height: calc(var(--vs-u) * 0.8); border-radius: 999px; background: var(--vs-primary); }
+.vs-shot { position: relative; width: 100%; border-radius: calc(var(--vs-u) * 2); overflow: hidden; background: var(--vs-panel); }
+.vs-shot-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-shot-missing { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; opacity: 0.5; font-family: var(--vs-font-mono); border: calc(var(--vs-u) * 0.4) dashed var(--vs-text); border-radius: inherit; }
+.vs-pin { position: absolute; transform: translate(-50%, -50%); }
+.vs-pin > div { display: flex; align-items: center; gap: 0.4em; }
+.vs-pin-dot { width: 1em; height: 1em; border-radius: 50%; background: var(--vs-primary); box-shadow: 0 0 0 0.3em color-mix(in srgb, var(--vs-primary) 35%, transparent); flex: none; }
+.vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
+.vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
+.vs-callouts .vs-callout { align-self: flex-start; }
+</style>
+</head>
+<body>
+<div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
+<div id="vs-scene" class="clip vs-kind-kinetic-text" data-start="0" data-duration="3" data-track-index="0">
+<div class="vs-safe">
+<div class="vs-stack vs-typography" style="font-size:118.8px">
+<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">Docs in. Video out.</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">Video</span></div>
+</div>
+</div>
+</div>
+</div>
+<script>
+(function () {
+  var DURATION = 3;
+  var t = 0;
+  var playing = false;
+  function animations() {
+    return typeof document.getAnimations === "function" ? document.getAnimations() : [];
+  }
+  function apply(seconds) {
+    t = Math.min(Math.max(0, Number(seconds) || 0), DURATION);
+    var list = animations();
+    for (var i = 0; i < list.length; i++) {
+      try { list[i].currentTime = t * 1000; list[i].pause(); } catch (e) {}
+    }
+  }
+  var tl = {
+    duration: function () { return DURATION; },
+    totalDuration: function () { return DURATION; },
+    seek: function (s) { apply(s); return tl; },
+    totalTime: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    time: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    progress: function (p) { if (p === undefined) return DURATION ? t / DURATION : 0; apply(p * DURATION); return tl; },
+    pause: function () { playing = false; apply(t); return tl; },
+    play: function () { playing = true; return tl; },
+    paused: function (v) { if (v === undefined) return !playing; playing = !v; return tl; },
+    isActive: function () { return false; },
+    timeScale: function (v) { return v === undefined ? 1 : tl; },
+    getChildren: function () { return []; },
+    kill: function () { return tl; }
+  };
+  window.__timelines = window.__timelines || {};
+  window.__timelines["vs-s01"] = tl;
+  apply(0);
+})();
+</script>
+</body>
+</html>
+"
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > kinetic_text (9:16) 2`] = `
+{
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
+  "warnings": [
+    "kinetic_text: drawn as a typography card (not implemented in the HyperFrames composition yet)",
+  ],
+}
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > lower_third (9:16) 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1080, height=1920">
+<title>s01 lower_third</title>
+<style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: local("Inter"); }
+@font-face { font-family: "Helvetica"; src: local("Helvetica"); }
+@font-face { font-family: "Arial"; src: local("Arial"); }
+@font-face { font-family: "Menlo"; src: local("Menlo"); }
+@font-face { font-family: "DejaVu Sans Mono"; src: local("DejaVu Sans Mono"); }
+:root {
+  --vs-bg: #0B0F19;
+  --vs-text: #F5F7FA;
+  --vs-primary: #4F8CFF;
+  --vs-secondary: #22C55E;
+  --vs-font-heading: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-body: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-mono: "Menlo", "DejaVu Sans Mono", monospace;
+  --vs-u: 10.8px;
+  --vs-panel: color-mix(in srgb, var(--vs-text) 7%, var(--vs-bg));
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
+#vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
+.clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
+.vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
+.vs-fade { animation-name: vs-fade; }
+.vs-fade-up { animation-name: vs-fade-up; }
+.vs-scale-in { animation-name: vs-scale-in; }
+.vs-pop { animation-name: vs-pop; transform-box: fill-box; transform-origin: center; }
+.vs-pop-center { animation-name: vs-pop; transform-box: view-box; transform-origin: 50% 0; }
+.vs-slide-right { animation-name: vs-slide-right; }
+.vs-slide-left { animation-name: vs-slide-left; }
+.vs-grow-x { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 0 50%; }
+.vs-grow-x-rev { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 100% 50%; }
+.vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
+.vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
+.vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+@keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
+@keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes vs-pop { 0% { opacity: 0; transform: scale(0.6); } 70% { opacity: 1; transform: scale(1.06); } 100% { opacity: 1; transform: none; } }
+@keyframes vs-slide-right { from { opacity: 0; transform: translateX(calc(var(--vs-u) * -8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-slide-left { from { opacity: 0; transform: translateX(calc(var(--vs-u) * 8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+.vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-line { overflow-wrap: anywhere; }
+.vs-em { color: var(--vs-primary); }
+.vs-code-panel { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); max-height: 90%; overflow: hidden; }
+.vs-code-bar { display: flex; gap: calc(var(--vs-u) * 1.2); align-items: center; margin-bottom: calc(var(--vs-u) * 2); font-family: var(--vs-font-mono); font-size: calc(var(--vs-u) * 2.4); }
+.vs-code-bar span { width: calc(var(--vs-u) * 1.6); height: calc(var(--vs-u) * 1.6); border-radius: 50%; background: var(--vs-text); opacity: 0.25; }
+.vs-code-bar em { margin-left: auto; font-style: normal; opacity: 0.6; }
+.vs-code { font-family: var(--vs-font-mono); line-height: 1.45; white-space: pre; overflow: hidden; }
+.vs-code-line { display: flex; border-left: calc(var(--vs-u) * 0.6) solid transparent; padding-left: calc(var(--vs-u) * 1); }
+.vs-code-line.vs-hl { background: color-mix(in srgb, var(--vs-primary) 22%, transparent); border-left-color: var(--vs-primary); }
+.vs-ln { opacity: 0.4; min-width: 2.5em; text-align: right; padding-right: 1em; user-select: none; }
+.tk-kw { color: var(--vs-primary); font-weight: 700; }
+.tk-str { color: var(--vs-secondary); }
+.tk-num, .tk-lit { color: var(--vs-secondary); font-weight: 700; }
+.tk-com { opacity: 0.55; font-style: italic; }
+.tk-fn { font-weight: 700; }
+.tk-key { color: var(--vs-primary); }
+.vs-chart-title { font-family: var(--vs-font-heading); font-weight: 700; font-size: calc(var(--vs-u) * 5.5); text-align: center; }
+.vs-chart-svg { display: block; margin: 0 auto; overflow: visible; }
+.vs-axis { fill: var(--vs-text); fill-opacity: 0.8; font-family: var(--vs-font-body); }
+.vs-value { fill: var(--vs-text); font-family: var(--vs-font-heading); font-weight: 700; }
+.vs-gridline { stroke: var(--vs-text); stroke-opacity: 0.25; stroke-width: 2; }
+.vs-stat { align-items: center; text-align: center; }
+.vs-stat-value { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; }
+.vs-stat-unit { font-size: 0.5em; margin-left: 0.08em; }
+.vs-stat-label { font-weight: 600; }
+.vs-edges { position: absolute; left: 0; top: 0; overflow: visible; }
+.vs-node { position: absolute; display: flex; }
+.vs-node > div { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 calc(var(--vs-u) * 1); border: calc(var(--vs-u) * 0.45) solid var(--vs-primary); border-radius: calc(var(--vs-u) * 1.6); background: color-mix(in srgb, var(--vs-primary) 14%, var(--vs-bg)); font-family: var(--vs-font-heading); font-weight: 700; overflow: hidden; overflow-wrap: anywhere; line-height: 1.15; }
+.vs-compare { display: flex; gap: calc(var(--vs-u) * 4); }
+.vs-rows { flex-direction: column; }
+.vs-columns > * { flex: 1; }
+.vs-card { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; overflow-wrap: anywhere; }
+.vs-card.vs-right { border-top-color: var(--vs-secondary); }
+.vs-card-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); margin-bottom: 0.4em; }
+.vs-card.vs-right .vs-card-label { color: var(--vs-secondary); }
+.vs-card-text { line-height: 1.3; }
+.vs-verdict { font-family: var(--vs-font-heading); font-weight: 700; text-align: center; padding: calc(var(--vs-u) * 2); border-radius: calc(var(--vs-u) * 1.5); background: color-mix(in srgb, var(--vs-primary) 18%, transparent); overflow-wrap: anywhere; }
+.vs-cta, .vs-end { align-items: center; text-align: center; }
+.vs-headline { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.vs-subtitle { opacity: 0.85; overflow-wrap: anywhere; }
+.vs-action { display: inline-block; background: var(--vs-primary); color: var(--vs-bg); font-family: var(--vs-font-heading); font-weight: 800; padding: 0.45em 1.2em; border-radius: 999px; overflow-wrap: anywhere; }
+.vs-command { font-family: var(--vs-font-mono); background: var(--vs-panel); padding: 0.6em 1em; border-radius: calc(var(--vs-u) * 1.5); max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.vs-prompt { color: var(--vs-secondary); }
+.vs-url { color: var(--vs-secondary); font-weight: 600; overflow-wrap: anywhere; }
+.vs-logo { max-width: 40%; max-height: calc(var(--vs-u) * 14); object-fit: contain; }
+.vs-rule { width: 30%; height: calc(var(--vs-u) * 0.8); border-radius: 999px; background: var(--vs-primary); }
+.vs-shot { position: relative; width: 100%; border-radius: calc(var(--vs-u) * 2); overflow: hidden; background: var(--vs-panel); }
+.vs-shot-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-shot-missing { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; opacity: 0.5; font-family: var(--vs-font-mono); border: calc(var(--vs-u) * 0.4) dashed var(--vs-text); border-radius: inherit; }
+.vs-pin { position: absolute; transform: translate(-50%, -50%); }
+.vs-pin > div { display: flex; align-items: center; gap: 0.4em; }
+.vs-pin-dot { width: 1em; height: 1em; border-radius: 50%; background: var(--vs-primary); box-shadow: 0 0 0 0.3em color-mix(in srgb, var(--vs-primary) 35%, transparent); flex: none; }
+.vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
+.vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
+.vs-callouts .vs-callout { align-self: flex-start; }
+</style>
+</head>
+<body>
+<div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
+<div id="vs-scene" class="clip vs-kind-lower-third" data-start="0" data-duration="3" data-track-index="0">
+<div class="vs-safe">
+<div class="vs-stack vs-typography" style="font-size:118.8px">
+<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">Ada Lovelace</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">Engineer</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.46s;--d:0.6s"><span class="vs-line">Why we built it</span></div>
+</div>
+</div>
+</div>
+</div>
+<script>
+(function () {
+  var DURATION = 3;
+  var t = 0;
+  var playing = false;
+  function animations() {
+    return typeof document.getAnimations === "function" ? document.getAnimations() : [];
+  }
+  function apply(seconds) {
+    t = Math.min(Math.max(0, Number(seconds) || 0), DURATION);
+    var list = animations();
+    for (var i = 0; i < list.length; i++) {
+      try { list[i].currentTime = t * 1000; list[i].pause(); } catch (e) {}
+    }
+  }
+  var tl = {
+    duration: function () { return DURATION; },
+    totalDuration: function () { return DURATION; },
+    seek: function (s) { apply(s); return tl; },
+    totalTime: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    time: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    progress: function (p) { if (p === undefined) return DURATION ? t / DURATION : 0; apply(p * DURATION); return tl; },
+    pause: function () { playing = false; apply(t); return tl; },
+    play: function () { playing = true; return tl; },
+    paused: function (v) { if (v === undefined) return !playing; playing = !v; return tl; },
+    isActive: function () { return false; },
+    timeScale: function (v) { return v === undefined ? 1 : tl; },
+    getChildren: function () { return []; },
+    kill: function () { return tl; }
+  };
+  window.__timelines = window.__timelines || {};
+  window.__timelines["vs-s01"] = tl;
+  apply(0);
+})();
+</script>
+</body>
+</html>
+"
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > lower_third (9:16) 2`] = `
+{
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
+  "warnings": [
+    "lower_third: drawn as a typography card (not implemented in the HyperFrames composition yet)",
+  ],
+}
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > map (9:16) 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1080, height=1920">
+<title>s01 map</title>
+<style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: local("Inter"); }
+@font-face { font-family: "Helvetica"; src: local("Helvetica"); }
+@font-face { font-family: "Arial"; src: local("Arial"); }
+@font-face { font-family: "Menlo"; src: local("Menlo"); }
+@font-face { font-family: "DejaVu Sans Mono"; src: local("DejaVu Sans Mono"); }
+:root {
+  --vs-bg: #0B0F19;
+  --vs-text: #F5F7FA;
+  --vs-primary: #4F8CFF;
+  --vs-secondary: #22C55E;
+  --vs-font-heading: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-body: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-mono: "Menlo", "DejaVu Sans Mono", monospace;
+  --vs-u: 10.8px;
+  --vs-panel: color-mix(in srgb, var(--vs-text) 7%, var(--vs-bg));
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
+#vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
+.clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
+.vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
+.vs-fade { animation-name: vs-fade; }
+.vs-fade-up { animation-name: vs-fade-up; }
+.vs-scale-in { animation-name: vs-scale-in; }
+.vs-pop { animation-name: vs-pop; transform-box: fill-box; transform-origin: center; }
+.vs-pop-center { animation-name: vs-pop; transform-box: view-box; transform-origin: 50% 0; }
+.vs-slide-right { animation-name: vs-slide-right; }
+.vs-slide-left { animation-name: vs-slide-left; }
+.vs-grow-x { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 0 50%; }
+.vs-grow-x-rev { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 100% 50%; }
+.vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
+.vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
+.vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+@keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
+@keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes vs-pop { 0% { opacity: 0; transform: scale(0.6); } 70% { opacity: 1; transform: scale(1.06); } 100% { opacity: 1; transform: none; } }
+@keyframes vs-slide-right { from { opacity: 0; transform: translateX(calc(var(--vs-u) * -8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-slide-left { from { opacity: 0; transform: translateX(calc(var(--vs-u) * 8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+.vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-line { overflow-wrap: anywhere; }
+.vs-em { color: var(--vs-primary); }
+.vs-code-panel { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); max-height: 90%; overflow: hidden; }
+.vs-code-bar { display: flex; gap: calc(var(--vs-u) * 1.2); align-items: center; margin-bottom: calc(var(--vs-u) * 2); font-family: var(--vs-font-mono); font-size: calc(var(--vs-u) * 2.4); }
+.vs-code-bar span { width: calc(var(--vs-u) * 1.6); height: calc(var(--vs-u) * 1.6); border-radius: 50%; background: var(--vs-text); opacity: 0.25; }
+.vs-code-bar em { margin-left: auto; font-style: normal; opacity: 0.6; }
+.vs-code { font-family: var(--vs-font-mono); line-height: 1.45; white-space: pre; overflow: hidden; }
+.vs-code-line { display: flex; border-left: calc(var(--vs-u) * 0.6) solid transparent; padding-left: calc(var(--vs-u) * 1); }
+.vs-code-line.vs-hl { background: color-mix(in srgb, var(--vs-primary) 22%, transparent); border-left-color: var(--vs-primary); }
+.vs-ln { opacity: 0.4; min-width: 2.5em; text-align: right; padding-right: 1em; user-select: none; }
+.tk-kw { color: var(--vs-primary); font-weight: 700; }
+.tk-str { color: var(--vs-secondary); }
+.tk-num, .tk-lit { color: var(--vs-secondary); font-weight: 700; }
+.tk-com { opacity: 0.55; font-style: italic; }
+.tk-fn { font-weight: 700; }
+.tk-key { color: var(--vs-primary); }
+.vs-chart-title { font-family: var(--vs-font-heading); font-weight: 700; font-size: calc(var(--vs-u) * 5.5); text-align: center; }
+.vs-chart-svg { display: block; margin: 0 auto; overflow: visible; }
+.vs-axis { fill: var(--vs-text); fill-opacity: 0.8; font-family: var(--vs-font-body); }
+.vs-value { fill: var(--vs-text); font-family: var(--vs-font-heading); font-weight: 700; }
+.vs-gridline { stroke: var(--vs-text); stroke-opacity: 0.25; stroke-width: 2; }
+.vs-stat { align-items: center; text-align: center; }
+.vs-stat-value { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; }
+.vs-stat-unit { font-size: 0.5em; margin-left: 0.08em; }
+.vs-stat-label { font-weight: 600; }
+.vs-edges { position: absolute; left: 0; top: 0; overflow: visible; }
+.vs-node { position: absolute; display: flex; }
+.vs-node > div { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 calc(var(--vs-u) * 1); border: calc(var(--vs-u) * 0.45) solid var(--vs-primary); border-radius: calc(var(--vs-u) * 1.6); background: color-mix(in srgb, var(--vs-primary) 14%, var(--vs-bg)); font-family: var(--vs-font-heading); font-weight: 700; overflow: hidden; overflow-wrap: anywhere; line-height: 1.15; }
+.vs-compare { display: flex; gap: calc(var(--vs-u) * 4); }
+.vs-rows { flex-direction: column; }
+.vs-columns > * { flex: 1; }
+.vs-card { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; overflow-wrap: anywhere; }
+.vs-card.vs-right { border-top-color: var(--vs-secondary); }
+.vs-card-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); margin-bottom: 0.4em; }
+.vs-card.vs-right .vs-card-label { color: var(--vs-secondary); }
+.vs-card-text { line-height: 1.3; }
+.vs-verdict { font-family: var(--vs-font-heading); font-weight: 700; text-align: center; padding: calc(var(--vs-u) * 2); border-radius: calc(var(--vs-u) * 1.5); background: color-mix(in srgb, var(--vs-primary) 18%, transparent); overflow-wrap: anywhere; }
+.vs-cta, .vs-end { align-items: center; text-align: center; }
+.vs-headline { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.vs-subtitle { opacity: 0.85; overflow-wrap: anywhere; }
+.vs-action { display: inline-block; background: var(--vs-primary); color: var(--vs-bg); font-family: var(--vs-font-heading); font-weight: 800; padding: 0.45em 1.2em; border-radius: 999px; overflow-wrap: anywhere; }
+.vs-command { font-family: var(--vs-font-mono); background: var(--vs-panel); padding: 0.6em 1em; border-radius: calc(var(--vs-u) * 1.5); max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.vs-prompt { color: var(--vs-secondary); }
+.vs-url { color: var(--vs-secondary); font-weight: 600; overflow-wrap: anywhere; }
+.vs-logo { max-width: 40%; max-height: calc(var(--vs-u) * 14); object-fit: contain; }
+.vs-rule { width: 30%; height: calc(var(--vs-u) * 0.8); border-radius: 999px; background: var(--vs-primary); }
+.vs-shot { position: relative; width: 100%; border-radius: calc(var(--vs-u) * 2); overflow: hidden; background: var(--vs-panel); }
+.vs-shot-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-shot-missing { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; opacity: 0.5; font-family: var(--vs-font-mono); border: calc(var(--vs-u) * 0.4) dashed var(--vs-text); border-radius: inherit; }
+.vs-pin { position: absolute; transform: translate(-50%, -50%); }
+.vs-pin > div { display: flex; align-items: center; gap: 0.4em; }
+.vs-pin-dot { width: 1em; height: 1em; border-radius: 50%; background: var(--vs-primary); box-shadow: 0 0 0 0.3em color-mix(in srgb, var(--vs-primary) 35%, transparent); flex: none; }
+.vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
+.vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
+.vs-callouts .vs-callout { align-self: flex-start; }
+</style>
+</head>
+<body>
+<div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
+<div id="vs-scene" class="clip vs-kind-map" data-start="0" data-duration="3" data-track-index="0">
+<div class="vs-safe">
+<div class="vs-stack vs-typography" style="font-size:118.8px">
+<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">Where it runs</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">Laptop</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.46s;--d:0.6s"><span class="vs-line">CI</span></div>
+</div>
+</div>
+</div>
+</div>
+<script>
+(function () {
+  var DURATION = 3;
+  var t = 0;
+  var playing = false;
+  function animations() {
+    return typeof document.getAnimations === "function" ? document.getAnimations() : [];
+  }
+  function apply(seconds) {
+    t = Math.min(Math.max(0, Number(seconds) || 0), DURATION);
+    var list = animations();
+    for (var i = 0; i < list.length; i++) {
+      try { list[i].currentTime = t * 1000; list[i].pause(); } catch (e) {}
+    }
+  }
+  var tl = {
+    duration: function () { return DURATION; },
+    totalDuration: function () { return DURATION; },
+    seek: function (s) { apply(s); return tl; },
+    totalTime: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    time: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    progress: function (p) { if (p === undefined) return DURATION ? t / DURATION : 0; apply(p * DURATION); return tl; },
+    pause: function () { playing = false; apply(t); return tl; },
+    play: function () { playing = true; return tl; },
+    paused: function (v) { if (v === undefined) return !playing; playing = !v; return tl; },
+    isActive: function () { return false; },
+    timeScale: function (v) { return v === undefined ? 1 : tl; },
+    getChildren: function () { return []; },
+    kill: function () { return tl; }
+  };
+  window.__timelines = window.__timelines || {};
+  window.__timelines["vs-s01"] = tl;
+  apply(0);
+})();
+</script>
+</body>
+</html>
+"
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > map (9:16) 2`] = `
+{
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
+  "warnings": [
+    "map: drawn as a typography card (not implemented in the HyperFrames composition yet)",
+  ],
+}
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > quote (9:16) 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1080, height=1920">
+<title>s01 quote</title>
+<style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: local("Inter"); }
+@font-face { font-family: "Helvetica"; src: local("Helvetica"); }
+@font-face { font-family: "Arial"; src: local("Arial"); }
+@font-face { font-family: "Menlo"; src: local("Menlo"); }
+@font-face { font-family: "DejaVu Sans Mono"; src: local("DejaVu Sans Mono"); }
+:root {
+  --vs-bg: #0B0F19;
+  --vs-text: #F5F7FA;
+  --vs-primary: #4F8CFF;
+  --vs-secondary: #22C55E;
+  --vs-font-heading: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-body: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-mono: "Menlo", "DejaVu Sans Mono", monospace;
+  --vs-u: 10.8px;
+  --vs-panel: color-mix(in srgb, var(--vs-text) 7%, var(--vs-bg));
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
+#vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
+.clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
+.vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
+.vs-fade { animation-name: vs-fade; }
+.vs-fade-up { animation-name: vs-fade-up; }
+.vs-scale-in { animation-name: vs-scale-in; }
+.vs-pop { animation-name: vs-pop; transform-box: fill-box; transform-origin: center; }
+.vs-pop-center { animation-name: vs-pop; transform-box: view-box; transform-origin: 50% 0; }
+.vs-slide-right { animation-name: vs-slide-right; }
+.vs-slide-left { animation-name: vs-slide-left; }
+.vs-grow-x { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 0 50%; }
+.vs-grow-x-rev { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 100% 50%; }
+.vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
+.vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
+.vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+@keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
+@keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes vs-pop { 0% { opacity: 0; transform: scale(0.6); } 70% { opacity: 1; transform: scale(1.06); } 100% { opacity: 1; transform: none; } }
+@keyframes vs-slide-right { from { opacity: 0; transform: translateX(calc(var(--vs-u) * -8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-slide-left { from { opacity: 0; transform: translateX(calc(var(--vs-u) * 8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+.vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-line { overflow-wrap: anywhere; }
+.vs-em { color: var(--vs-primary); }
+.vs-code-panel { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); max-height: 90%; overflow: hidden; }
+.vs-code-bar { display: flex; gap: calc(var(--vs-u) * 1.2); align-items: center; margin-bottom: calc(var(--vs-u) * 2); font-family: var(--vs-font-mono); font-size: calc(var(--vs-u) * 2.4); }
+.vs-code-bar span { width: calc(var(--vs-u) * 1.6); height: calc(var(--vs-u) * 1.6); border-radius: 50%; background: var(--vs-text); opacity: 0.25; }
+.vs-code-bar em { margin-left: auto; font-style: normal; opacity: 0.6; }
+.vs-code { font-family: var(--vs-font-mono); line-height: 1.45; white-space: pre; overflow: hidden; }
+.vs-code-line { display: flex; border-left: calc(var(--vs-u) * 0.6) solid transparent; padding-left: calc(var(--vs-u) * 1); }
+.vs-code-line.vs-hl { background: color-mix(in srgb, var(--vs-primary) 22%, transparent); border-left-color: var(--vs-primary); }
+.vs-ln { opacity: 0.4; min-width: 2.5em; text-align: right; padding-right: 1em; user-select: none; }
+.tk-kw { color: var(--vs-primary); font-weight: 700; }
+.tk-str { color: var(--vs-secondary); }
+.tk-num, .tk-lit { color: var(--vs-secondary); font-weight: 700; }
+.tk-com { opacity: 0.55; font-style: italic; }
+.tk-fn { font-weight: 700; }
+.tk-key { color: var(--vs-primary); }
+.vs-chart-title { font-family: var(--vs-font-heading); font-weight: 700; font-size: calc(var(--vs-u) * 5.5); text-align: center; }
+.vs-chart-svg { display: block; margin: 0 auto; overflow: visible; }
+.vs-axis { fill: var(--vs-text); fill-opacity: 0.8; font-family: var(--vs-font-body); }
+.vs-value { fill: var(--vs-text); font-family: var(--vs-font-heading); font-weight: 700; }
+.vs-gridline { stroke: var(--vs-text); stroke-opacity: 0.25; stroke-width: 2; }
+.vs-stat { align-items: center; text-align: center; }
+.vs-stat-value { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; }
+.vs-stat-unit { font-size: 0.5em; margin-left: 0.08em; }
+.vs-stat-label { font-weight: 600; }
+.vs-edges { position: absolute; left: 0; top: 0; overflow: visible; }
+.vs-node { position: absolute; display: flex; }
+.vs-node > div { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 calc(var(--vs-u) * 1); border: calc(var(--vs-u) * 0.45) solid var(--vs-primary); border-radius: calc(var(--vs-u) * 1.6); background: color-mix(in srgb, var(--vs-primary) 14%, var(--vs-bg)); font-family: var(--vs-font-heading); font-weight: 700; overflow: hidden; overflow-wrap: anywhere; line-height: 1.15; }
+.vs-compare { display: flex; gap: calc(var(--vs-u) * 4); }
+.vs-rows { flex-direction: column; }
+.vs-columns > * { flex: 1; }
+.vs-card { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; overflow-wrap: anywhere; }
+.vs-card.vs-right { border-top-color: var(--vs-secondary); }
+.vs-card-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); margin-bottom: 0.4em; }
+.vs-card.vs-right .vs-card-label { color: var(--vs-secondary); }
+.vs-card-text { line-height: 1.3; }
+.vs-verdict { font-family: var(--vs-font-heading); font-weight: 700; text-align: center; padding: calc(var(--vs-u) * 2); border-radius: calc(var(--vs-u) * 1.5); background: color-mix(in srgb, var(--vs-primary) 18%, transparent); overflow-wrap: anywhere; }
+.vs-cta, .vs-end { align-items: center; text-align: center; }
+.vs-headline { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.vs-subtitle { opacity: 0.85; overflow-wrap: anywhere; }
+.vs-action { display: inline-block; background: var(--vs-primary); color: var(--vs-bg); font-family: var(--vs-font-heading); font-weight: 800; padding: 0.45em 1.2em; border-radius: 999px; overflow-wrap: anywhere; }
+.vs-command { font-family: var(--vs-font-mono); background: var(--vs-panel); padding: 0.6em 1em; border-radius: calc(var(--vs-u) * 1.5); max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.vs-prompt { color: var(--vs-secondary); }
+.vs-url { color: var(--vs-secondary); font-weight: 600; overflow-wrap: anywhere; }
+.vs-logo { max-width: 40%; max-height: calc(var(--vs-u) * 14); object-fit: contain; }
+.vs-rule { width: 30%; height: calc(var(--vs-u) * 0.8); border-radius: 999px; background: var(--vs-primary); }
+.vs-shot { position: relative; width: 100%; border-radius: calc(var(--vs-u) * 2); overflow: hidden; background: var(--vs-panel); }
+.vs-shot-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-shot-missing { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; opacity: 0.5; font-family: var(--vs-font-mono); border: calc(var(--vs-u) * 0.4) dashed var(--vs-text); border-radius: inherit; }
+.vs-pin { position: absolute; transform: translate(-50%, -50%); }
+.vs-pin > div { display: flex; align-items: center; gap: 0.4em; }
+.vs-pin-dot { width: 1em; height: 1em; border-radius: 50%; background: var(--vs-primary); box-shadow: 0 0 0 0.3em color-mix(in srgb, var(--vs-primary) 35%, transparent); flex: none; }
+.vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
+.vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
+.vs-callouts .vs-callout { align-self: flex-start; }
+</style>
+</head>
+<body>
+<div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
+<div id="vs-scene" class="clip vs-kind-quote" data-start="0" data-duration="3" data-track-index="0">
+<div class="vs-safe">
+<div class="vs-stack vs-typography" style="font-size:118.8px">
+<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">It just works.</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">A user</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.46s;--d:0.6s"><span class="vs-line">README</span></div>
+</div>
+</div>
+</div>
+</div>
+<script>
+(function () {
+  var DURATION = 3;
+  var t = 0;
+  var playing = false;
+  function animations() {
+    return typeof document.getAnimations === "function" ? document.getAnimations() : [];
+  }
+  function apply(seconds) {
+    t = Math.min(Math.max(0, Number(seconds) || 0), DURATION);
+    var list = animations();
+    for (var i = 0; i < list.length; i++) {
+      try { list[i].currentTime = t * 1000; list[i].pause(); } catch (e) {}
+    }
+  }
+  var tl = {
+    duration: function () { return DURATION; },
+    totalDuration: function () { return DURATION; },
+    seek: function (s) { apply(s); return tl; },
+    totalTime: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    time: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    progress: function (p) { if (p === undefined) return DURATION ? t / DURATION : 0; apply(p * DURATION); return tl; },
+    pause: function () { playing = false; apply(t); return tl; },
+    play: function () { playing = true; return tl; },
+    paused: function (v) { if (v === undefined) return !playing; playing = !v; return tl; },
+    isActive: function () { return false; },
+    timeScale: function (v) { return v === undefined ? 1 : tl; },
+    getChildren: function () { return []; },
+    kill: function () { return tl; }
+  };
+  window.__timelines = window.__timelines || {};
+  window.__timelines["vs-s01"] = tl;
+  apply(0);
+})();
+</script>
+</body>
+</html>
+"
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > quote (9:16) 2`] = `
+{
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
+  "warnings": [
+    "quote: drawn as a typography card (not implemented in the HyperFrames composition yet)",
+  ],
+}
+`;
+
 exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > screenshot (9:16) 1`] = `
 "<!doctype html>
 <html lang="en">
@@ -1219,6 +1922,534 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > screensho
   ],
   "warnings": [
     "screenshot: asset "a1" could not be resolved to an image in the project; drawing a placeholder",
+  ],
+}
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > split_screen (9:16) 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1080, height=1920">
+<title>s01 split_screen</title>
+<style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: local("Inter"); }
+@font-face { font-family: "Helvetica"; src: local("Helvetica"); }
+@font-face { font-family: "Arial"; src: local("Arial"); }
+@font-face { font-family: "Menlo"; src: local("Menlo"); }
+@font-face { font-family: "DejaVu Sans Mono"; src: local("DejaVu Sans Mono"); }
+:root {
+  --vs-bg: #0B0F19;
+  --vs-text: #F5F7FA;
+  --vs-primary: #4F8CFF;
+  --vs-secondary: #22C55E;
+  --vs-font-heading: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-body: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-mono: "Menlo", "DejaVu Sans Mono", monospace;
+  --vs-u: 10.8px;
+  --vs-panel: color-mix(in srgb, var(--vs-text) 7%, var(--vs-bg));
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
+#vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
+.clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
+.vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
+.vs-fade { animation-name: vs-fade; }
+.vs-fade-up { animation-name: vs-fade-up; }
+.vs-scale-in { animation-name: vs-scale-in; }
+.vs-pop { animation-name: vs-pop; transform-box: fill-box; transform-origin: center; }
+.vs-pop-center { animation-name: vs-pop; transform-box: view-box; transform-origin: 50% 0; }
+.vs-slide-right { animation-name: vs-slide-right; }
+.vs-slide-left { animation-name: vs-slide-left; }
+.vs-grow-x { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 0 50%; }
+.vs-grow-x-rev { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 100% 50%; }
+.vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
+.vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
+.vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+@keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
+@keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes vs-pop { 0% { opacity: 0; transform: scale(0.6); } 70% { opacity: 1; transform: scale(1.06); } 100% { opacity: 1; transform: none; } }
+@keyframes vs-slide-right { from { opacity: 0; transform: translateX(calc(var(--vs-u) * -8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-slide-left { from { opacity: 0; transform: translateX(calc(var(--vs-u) * 8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+.vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-line { overflow-wrap: anywhere; }
+.vs-em { color: var(--vs-primary); }
+.vs-code-panel { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); max-height: 90%; overflow: hidden; }
+.vs-code-bar { display: flex; gap: calc(var(--vs-u) * 1.2); align-items: center; margin-bottom: calc(var(--vs-u) * 2); font-family: var(--vs-font-mono); font-size: calc(var(--vs-u) * 2.4); }
+.vs-code-bar span { width: calc(var(--vs-u) * 1.6); height: calc(var(--vs-u) * 1.6); border-radius: 50%; background: var(--vs-text); opacity: 0.25; }
+.vs-code-bar em { margin-left: auto; font-style: normal; opacity: 0.6; }
+.vs-code { font-family: var(--vs-font-mono); line-height: 1.45; white-space: pre; overflow: hidden; }
+.vs-code-line { display: flex; border-left: calc(var(--vs-u) * 0.6) solid transparent; padding-left: calc(var(--vs-u) * 1); }
+.vs-code-line.vs-hl { background: color-mix(in srgb, var(--vs-primary) 22%, transparent); border-left-color: var(--vs-primary); }
+.vs-ln { opacity: 0.4; min-width: 2.5em; text-align: right; padding-right: 1em; user-select: none; }
+.tk-kw { color: var(--vs-primary); font-weight: 700; }
+.tk-str { color: var(--vs-secondary); }
+.tk-num, .tk-lit { color: var(--vs-secondary); font-weight: 700; }
+.tk-com { opacity: 0.55; font-style: italic; }
+.tk-fn { font-weight: 700; }
+.tk-key { color: var(--vs-primary); }
+.vs-chart-title { font-family: var(--vs-font-heading); font-weight: 700; font-size: calc(var(--vs-u) * 5.5); text-align: center; }
+.vs-chart-svg { display: block; margin: 0 auto; overflow: visible; }
+.vs-axis { fill: var(--vs-text); fill-opacity: 0.8; font-family: var(--vs-font-body); }
+.vs-value { fill: var(--vs-text); font-family: var(--vs-font-heading); font-weight: 700; }
+.vs-gridline { stroke: var(--vs-text); stroke-opacity: 0.25; stroke-width: 2; }
+.vs-stat { align-items: center; text-align: center; }
+.vs-stat-value { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; }
+.vs-stat-unit { font-size: 0.5em; margin-left: 0.08em; }
+.vs-stat-label { font-weight: 600; }
+.vs-edges { position: absolute; left: 0; top: 0; overflow: visible; }
+.vs-node { position: absolute; display: flex; }
+.vs-node > div { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 calc(var(--vs-u) * 1); border: calc(var(--vs-u) * 0.45) solid var(--vs-primary); border-radius: calc(var(--vs-u) * 1.6); background: color-mix(in srgb, var(--vs-primary) 14%, var(--vs-bg)); font-family: var(--vs-font-heading); font-weight: 700; overflow: hidden; overflow-wrap: anywhere; line-height: 1.15; }
+.vs-compare { display: flex; gap: calc(var(--vs-u) * 4); }
+.vs-rows { flex-direction: column; }
+.vs-columns > * { flex: 1; }
+.vs-card { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; overflow-wrap: anywhere; }
+.vs-card.vs-right { border-top-color: var(--vs-secondary); }
+.vs-card-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); margin-bottom: 0.4em; }
+.vs-card.vs-right .vs-card-label { color: var(--vs-secondary); }
+.vs-card-text { line-height: 1.3; }
+.vs-verdict { font-family: var(--vs-font-heading); font-weight: 700; text-align: center; padding: calc(var(--vs-u) * 2); border-radius: calc(var(--vs-u) * 1.5); background: color-mix(in srgb, var(--vs-primary) 18%, transparent); overflow-wrap: anywhere; }
+.vs-cta, .vs-end { align-items: center; text-align: center; }
+.vs-headline { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.vs-subtitle { opacity: 0.85; overflow-wrap: anywhere; }
+.vs-action { display: inline-block; background: var(--vs-primary); color: var(--vs-bg); font-family: var(--vs-font-heading); font-weight: 800; padding: 0.45em 1.2em; border-radius: 999px; overflow-wrap: anywhere; }
+.vs-command { font-family: var(--vs-font-mono); background: var(--vs-panel); padding: 0.6em 1em; border-radius: calc(var(--vs-u) * 1.5); max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.vs-prompt { color: var(--vs-secondary); }
+.vs-url { color: var(--vs-secondary); font-weight: 600; overflow-wrap: anywhere; }
+.vs-logo { max-width: 40%; max-height: calc(var(--vs-u) * 14); object-fit: contain; }
+.vs-rule { width: 30%; height: calc(var(--vs-u) * 0.8); border-radius: 999px; background: var(--vs-primary); }
+.vs-shot { position: relative; width: 100%; border-radius: calc(var(--vs-u) * 2); overflow: hidden; background: var(--vs-panel); }
+.vs-shot-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-shot-missing { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; opacity: 0.5; font-family: var(--vs-font-mono); border: calc(var(--vs-u) * 0.4) dashed var(--vs-text); border-radius: inherit; }
+.vs-pin { position: absolute; transform: translate(-50%, -50%); }
+.vs-pin > div { display: flex; align-items: center; gap: 0.4em; }
+.vs-pin-dot { width: 1em; height: 1em; border-radius: 50%; background: var(--vs-primary); box-shadow: 0 0 0 0.3em color-mix(in srgb, var(--vs-primary) 35%, transparent); flex: none; }
+.vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
+.vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
+.vs-callouts .vs-callout { align-self: flex-start; }
+</style>
+</head>
+<body>
+<div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
+<div id="vs-scene" class="clip vs-kind-split-screen" data-start="0" data-duration="3" data-track-index="0">
+<div class="vs-safe">
+<div class="vs-stack vs-typography" style="font-size:118.8px">
+<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">Manual edits</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">One command</span></div>
+</div>
+</div>
+</div>
+</div>
+<script>
+(function () {
+  var DURATION = 3;
+  var t = 0;
+  var playing = false;
+  function animations() {
+    return typeof document.getAnimations === "function" ? document.getAnimations() : [];
+  }
+  function apply(seconds) {
+    t = Math.min(Math.max(0, Number(seconds) || 0), DURATION);
+    var list = animations();
+    for (var i = 0; i < list.length; i++) {
+      try { list[i].currentTime = t * 1000; list[i].pause(); } catch (e) {}
+    }
+  }
+  var tl = {
+    duration: function () { return DURATION; },
+    totalDuration: function () { return DURATION; },
+    seek: function (s) { apply(s); return tl; },
+    totalTime: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    time: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    progress: function (p) { if (p === undefined) return DURATION ? t / DURATION : 0; apply(p * DURATION); return tl; },
+    pause: function () { playing = false; apply(t); return tl; },
+    play: function () { playing = true; return tl; },
+    paused: function (v) { if (v === undefined) return !playing; playing = !v; return tl; },
+    isActive: function () { return false; },
+    timeScale: function (v) { return v === undefined ? 1 : tl; },
+    getChildren: function () { return []; },
+    kill: function () { return tl; }
+  };
+  window.__timelines = window.__timelines || {};
+  window.__timelines["vs-s01"] = tl;
+  apply(0);
+})();
+</script>
+</body>
+</html>
+"
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > split_screen (9:16) 2`] = `
+{
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
+  "warnings": [
+    "split_screen: drawn as a typography card (not implemented in the HyperFrames composition yet)",
+  ],
+}
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > stat (9:16) 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1080, height=1920">
+<title>s01 stat</title>
+<style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: local("Inter"); }
+@font-face { font-family: "Helvetica"; src: local("Helvetica"); }
+@font-face { font-family: "Arial"; src: local("Arial"); }
+@font-face { font-family: "Menlo"; src: local("Menlo"); }
+@font-face { font-family: "DejaVu Sans Mono"; src: local("DejaVu Sans Mono"); }
+:root {
+  --vs-bg: #0B0F19;
+  --vs-text: #F5F7FA;
+  --vs-primary: #4F8CFF;
+  --vs-secondary: #22C55E;
+  --vs-font-heading: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-body: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-mono: "Menlo", "DejaVu Sans Mono", monospace;
+  --vs-u: 10.8px;
+  --vs-panel: color-mix(in srgb, var(--vs-text) 7%, var(--vs-bg));
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
+#vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
+.clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
+.vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
+.vs-fade { animation-name: vs-fade; }
+.vs-fade-up { animation-name: vs-fade-up; }
+.vs-scale-in { animation-name: vs-scale-in; }
+.vs-pop { animation-name: vs-pop; transform-box: fill-box; transform-origin: center; }
+.vs-pop-center { animation-name: vs-pop; transform-box: view-box; transform-origin: 50% 0; }
+.vs-slide-right { animation-name: vs-slide-right; }
+.vs-slide-left { animation-name: vs-slide-left; }
+.vs-grow-x { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 0 50%; }
+.vs-grow-x-rev { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 100% 50%; }
+.vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
+.vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
+.vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+@keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
+@keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes vs-pop { 0% { opacity: 0; transform: scale(0.6); } 70% { opacity: 1; transform: scale(1.06); } 100% { opacity: 1; transform: none; } }
+@keyframes vs-slide-right { from { opacity: 0; transform: translateX(calc(var(--vs-u) * -8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-slide-left { from { opacity: 0; transform: translateX(calc(var(--vs-u) * 8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+.vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-line { overflow-wrap: anywhere; }
+.vs-em { color: var(--vs-primary); }
+.vs-code-panel { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); max-height: 90%; overflow: hidden; }
+.vs-code-bar { display: flex; gap: calc(var(--vs-u) * 1.2); align-items: center; margin-bottom: calc(var(--vs-u) * 2); font-family: var(--vs-font-mono); font-size: calc(var(--vs-u) * 2.4); }
+.vs-code-bar span { width: calc(var(--vs-u) * 1.6); height: calc(var(--vs-u) * 1.6); border-radius: 50%; background: var(--vs-text); opacity: 0.25; }
+.vs-code-bar em { margin-left: auto; font-style: normal; opacity: 0.6; }
+.vs-code { font-family: var(--vs-font-mono); line-height: 1.45; white-space: pre; overflow: hidden; }
+.vs-code-line { display: flex; border-left: calc(var(--vs-u) * 0.6) solid transparent; padding-left: calc(var(--vs-u) * 1); }
+.vs-code-line.vs-hl { background: color-mix(in srgb, var(--vs-primary) 22%, transparent); border-left-color: var(--vs-primary); }
+.vs-ln { opacity: 0.4; min-width: 2.5em; text-align: right; padding-right: 1em; user-select: none; }
+.tk-kw { color: var(--vs-primary); font-weight: 700; }
+.tk-str { color: var(--vs-secondary); }
+.tk-num, .tk-lit { color: var(--vs-secondary); font-weight: 700; }
+.tk-com { opacity: 0.55; font-style: italic; }
+.tk-fn { font-weight: 700; }
+.tk-key { color: var(--vs-primary); }
+.vs-chart-title { font-family: var(--vs-font-heading); font-weight: 700; font-size: calc(var(--vs-u) * 5.5); text-align: center; }
+.vs-chart-svg { display: block; margin: 0 auto; overflow: visible; }
+.vs-axis { fill: var(--vs-text); fill-opacity: 0.8; font-family: var(--vs-font-body); }
+.vs-value { fill: var(--vs-text); font-family: var(--vs-font-heading); font-weight: 700; }
+.vs-gridline { stroke: var(--vs-text); stroke-opacity: 0.25; stroke-width: 2; }
+.vs-stat { align-items: center; text-align: center; }
+.vs-stat-value { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; }
+.vs-stat-unit { font-size: 0.5em; margin-left: 0.08em; }
+.vs-stat-label { font-weight: 600; }
+.vs-edges { position: absolute; left: 0; top: 0; overflow: visible; }
+.vs-node { position: absolute; display: flex; }
+.vs-node > div { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 calc(var(--vs-u) * 1); border: calc(var(--vs-u) * 0.45) solid var(--vs-primary); border-radius: calc(var(--vs-u) * 1.6); background: color-mix(in srgb, var(--vs-primary) 14%, var(--vs-bg)); font-family: var(--vs-font-heading); font-weight: 700; overflow: hidden; overflow-wrap: anywhere; line-height: 1.15; }
+.vs-compare { display: flex; gap: calc(var(--vs-u) * 4); }
+.vs-rows { flex-direction: column; }
+.vs-columns > * { flex: 1; }
+.vs-card { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; overflow-wrap: anywhere; }
+.vs-card.vs-right { border-top-color: var(--vs-secondary); }
+.vs-card-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); margin-bottom: 0.4em; }
+.vs-card.vs-right .vs-card-label { color: var(--vs-secondary); }
+.vs-card-text { line-height: 1.3; }
+.vs-verdict { font-family: var(--vs-font-heading); font-weight: 700; text-align: center; padding: calc(var(--vs-u) * 2); border-radius: calc(var(--vs-u) * 1.5); background: color-mix(in srgb, var(--vs-primary) 18%, transparent); overflow-wrap: anywhere; }
+.vs-cta, .vs-end { align-items: center; text-align: center; }
+.vs-headline { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.vs-subtitle { opacity: 0.85; overflow-wrap: anywhere; }
+.vs-action { display: inline-block; background: var(--vs-primary); color: var(--vs-bg); font-family: var(--vs-font-heading); font-weight: 800; padding: 0.45em 1.2em; border-radius: 999px; overflow-wrap: anywhere; }
+.vs-command { font-family: var(--vs-font-mono); background: var(--vs-panel); padding: 0.6em 1em; border-radius: calc(var(--vs-u) * 1.5); max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.vs-prompt { color: var(--vs-secondary); }
+.vs-url { color: var(--vs-secondary); font-weight: 600; overflow-wrap: anywhere; }
+.vs-logo { max-width: 40%; max-height: calc(var(--vs-u) * 14); object-fit: contain; }
+.vs-rule { width: 30%; height: calc(var(--vs-u) * 0.8); border-radius: 999px; background: var(--vs-primary); }
+.vs-shot { position: relative; width: 100%; border-radius: calc(var(--vs-u) * 2); overflow: hidden; background: var(--vs-panel); }
+.vs-shot-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-shot-missing { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; opacity: 0.5; font-family: var(--vs-font-mono); border: calc(var(--vs-u) * 0.4) dashed var(--vs-text); border-radius: inherit; }
+.vs-pin { position: absolute; transform: translate(-50%, -50%); }
+.vs-pin > div { display: flex; align-items: center; gap: 0.4em; }
+.vs-pin-dot { width: 1em; height: 1em; border-radius: 50%; background: var(--vs-primary); box-shadow: 0 0 0 0.3em color-mix(in srgb, var(--vs-primary) 35%, transparent); flex: none; }
+.vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
+.vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
+.vs-callouts .vs-callout { align-self: flex-start; }
+</style>
+</head>
+<body>
+<div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
+<div id="vs-scene" class="clip vs-kind-stat" data-start="0" data-duration="3" data-track-index="0">
+<div class="vs-safe">
+<div class="vs-stack vs-typography" style="font-size:118.8px">
+<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">40</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">%</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.46s;--d:0.6s"><span class="vs-line">faster builds</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.64s;--d:0.6s"><span class="vs-line">vs. last release</span></div>
+</div>
+</div>
+</div>
+</div>
+<script>
+(function () {
+  var DURATION = 3;
+  var t = 0;
+  var playing = false;
+  function animations() {
+    return typeof document.getAnimations === "function" ? document.getAnimations() : [];
+  }
+  function apply(seconds) {
+    t = Math.min(Math.max(0, Number(seconds) || 0), DURATION);
+    var list = animations();
+    for (var i = 0; i < list.length; i++) {
+      try { list[i].currentTime = t * 1000; list[i].pause(); } catch (e) {}
+    }
+  }
+  var tl = {
+    duration: function () { return DURATION; },
+    totalDuration: function () { return DURATION; },
+    seek: function (s) { apply(s); return tl; },
+    totalTime: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    time: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    progress: function (p) { if (p === undefined) return DURATION ? t / DURATION : 0; apply(p * DURATION); return tl; },
+    pause: function () { playing = false; apply(t); return tl; },
+    play: function () { playing = true; return tl; },
+    paused: function (v) { if (v === undefined) return !playing; playing = !v; return tl; },
+    isActive: function () { return false; },
+    timeScale: function (v) { return v === undefined ? 1 : tl; },
+    getChildren: function () { return []; },
+    kill: function () { return tl; }
+  };
+  window.__timelines = window.__timelines || {};
+  window.__timelines["vs-s01"] = tl;
+  apply(0);
+})();
+</script>
+</body>
+</html>
+"
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > stat (9:16) 2`] = `
+{
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
+  "warnings": [
+    "stat: drawn as a typography card (not implemented in the HyperFrames composition yet)",
+  ],
+}
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > timeline (9:16) 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1080, height=1920">
+<title>s01 timeline</title>
+<style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: local("Inter"); }
+@font-face { font-family: "Helvetica"; src: local("Helvetica"); }
+@font-face { font-family: "Arial"; src: local("Arial"); }
+@font-face { font-family: "Menlo"; src: local("Menlo"); }
+@font-face { font-family: "DejaVu Sans Mono"; src: local("DejaVu Sans Mono"); }
+:root {
+  --vs-bg: #0B0F19;
+  --vs-text: #F5F7FA;
+  --vs-primary: #4F8CFF;
+  --vs-secondary: #22C55E;
+  --vs-font-heading: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-body: "Inter", "Helvetica", "Arial", sans-serif;
+  --vs-font-mono: "Menlo", "DejaVu Sans Mono", monospace;
+  --vs-u: 10.8px;
+  --vs-panel: color-mix(in srgb, var(--vs-text) 7%, var(--vs-bg));
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
+#vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
+.clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
+.vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
+.vs-fade { animation-name: vs-fade; }
+.vs-fade-up { animation-name: vs-fade-up; }
+.vs-scale-in { animation-name: vs-scale-in; }
+.vs-pop { animation-name: vs-pop; transform-box: fill-box; transform-origin: center; }
+.vs-pop-center { animation-name: vs-pop; transform-box: view-box; transform-origin: 50% 0; }
+.vs-slide-right { animation-name: vs-slide-right; }
+.vs-slide-left { animation-name: vs-slide-left; }
+.vs-grow-x { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 0 50%; }
+.vs-grow-x-rev { animation-name: vs-grow-x; transform-box: fill-box; transform-origin: 100% 50%; }
+.vs-grow-x-center { animation-name: vs-grow-x; transform-origin: 50% 50%; }
+.vs-draw { animation-name: vs-draw; stroke-dasharray: 1; animation-timing-function: linear; }
+.vs-zoom { animation-name: vs-zoom; animation-timing-function: linear; }
+@keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vs-fade-up { from { opacity: 0; transform: translateY(calc(var(--vs-u) * 4)); } to { opacity: 1; transform: none; } }
+@keyframes vs-scale-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes vs-pop { 0% { opacity: 0; transform: scale(0.6); } 70% { opacity: 1; transform: scale(1.06); } 100% { opacity: 1; transform: none; } }
+@keyframes vs-slide-right { from { opacity: 0; transform: translateX(calc(var(--vs-u) * -8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-slide-left { from { opacity: 0; transform: translateX(calc(var(--vs-u) * 8)); } to { opacity: 1; transform: none; } }
+@keyframes vs-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes vs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes vs-zoom { from { transform: scale(1); } to { transform: scale(1.04); } }
+.vs-typography { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; text-align: center; }
+.vs-line { overflow-wrap: anywhere; }
+.vs-em { color: var(--vs-primary); }
+.vs-code-panel { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); max-height: 90%; overflow: hidden; }
+.vs-code-bar { display: flex; gap: calc(var(--vs-u) * 1.2); align-items: center; margin-bottom: calc(var(--vs-u) * 2); font-family: var(--vs-font-mono); font-size: calc(var(--vs-u) * 2.4); }
+.vs-code-bar span { width: calc(var(--vs-u) * 1.6); height: calc(var(--vs-u) * 1.6); border-radius: 50%; background: var(--vs-text); opacity: 0.25; }
+.vs-code-bar em { margin-left: auto; font-style: normal; opacity: 0.6; }
+.vs-code { font-family: var(--vs-font-mono); line-height: 1.45; white-space: pre; overflow: hidden; }
+.vs-code-line { display: flex; border-left: calc(var(--vs-u) * 0.6) solid transparent; padding-left: calc(var(--vs-u) * 1); }
+.vs-code-line.vs-hl { background: color-mix(in srgb, var(--vs-primary) 22%, transparent); border-left-color: var(--vs-primary); }
+.vs-ln { opacity: 0.4; min-width: 2.5em; text-align: right; padding-right: 1em; user-select: none; }
+.tk-kw { color: var(--vs-primary); font-weight: 700; }
+.tk-str { color: var(--vs-secondary); }
+.tk-num, .tk-lit { color: var(--vs-secondary); font-weight: 700; }
+.tk-com { opacity: 0.55; font-style: italic; }
+.tk-fn { font-weight: 700; }
+.tk-key { color: var(--vs-primary); }
+.vs-chart-title { font-family: var(--vs-font-heading); font-weight: 700; font-size: calc(var(--vs-u) * 5.5); text-align: center; }
+.vs-chart-svg { display: block; margin: 0 auto; overflow: visible; }
+.vs-axis { fill: var(--vs-text); fill-opacity: 0.8; font-family: var(--vs-font-body); }
+.vs-value { fill: var(--vs-text); font-family: var(--vs-font-heading); font-weight: 700; }
+.vs-gridline { stroke: var(--vs-text); stroke-opacity: 0.25; stroke-width: 2; }
+.vs-stat { align-items: center; text-align: center; }
+.vs-stat-value { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); line-height: 1; }
+.vs-stat-unit { font-size: 0.5em; margin-left: 0.08em; }
+.vs-stat-label { font-weight: 600; }
+.vs-edges { position: absolute; left: 0; top: 0; overflow: visible; }
+.vs-node { position: absolute; display: flex; }
+.vs-node > div { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 calc(var(--vs-u) * 1); border: calc(var(--vs-u) * 0.45) solid var(--vs-primary); border-radius: calc(var(--vs-u) * 1.6); background: color-mix(in srgb, var(--vs-primary) 14%, var(--vs-bg)); font-family: var(--vs-font-heading); font-weight: 700; overflow: hidden; overflow-wrap: anywhere; line-height: 1.15; }
+.vs-compare { display: flex; gap: calc(var(--vs-u) * 4); }
+.vs-rows { flex-direction: column; }
+.vs-columns > * { flex: 1; }
+.vs-card { background: var(--vs-panel); border-radius: calc(var(--vs-u) * 2); padding: calc(var(--vs-u) * 3); border-top: calc(var(--vs-u) * 0.8) solid var(--vs-primary); overflow: hidden; overflow-wrap: anywhere; }
+.vs-card.vs-right { border-top-color: var(--vs-secondary); }
+.vs-card-label { font-family: var(--vs-font-heading); font-weight: 800; color: var(--vs-primary); margin-bottom: 0.4em; }
+.vs-card.vs-right .vs-card-label { color: var(--vs-secondary); }
+.vs-card-text { line-height: 1.3; }
+.vs-verdict { font-family: var(--vs-font-heading); font-weight: 700; text-align: center; padding: calc(var(--vs-u) * 2); border-radius: calc(var(--vs-u) * 1.5); background: color-mix(in srgb, var(--vs-primary) 18%, transparent); overflow-wrap: anywhere; }
+.vs-cta, .vs-end { align-items: center; text-align: center; }
+.vs-headline { font-family: var(--vs-font-heading); font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.vs-subtitle { opacity: 0.85; overflow-wrap: anywhere; }
+.vs-action { display: inline-block; background: var(--vs-primary); color: var(--vs-bg); font-family: var(--vs-font-heading); font-weight: 800; padding: 0.45em 1.2em; border-radius: 999px; overflow-wrap: anywhere; }
+.vs-command { font-family: var(--vs-font-mono); background: var(--vs-panel); padding: 0.6em 1em; border-radius: calc(var(--vs-u) * 1.5); max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.vs-prompt { color: var(--vs-secondary); }
+.vs-url { color: var(--vs-secondary); font-weight: 600; overflow-wrap: anywhere; }
+.vs-logo { max-width: 40%; max-height: calc(var(--vs-u) * 14); object-fit: contain; }
+.vs-rule { width: 30%; height: calc(var(--vs-u) * 0.8); border-radius: 999px; background: var(--vs-primary); }
+.vs-shot { position: relative; width: 100%; border-radius: calc(var(--vs-u) * 2); overflow: hidden; background: var(--vs-panel); }
+.vs-shot-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vs-shot-missing { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; opacity: 0.5; font-family: var(--vs-font-mono); border: calc(var(--vs-u) * 0.4) dashed var(--vs-text); border-radius: inherit; }
+.vs-pin { position: absolute; transform: translate(-50%, -50%); }
+.vs-pin > div { display: flex; align-items: center; gap: 0.4em; }
+.vs-pin-dot { width: 1em; height: 1em; border-radius: 50%; background: var(--vs-primary); box-shadow: 0 0 0 0.3em color-mix(in srgb, var(--vs-primary) 35%, transparent); flex: none; }
+.vs-callouts { display: flex; flex-direction: column; gap: 0.6em; margin-top: calc(var(--vs-u) * 3); }
+.vs-callout { background: var(--vs-primary); color: var(--vs-bg); font-weight: 700; padding: 0.35em 0.8em; border-radius: 0.6em; overflow-wrap: anywhere; }
+.vs-callouts .vs-callout { align-self: flex-start; }
+</style>
+</head>
+<body>
+<div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
+<div id="vs-scene" class="clip vs-kind-timeline" data-start="0" data-duration="3" data-track-index="0">
+<div class="vs-safe">
+<div class="vs-stack vs-typography" style="font-size:118.8px">
+<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line">Ingest</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.28s;--d:0.6s"><span class="vs-line">Plan</span></div>
+<div class="vs-a vs-fade-up" style="--t:0.46s;--d:0.6s"><span class="vs-line">Render</span></div>
+</div>
+</div>
+</div>
+</div>
+<script>
+(function () {
+  var DURATION = 3;
+  var t = 0;
+  var playing = false;
+  function animations() {
+    return typeof document.getAnimations === "function" ? document.getAnimations() : [];
+  }
+  function apply(seconds) {
+    t = Math.min(Math.max(0, Number(seconds) || 0), DURATION);
+    var list = animations();
+    for (var i = 0; i < list.length; i++) {
+      try { list[i].currentTime = t * 1000; list[i].pause(); } catch (e) {}
+    }
+  }
+  var tl = {
+    duration: function () { return DURATION; },
+    totalDuration: function () { return DURATION; },
+    seek: function (s) { apply(s); return tl; },
+    totalTime: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    time: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    progress: function (p) { if (p === undefined) return DURATION ? t / DURATION : 0; apply(p * DURATION); return tl; },
+    pause: function () { playing = false; apply(t); return tl; },
+    play: function () { playing = true; return tl; },
+    paused: function (v) { if (v === undefined) return !playing; playing = !v; return tl; },
+    isActive: function () { return false; },
+    timeScale: function (v) { return v === undefined ? 1 : tl; },
+    getChildren: function () { return []; },
+    kill: function () { return tl; }
+  };
+  window.__timelines = window.__timelines || {};
+  window.__timelines["vs-s01"] = tl;
+  apply(0);
+})();
+</script>
+</body>
+</html>
+"
+`;
+
+exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > timeline (9:16) 2`] = `
+{
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
+  "warnings": [
+    "timeline: drawn as a typography card (not implemented in the HyperFrames composition yet)",
   ],
 }
 `;

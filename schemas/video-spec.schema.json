@@ -18,6 +18,82 @@
       "minLength": 1,
       "type": "string"
     },
+    "audio": {
+      "description": "Audio beds beyond the voice.",
+      "additionalProperties": false,
+      "properties": {
+        "music": {
+          "description": "Background music mixed under the voice.",
+          "additionalProperties": false,
+          "properties": {
+            "duck_db": {
+              "description": "Extra attenuation while speech plays. Default -10 dB; ignored with voice.mode none.",
+              "maximum": 0,
+              "minimum": -40,
+              "type": "number"
+            },
+            "fade_in_ms": {
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "fade_out_ms": {
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "file": {
+              "description": "`bundled:<id>` (music/ in the plugin) or a path relative to the project folder.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "license": {
+              "description": "Required for user files; bundled tracks carry their own.",
+              "additionalProperties": false,
+              "properties": {
+                "attribution": {
+                  "description": "Credit line to show or post, when the licence requires one.",
+                  "type": "string"
+                },
+                "id": {
+                  "description": "SPDX id (e.g. CC0-1.0, CC-BY-4.0) or user-owned / licensed.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "source": {
+                  "description": "Where the track came from (URL or description).",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            "loop": {
+              "description": "Loop the track to cover the video (default true).",
+              "type": "boolean"
+            },
+            "start_sec": {
+              "description": "Offset into the track.",
+              "minimum": 0,
+              "type": "number"
+            },
+            "volume_db": {
+              "description": "Bed level before ducking. Default -18 dB.",
+              "maximum": 0,
+              "minimum": -60,
+              "type": "number"
+            }
+          },
+          "required": [
+            "file"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "brand_profile": {
       "description": "Brand profile reference, e.g. `acme@3`.",
       "type": "string"
@@ -223,7 +299,14 @@
                   "screenshot",
                   "comparison",
                   "cta",
-                  "end_card"
+                  "end_card",
+                  "quote",
+                  "stat",
+                  "timeline",
+                  "split_screen",
+                  "lower_third",
+                  "kinetic_text",
+                  "map"
                 ],
                 "type": "string"
               },
@@ -264,7 +347,17 @@
               "demo",
               "payoff",
               "cta",
-              "end_card"
+              "end_card",
+              "question",
+              "contrarian_claim",
+              "story",
+              "step",
+              "comparison",
+              "reveal",
+              "objection",
+              "testimonial",
+              "result",
+              "loop_back"
             ],
             "type": "string"
           },
@@ -397,6 +490,11 @@
       "const": "1.0",
       "type": "string"
     },
+    "style": {
+      "description": "Style pack id: styles/<id>.yaml (look and motion). Brand colours and fonts override it.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
     "target_duration_sec": {
       "exclusiveMinimum": 0,
       "maximum": 600,
@@ -416,6 +514,14 @@
     "voice": {
       "additionalProperties": false,
       "properties": {
+        "mode": {
+          "description": "narrated: scenes carry voiceover (default). none: no speech; timing comes from scene durations and on-screen text, usually over a music bed.",
+          "enum": [
+            "narrated",
+            "none"
+          ],
+          "type": "string"
+        },
         "provider_preference": {
           "description": "Preferred TTS providers in order; the router may override on policy.",
           "items": {

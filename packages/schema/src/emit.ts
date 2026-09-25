@@ -8,6 +8,7 @@ import { CreativeBrief } from "./creative-brief.js";
 import { PlatformContract } from "./platform-contract.js";
 import { Policy } from "./policy.js";
 import { RenderManifest } from "./render-manifest.js";
+import { Style } from "./style.js";
 import { Template } from "./template.js";
 import { VideoLock } from "./video-lock.js";
 import { VideoSpec } from "./video-spec.js";
@@ -23,6 +24,7 @@ export const EMITTED_SCHEMAS = {
   template: Template,
   "platform-contract": PlatformContract,
   "video-lock": VideoLock,
+  style: Style,
 } as const satisfies Record<string, z.ZodType>;
 
 export type EmittedSchemaName = keyof typeof EMITTED_SCHEMAS;

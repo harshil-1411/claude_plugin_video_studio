@@ -353,6 +353,54 @@ describe("master, targets, cover and publish (M1/M2)", () => {
   });
 });
 
+describe("Phase 5: reel grammar, voice mode and music", () => {
+  const sem = (spec: VideoSpecT) => validateVideoSpecSemantics(spec);
+
+  it("accepts every new kind's example props and the new purposes", () => {
+    const spec = loadSpec();
+    for (const kind of ["quote", "stat", "timeline", "split_screen", "lower_third", "kinetic_text", "map"] as const) {
+      expect(DeterministicProps[kind].safeParse(DETERMINISTIC_PROPS_EXAMPLES[kind]).success, kind).toBe(true);
+    }
+    const s = clone(spec);
+    s.scenes[1]!.purpose = "reveal";
+    expect(VideoSpec.safeParse(s).success).toBe(true);
+  });
+
+  it("voice.mode none: voiceover is an error, a missing music bed a warning", () => {
+    const s = clone(loadSpec());
+    s.voice.mode = "none";
+    const r = sem(s);
+    expect(r.errors.filter((e) => e.path.endsWith(".voiceover")).length).toBe(s.scenes.filter((x) => x.voiceover.trim()).length);
+    expect(r.warnings.map((w) => w.path)).toContain("audio.music");
+    for (const sc of s.scenes) sc.voiceover = "";
+    s.audio = { music: { file: "bundled:lofi" } };
+    const ok = sem(s);
+    expect(ok.errors.filter((e) => e.path.endsWith(".voiceover"))).toEqual([]);
+    expect(ok.warnings.map((w) => w.path)).not.toContain("audio.music");
+  });
+
+  it("warns when a user music file has no licence", () => {
+    const s = clone(loadSpec());
+    s.audio = { music: { file: "assets/track.mp3" } };
+    expect(sem(s).warnings.map((w) => w.path)).toContain("audio.music.license");
+    s.audio = { music: { file: "assets/track.mp3", license: { id: "user-owned" } } };
+    expect(sem(s).warnings.map((w) => w.path)).not.toContain("audio.music.license");
+  });
+
+  it("strict grounding reads numbers in props (a stat card), not coordinates or code", () => {
+    const s = clone(loadSpec());
+    s.grounding = "strict";
+    const sc = s.scenes[1]!;
+    sc.claim_refs = [];
+    sc.voiceover = "Here is the result.";
+    sc.on_screen_text = undefined;
+    sc.deterministic = { kind: "stat", props: { value: 73, unit: "%", label: "fewer tickets" } };
+    expect(sem(s).errors.map((e) => e.path)).toContain("scenes.1.claim_refs");
+    sc.deterministic = { kind: "map", props: { points: [{ label: "Laptop", x: 0.3, y: 0.4 }] } };
+    expect(sem(s).errors.map((e) => e.path)).not.toContain("scenes.1.claim_refs");
+  });
+});
+
 describe("Brand v2 (M4)", () => {
   it("parses the v2 blocks and keeps v1 files valid", () => {
     expect(parseYamlOrJson(Brand, read(FIXTURES.brand)).ok).toBe(true);

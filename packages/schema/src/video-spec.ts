@@ -26,6 +26,17 @@ export const ScenePurpose = z.enum([
   "payoff",
   "cta",
   "end_card",
+  // Phase 5 reel grammar
+  "question",
+  "contrarian_claim",
+  "story",
+  "step",
+  "comparison",
+  "reveal",
+  "objection",
+  "testimonial",
+  "result",
+  "loop_back",
 ]);
 
 export const VisualStrategy = z.enum([
@@ -46,6 +57,14 @@ export const DeterministicKind = z.enum([
   "comparison",
   "cta",
   "end_card",
+  // Phase 5 reel grammar
+  "quote",
+  "stat",
+  "timeline",
+  "split_screen",
+  "lower_third",
+  "kinetic_text",
+  "map",
 ]);
 
 export const DeterministicScene = z
@@ -90,7 +109,12 @@ export const Scene = z.strictObject({
   transition: Transition.optional(),
 });
 
+export const VoiceMode = z
+  .enum(["narrated", "none"])
+  .describe("narrated: scenes carry voiceover (default). none: no speech; timing comes from scene durations and on-screen text, usually over a music bed.");
+
 export const VoiceSettings = z.strictObject({
+  mode: VoiceMode.optional(),
   provider_preference: z.array(Id).optional().describe("Preferred TTS providers in order; the router may override on policy."),
   voice_id: z.string().optional(),
   style: z.string().optional(),
@@ -104,6 +128,29 @@ export const CaptionSettings = z.strictObject({
     .optional()
     .describe("Manual caption placement. Omit to let the caption engine place captions in the platforms' caption zone."),
 });
+
+export const AudioLicense = z
+  .strictObject({
+    id: NonEmptyString.describe("SPDX id (e.g. CC0-1.0, CC-BY-4.0) or user-owned / licensed."),
+    source: z.string().optional().describe("Where the track came from (URL or description)."),
+    attribution: z.string().optional().describe("Credit line to show or post, when the licence requires one."),
+  })
+  .describe("Rights for an audio file; recorded in the manifest, video.lock and provenance.");
+
+export const MusicBed = z
+  .strictObject({
+    file: NonEmptyString.describe("`bundled:<id>` (music/ in the plugin) or a path relative to the project folder."),
+    volume_db: z.number().min(-60).max(0).optional().describe("Bed level before ducking. Default -18 dB."),
+    duck_db: z.number().min(-40).max(0).optional().describe("Extra attenuation while speech plays. Default -10 dB; ignored with voice.mode none."),
+    fade_in_ms: z.int().min(0).max(10_000).optional(),
+    fade_out_ms: z.int().min(0).max(10_000).optional(),
+    loop: z.boolean().optional().describe("Loop the track to cover the video (default true)."),
+    start_sec: z.number().min(0).optional().describe("Offset into the track."),
+    license: AudioLicense.optional().describe("Required for user files; bundled tracks carry their own."),
+  })
+  .describe("Background music mixed under the voice.");
+
+export const AudioSettings = z.strictObject({ music: MusicBed.optional() }).describe("Audio beds beyond the voice.");
 
 export const MasterCanvas = z
   .strictObject({
@@ -153,6 +200,8 @@ export const VideoSpec = z
     grounding: Grounding,
     voice: VoiceSettings,
     captions: CaptionSettings,
+    style: Id.optional().describe("Style pack id: styles/<id>.yaml (look and motion). Brand colours and fonts override it."),
+    audio: AudioSettings.optional(),
     cover: Cover.optional(),
     publish: z.record(PlatformTargetId, PublishSettings).optional().describe("Post copy keyed by target id."),
     scenes: z.array(Scene).min(1),
@@ -173,6 +222,10 @@ export type VisualRequirements = z.infer<typeof VisualRequirements>;
 export type Transition = z.infer<typeof Transition>;
 export type Scene = z.infer<typeof Scene>;
 export type VoiceSettings = z.infer<typeof VoiceSettings>;
+export type VoiceMode = z.infer<typeof VoiceMode>;
+export type AudioLicense = z.infer<typeof AudioLicense>;
+export type MusicBed = z.infer<typeof MusicBed>;
+export type AudioSettings = z.infer<typeof AudioSettings>;
 export type CaptionSettings = z.infer<typeof CaptionSettings>;
 export type MasterCanvas = z.infer<typeof MasterCanvas>;
 export type Cover = z.infer<typeof Cover>;
@@ -191,6 +244,11 @@ export function resolveMaster(spec: Pick<VideoSpec, "aspect_ratio" | "master">):
   return spec.master ?? defaultMaster(spec.aspect_ratio);
 }
 
+/** The spec's voice mode (`narrated` unless set to `none`). */
+export function voiceMode(spec: Pick<VideoSpec, "voice">): VoiceMode {
+  return spec.voice.mode ?? "narrated";
+}
+
 /** Target contract ids: `targets` when given, else the primary platform's contract (possibly none). */
 export function resolveTargets(spec: Pick<VideoSpec, "platform" | "targets">): string[] {
   if (spec.targets?.length) return [...new Set(spec.targets)];
@@ -203,6 +261,7 @@ export function resolveTargets(spec: Pick<VideoSpec, "platform" | "targets">): s
 
 const Label = NonEmptyString;
 const Side = z.strictObject({ label: Label, text: NonEmptyString });
+const SplitPanel = z.strictObject({ label: z.string().optional(), text: z.string().optional(), asset: Id.optional().describe("ContentIR asset id of an image") });
 
 /**
  * Props for each deterministic kind. `DeterministicScene.props` stays an open record in the
@@ -240,6 +299,41 @@ export const DeterministicProps = {
     asset: Id.describe("ContentIR asset id"),
     callouts: z.array(z.union([NonEmptyString, z.strictObject({ text: NonEmptyString, x: z.number().optional(), y: z.number().optional() })])).optional(),
   }),
+  quote: z.strictObject({ text: NonEmptyString, attribution: z.string().optional(), source: z.string().optional().describe("Where it was said or written.") }),
+  stat: z.strictObject({
+    value: z.union([z.number(), NonEmptyString]),
+    unit: z.string().optional(),
+    label: NonEmptyString,
+    context: z.string().optional().describe("One short line under the label, e.g. the comparison baseline."),
+  }),
+  timeline: z.strictObject({
+    events: z.array(z.strictObject({ label: NonEmptyString, text: z.string().optional() })).min(2).max(6),
+    current: z.int().min(0).optional().describe("Index of the highlighted event."),
+  }),
+  split_screen: z.strictObject({
+    mode: z.enum(["side_by_side", "before_after"]).optional().describe("Default side_by_side; before_after labels the halves Before/After unless labels are given."),
+    left: SplitPanel,
+    right: SplitPanel,
+  }),
+  lower_third: z.strictObject({
+    name: NonEmptyString,
+    title: z.string().optional(),
+    headline: z.string().optional().describe("Main text above the lower third (motion graphics have no footage behind it)."),
+  }),
+  kinetic_text: z.strictObject({
+    text: NonEmptyString.describe("Shown word by word or phrase by phrase in rhythm."),
+    rhythm: z.enum(["word", "phrase"]).optional(),
+    emphasis: z.string().optional().describe("Word(s) drawn in the primary colour."),
+  }),
+  map: z.strictObject({
+    title: z.string().optional(),
+    points: z
+      .array(z.strictObject({ label: NonEmptyString, x: z.number().min(0).max(1), y: z.number().min(0).max(1) }))
+      .min(1)
+      .max(8)
+      .describe("Pins in normalized coordinates of an abstract map panel (no geographic data)."),
+    route: z.boolean().optional().describe("Connect the points in order."),
+  }),
 } as const satisfies Record<DeterministicKind, z.ZodType>;
 
 /** Minimal valid props per kind, used in actionable fixes and scaffold guidance. */
@@ -252,6 +346,13 @@ export const DETERMINISTIC_PROPS_EXAMPLES: Record<DeterministicKind, Record<stri
   end_card: { title: "Name", subtitle: "url" },
   chart: { type: "stat", value: 40, unit: "%", label: "faster builds" },
   screenshot: { asset: "a1", callouts: ["Click here"] },
+  quote: { text: "It just works.", attribution: "A user", source: "README" },
+  stat: { value: 40, unit: "%", label: "faster builds", context: "vs. last release" },
+  timeline: { events: [{ label: "Ingest" }, { label: "Plan" }, { label: "Render" }], current: 1 },
+  split_screen: { mode: "before_after", left: { text: "Manual edits" }, right: { text: "One command" } },
+  lower_third: { name: "Ada Lovelace", title: "Engineer", headline: "Why we built it" },
+  kinetic_text: { text: "Docs in. Video out.", rhythm: "word", emphasis: "Video" },
+  map: { title: "Where it runs", points: [{ label: "Laptop", x: 0.3, y: 0.4 }, { label: "CI", x: 0.7, y: 0.6 }], route: true },
 };
 
 export interface SemanticIssue {
@@ -444,7 +545,7 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
       errors.push({
         path: `${at}.deterministic`,
         message: `${sid}: visual_strategy "motion_graphic" requires deterministic {kind, props}`,
-        fix: 'add deterministic: {kind: "typography" | "code" | "chart" | "diagram" | "screenshot" | "comparison" | "cta" | "end_card", props: {...}}',
+        fix: `add deterministic: {kind: ${DeterministicKind.options.map((k) => `"${k}"`).join(" | ")}, props: {...}}`,
       });
     }
     if (scene.deterministic) {
@@ -480,6 +581,18 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
               }
             }
           });
+        } else if (kind === "split_screen" && assetIds) {
+          for (const side of ["left", "right"] as const) {
+            const asset = (r.data[side] as { asset?: string }).asset;
+            if (asset && !assetIds.has(asset)) {
+              const near = closestMatches(asset, assetIds);
+              errors.push({
+                path: `${at}.deterministic.props.${side}.asset`,
+                message: `${sid}: split_screen ${side} asset "${asset}" is not a ContentIR asset id`,
+                fix: near.length ? `use an existing asset id, e.g. ${near.map((x) => `"${x}"`).join(", ")}` : "ingest the image first, or use text instead",
+              });
+            }
+          }
         } else if (kind === "screenshot" && assetIds && !assetIds.has(r.data.asset as string)) {
           const near = closestMatches(r.data.asset as string, assetIds);
           errors.push({
@@ -555,7 +668,8 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
     }
 
     if (scene.claim_refs.length === 0 && spec.grounding !== "off") {
-      const token = findQuantitativeToken(`${scene.voiceover}\n${scene.on_screen_text ?? ""}`);
+      // Props carry text too (stat values, quotes, kinetic text), which matters most without narration.
+      const token = findQuantitativeToken(`${scene.voiceover}\n${scene.on_screen_text ?? ""}\n${scene.deterministic ? propsText(scene.deterministic.props) : ""}`);
       if (token) {
         const issue: SemanticIssue = {
           path: `${at}.claim_refs`,
@@ -618,6 +732,33 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
     }
   }
 
+  if (voiceMode(spec) === "none") {
+    spec.scenes.forEach((scene, i) => {
+      if (scene.voiceover.trim()) {
+        errors.push({
+          path: `scenes.${i}.voiceover`,
+          message: `scene ${scene.id} has voiceover, but voice.mode is "none" (nothing is spoken)`,
+          fix: 'move the words into on_screen_text or the deterministic props and set voiceover to "", or set voice.mode to "narrated"',
+        });
+      }
+    });
+    if (!spec.audio?.music) {
+      warnings.push({
+        path: "audio.music",
+        message: 'voice.mode is "none" and there is no music bed, so the video is silent',
+        fix: 'add audio.music {file: "bundled:<id>"} (see the music catalogue), or keep it silent on purpose',
+      });
+    }
+  }
+  const music = spec.audio?.music;
+  if (music && !music.file.startsWith("bundled:") && !music.license) {
+    warnings.push({
+      path: "audio.music.license",
+      message: `music file "${music.file}" has no licence recorded`,
+      fix: 'add audio.music.license {id: "CC0-1.0" | "CC-BY-4.0" | "user-owned" | ..., source, attribution?} so the package records its rights',
+    });
+  }
+
   const firstScene = spec.scenes[0];
   if (firstScene && firstScene.purpose !== "hook") {
     warnings.push({
@@ -636,6 +777,24 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
   }
 
   return { ok: errors.length === 0, errors, warnings };
+}
+
+/** Props keys that hold layout, ids or code rather than claims the viewer reads. */
+const NON_CLAIM_KEYS = new Set(["asset", "x", "y", "current", "highlight_lines", "code", "language", "command", "url", "route", "mode", "rhythm", "type"]);
+
+/** The viewer-facing text in deterministic props, one value per line (for grounding checks). */
+export function propsText(props: unknown): string {
+  if (typeof props === "string") return props;
+  if (typeof props === "number") return String(props);
+  if (Array.isArray(props)) return props.map(propsText).filter(Boolean).join("\n");
+  if (props && typeof props === "object") {
+    return Object.entries(props)
+      .filter(([k]) => !NON_CLAIM_KEYS.has(k))
+      .map(([, v]) => propsText(v))
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
 }
 
 function round(n: number): number {

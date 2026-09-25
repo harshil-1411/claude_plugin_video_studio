@@ -29,7 +29,17 @@
               "demo",
               "payoff",
               "cta",
-              "end_card"
+              "end_card",
+              "question",
+              "contrarian_claim",
+              "story",
+              "step",
+              "comparison",
+              "reveal",
+              "objection",
+              "testimonial",
+              "result",
+              "loop_back"
             ],
             "type": "string"
           },
@@ -48,7 +58,14 @@
               "screenshot",
               "comparison",
               "cta",
-              "end_card"
+              "end_card",
+              "quote",
+              "stat",
+              "timeline",
+              "split_screen",
+              "lower_third",
+              "kinetic_text",
+              "map"
             ],
             "type": "string"
           },
@@ -92,6 +109,15 @@
       "exclusiveMinimum": 0,
       "maximum": 600,
       "type": "number"
+    },
+    "default_music": {
+      "description": "Music bed the scaffold selects, e.g. bundled:lofi.",
+      "type": "string"
+    },
+    "default_style": {
+      "description": "Style pack the scaffold selects unless the user picks one.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
     },
     "description": {
       "minLength": 1,
@@ -208,6 +234,14 @@
     "schema_version": {
       "description": "Schema version of this document.",
       "const": "1.0",
+      "type": "string"
+    },
+    "voice_mode": {
+      "description": "Archetypes without speech (e.g. text-over-music) set none.",
+      "enum": [
+        "narrated",
+        "none"
+      ],
       "type": "string"
     }
   },

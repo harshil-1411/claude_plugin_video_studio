@@ -1,6 +1,7 @@
 import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DeterministicKind, TextBox, TextRole } from "@video-studio/schema";
+import { fallbackLines } from "./fallback.js";
 import { codeLabel, escapeHtml, highlightLines, languageFamily } from "./hyperframes-highlight.js";
 import { safeArea } from "./text-layout.js";
 import { fontFaceCss } from "./tokens.js";
@@ -82,7 +83,9 @@ const GENERIC_FONTS = new Set([
   "emoji",
   "math",
 ]);
-const FALLBACK_TOKENS: Omit<VisualTokens, "logo_path"> = {
+/** The string tokens (fonts and colours) the stylesheet always needs. */
+type CoreTokens = Pick<VisualTokens, "font_heading" | "font_body" | "font_mono" | "color_background" | "color_text" | "color_primary" | "color_secondary">;
+const FALLBACK_TOKENS: CoreTokens = {
   font_heading: "Helvetica, Arial, sans-serif",
   font_body: "Helvetica, Arial, sans-serif",
   font_mono: "Menlo, monospace",
@@ -784,7 +787,22 @@ const RENDERERS: Record<DeterministicKind, (ctx: KindCtx) => string> = {
   cta: renderCta,
   end_card: renderEndCard,
   screenshot: renderScreenshot,
+  quote: renderFallback("quote"),
+  stat: renderFallback("stat"),
+  timeline: renderFallback("timeline"),
+  split_screen: renderFallback("split_screen"),
+  lower_third: renderFallback("lower_third"),
+  kinetic_text: renderFallback("kinetic_text"),
+  map: renderFallback("map"),
 };
+
+/** A typography card with the props' text, for kinds not implemented here yet. */
+function renderFallback(kind: DeterministicKind): (ctx: KindCtx) => string {
+  return (ctx) => {
+    ctx.warnings.push(`${kind}: drawn as a typography card (not implemented in the HyperFrames composition yet)`);
+    return renderTypography({ ...ctx, props: { lines: fallbackLines(ctx.props) } });
+  };
+}
 
 // ---------------------------------------------------------------------------------- document
 

@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, isAbsolute, join } from "node:path";
+import { fallbackLines } from "./fallback.js";
 import { codeLabel } from "./hyperframes-highlight.js";
 import { projectPaths, resolveInsideProject } from "@video-studio/core";
 import {
@@ -788,6 +789,17 @@ function layoutKind(det: NonNullable<Scene["deterministic"]>, c: Ctx, inputs: Co
       return diagram(p, c);
     case "screenshot":
       return screenshot(p, c, inputs.image ?? null);
+    case "quote":
+    case "stat":
+    case "timeline":
+    case "split_screen":
+    case "lower_third":
+    case "kinetic_text":
+    case "map": {
+      // Not drawn natively yet: a typography card with the props' text.
+      const l = typography({ lines: fallbackLines(p) }, c);
+      return { ...l, warnings: [...l.warnings, `${det.kind}: drawn as a typography card (not implemented in ${FFMPEG_RENDERER_ID} yet)`] };
+    }
     default:
       throw new Error(`${FFMPEG_RENDERER_ID} cannot draw kind "${String((det as { kind: unknown }).kind)}"`);
   }

@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:style",
+  "title": "Style",
+  "description": "styles/<id>.yaml: a style pack (palette, fonts, weights, text treatment, motion and caption styling) a spec selects with `style`.",
+  "additionalProperties": false,
+  "properties": {
+    "captions": {
+      "description": "Burned-in caption styling.",
+      "additionalProperties": false,
+      "properties": {
+        "active_word": {
+          "description": "Karaoke-style active-word highlight. Off by default: keyword emphasis only.",
+          "type": "boolean"
+        },
+        "family": {
+          "description": "Caption font family; defaults to the body font.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "max_lines": {
+          "maximum": 3,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "plate_opacity": {
+          "description": "Opacity of the plate behind caption text (0 = no plate).",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "weight": {
+          "maximum": 900,
+          "minimum": 100,
+          "multipleOf": 100,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "description": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "fonts": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "heading": {
+          "type": "string"
+        },
+        "mono": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "id": {
+      "description": "Must equal the file name: styles/<id>.yaml.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "motion": {
+      "description": "Motion tokens; brand.motion overrides personality and transition_ms when set.",
+      "additionalProperties": false,
+      "properties": {
+        "easing": {
+          "enum": [
+            "linear",
+            "ease_out",
+            "ease_in_out",
+            "spring",
+            "snap"
+          ],
+          "type": "string"
+        },
+        "enter_ms": {
+          "description": "How long an element takes to appear.",
+          "maximum": 2000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "exit_ms": {
+          "maximum": 2000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "personality": {
+          "enum": [
+            "calm",
+            "precise",
+            "friendly",
+            "energetic",
+            "playful"
+          ],
+          "type": "string"
+        },
+        "stagger_ms": {
+          "description": "Delay between successive elements (lines, bullets, words).",
+          "maximum": 1000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "transition": {
+          "description": "Default transition between scenes.",
+          "enum": [
+            "cut",
+            "crossfade",
+            "fade_black",
+            "slide",
+            "zoom",
+            "whip"
+          ],
+          "type": "string"
+        },
+        "transition_ms": {
+          "maximum": 2000,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "personality",
+        "easing",
+        "enter_ms",
+        "exit_ms",
+        "stagger_ms",
+        "transition",
+        "transition_ms"
+      ],
+      "type": "object"
+    },
+    "name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "palette": {
+      "additionalProperties": false,
+      "properties": {
+        "background": {
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "primary": {
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "secondary": {
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "text": {
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "text": {
+      "additionalProperties": false,
+      "properties": {
+        "align": {
+          "enum": [
+            "center",
+            "left"
+          ],
+          "type": "string"
+        },
+        "case": {
+          "description": "Heading case transform.",
+          "enum": [
+            "as_is",
+            "upper",
+            "title"
+          ],
+          "type": "string"
+        },
+        "heading_scale": {
+          "description": "Multiplier on the heading size the layout would pick.",
+          "maximum": 1.6,
+          "minimum": 0.6,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "version": {
+      "description": "Bumped whenever a value changes (part of the scene cache key).",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991,
+      "type": "integer"
+    },
+    "weights": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "maximum": 900,
+          "minimum": 100,
+          "multipleOf": 100,
+          "type": "integer"
+        },
+        "heading": {
+          "maximum": 900,
+          "minimum": 100,
+          "multipleOf": 100,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "version",
+    "description",
+    "motion"
+  ],
+  "type": "object"
+}

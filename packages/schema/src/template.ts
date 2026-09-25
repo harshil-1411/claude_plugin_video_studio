@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { AspectRatio, Goal, Id, NonEmptyString, Platform, SchemaVersion } from "./common.js";
 import { HookMechanism } from "./creative-brief.js";
-import { DeterministicKind, ScenePurpose, VisualStrategy } from "./video-spec.js";
+import { DeterministicKind, ScenePurpose, VisualStrategy, VoiceMode } from "./video-spec.js";
 
 /** Allowed deviation of summed beat shares from 1. */
 export const BEAT_SHARE_TOLERANCE = 0.01;
@@ -43,6 +43,9 @@ export const Template = z
     beats: z.array(TemplateBeat).min(2),
     hook_mechanisms: z.array(HookMechanism).min(1).describe("Preferred hook mechanisms, best first."),
     rules: z.array(NonEmptyString).describe("Story rules the plan must follow, e.g. one idea per scene."),
+    voice_mode: VoiceMode.optional().describe("Archetypes without speech (e.g. text-over-music) set none."),
+    default_style: Id.optional().describe("Style pack the scaffold selects unless the user picks one."),
+    default_music: z.string().optional().describe("Music bed the scaffold selects, e.g. bundled:lofi."),
   })
   .superRefine((t, ctx) => {
     const sum = t.beats.reduce((s, b) => s + b.share, 0);

@@ -110736,7 +110736,7 @@ var esm_exports$2 = /* @__PURE__ */ __exportAll({
 	ElementType: () => ElementType$1,
 	Root: () => Root$1,
 	Script: () => Script$1,
-	Style: () => Style$1,
+	Style: () => Style$2,
 	Tag: () => Tag$1,
 	Text: () => Text$4,
 	isTag: () => isTag$4
@@ -110782,7 +110782,7 @@ const Comment$4 = ElementType$1.Comment;
 /** Type for <script> tags */
 const Script$1 = ElementType$1.Script;
 /** Type for <style> tags */
-const Style$1 = ElementType$1.Style;
+const Style$2 = ElementType$1.Style;
 /** Type for Any tag */
 const Tag$1 = ElementType$1.Tag;
 /** Type for <![CDATA[ ... ]]> */
@@ -111489,7 +111489,7 @@ function renderNode$1(node, options) {
 		case Comment$4: return renderComment(node);
 		case CDATA$2: return renderCdata(node);
 		case Script$1:
-		case Style$1:
+		case Style$2:
 		case Tag$1: return renderTag$1(node, options);
 		case Text$4: return renderText(node, options);
 	}
@@ -114038,7 +114038,7 @@ var init_dist$7 = __esmMin((() => {
 function isTag$2(element) {
 	return element.type === ElementType.Tag || element.type === ElementType.Script || element.type === ElementType.Style;
 }
-var ElementType, Root, Text$2, Directive, Comment$1, Script, Style, Tag, CDATA;
+var ElementType, Root, Text$2, Directive, Comment$1, Script, Style$1, Tag, CDATA;
 var init_dist$6 = __esmMin((() => {
 	(function(ElementType) {
 		/** Type for the root element of a document */
@@ -114065,7 +114065,7 @@ var init_dist$6 = __esmMin((() => {
 	Directive = ElementType.Directive;
 	Comment$1 = ElementType.Comment;
 	Script = ElementType.Script;
-	Style = ElementType.Style;
+	Style$1 = ElementType.Style;
 	Tag = ElementType.Tag;
 	CDATA = ElementType.CDATA;
 	ElementType.Doctype;
@@ -114525,7 +114525,7 @@ function renderNode(node, options, xmlMode) {
 		case Comment$1: return `<!--${node.data}-->`;
 		case CDATA: return `<![CDATA[${node.children[0].data}]]>`;
 		case Script:
-		case Style:
+		case Style$1:
 		case Tag: return renderTag(node, options, xmlMode);
 		case Text$2: {
 			const element = node;
@@ -229433,7 +229433,17 @@ const ScenePurpose = _enum([
 	"demo",
 	"payoff",
 	"cta",
-	"end_card"
+	"end_card",
+	"question",
+	"contrarian_claim",
+	"story",
+	"step",
+	"comparison",
+	"reveal",
+	"objection",
+	"testimonial",
+	"result",
+	"loop_back"
 ]);
 const VisualStrategy = _enum([
 	"motion_graphic",
@@ -229451,7 +229461,14 @@ const DeterministicKind = _enum([
 	"screenshot",
 	"comparison",
 	"cta",
-	"end_card"
+	"end_card",
+	"quote",
+	"stat",
+	"timeline",
+	"split_screen",
+	"lower_third",
+	"kinetic_text",
+	"map"
 ]);
 const DeterministicScene = strictObject({
 	kind: DeterministicKind,
@@ -229513,7 +229530,9 @@ const Scene = strictObject({
 	claim_refs: array(NonEmptyString).describe("Evidence source_refs or ContentIR claim ids backing this scene."),
 	transition: Transition.optional()
 });
+const VoiceMode = _enum(["narrated", "none"]).describe("narrated: scenes carry voiceover (default). none: no speech; timing comes from scene durations and on-screen text, usually over a music bed.");
 const VoiceSettings = strictObject({
+	mode: VoiceMode.optional(),
 	provider_preference: array(Id).optional().describe("Preferred TTS providers in order; the router may override on policy."),
 	voice_id: string().optional(),
 	style: string().optional()
@@ -229523,6 +229542,21 @@ const CaptionSettings = strictObject({
 	burn_in: boolean(),
 	position: strictObject({ y: number().min(0).max(1).describe("Vertical centre of the caption block as a fraction of frame height.") }).optional().describe("Manual caption placement. Omit to let the caption engine place captions in the platforms' caption zone.")
 });
+const AudioLicense = strictObject({
+	id: NonEmptyString.describe("SPDX id (e.g. CC0-1.0, CC-BY-4.0) or user-owned / licensed."),
+	source: string().optional().describe("Where the track came from (URL or description)."),
+	attribution: string().optional().describe("Credit line to show or post, when the licence requires one.")
+}).describe("Rights for an audio file; recorded in the manifest, video.lock and provenance.");
+const AudioSettings = strictObject({ music: strictObject({
+	file: NonEmptyString.describe("`bundled:<id>` (music/ in the plugin) or a path relative to the project folder."),
+	volume_db: number().min(-60).max(0).optional().describe("Bed level before ducking. Default -18 dB."),
+	duck_db: number().min(-40).max(0).optional().describe("Extra attenuation while speech plays. Default -10 dB; ignored with voice.mode none."),
+	fade_in_ms: int().min(0).max(1e4).optional(),
+	fade_out_ms: int().min(0).max(1e4).optional(),
+	loop: boolean().optional().describe("Loop the track to cover the video (default true)."),
+	start_sec: number().min(0).optional().describe("Offset into the track."),
+	license: AudioLicense.optional().describe("Required for user files; bundled tracks carry their own.")
+}).describe("Background music mixed under the voice.").optional() }).describe("Audio beds beyond the voice.");
 const MasterCanvas = strictObject({
 	width: int().min(2).max(7680),
 	height: int().min(2).max(7680),
@@ -229557,6 +229591,8 @@ const VideoSpec = strictObject({
 	grounding: Grounding,
 	voice: VoiceSettings,
 	captions: CaptionSettings,
+	style: Id.optional().describe("Style pack id: styles/<id>.yaml (look and motion). Brand colours and fonts override it."),
+	audio: AudioSettings.optional(),
 	cover: Cover.optional(),
 	publish: record(PlatformTargetId, PublishSettings).optional().describe("Post copy keyed by target id."),
 	scenes: array(Scene).min(1)
@@ -229583,6 +229619,10 @@ function defaultMaster(aspect) {
 function resolveMaster(spec) {
 	return spec.master ?? defaultMaster(spec.aspect_ratio);
 }
+/** The spec's voice mode (`narrated` unless set to `none`). */
+function voiceMode(spec) {
+	return spec.voice.mode ?? "narrated";
+}
 /** Target contract ids: `targets` when given, else the primary platform's contract (possibly none). */
 function resolveTargets(spec) {
 	if (spec.targets?.length) return [...new Set(spec.targets)];
@@ -229592,6 +229632,11 @@ function resolveTargets(spec) {
 const Side = strictObject({
 	label: NonEmptyString,
 	text: NonEmptyString
+});
+const SplitPanel = strictObject({
+	label: string().optional(),
+	text: string().optional(),
+	asset: Id.optional().describe("ContentIR asset id of an image")
 });
 /**
 * Props for each deterministic kind. `DeterministicScene.props` stays an open record in the
@@ -229648,6 +229693,48 @@ const DeterministicProps = {
 			x: number().optional(),
 			y: number().optional()
 		})])).optional()
+	}),
+	quote: strictObject({
+		text: NonEmptyString,
+		attribution: string().optional(),
+		source: string().optional().describe("Where it was said or written.")
+	}),
+	stat: strictObject({
+		value: union([number(), NonEmptyString]),
+		unit: string().optional(),
+		label: NonEmptyString,
+		context: string().optional().describe("One short line under the label, e.g. the comparison baseline.")
+	}),
+	timeline: strictObject({
+		events: array(strictObject({
+			label: NonEmptyString,
+			text: string().optional()
+		})).min(2).max(6),
+		current: int().min(0).optional().describe("Index of the highlighted event.")
+	}),
+	split_screen: strictObject({
+		mode: _enum(["side_by_side", "before_after"]).optional().describe("Default side_by_side; before_after labels the halves Before/After unless labels are given."),
+		left: SplitPanel,
+		right: SplitPanel
+	}),
+	lower_third: strictObject({
+		name: NonEmptyString,
+		title: string().optional(),
+		headline: string().optional().describe("Main text above the lower third (motion graphics have no footage behind it).")
+	}),
+	kinetic_text: strictObject({
+		text: NonEmptyString.describe("Shown word by word or phrase by phrase in rhythm."),
+		rhythm: _enum(["word", "phrase"]).optional(),
+		emphasis: string().optional().describe("Word(s) drawn in the primary colour.")
+	}),
+	map: strictObject({
+		title: string().optional(),
+		points: array(strictObject({
+			label: NonEmptyString,
+			x: number().min(0).max(1),
+			y: number().min(0).max(1)
+		})).min(1).max(8).describe("Pins in normalized coordinates of an abstract map panel (no geographic data)."),
+		route: boolean().optional().describe("Connect the points in order.")
 	})
 };
 /** Minimal valid props per kind, used in actionable fixes and scaffold guidance. */
@@ -229694,6 +229781,53 @@ const DETERMINISTIC_PROPS_EXAMPLES = {
 	screenshot: {
 		asset: "a1",
 		callouts: ["Click here"]
+	},
+	quote: {
+		text: "It just works.",
+		attribution: "A user",
+		source: "README"
+	},
+	stat: {
+		value: 40,
+		unit: "%",
+		label: "faster builds",
+		context: "vs. last release"
+	},
+	timeline: {
+		events: [
+			{ label: "Ingest" },
+			{ label: "Plan" },
+			{ label: "Render" }
+		],
+		current: 1
+	},
+	split_screen: {
+		mode: "before_after",
+		left: { text: "Manual edits" },
+		right: { text: "One command" }
+	},
+	lower_third: {
+		name: "Ada Lovelace",
+		title: "Engineer",
+		headline: "Why we built it"
+	},
+	kinetic_text: {
+		text: "Docs in. Video out.",
+		rhythm: "word",
+		emphasis: "Video"
+	},
+	map: {
+		title: "Where it runs",
+		points: [{
+			label: "Laptop",
+			x: .3,
+			y: .4
+		}, {
+			label: "CI",
+			x: .7,
+			y: .6
+		}],
+		route: true
 	}
 };
 /** Allowed deviation of summed scene durations from `target_duration_sec`. */
@@ -229846,7 +229980,7 @@ function validateVideoSpecSemantics(spec, ir) {
 		if (scene.visual_strategy === "motion_graphic" && !scene.deterministic) errors.push({
 			path: `${at}.deterministic`,
 			message: `${sid}: visual_strategy "motion_graphic" requires deterministic {kind, props}`,
-			fix: "add deterministic: {kind: \"typography\" | \"code\" | \"chart\" | \"diagram\" | \"screenshot\" | \"comparison\" | \"cta\" | \"end_card\", props: {...}}"
+			fix: `add deterministic: {kind: ${DeterministicKind.options.map((k) => `"${k}"`).join(" | ")}, props: {...}}`
 		});
 		if (scene.deterministic) {
 			const { kind, props } = scene.deterministic;
@@ -229875,7 +230009,18 @@ function validateVideoSpecSemantics(spec, ir) {
 							fix: `add "${end}" to nodes or use one of ${closestMatches(end, nodes).map((x) => `"${x}"`).join(", ")}`
 						});
 					});
-				} else if (kind === "screenshot" && assetIds && !assetIds.has(r.data.asset)) {
+				} else if (kind === "split_screen" && assetIds) for (const side of ["left", "right"]) {
+					const asset = r.data[side].asset;
+					if (asset && !assetIds.has(asset)) {
+						const near = closestMatches(asset, assetIds);
+						errors.push({
+							path: `${at}.deterministic.props.${side}.asset`,
+							message: `${sid}: split_screen ${side} asset "${asset}" is not a ContentIR asset id`,
+							fix: near.length ? `use an existing asset id, e.g. ${near.map((x) => `"${x}"`).join(", ")}` : "ingest the image first, or use text instead"
+						});
+					}
+				}
+				else if (kind === "screenshot" && assetIds && !assetIds.has(r.data.asset)) {
 					const near = closestMatches(r.data.asset, assetIds);
 					errors.push({
 						path: `${at}.deterministic.props.asset`,
@@ -229939,7 +230084,7 @@ function validateVideoSpecSemantics(spec, ir) {
 			}
 		});
 		if (scene.claim_refs.length === 0 && spec.grounding !== "off") {
-			const token = findQuantitativeToken(`${scene.voiceover}\n${scene.on_screen_text ?? ""}`);
+			const token = findQuantitativeToken(`${scene.voiceover}\n${scene.on_screen_text ?? ""}\n${scene.deterministic ? propsText(scene.deterministic.props) : ""}`);
 			if (token) {
 				const issue = {
 					path: `${at}.claim_refs`,
@@ -229991,6 +230136,26 @@ function validateVideoSpecSemantics(spec, ir) {
 			fix: targets.length ? `add "${key}" to targets, or rename the key to one of ${targets.join(", ")}` : `add "${key}" to targets or remove it`
 		});
 	}
+	if (voiceMode(spec) === "none") {
+		spec.scenes.forEach((scene, i) => {
+			if (scene.voiceover.trim()) errors.push({
+				path: `scenes.${i}.voiceover`,
+				message: `scene ${scene.id} has voiceover, but voice.mode is "none" (nothing is spoken)`,
+				fix: "move the words into on_screen_text or the deterministic props and set voiceover to \"\", or set voice.mode to \"narrated\""
+			});
+		});
+		if (!spec.audio?.music) warnings.push({
+			path: "audio.music",
+			message: "voice.mode is \"none\" and there is no music bed, so the video is silent",
+			fix: "add audio.music {file: \"bundled:<id>\"} (see the music catalogue), or keep it silent on purpose"
+		});
+	}
+	const music = spec.audio?.music;
+	if (music && !music.file.startsWith("bundled:") && !music.license) warnings.push({
+		path: "audio.music.license",
+		message: `music file "${music.file}" has no licence recorded`,
+		fix: "add audio.music.license {id: \"CC0-1.0\" | \"CC-BY-4.0\" | \"user-owned\" | ..., source, attribution?} so the package records its rights"
+	});
 	const firstScene = spec.scenes[0];
 	if (firstScene && firstScene.purpose !== "hook") warnings.push({
 		path: "scenes.0.purpose",
@@ -230008,6 +230173,30 @@ function validateVideoSpecSemantics(spec, ir) {
 		errors,
 		warnings
 	};
+}
+/** Props keys that hold layout, ids or code rather than claims the viewer reads. */
+const NON_CLAIM_KEYS = /* @__PURE__ */ new Set([
+	"asset",
+	"x",
+	"y",
+	"current",
+	"highlight_lines",
+	"code",
+	"language",
+	"command",
+	"url",
+	"route",
+	"mode",
+	"rhythm",
+	"type"
+]);
+/** The viewer-facing text in deterministic props, one value per line (for grounding checks). */
+function propsText(props) {
+	if (typeof props === "string") return props;
+	if (typeof props === "number") return String(props);
+	if (Array.isArray(props)) return props.map(propsText).filter(Boolean).join("\n");
+	if (props && typeof props === "object") return Object.entries(props).filter(([k]) => !NON_CLAIM_KEYS.has(k)).map(([, v]) => propsText(v)).filter(Boolean).join("\n");
+	return "";
 }
 function round(n) {
 	return Math.round(n * 100) / 100;
@@ -230377,6 +230566,57 @@ const Brand = strictObject({
 	title: "Brand",
 	description: "brand.yaml: brand voice, visual tokens, caption and motion styling, video defaults, terminology, prohibited claims and allowed CTAs."
 });
+const StyleMotion = strictObject({
+	personality: MotionPersonality,
+	easing: _enum([
+		"linear",
+		"ease_out",
+		"ease_in_out",
+		"spring",
+		"snap"
+	]),
+	enter_ms: int().min(0).max(2e3).describe("How long an element takes to appear."),
+	exit_ms: int().min(0).max(2e3),
+	stagger_ms: int().min(0).max(1e3).describe("Delay between successive elements (lines, bullets, words)."),
+	transition: Transition.describe("Default transition between scenes."),
+	transition_ms: int().min(0).max(2e3)
+}).describe("Motion tokens; brand.motion overrides personality and transition_ms when set.");
+strictObject({
+	id: Id.describe("Must equal the file name: styles/<id>.yaml."),
+	name: NonEmptyString,
+	version: int().positive().describe("Bumped whenever a value changes (part of the scene cache key)."),
+	description: NonEmptyString,
+	palette: strictObject({
+		background: HexColor.optional(),
+		text: HexColor.optional(),
+		primary: HexColor.optional(),
+		secondary: HexColor.optional()
+	}).optional(),
+	fonts: strictObject({
+		heading: string().optional(),
+		body: string().optional(),
+		mono: string().optional()
+	}).optional(),
+	weights: strictObject({
+		heading: FontWeight.optional(),
+		body: FontWeight.optional()
+	}).optional(),
+	text: strictObject({
+		case: _enum([
+			"as_is",
+			"upper",
+			"title"
+		]).optional().describe("Heading case transform."),
+		heading_scale: number().min(.6).max(1.6).optional().describe("Multiplier on the heading size the layout would pick."),
+		align: _enum(["center", "left"]).optional()
+	}).optional(),
+	motion: StyleMotion,
+	captions: BrandCaptions.optional()
+}).meta({
+	id: "Style",
+	title: "Style",
+	description: "styles/<id>.yaml: a style pack (palette, fonts, weights, text treatment, motion and caption styling) a spec selects with `style`."
+});
 //#endregion
 //#region ../schema/dist/platform-contract.js
 /** Calendar date `YYYY-MM-DD`. */
@@ -230685,7 +230925,10 @@ const Template = strictObject({
 	caption_preset: Id,
 	beats: array(TemplateBeat).min(2),
 	hook_mechanisms: array(HookMechanism).min(1).describe("Preferred hook mechanisms, best first."),
-	rules: array(NonEmptyString).describe("Story rules the plan must follow, e.g. one idea per scene.")
+	rules: array(NonEmptyString).describe("Story rules the plan must follow, e.g. one idea per scene."),
+	voice_mode: VoiceMode.optional().describe("Archetypes without speech (e.g. text-over-music) set none."),
+	default_style: Id.optional().describe("Style pack the scaffold selects unless the user picks one."),
+	default_music: string().optional().describe("Music bed the scaffold selects, e.g. bundled:lofi.")
 }).superRefine((t, ctx) => {
 	const sum = t.beats.reduce((s, b) => s + b.share, 0);
 	if (Math.abs(sum - 1) > .01) ctx.addIssue({
@@ -233597,6 +233840,16 @@ function inset(r, dx, dy = dx) {
 	};
 }
 //#endregion
+//#region ../renderer/dist/fallback.js
+/**
+* Lines for drawing a deterministic kind as a plain typography card, used while a renderer does
+* not implement that kind yet. The renderer adds a warning so QA reports the stand-in.
+*/
+function fallbackLines(props) {
+	const lines = propsText(props).split("\n").map((l) => l.trim()).filter(Boolean);
+	return lines.length ? lines : [" "];
+}
+//#endregion
 //#region ../renderer/dist/hyperframes-highlight.js
 /**
 * Tiny deterministic syntax highlighter for the HyperFrames `code` scene kind.
@@ -234917,6 +235170,19 @@ function layoutKind(det, c, inputs) {
 		case "chart": return chart(p, c);
 		case "diagram": return diagram(p, c);
 		case "screenshot": return screenshot(p, c, inputs.image ?? null);
+		case "quote":
+		case "stat":
+		case "timeline":
+		case "split_screen":
+		case "lower_third":
+		case "kinetic_text":
+		case "map": {
+			const l = typography({ lines: fallbackLines(p) }, c);
+			return {
+				...l,
+				warnings: [...l.warnings, `${det.kind}: drawn as a typography card (not implemented in ${FFMPEG_RENDERER_ID} yet)`]
+			};
+		}
 		default: throw new Error(`${FFMPEG_RENDERER_ID} cannot draw kind "${String(det.kind)}"`);
 	}
 }
@@ -236158,8 +236424,25 @@ const RENDERERS = {
 	comparison: renderComparison,
 	cta: renderCta,
 	end_card: renderEndCard,
-	screenshot: renderScreenshot
+	screenshot: renderScreenshot,
+	quote: renderFallback("quote"),
+	stat: renderFallback("stat"),
+	timeline: renderFallback("timeline"),
+	split_screen: renderFallback("split_screen"),
+	lower_third: renderFallback("lower_third"),
+	kinetic_text: renderFallback("kinetic_text"),
+	map: renderFallback("map")
 };
+/** A typography card with the props' text, for kinds not implemented here yet. */
+function renderFallback(kind) {
+	return (ctx) => {
+		ctx.warnings.push(`${kind}: drawn as a typography card (not implemented in the HyperFrames composition yet)`);
+		return renderTypography({
+			...ctx,
+			props: { lines: fallbackLines(ctx.props) }
+		});
+	};
+}
 function stylesheet(stage, tokens, fontNames, bundledFaces = "") {
 	const { W, H, u, safe } = stage;
 	const faces = fontNames.map((n) => `@font-face { font-family: "${n}"; src: local("${n}"); }`).join("\n");
@@ -237367,7 +237650,8 @@ const SCHEMA_NAMES = [
 	"policy",
 	"template",
 	"platform-contract",
-	"video-lock"
+	"video-lock",
+	"style"
 ];
 /**
 * Locate the bundled `schemas/` directory: `${CLAUDE_PLUGIN_ROOT}/schemas` first, then
