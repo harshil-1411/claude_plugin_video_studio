@@ -147,7 +147,7 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 
 Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md` (Phases 4 → 5 → 6 → local 8, no human intervention; Phase 7, Phase 9 and CI are out of scope).
 
-- **Current:** Phase 8 (local subset): fonts (Noto JP, Devanagari and Arabic, already downloaded to the scratchpad), `localize`, accessibility, C2PA, docs, README and hero video.
+- **Current:** the loop is **complete**. Next is the user's `docs/USER_CHECKLIST.md`, then Phase 7 (providers, keys) or Phase 9 (distribution) when the user decides.
 - **Done:**
   - Step 0 (Phase 4 closed).
   - Phase 5 step 1 (`489dbbd`): schema for the new purposes and kinds, `audio.music`, `voice.mode` and `Style`.
@@ -184,6 +184,26 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
     - A folder of 6 clips (ingested as a folder) became an aesthetic-broll reel on `bundled:upbeat` with beat sync (5 cuts moved onto 120 bpm beats), −13.8 LUFS.
     - A silent-vlog reel with native ambient sound, 300 ms crossfades and a lower third over the footage: QA pass, −14.0 LUFS.
     - Demo capture against a real app: user checklist (no Chrome in the sandbox).
+  - Phase 8, local subset (`58921e9`, `5eb08dd` + close):
+    - **Multilingual:**
+      - Noto Sans JP, Devanagari and Arabic bundled, with script detection and script-first font chains
+      - CJK kinsoku breaking; Devanagari/Arabic/Hebrew drawn through libass, since this drawtext does not shape them
+      - HyperFrames gets `lang`/`dir`
+      - per-language system voices (ja → Kyoko; no Hindi voice → silent with a reason)
+      - per-script speech and reading rates
+    - **Tools:**
+      - `localize` (translation sheet → `localized/<lang>/`, apply re-times and validates)
+      - sound-event captions (`[music]`, sfx captions, `[ambient sound]`)
+      - `export sign` for C2PA via c2patool (test certificate)
+    - **Fixes, docs and media:**
+      - libass captions now get a flat fonts folder; the bundled caption fonts had never loaded before (`ASSEMBLY_VERSION` 3)
+      - complex-script cover headlines drawn with libass (`COVER_VERSION` 3)
+      - `docs/contributing/`, a README rewrite, and `docs/media/hero.mp4` made by the plugin
+  - **Phase 8 exit passed (sandbox):** the Whisper paper PDF (arXiv 2212.04356) became an English explainer grounded in 3 evidence spans, then `localize` gave hi-IN (38 s after re-timing) and ja-JP (32 s).
+    - All three render and lint with 0 errors and 0 warnings for youtube-shorts, tiktok and instagram.
+    - Frames and covers were checked by eye: shaped Devanagari, CJK line breaks, no tofu.
+    - A signed EN export has 5 videos with valid C2PA (test certificate untrusted, as expected).
+  - **Not done in Phase 8 (out of scope or needs a person):** face-collision avoidance (no vision model), the Remotion renderer (licence plus a new install), community marketplace submission, and Hebrew/Korean/Thai fonts.
 - **Deferred to `docs/USER_CHECKLIST.md`** (written at the end):
   - real `say` renders
   - HyperFrames install and renders of new kinds and styles

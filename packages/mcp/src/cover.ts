@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type RunOptions, escapeFilterOption, escapeFiltergraph, ffprobe, runFfmpeg, secs } from "@video-studio/media";
 import { type LayoutZones, type PxRect, intersect } from "@video-studio/platforms";
-import { COMPLEX_SCRIPTS, type FontResolver, type VisualTokens, createFontResolver, dominantScript, ffColor, fitText, prepareLibassFontsDir, scriptFontFamilies } from "@video-studio/renderer";
+import { COMPLEX_SCRIPTS, type FontResolver, type VisualTokens, assFontSize, createFontResolver, dominantScript, ffColor, fitText, prepareLibassFontsDir, readFontMetrics, scriptFirstChain, scriptFontFamilies } from "@video-studio/renderer";
 import type { AspectRatio, PlatformContract, TextBox } from "@video-studio/schema";
 
 /**
@@ -17,7 +17,8 @@ import type { AspectRatio, PlatformContract, TextBox } from "@video-studio/schem
  * The headline's box is returned for lint. Platform limits come from the contracts only.
  */
 
-export const COVER_VERSION = 2;
+/** Bump when cover pixels change. 3: the headline uses its own script's font (CJK first in the chain; Devanagari/Arabic through libass). */
+export const COVER_VERSION = 3;
 
 export interface CoverCropRect extends PxRect {
   id: string;
@@ -152,7 +153,8 @@ export async function renderCover(o: CoverOptions): Promise<CoverResult> {
     const filters: string[] = [];
     let font: string | null = null;
     try {
-      font = await (o.fontResolver ?? createFontResolver(o.env ?? process.env))(o.tokens.font_heading, 700);
+      // The headline's own script first (a Japanese headline needs Noto Sans JP before Inter).
+      font = await (o.fontResolver ?? createFontResolver(o.env ?? process.env))(scriptFirstChain(o.tokens.font_heading, dominantScript(o.headline)), 700);
     } catch (e) {
       warnings.push(`cover: no font for "${o.tokens.font_heading}" (${e instanceof Error ? e.message : String(e)}); cover has no headline`);
     }
@@ -183,7 +185,7 @@ export async function renderCover(o: CoverOptions): Promise<CoverResult> {
           "",
           "[V4+ Styles]",
           "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-          `Style: H,${family},${fit.fontSize},${bgr(o.tokens.color_text)},${bgr(o.tokens.color_text)},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,8,0,0,0,1`,
+          `Style: H,${family},${assFontSize(fit.fontSize, font ? readFontMetrics(font) : null)},${bgr(o.tokens.color_text)},${bgr(o.tokens.color_text)},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,8,0,0,0,1`,
           "",
           "[Events]",
           "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",

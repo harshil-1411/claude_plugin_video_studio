@@ -245424,6 +245424,7 @@ async function applySheet(root, out, sheetPath, src, srcSha, language, notes) {
 			continue;
 		}
 		let value = target;
+		if (e.path.endsWith(".unit") && /^\s/.test(e.source) && !/^\s/.test(value) && languageRate(sheet.target_language).unit !== "chars") value = ` ${value}`;
 		const em = /^scenes\.(\d+)\.deterministic\.props\.(lines\.\d+|text)$/.exec(e.path);
 		if (em) {
 			const t = takeEmphasisMarks(target);
@@ -247727,7 +247728,7 @@ async function renderCover(o) {
 		const filters = [];
 		let font = null;
 		try {
-			font = await (o.fontResolver ?? createFontResolver(o.env ?? process.env))(o.tokens.font_heading, 700);
+			font = await (o.fontResolver ?? createFontResolver(o.env ?? process.env))(scriptFirstChain(o.tokens.font_heading, dominantScript(o.headline)), 700);
 		} catch (e) {
 			warnings.push(`cover: no font for "${o.tokens.font_heading}" (${e instanceof Error ? e.message : String(e)}); cover has no headline`);
 		}
@@ -247769,7 +247770,7 @@ async function renderCover(o) {
 					"",
 					"[V4+ Styles]",
 					"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-					`Style: H,${family},${fit.fontSize},${bgr(o.tokens.color_text)},${bgr(o.tokens.color_text)},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,8,0,0,0,1`,
+					`Style: H,${family},${assFontSize(fit.fontSize, font ? readFontMetrics(font) : null)},${bgr(o.tokens.color_text)},${bgr(o.tokens.color_text)},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,8,0,0,0,1`,
 					"",
 					"[Events]",
 					"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -248694,7 +248695,7 @@ async function renderProject(projectDir, o = {}) {
 	const hookMid = Math.round(hookStart + slotMs[hookIdx] / 2);
 	const coverAt = spec.cover ? Math.round(spec.cover.focal_time_sec * 1e3) : hookMid;
 	const thumbnailKey = sha256Hex(canonicalJson({
-		v: 2,
+		v: 3,
 		assembly: assemblyKey,
 		at: coverAt,
 		cover: spec.cover ?? null,
@@ -249944,7 +249945,7 @@ async function lockFromState(root, state, projectId, outputs) {
 		engine: {
 			engine: ENGINE_VERSION,
 			assembly: String(3),
-			cover: String(2),
+			cover: String(3),
 			target_package: String(1),
 			zones: String(2),
 			layout: String(6)

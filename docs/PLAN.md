@@ -174,7 +174,7 @@ Phases 0–3 are done. The Phase 3 exit (interactive `/video-studio:create`) is 
 
 ## Immediate next steps
 Updated 2026-09-25. M9 and the Phase 3 exit are done. Phase 4 steps 1–2 are done: M1–M6, M8, platform contracts and lint. See `docs/HANDOFF.md`.
-Phase 4 is done (exit passed 2026-09-25; CI deferred). Phases 5 and 6 are done (exits passed 2026-09-25 in the sandbox; the Phase 6 demo-capture exit needs Chrome and is on the user checklist). The autonomous loop now runs the local parts of Phase 8. Progress is in the "Loop state" block of `docs/HANDOFF.md`.
+Phase 4 is done (exit passed 2026-09-25; CI deferred). Phases 5 and 6 are done (exits passed 2026-09-25 in the sandbox; the Phase 6 demo-capture exit needs Chrome and is on the user checklist). Phase 8 (local subset) is done; see `docs/HANDOFF.md`. What remains needs the user: `docs/USER_CHECKLIST.md`, Phase 7 (paid provider keys) and Phase 9 (distribution, go/no-go). Progress is in the "Loop state" block of `docs/HANDOFF.md`.
 
 ## Verification
 - **Every step:** `npx tsc -b`, full `npx vitest run`, `node scripts/smoke-mcp.mjs`, `claude plugin validate --strict .claude-plugin/plugin.json`, and a rebuilt `dist/mcp.mjs`.

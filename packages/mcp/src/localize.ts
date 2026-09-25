@@ -458,6 +458,8 @@ async function applySheet(root: string, out: string, sheetPath: string, src: Vid
       continue;
     }
     let value = target;
+    // Units keep the source's separator (" hours" → " घंटे"), except in scripts written without spaces.
+    if (e.path.endsWith(".unit") && /^\s/.test(e.source) && !/^\s/.test(value) && languageRate(sheet.target_language).unit !== "chars") value = ` ${value}`;
     const em = /^scenes\.(\d+)\.deterministic\.props\.(lines\.\d+|text)$/.exec(e.path);
     if (em) {
       const t = takeEmphasisMarks(target);

@@ -5,24 +5,51 @@ finished, reproducible package: MP4, captions, thumbnail, social copy, manifest 
 Claude writes the creative brief and scene spec. A bundled MCP server (`engine`) validates, persists,
 routes, renders and runs QA. The plugin needs no LLM API key.
 
-## Status: Phase 3 (local render)
+<p align="center"><img src="docs/media/hero-cover.jpg" width="240" alt="Cover of the video-studio hero reel"></p>
 
-What works today, with local tools only (no keys needed):
+The reel in [`docs/media/hero.mp4`](docs/media/hero.mp4) was made by this plugin from this README
+(animated-explainer archetype, technical style, local renderer).
 
-- `/video-studio:create "Explain vector DBs in 30s"`: ingest → plan (brief, grounded spec, storyboard)
-  → approval → local render (preview, then final) → QA → `dist/` export.
-- `/video-studio:ingest`, `/video-studio:plan`, `/video-studio:validate`, `/video-studio:render`,
-  `/video-studio:qa`, `/video-studio:export`, `/video-studio:doctor`.
-- Rendering: voice from ElevenLabs (if a key is configured), system TTS (macOS `say`, `espeak-ng`) or
-  silent; motion-graphic scenes drawn by HyperFrames (optional install, see the render skill) or
-  ffmpeg; captions (SRT, VTT, burned-in ASS karaoke), loudness normalised to -14 LUFS, thumbnail,
-  technical QA, render manifest and provenance.
-- MCP tools: `doctor`, `project_init`, `ingest`, `template_list`, `template_get`, `spec_scaffold`,
-  `brief_validate`, `spec_validate`, `storyboard_render`, `schema_get`, `render_submit`, `job_status`,
-  `qa_run`, `export`.
+## What it does (local tools only, no keys needed)
 
-Generative video providers (Runway, HeyGen, fal.ai) arrive in Phase 4 (see `docs/PLAN.md`); until
-then such scenes render as placeholder cards. Example: `examples/text-to-motion-graphic/`.
+- **Create:** `/video-studio:create <file | URL | repo | folder of clips | idea>` runs:
+  ingest → plan (brief, grounded spec, storyboard) → your approval → local render (preview,
+  then final) → QA → per-platform packages. Every claim on screen cites the source.
+- **Inputs:** text, Markdown, URLs, PDF, DOCX, PPTX, local repos, video and audio files, and
+  folders of clips.
+  - Speech is transcribed locally with whisper.cpp (the model download is opt-in) or imported
+    from SRT/VTT.
+  - `demo` records a scripted walk through an app you started (inputs are blurred).
+- **Formats:**
+  - 18 templates: explainers, listicles, product demo and UI, case study, before/after,
+    carousel, text over music, talking head, aesthetic b-roll, silent vlog, oddly satisfying,
+    ambient.
+  - 15 scene kinds: typography, code, charts, stats, diagrams, timelines, quotes, split
+    screens, lower thirds, kinetic text, maps and more.
+  - Real footage, with fits, speed and text overlays.
+  - 4 style packs, and brand kits.
+- **Audio:**
+  - System TTS or ElevenLabs, or no voice at all.
+  - Bundled CC0 music beds with ducking under speech, beat-synced cuts, native clip sound,
+    crossfades and sound effects.
+  - Loudness normalised to -14 LUFS.
+- **Platforms:** one `dist/<target>/` package per platform (TikTok, Instagram Reels, YouTube
+  Shorts, LinkedIn, Facebook) with video, cover, captions, post copy and a QA report. Captions
+  and text stay clear of each app's UI, checked by `lint` against versioned `platform-specs/`.
+- **Languages:** `localize` makes Hindi, Japanese, Arabic and other language versions. It ships
+  Noto fonts, CJK line breaking, right-to-left and shaped scripts, and per-language voices.
+- **Trust:**
+  - `verify` checks claim coverage.
+  - `video.lock` pins every version and hash.
+  - `test` compares golden frames and `diff` compares renders.
+  - Provenance is recorded, and `export sign` adds optional C2PA content credentials.
+- **Experiments:** `variants` builds hook × cover A/B sets; `adapt` changes the aspect ratio,
+  length or platform; `shorts` cuts standalone clips from a long talk; `analyze` gives a
+  reference video's structure.
+
+Renderers: ffmpeg is built in. HyperFrames is an optional install for richer motion graphics.
+Generative video providers (Runway, HeyGen, fal.ai) are planned for Phase 7 (see
+`docs/PLAN.md`); until then such scenes render as placeholder cards.
 
 ## Install
 
@@ -64,9 +91,19 @@ Run the engine directly with `node dist/mcp.mjs`. It speaks MCP over stdio and l
 After changing anything under `packages/`, rerun `pnpm bundle` and commit `dist/mcp.mjs`. CI fails
 if the committed bundle or schemas are stale.
 
-Layout: `packages/schema` (zod models, JSON Schemas), `packages/core` (project folders, cache,
-SQLite ledger, jobs), `packages/mcp` (MCP server, bundled to `dist/mcp.mjs`), `skills/` (thin
-SKILL.md files that call the MCP tools).
+Layout:
+- `packages/schema`: zod models and JSON Schemas.
+- `packages/core`: project folders, cache, SQLite ledger and jobs.
+- `packages/ingestion`: the extractors.
+- `packages/media`: ffmpeg, audio, captions, QA, ASR and beats.
+- `packages/renderer`: the ffmpeg, footage and HyperFrames renderers, tokens, styles and scripts.
+- `packages/platforms`: platform contracts and zones.
+- `packages/voice`: the TTS backends.
+- `packages/mcp`: the MCP server, bundled to `dist/mcp.mjs`.
+- Data: `skills/` (thin SKILL.md files), `templates/`, `styles/`, `music/`, `fonts/` and
+  `platform-specs/`.
+
+Contributor guides are in `docs/contributing/`.
 
 ## License
 
