@@ -98,7 +98,19 @@ export const FinalOutput = z.strictObject({
   height: z.int().positive().optional(),
   duration_sec: z.number().nonnegative().optional(),
   transcoded: z.boolean().optional().describe("True when the file was re-encoded to fit the target's envelope rather than copied."),
+  c2pa: z.boolean().optional().describe("True when the file carries a signed C2PA manifest."),
 });
+
+export const C2paRecord = z
+  .strictObject({
+    tool: z.string().describe("Signer, e.g. c2patool 0.26.68."),
+    certificate: z.enum(["test", "user"]).describe("test: the tool's built-in test certificate (not trusted by validators); user: the user's own certificate."),
+    claim_generator: z.string(),
+    assertions: z.array(z.string()).describe("Assertion labels written, e.g. c2pa.actions, stds.schema-org.CreativeWork."),
+    signed: z.array(FilePath),
+    ai_generated: z.boolean().describe("Whether the manifest declares AI-generated content (trainedAlgorithmicMedia)."),
+  })
+  .describe("C2PA content credentials written at export.");
 
 export const QaStatus = z.enum(["pass", "warn", "fail"]);
 
@@ -167,6 +179,7 @@ export const RenderManifest = z
       .optional()
       .describe("The music bed mixed into the audio, with its rights."),
     outputs: z.array(FinalOutput),
+    c2pa: C2paRecord.optional(),
     qa: QaSummary.optional(),
     settings: RenderSettings.optional(),
     timing_adjustments: z.array(TimingAdjustment).optional(),
@@ -193,6 +206,7 @@ export type CaptionFormat = z.infer<typeof CaptionFormat>;
 export type CaptionsRender = z.infer<typeof CaptionsRender>;
 export type OutputKind = z.infer<typeof OutputKind>;
 export type FinalOutput = z.infer<typeof FinalOutput>;
+export type C2paRecord = z.infer<typeof C2paRecord>;
 export type QaStatus = z.infer<typeof QaStatus>;
 export type QaSummary = z.infer<typeof QaSummary>;
 export type TimingAdjustment = z.infer<typeof TimingAdjustment>;

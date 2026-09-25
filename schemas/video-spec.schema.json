@@ -145,6 +145,10 @@
         "preset": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
           "type": "string"
+        },
+        "sound_events": {
+          "description": "Caption non-speech sound too (accessibility): [music] while only music plays, sfx captions, [ambient sound] for native clips without speech. Default true when captions are burned in.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -486,6 +490,10 @@
                   "description": "Offset inside the scene.",
                   "minimum": 0,
                   "type": "number"
+                },
+                "caption": {
+                  "description": "Sound-event caption shown while it plays, e.g. \"[applause]\" (accessibility).",
+                  "type": "string"
                 },
                 "file": {
                   "description": "Project-relative audio file.",

@@ -25,6 +25,7 @@ const expected = [
   "ingest",
   "job_status",
   "lint",
+  "localize",
   "project_init",
   "qa_run",
   "render_submit",

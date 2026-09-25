@@ -10,6 +10,7 @@ import { Policy } from "./policy.js";
 import { RenderManifest } from "./render-manifest.js";
 import { ExperimentManifest, ExperimentPlan } from "./experiment.js";
 import { DemoScript, FormatGrammar, ShortCandidates } from "./footage.js";
+import { TranslationSheet } from "./localization.js";
 import { Style } from "./style.js";
 import { Template } from "./template.js";
 import { VideoLock } from "./video-lock.js";
@@ -32,6 +33,7 @@ export const EMITTED_SCHEMAS = {
   "demo-script": DemoScript,
   "format-grammar": FormatGrammar,
   "short-candidates": ShortCandidates,
+  "translation-sheet": TranslationSheet,
 } as const satisfies Record<string, z.ZodType>;
 
 export type EmittedSchemaName = keyof typeof EMITTED_SCHEMAS;

@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:translation-sheet",
+  "title": "TranslationSheet",
+  "description": "localized/<lang>/project/translation.json: the strings of a spec to translate, and their translations.",
+  "additionalProperties": false,
+  "properties": {
+    "entries": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "voiceover",
+              "on_screen_text",
+              "props",
+              "cover",
+              "post",
+              "title"
+            ],
+            "type": "string"
+          },
+          "note": {
+            "description": "Context for the translator, e.g. 'keep under 6 words', 'code: do not translate'.",
+            "type": "string"
+          },
+          "path": {
+            "description": "JSON path into the spec, e.g. scenes.2.voiceover or scenes.0.deterministic.props.lines.1.",
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "description": "The translation; empty keeps the source text (names, code, URLs).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "kind",
+          "source"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    },
+    "source_language": {
+      "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+      "type": "string"
+    },
+    "source_spec_sha256": {
+      "description": "The spec the sheet was made from; applying to a changed spec is refused.",
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "target_language": {
+      "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "source_language",
+    "target_language",
+    "source_spec_sha256",
+    "entries"
+  ],
+  "type": "object"
+}

@@ -28,6 +28,7 @@ export const SCHEMA_NAMES = [
   "demo-script",
   "format-grammar",
   "short-candidates",
+  "translation-sheet",
 ] as const;
 export type SchemaName = (typeof SCHEMA_NAMES)[number];
 

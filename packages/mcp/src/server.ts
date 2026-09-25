@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { initProject, projectPaths } from "@video-studio/core";
 import { type IngestOptions, formatIngestSummary, ingest } from "@video-studio/ingestion";
-import { AspectRatio, Platform, PlatformTargetId } from "@video-studio/schema";
+import { AspectRatio, LanguageTag, Platform, PlatformTargetId } from "@video-studio/schema";
 import { z } from "zod";
 import { type DoctorDeps, defaultDoctorDeps, formatDoctorReport, runDoctor } from "./doctor.js";
 import { SCHEMA_NAMES, findSchemasDir, resolveInputPath } from "./paths.js";
@@ -14,6 +14,7 @@ import { analyzeVideo, findShorts, formatGrammar, formatShorts } from "./analyze
 import { makeShortProjects } from "./shorts.js";
 import { transcribeAsset } from "./transcribe.js";
 import { formatDemo, recordDemo } from "./demo.js";
+import { formatLocalize, localizeProject } from "./localize.js";
 import { diffProjects, formatDiff } from "./diff.js";
 import { formatGolden, testProject } from "./golden.js";
 import { formatLint, lintProject } from "./lint.js";
@@ -468,11 +469,12 @@ export function createServer(options: ServerOptions = {}): McpServer {
       inputSchema: {
         project_dir: z.string().min(1).describe("Rendered project folder"),
         quality: QUALITY.optional().describe("Which render to export (default: the latest)"),
+        sign: z.boolean().optional().describe("Add C2PA content credentials (provenance, AI disclosure) to the exported videos with the local c2patool"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    safe(async ({ project_dir, quality }: { project_dir: string; quality?: "preview" | "final" }) => {
-      const r = await exportProject(resolveInputPath(project_dir, cwd()), quality ? { quality } : {});
+    safe(async ({ project_dir, quality, sign }: { project_dir: string; quality?: "preview" | "final"; sign?: boolean }) => {
+      const r = await exportProject(resolveInputPath(project_dir, cwd()), { ...(quality ? { quality } : {}), ...(sign ? { sign } : {}) });
       return jsonResult(`exported the ${r.quality} render to ${r.dist.dir}${r.qa_status ? ` (QA ${r.qa_status})` : ""}`, r as unknown as Record<string, unknown>);
     }),
   );
@@ -694,6 +696,29 @@ export function createServer(options: ServerOptions = {}): McpServer {
     safe(async (args: { project_dir: string; confirm: boolean; script?: string }) => {
       const r = await recordDemo(resolveInputPath(args.project_dir, cwd()), { confirm: args.confirm, ...(args.script ? { script: args.script } : {}), env });
       return jsonResult(formatDemo(r), r as unknown as Record<string, unknown>);
+    }),
+  );
+
+  server.registerTool(
+    "localize",
+    {
+      title: "Make a language version",
+      description:
+        "Localize <project_dir> into `language` (BCP-47, e.g. hi-IN, ja-JP, ar-SA, de-DE). Step 1 (default): copy the project to localized/<language>/ with spec.language set and write project/translation.json (TranslationSheet: every voiceover, on-screen text, text prop, cover headline and post copy, with notes such as word limits and 'do not translate code'). Fill each entry's `target`, then step 2 (apply: true): the translations are written into the localized spec, scenes are re-timed for the language (speaking and reading speed per script), fonts switch to the script's bundled Noto family, and the spec is validated. Claims keep their claim_refs; translate meaning, never add facts.",
+      inputSchema: {
+        project_dir: z.string().min(1),
+        language: LanguageTag.describe("Target language, e.g. hi-IN, ja-JP"),
+        apply: z.boolean().optional().describe("Apply the filled translation.json (step 2)"),
+        out_dir: z.string().min(1).optional().describe("Default <project_dir>/localized/<language>"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async (args: { project_dir: string; language: string; apply?: boolean; out_dir?: string }) => {
+      const r = await localizeProject(resolveInputPath(args.project_dir, cwd()), args.language, {
+        ...(args.apply ? { apply: true } : {}),
+        ...(args.out_dir ? { out_dir: resolveInputPath(args.out_dir, cwd()) } : {}),
+      });
+      return jsonResult(formatLocalize(r), r as unknown as Record<string, unknown>);
     }),
   );
 

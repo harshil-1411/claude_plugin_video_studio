@@ -132,6 +132,7 @@ export const SoundEffect = z
     at_sec: z.number().min(0).describe("Offset inside the scene."),
     volume_db: z.number().min(-60).max(6).optional(),
     license: AudioLicense.optional(),
+    caption: z.string().optional().describe("Sound-event caption shown while it plays, e.g. \"[applause]\" (accessibility)."),
   })
   .describe("A one-shot sound effect.");
 
@@ -171,6 +172,10 @@ export const CaptionSettings = z.strictObject({
     .strictObject({ y: z.number().min(0).max(1).describe("Vertical centre of the caption block as a fraction of frame height.") })
     .optional()
     .describe("Manual caption placement. Omit to let the caption engine place captions in the platforms' caption zone."),
+  sound_events: z
+    .boolean()
+    .optional()
+    .describe("Caption non-speech sound too (accessibility): [music] while only music plays, sfx captions, [ambient sound] for native clips without speech. Default true when captions are burned in."),
 });
 
 export const MusicBed = z

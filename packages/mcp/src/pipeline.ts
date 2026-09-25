@@ -1193,7 +1193,7 @@ export async function runQa(projectDir: string, opts: { quality?: Quality; now?:
 }
 
 /** Re-export dist/ from the latest (or given quality's) existing render; renders nothing. */
-export async function exportProject(projectDir: string, opts: { quality?: Quality; now?: () => Date } = {}): Promise<{ quality: Quality; dist: DistFiles; qa_status?: string }> {
+export async function exportProject(projectDir: string, opts: { quality?: Quality; now?: () => Date; /** Sign the videos with C2PA content credentials (Phase 8; not implemented yet). */ sign?: boolean } = {}): Promise<{ quality: Quality; dist: DistFiles; qa_status?: string }> {
   const root = projectPaths(projectDir).root;
   const state = await loadState(root, opts.quality);
   const dist = await exportFromState(root, state, opts.now ?? (() => new Date()));

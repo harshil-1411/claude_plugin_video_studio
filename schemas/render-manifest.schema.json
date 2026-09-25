@@ -5,6 +5,54 @@
   "description": "Exactly what happened: per-scene provider/model, prompts, seeds, task ids, hashes, cost, timestamps, retries, outputs, QA and tool versions.",
   "additionalProperties": false,
   "properties": {
+    "c2pa": {
+      "description": "C2PA content credentials written at export.",
+      "additionalProperties": false,
+      "properties": {
+        "ai_generated": {
+          "description": "Whether the manifest declares AI-generated content (trainedAlgorithmicMedia).",
+          "type": "boolean"
+        },
+        "assertions": {
+          "description": "Assertion labels written, e.g. c2pa.actions, stds.schema-org.CreativeWork.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "certificate": {
+          "description": "test: the tool's built-in test certificate (not trusted by validators); user: the user's own certificate.",
+          "enum": [
+            "test",
+            "user"
+          ],
+          "type": "string"
+        },
+        "claim_generator": {
+          "type": "string"
+        },
+        "signed": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tool": {
+          "description": "Signer, e.g. c2patool 0.26.68.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "certificate",
+        "claim_generator",
+        "assertions",
+        "signed",
+        "ai_generated"
+      ],
+      "type": "object"
+    },
     "captions": {
       "additionalProperties": false,
       "properties": {
@@ -316,6 +364,10 @@
       "items": {
         "additionalProperties": false,
         "properties": {
+          "c2pa": {
+            "description": "True when the file carries a signed C2PA manifest.",
+            "type": "boolean"
+          },
           "duration_sec": {
             "minimum": 0,
             "type": "number"

@@ -260,6 +260,10 @@
                       "minimum": 0,
                       "type": "number"
                     },
+                    "caption": {
+                      "description": "Sound-event caption shown while it plays, e.g. \"[applause]\" (accessibility).",
+                      "type": "string"
+                    },
                     "file": {
                       "description": "Project-relative audio file.",
                       "minLength": 1,
