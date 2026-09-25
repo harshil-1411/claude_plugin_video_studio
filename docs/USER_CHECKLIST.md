@@ -4,7 +4,7 @@ The autonomous loop (2026-09-25) built and tested Phases 4, 5, 6 and the local p
 
 Run them in a normal terminal, in this order, and paste back anything that fails. Each item says what "pass" looks like.
 
-## 1. Refresh the lockfile (2 min, required)
+## 1. Refresh the lockfile — ✅ done 2026-09-26 (`03610f3`, all checks passed)
 
 The `ingestion` package now depends on `media`. In the sandbox that link was made by hand.
 
