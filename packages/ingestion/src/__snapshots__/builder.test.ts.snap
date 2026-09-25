@@ -1,0 +1,228 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildContentIR > produces a schema-valid IR with unique refs, ids, claims and classification 1`] = `
+{
+  "assets": [],
+  "claims": [
+    {
+      "evidence_refs": [
+        "markdown:README.md#L3",
+        "markdown:README.md#L3-2",
+      ],
+      "id": "claim-1",
+      "kind": "quantitative",
+      "text": "Widgetron renders videos 3x faster than v1.",
+    },
+    {
+      "evidence_refs": [
+        "markdown:README.md#L3",
+        "markdown:README.md#L3-2",
+      ],
+      "id": "claim-2",
+      "kind": "quantitative",
+      "text": "Setup takes under 5 minutes.",
+    },
+    {
+      "evidence_refs": [
+        "markdown:README.md#L7-L8",
+        "markdown:README.md#L7-L8-2",
+      ],
+      "id": "claim-3",
+      "kind": "quantitative",
+      "text": "Pro costs $29 per month.",
+    },
+    {
+      "evidence_refs": [
+        "markdown:README.md#L7-L8",
+        "markdown:README.md#L7-L8-2",
+      ],
+      "id": "claim-4",
+      "kind": "quantitative",
+      "text": "Teams save 20% on annual plans.",
+    },
+  ],
+  "classification": {
+    "contains_likeness": false,
+    "contains_pii": true,
+    "contains_secrets": true,
+    "data_class": "restricted",
+    "notes": [
+      "src-3: possible secret: aws_access_key_id ×2",
+      "src-3: possible PII: email ×3",
+    ],
+  },
+  "created_at": "2026-09-25T00:00:00.000Z",
+  "entities": [],
+  "evidence": [
+    {
+      "locator": {
+        "char_end": 92,
+        "char_start": 20,
+        "line_end": 3,
+        "line_start": 3,
+        "selector": "#widgetron-launch",
+      },
+      "ref": "markdown:README.md#L3",
+      "source_id": "src-1",
+      "text": "Widgetron renders videos 3x faster than v1. Setup takes under 5 minutes.",
+    },
+    {
+      "locator": {
+        "char_end": 166,
+        "char_start": 106,
+        "line_end": 8,
+        "line_start": 7,
+        "selector": "#pricing",
+      },
+      "ref": "markdown:README.md#L7-L8",
+      "source_id": "src-1",
+      "text": "- Pro costs $29 per month.
+- Teams save 20% on annual plans.",
+    },
+    {
+      "locator": {
+        "char_end": 204,
+        "char_start": 168,
+        "line_end": 12,
+        "line_start": 10,
+        "selector": "#pricing",
+      },
+      "ref": "markdown:README.md#L10-L12",
+      "source_id": "src-1",
+      "text": "\`\`\`sh
+npx widgetron --workers 16
+\`\`\`",
+    },
+    {
+      "locator": {
+        "char_end": 92,
+        "char_start": 20,
+        "line_end": 3,
+        "line_start": 3,
+        "selector": "#widgetron-launch",
+      },
+      "ref": "markdown:README.md#L3-2",
+      "source_id": "src-2",
+      "text": "Widgetron renders videos 3x faster than v1. Setup takes under 5 minutes.",
+    },
+    {
+      "locator": {
+        "char_end": 166,
+        "char_start": 106,
+        "line_end": 8,
+        "line_start": 7,
+        "selector": "#pricing",
+      },
+      "ref": "markdown:README.md#L7-L8-2",
+      "source_id": "src-2",
+      "text": "- Pro costs $29 per month.
+- Teams save 20% on annual plans.",
+    },
+    {
+      "locator": {
+        "char_end": 204,
+        "char_start": 168,
+        "line_end": 12,
+        "line_start": 10,
+        "selector": "#pricing",
+      },
+      "ref": "markdown:README.md#L10-L12-2",
+      "source_id": "src-2",
+      "text": "\`\`\`sh
+npx widgetron --workers 16
+\`\`\`",
+    },
+    {
+      "locator": {
+        "char_end": 36,
+        "char_start": 0,
+        "line_end": 1,
+        "line_start": 1,
+      },
+      "ref": "text:inline-a2d846c04335#c0-36",
+      "source_id": "src-3",
+      "text": "Contact ops@acme-corp.io for access.",
+    },
+    {
+      "locator": {
+        "char_end": 66,
+        "char_start": 38,
+        "line_end": 3,
+        "line_start": 3,
+      },
+      "ref": "text:inline-a2d846c04335#c38-66",
+      "source_id": "src-3",
+      "text": "AWS_KEY=AKIAIOSFODNN7EXAMPLE",
+    },
+  ],
+  "id": "ir-c8a1e3d95689",
+  "schema_version": "1.0",
+  "sections": [
+    {
+      "heading": "Widgetron Launch",
+      "id": "sec-1",
+      "source_id": "src-1",
+      "text": "Widgetron renders videos 3x faster than v1. Setup takes under 5 minutes.",
+    },
+    {
+      "heading": "Pricing",
+      "id": "sec-2",
+      "source_id": "src-1",
+      "text": "- Pro costs $29 per month.
+- Teams save 20% on annual plans.
+
+\`\`\`sh
+npx widgetron --workers 16
+\`\`\`",
+    },
+    {
+      "heading": "Widgetron Launch",
+      "id": "sec-3",
+      "source_id": "src-2",
+      "text": "Widgetron renders videos 3x faster than v1. Setup takes under 5 minutes.",
+    },
+    {
+      "heading": "Pricing",
+      "id": "sec-4",
+      "source_id": "src-2",
+      "text": "- Pro costs $29 per month.
+- Teams save 20% on annual plans.
+
+\`\`\`sh
+npx widgetron --workers 16
+\`\`\`",
+    },
+    {
+      "id": "sec-5",
+      "source_id": "src-3",
+      "text": "Contact ops@acme-corp.io for access.
+
+AWS_KEY=AKIAIOSFODNN7EXAMPLE",
+    },
+  ],
+  "sources": [
+    {
+      "id": "src-1",
+      "kind": "markdown",
+      "sha256": "3c9de971c843929b194d1bd7dac918aee4b48fcd5ce29a3312487f7ea43cccc1",
+      "title": "Widgetron Launch",
+      "uri": "/p/README.md",
+    },
+    {
+      "id": "src-2",
+      "kind": "markdown",
+      "sha256": "3c9de971c843929b194d1bd7dac918aee4b48fcd5ce29a3312487f7ea43cccc1",
+      "title": "Widgetron Launch",
+      "uri": "/p/README.md",
+    },
+    {
+      "id": "src-3",
+      "kind": "text",
+      "sha256": "a2d846c0433597b31e836507b234d705faa55d3ad86b8cc8b0d4bd0a09ad0041",
+      "title": "Contact ops@acme-corp.io for access.",
+      "uri": "inline:inline-a2d846c04335",
+    },
+  ],
+  "warnings": [],
+}
+`;

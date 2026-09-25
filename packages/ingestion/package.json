@@ -1,0 +1,31 @@
+{
+  "name": "@video-studio/ingestion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "@secretlint/core": "^13.0.5",
+    "@secretlint/secretlint-rule-preset-recommend": "^13.0.5",
+    "@video-studio/core": "workspace:*",
+    "@video-studio/schema": "workspace:*",
+    "@xmldom/xmldom": "^0.9.12",
+    "defuddle": "^0.19.4",
+    "jszip": "^3.10.2",
+    "linkedom": "^0.18.13",
+    "mammoth": "^1.12.3",
+    "repomix": "^1.18.1",
+    "unpdf": "^1.8.1",
+    "yaml": "^2.9.1"
+  }
+}

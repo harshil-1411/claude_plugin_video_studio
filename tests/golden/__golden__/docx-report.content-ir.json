@@ -1,0 +1,152 @@
+{
+  "schema_version": "1.0",
+  "id": "ir-72d5811e9b1a",
+  "created_at": "2026-09-25T12:00:00.000Z",
+  "sources": [
+    {
+      "id": "src-1",
+      "kind": "docx",
+      "uri": "<repo>/fixtures/docs/sample.docx",
+      "sha256": "f89010251e356441c7c486dd8f06c68d798a1ee448cb3ffd8b05b9de373bd389",
+      "title": "Vector DB Notes"
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec-1",
+      "source_id": "src-1",
+      "text": "This preface sits before any heading."
+    },
+    {
+      "id": "sec-2",
+      "source_id": "src-1",
+      "heading": "Overview",
+      "text": "Vector databases index embeddings.\n\nThey answer nearest-neighbour queries quickly.\n\nFast similarity search\n\nMetadata filtering"
+    },
+    {
+      "id": "sec-3",
+      "source_id": "src-1",
+      "heading": "Results",
+      "text": "Recall improved to 0.97 at 10 ms p95 latency.\n\nMetric | Value\n\nRecall | 0.97"
+    }
+  ],
+  "evidence": [
+    {
+      "ref": "docx:sample.docx#para-1",
+      "source_id": "src-1",
+      "text": "This preface sits before any heading.",
+      "locator": {
+        "selector": "#para-1",
+        "char_start": 0,
+        "char_end": 37
+      }
+    },
+    {
+      "ref": "docx:sample.docx#para-2",
+      "source_id": "src-1",
+      "text": "Vector databases index embeddings.",
+      "locator": {
+        "selector": "#para-2",
+        "char_start": 0,
+        "char_end": 34
+      }
+    },
+    {
+      "ref": "docx:sample.docx#para-3",
+      "source_id": "src-1",
+      "text": "They answer nearest-neighbour queries quickly.",
+      "locator": {
+        "selector": "#para-3",
+        "char_start": 36,
+        "char_end": 82
+      }
+    },
+    {
+      "ref": "docx:sample.docx#para-4",
+      "source_id": "src-1",
+      "text": "Fast similarity search",
+      "locator": {
+        "selector": "#para-4",
+        "char_start": 84,
+        "char_end": 106
+      }
+    },
+    {
+      "ref": "docx:sample.docx#para-5",
+      "source_id": "src-1",
+      "text": "Metadata filtering",
+      "locator": {
+        "selector": "#para-5",
+        "char_start": 108,
+        "char_end": 126
+      }
+    },
+    {
+      "ref": "docx:sample.docx#para-6",
+      "source_id": "src-1",
+      "text": "Recall improved to 0.97 at 10 ms p95 latency.",
+      "locator": {
+        "selector": "#para-6",
+        "char_start": 0,
+        "char_end": 45
+      }
+    },
+    {
+      "ref": "docx:sample.docx#para-7",
+      "source_id": "src-1",
+      "text": "Metric | Value",
+      "locator": {
+        "selector": "#para-7",
+        "char_start": 47,
+        "char_end": 61
+      }
+    },
+    {
+      "ref": "docx:sample.docx#para-8",
+      "source_id": "src-1",
+      "text": "Recall | 0.97",
+      "locator": {
+        "selector": "#para-8",
+        "char_start": 63,
+        "char_end": 76
+      }
+    }
+  ],
+  "entities": [
+    {
+      "id": "ent-1",
+      "name": "DB",
+      "kind": "technology",
+      "evidence_refs": [
+        "docx:sample.docx#para-1"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "claim-1",
+      "text": "Recall improved to 0.97 at 10 ms p95 latency.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "docx:sample.docx#para-6"
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "id": "asset-1",
+      "kind": "image",
+      "path": "source/assets/b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640.png",
+      "sha256": "b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640",
+      "source_ref": "docx:sample.docx#img-1"
+    }
+  ],
+  "classification": {
+    "contains_secrets": false,
+    "contains_pii": false,
+    "contains_likeness": false,
+    "data_class": "internal",
+    "notes": []
+  },
+  "warnings": []
+}

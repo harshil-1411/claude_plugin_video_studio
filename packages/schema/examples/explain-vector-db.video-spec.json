@@ -1,0 +1,126 @@
+{
+  "schema_version": "1.0",
+  "id": "explain-vector-db",
+  "title": "What a vector database actually does",
+  "goal": "explain",
+  "audience": "backend engineers new to AI search",
+  "platform": "instagram_reels",
+  "aspect_ratio": "9:16",
+  "target_duration_sec": 30,
+  "language": "en-US",
+  "brand_profile": "acme@3",
+  "grounding": "strict",
+  "voice": {
+    "style": "calm, confident, conversational"
+  },
+  "captions": {
+    "preset": "minimal",
+    "burn_in": true
+  },
+  "scenes": [
+    {
+      "id": "s01",
+      "duration_sec": 3.5,
+      "purpose": "hook",
+      "voiceover": "Keyword search can't find what you meant. Only what you typed.",
+      "on_screen_text": "Search finds words, not meaning",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "typography",
+        "props": { "lines": ["Search finds words", "not meaning"], "emphasis": "meaning" }
+      },
+      "visual_requirements": { "subject": "search box with mismatched results", "camera": "none", "continuity_refs": [] },
+      "claim_refs": [],
+      "transition": "cut"
+    },
+    {
+      "id": "s02",
+      "duration_sec": 5,
+      "purpose": "problem",
+      "voiceover": "Ask for a cheap flight and a keyword index misses the page that says low-cost airfare.",
+      "on_screen_text": "\"cheap flight\" ≠ \"low-cost airfare\"",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "comparison",
+        "props": { "left": { "label": "Query", "text": "cheap flight" }, "right": { "label": "Document", "text": "low-cost airfare" }, "verdict": "no keyword overlap" }
+      },
+      "visual_requirements": { "continuity_refs": ["s01"] },
+      "claim_refs": ["url:https://example.com/vector-db-guide#keyword-limits"],
+      "transition": "slide"
+    },
+    {
+      "id": "s03",
+      "duration_sec": 6,
+      "purpose": "point",
+      "voiceover": "An embedding model turns text into a list of numbers, so similar meanings land close together.",
+      "on_screen_text": "Meaning → coordinates",
+      "visual_strategy": "generated_video",
+      "visual_requirements": {
+        "subject": "glowing points drifting into clusters in a dark 3D space",
+        "camera": "slow orbit",
+        "style": "clean abstract data visualization, brand blue accents",
+        "continuity_refs": [],
+        "modality": "video",
+        "realism": "low",
+        "character_reference": "none",
+        "audio_generation": "none",
+        "max_cost_usd": 1.2,
+        "data_policy": "external-ok",
+        "preference": ["quality", "cost"]
+      },
+      "claim_refs": ["url:https://example.com/vector-db-guide#embeddings"],
+      "transition": "crossfade"
+    },
+    {
+      "id": "s04",
+      "duration_sec": 6.5,
+      "purpose": "point",
+      "voiceover": "A vector database indexes those numbers and returns the nearest neighbours to your query in milliseconds.",
+      "on_screen_text": "Nearest neighbours, not exact matches",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "diagram",
+        "props": {
+          "nodes": ["query", "embedding model", "ANN index", "top-k results"],
+          "edges": [["query", "embedding model"], ["embedding model", "ANN index"], ["ANN index", "top-k results"]]
+        }
+      },
+      "visual_requirements": { "continuity_refs": ["s03"] },
+      "claim_refs": ["url:https://example.com/vector-db-guide#ann-index"],
+      "transition": "cut"
+    },
+    {
+      "id": "s05",
+      "duration_sec": 5.5,
+      "purpose": "proof",
+      "voiceover": "The query code is five lines: embed the question, then ask for the top five matches.",
+      "on_screen_text": "5 lines to semantic search",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "code",
+        "props": {
+          "language": "python",
+          "code": "q = embed(\"cheap flight\")\nhits = index.query(vector=q, top_k=5)\nfor h in hits:\n    print(h.score, h.text)\n",
+          "highlight_lines": [2]
+        }
+      },
+      "visual_requirements": { "continuity_refs": [] },
+      "claim_refs": ["url:https://example.com/vector-db-guide#quickstart"],
+      "transition": "cut"
+    },
+    {
+      "id": "s06",
+      "duration_sec": 3.5,
+      "purpose": "cta",
+      "voiceover": "Follow for part two: choosing an index.",
+      "on_screen_text": "Next: choosing an index",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "cta",
+        "props": { "headline": "Next: choosing an index", "action": "Follow" }
+      },
+      "visual_requirements": { "continuity_refs": [] },
+      "claim_refs": []
+    }
+  ]
+}

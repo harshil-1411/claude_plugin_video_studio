@@ -1,0 +1,12 @@
+{
+  "name": "video-studio-marketplace",
+  "description": "Self-hosted marketplace for the video-studio Claude Code plugin.",
+  "owner": { "name": "Suparn Bector" },
+  "plugins": [
+    {
+      "name": "video-studio",
+      "source": "./",
+      "description": "Provider-neutral knowledge-to-video compiler for Claude Code."
+    }
+  ]
+}

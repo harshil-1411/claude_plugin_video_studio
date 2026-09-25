@@ -1,0 +1,158 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`markdownExtractor > emits sections and line-located evidence 1`] = `
+{
+  "assets": [],
+  "evidence": [
+    {
+      "locator": {
+        "char_end": 49,
+        "char_start": 0,
+        "line_end": 4,
+        "line_start": 1,
+        "selector": "front-matter",
+      },
+      "ref": "markdown:docs/guide.md#L1-L4",
+      "text": "title: Widgetron Guide
+tags: [video, cli]",
+    },
+    {
+      "locator": {
+        "char_end": 119,
+        "char_start": 50,
+        "line_end": 5,
+        "line_start": 5,
+      },
+      "ref": "markdown:docs/guide.md#L5",
+      "text": "Intro paragraph with a [link](https://example.com) and **bold** text.",
+    },
+    {
+      "locator": {
+        "char_end": 184,
+        "char_start": 133,
+        "line_end": 10,
+        "line_start": 9,
+        "selector": "#overview",
+      },
+      "ref": "markdown:docs/guide.md#L9-L10",
+      "text": "Widgetron renders videos 3x faster.
+It wraps lines.",
+    },
+    {
+      "locator": {
+        "char_end": 271,
+        "char_start": 217,
+        "line_end": 18,
+        "line_start": 15,
+        "selector": "#setext-heading",
+      },
+      "ref": "markdown:docs/guide.md#L15-L18",
+      "text": "- item one
+- item two
+
+- item three after a blank line",
+    },
+    {
+      "locator": {
+        "char_end": 331,
+        "char_start": 273,
+        "line_end": 25,
+        "line_start": 20,
+        "selector": "#setext-heading",
+      },
+      "ref": "markdown:docs/guide.md#L20-L25",
+      "text": "\`\`\`ts
+// # not a heading
+const x = 1;
+
+console.log(x);
+\`\`\`",
+    },
+    {
+      "locator": {
+        "char_end": 364,
+        "char_start": 349,
+        "line_end": 29,
+        "line_start": 29,
+        "selector": "#overview-2",
+      },
+      "ref": "markdown:docs/guide.md#L29",
+      "text": "> quoted *text*",
+    },
+    {
+      "locator": {
+        "char_end": 395,
+        "char_start": 366,
+        "line_end": 33,
+        "line_start": 31,
+        "selector": "#overview-2",
+      },
+      "ref": "markdown:docs/guide.md#L31-L33",
+      "text": "| a | b |
+|---|---|
+| 1 | 2 |",
+    },
+    {
+      "locator": {
+        "char_end": 420,
+        "char_start": 397,
+        "line_end": 37,
+        "line_start": 35,
+        "selector": "#overview-2",
+      },
+      "ref": "markdown:docs/guide.md#L35-L37",
+      "text": "~~~
+unterminated fence
+",
+    },
+  ],
+  "sections": [
+    {
+      "heading": "Front matter",
+      "text": "title: Widgetron Guide
+tags:
+  - video
+  - cli",
+    },
+    {
+      "text": "Intro paragraph with a link and bold text.",
+    },
+    {
+      "heading": "Overview",
+      "text": "Widgetron renders videos 3x faster. It wraps lines.",
+    },
+    {
+      "heading": "Setext Heading",
+      "text": "- item one
+- item two
+- item three after a blank line
+
+\`\`\`ts
+// # not a heading
+const x = 1;
+
+console.log(x);
+\`\`\`",
+    },
+    {
+      "heading": "Overview",
+      "text": "quoted text
+
+| a | b |
+|---|---|
+| 1 | 2 |
+
+~~~
+unterminated fence
+",
+    },
+  ],
+  "source": {
+    "kind": "markdown",
+    "sha256": "2bfd5e649d7f7685d546f97348d81ad3e3a879e4732e4c1a597001de0f7a55da",
+    "title": "Widgetron Guide",
+    "uri": "/proj/docs/guide.md",
+  },
+  "warnings": [],
+}
+`;

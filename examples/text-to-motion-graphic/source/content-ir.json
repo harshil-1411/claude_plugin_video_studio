@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "id": "ir-a5277b3461f9",
+  "created_at": "2026-09-25T06:24:58.962Z",
+  "sources": [
+    {
+      "id": "src-1",
+      "kind": "markdown",
+      "uri": "input/vector-databases.md",
+      "sha256": "352a0bc50193550178fb8549bc4fc903096844b81caa95b89ab772e5a7a32be6",
+      "title": "Vector databases in brief"
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec-1",
+      "source_id": "src-1",
+      "heading": "Vector databases in brief",
+      "text": "Keyword search matches the words you typed. A search for \"cheap flight\" can miss a page that only says \"low-cost airfare\", because the two share no words.\n\nAn embedding model turns a piece of text into a vector: a list of numbers. Texts with similar meanings get vectors that sit close together.\n\nA vector database stores those vectors in an index built for similarity. At query time it embeds the question and returns the nearest neighbours: the stored items whose vectors are closest to the query.\n\nMost vector databases use approximate nearest-neighbour (ANN) indexes such as HNSW, which trade a little accuracy for much faster search over large collections.\n\nThe usual flow has four steps: embed your documents, store the vectors, embed the query, and ask for the top matches."
+    }
+  ],
+  "evidence": [
+    {
+      "ref": "markdown:input/vector-databases.md#L3",
+      "source_id": "src-1",
+      "text": "Keyword search matches the words you typed. A search for \"cheap flight\" can miss a page that only says \"low-cost airfare\", because the two share no words.",
+      "locator": {
+        "line_start": 3,
+        "line_end": 3,
+        "selector": "#vector-databases-in-brief",
+        "char_start": 29,
+        "char_end": 183
+      }
+    },
+    {
+      "ref": "markdown:input/vector-databases.md#L5",
+      "source_id": "src-1",
+      "text": "An embedding model turns a piece of text into a vector: a list of numbers. Texts with similar meanings get vectors that sit close together.",
+      "locator": {
+        "line_start": 5,
+        "line_end": 5,
+        "selector": "#vector-databases-in-brief",
+        "char_start": 185,
+        "char_end": 324
+      }
+    },
+    {
+      "ref": "markdown:input/vector-databases.md#L7",
+      "source_id": "src-1",
+      "text": "A vector database stores those vectors in an index built for similarity. At query time it embeds the question and returns the nearest neighbours: the stored items whose vectors are closest to the query.",
+      "locator": {
+        "line_start": 7,
+        "line_end": 7,
+        "selector": "#vector-databases-in-brief",
+        "char_start": 326,
+        "char_end": 528
+      }
+    },
+    {
+      "ref": "markdown:input/vector-databases.md#L9",
+      "source_id": "src-1",
+      "text": "Most vector databases use approximate nearest-neighbour (ANN) indexes such as HNSW, which trade a little accuracy for much faster search over large collections.",
+      "locator": {
+        "line_start": 9,
+        "line_end": 9,
+        "selector": "#vector-databases-in-brief",
+        "char_start": 530,
+        "char_end": 690
+      }
+    },
+    {
+      "ref": "markdown:input/vector-databases.md#L11",
+      "source_id": "src-1",
+      "text": "The usual flow has four steps: embed your documents, store the vectors, embed the query, and ask for the top matches.",
+      "locator": {
+        "line_start": 11,
+        "line_end": 11,
+        "selector": "#vector-databases-in-brief",
+        "char_start": 692,
+        "char_end": 809
+      }
+    }
+  ],
+  "entities": [],
+  "claims": [],
+  "assets": [],
+  "classification": {
+    "contains_secrets": false,
+    "contains_pii": false,
+    "contains_likeness": false,
+    "data_class": "internal",
+    "notes": []
+  },
+  "warnings": []
+}

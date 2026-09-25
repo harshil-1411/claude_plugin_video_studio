@@ -1,0 +1,51 @@
+# Story template: explain one concept to a technical or curious audience.
+schema_version: "1.0"
+id: explain
+name: Explain a concept
+description: Short explainer that takes one idea from confusion to clarity with a concrete example and proof.
+goals: [explain, educate]
+platforms: [instagram_reels, tiktok, youtube_shorts, linkedin, x]
+default_aspect_ratio: "9:16"
+default_duration_sec: 30
+duration_range: { min_sec: 20, max_sec: 60 }
+pacing: { avg_shot_sec: 5, max_words_per_sec: 3.0 }
+caption_preset: minimal
+beats:
+  - purpose: hook
+    share: 0.12
+    guidance: State the misconception or pain in one line the viewer recognises. No logo, no preamble.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: problem
+    share: 0.16
+    guidance: Show a concrete, relatable example of the problem. Prefer a side-by-side over an abstract statement.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: comparison
+  - purpose: point
+    share: 0.22
+    guidance: Introduce the core idea in plain words, one sentence. Visualise the mechanism rather than repeating the voiceover.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: diagram
+  - purpose: point
+    share: 0.20
+    guidance: Explain how it works or why it matters, building on the previous scene. One idea only.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: diagram
+  - purpose: proof
+    share: 0.16
+    guidance: Ground the idea with evidence from the source (code, number or quote) and cite it in claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: code
+    optional: true
+  - purpose: cta
+    share: 0.14
+    guidance: Give one clear next step that matches the brief's desired_action.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+hook_mechanisms: [pain_point, curiosity_gap, contrarian, question]
+rules:
+  - One idea per scene.
+  - The hook lands in the first 3 seconds, without a logo or greeting.
+  - Every number, percentage or comparison cites a ContentIR ref in claim_refs.
+  - On-screen text complements the voiceover; do not repeat it word for word.
+  - CTA must be an allowed brand CTA if a brand profile is present.

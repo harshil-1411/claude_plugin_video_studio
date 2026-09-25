@@ -1,0 +1,57 @@
+# Worked example: produced by following skills/plan/SKILL.md by hand with
+# this repo's README.md as the only source. See ../README.md.
+schema_version: "1.0"
+id: brief-readme-launch
+goal: launch
+audience: Developers who use Claude Code and want to turn docs, posts or repos into short videos without writing video prompts
+platform: youtube_shorts
+aspect_ratio: "9:16"
+target_duration_sec: 40
+language: en-US
+tone:
+  - precise
+  - technical
+  - minimal hype
+desired_action: Try the plugin locally with `claude --plugin-dir .`
+key_messages:
+  - video-studio turns text, URLs, documents or repos into a finished video package with captions, thumbnail and provenance.
+  - Claude writes the brief and scene spec; a bundled engine validates, renders and runs QA.
+  - The plugin needs no LLM API key.
+  - Today it ships a setup doctor and a spec validator; rendering and providers come in later phases.
+hook_candidates:
+  - text: Stop writing video prompts. Compile your docs instead.
+    mechanism: contrarian
+    scores: { relevance: 9, clarity: 8, curiosity: 9, evidence_strength: 8, visual_potential: 8 }
+  - text: Point it at a README. Get a video package back.
+    mechanism: promise
+    scores: { relevance: 9, clarity: 9, curiosity: 6, evidence_strength: 7, visual_potential: 8 }
+  - text: This video plugin needs no LLM API key. Here's why.
+    mechanism: curiosity_gap
+    scores: { relevance: 6, clarity: 8, curiosity: 8, evidence_strength: 9, visual_potential: 5 }
+  - text: What if your docs could ship their own video?
+    mechanism: question
+    scores: { relevance: 8, clarity: 7, curiosity: 7, evidence_strength: 6, visual_potential: 7 }
+chosen_hook: Stop writing video prompts. Compile your docs instead.
+template: devtool-launch
+assumptions:
+  - field: goal
+    value: launch
+    reason: The README introduces a new Claude Code plugin with install steps; the user asked for a launch-style devtool video.
+  - field: audience
+    value: Developers who use Claude Code
+    reason: The README is written for developers (install commands, pnpm scripts, MCP tools).
+  - field: platform
+    value: youtube_shorts
+    reason: No platform given; vertical short-form for a developer audience defaults to YouTube Shorts.
+  - field: target_duration_sec
+    value: "40"
+    reason: Requested 30-45 s; 40 s fits the four key messages at about 2.5 words per second.
+  - field: tone
+    value: precise, technical, minimal hype
+    reason: Matches the README's plain register and the devtool-launch template; no brand.yaml was provided.
+  - field: desired_action
+    value: Try the plugin locally with `claude --plugin-dir .`
+    reason: It is the README's own first install step and works today without a marketplace listing.
+  - field: language
+    value: en-US
+    reason: The source is in English.

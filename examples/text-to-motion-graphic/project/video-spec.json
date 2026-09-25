@@ -1,0 +1,107 @@
+{
+  "schema_version": "1.0",
+  "id": "vector-db-30s",
+  "title": "Vector databases in 30 seconds",
+  "brief_id": "brief-vector-db-30s",
+  "goal": "explain",
+  "audience": "Developers new to AI search who know what a keyword search index is",
+  "platform": "youtube_shorts",
+  "aspect_ratio": "9:16",
+  "target_duration_sec": 30,
+  "language": "en-US",
+  "grounding": "strict",
+  "voice": { "style": "plain, friendly, unhurried" },
+  "captions": { "preset": "minimal", "burn_in": true },
+  "scenes": [
+    {
+      "id": "s01",
+      "duration_sec": 3.5,
+      "purpose": "hook",
+      "voiceover": "Keyword search finds your words. Not what you meant.",
+      "on_screen_text": "Words, not meaning",
+      "visual_strategy": "motion_graphic",
+      "deterministic": { "kind": "typography", "props": { "lines": ["Search finds words,", "not meaning"], "emphasis": "meaning" } },
+      "visual_requirements": { "continuity_refs": [] },
+      "claim_refs": ["markdown:input/vector-databases.md#L3"],
+      "transition": "cut"
+    },
+    {
+      "id": "s02",
+      "duration_sec": 5.5,
+      "purpose": "problem",
+      "voiceover": "Search for cheap flight, and you can miss a page that only says low-cost airfare.",
+      "on_screen_text": "No shared words, no match",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "comparison",
+        "props": { "left": { "label": "Query", "text": "cheap flight" }, "right": { "label": "Page", "text": "low-cost airfare" }, "verdict": "no shared words" }
+      },
+      "visual_requirements": { "continuity_refs": ["s01"] },
+      "claim_refs": ["markdown:input/vector-databases.md#L3"],
+      "transition": "cut"
+    },
+    {
+      "id": "s03",
+      "duration_sec": 6,
+      "purpose": "point",
+      "voiceover": "An embedding model turns text into a list of numbers. Similar meanings land close together.",
+      "on_screen_text": "Meaning becomes coordinates",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "diagram",
+        "props": { "nodes": ["text", "embedding model", "vector"], "edges": [["text", "embedding model"], ["embedding model", "vector"]] }
+      },
+      "visual_requirements": { "continuity_refs": [] },
+      "claim_refs": ["markdown:input/vector-databases.md#L5"],
+      "transition": "cut"
+    },
+    {
+      "id": "s04",
+      "duration_sec": 6,
+      "purpose": "point",
+      "voiceover": "A vector database indexes those vectors and returns the nearest neighbours to your query.",
+      "on_screen_text": "Nearest, not exact",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "diagram",
+        "props": {
+          "nodes": ["query", "embed", "vector index", "nearest neighbours"],
+          "edges": [["query", "embed"], ["embed", "vector index"], ["vector index", "nearest neighbours"]]
+        }
+      },
+      "visual_requirements": { "continuity_refs": ["s03"] },
+      "claim_refs": ["markdown:input/vector-databases.md#L7"],
+      "transition": "cut"
+    },
+    {
+      "id": "s05",
+      "duration_sec": 5.5,
+      "purpose": "proof",
+      "voiceover": "Most use approximate indexes like HNSW: a little accuracy for much faster search.",
+      "on_screen_text": "Approximate, but fast",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "comparison",
+        "props": {
+          "left": { "label": "Exact search", "text": "checks every vector" },
+          "right": { "label": "ANN index", "text": "much faster, slightly approximate" },
+          "verdict": "HNSW and friends"
+        }
+      },
+      "visual_requirements": { "continuity_refs": [] },
+      "claim_refs": ["markdown:input/vector-databases.md#L9"],
+      "transition": "cut"
+    },
+    {
+      "id": "s06",
+      "duration_sec": 3.5,
+      "purpose": "cta",
+      "voiceover": "Embed, store, query, match. Try it on your docs.",
+      "on_screen_text": "Try it on your docs",
+      "visual_strategy": "motion_graphic",
+      "deterministic": { "kind": "cta", "props": { "headline": "Embed, store, query, match", "action": "Try it on your docs" } },
+      "visual_requirements": { "continuity_refs": [] },
+      "claim_refs": ["markdown:input/vector-databases.md#L11"]
+    }
+  ]
+}

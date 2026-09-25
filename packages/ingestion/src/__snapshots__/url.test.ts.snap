@@ -1,0 +1,205 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`urlExtractor > extracts a blog article into heading-keyed evidence 1`] = `
+{
+  "assets": [],
+  "evidence": [
+    {
+      "locator": {},
+      "ref": "url:https://blog.example.com/vector-dbs#why-vector-databases-matter",
+      "text": "Search used to mean matching keywords. Modern applications instead compare *meaning*, which requires turning text, images and audio into embeddings and finding the closest ones quickly.",
+    },
+    {
+      "locator": {},
+      "ref": "url:https://blog.example.com/vector-dbs#why-vector-databases-matter-2",
+      "text": "A vector database stores those embeddings and answers nearest-neighbour queries. In our benchmarks, switching from brute-force search to an HNSW index cut p95 latency from 480 ms to 12 ms on a 10 million vector corpus.",
+    },
+    {
+      "locator": {
+        "selector": "#how-approximate-search-works",
+      },
+      "ref": "url:https://blog.example.com/vector-dbs#how-approximate-search-works",
+      "text": "Exact search compares a query against every stored vector, which is too slow at scale. Approximate nearest neighbour (ANN) indexes trade a little recall for a large speed-up.",
+    },
+    {
+      "locator": {
+        "selector": "#how-approximate-search-works",
+      },
+      "ref": "url:https://blog.example.com/vector-dbs#how-approximate-search-works-2",
+      "text": "- HNSW builds a layered proximity graph and typically reaches 95% recall.
+- IVF partitions vectors into clusters and only scans the closest ones.
+- Product quantization compresses vectors to roughly 1/16 of their original size.",
+    },
+    {
+      "locator": {
+        "selector": "#getting-started",
+      },
+      "ref": "url:https://blog.example.com/vector-dbs#getting-started",
+      "text": "Most clients follow the same shape: create a collection, upsert vectors, then query.",
+    },
+    {
+      "locator": {
+        "selector": "#getting-started",
+      },
+      "ref": "url:https://blog.example.com/vector-dbs#getting-started-3",
+      "text": "\`\`\`python
+client = VectorClient(url="http://localhost:6333")
+client.upsert("docs", vectors=embeddings)
+hits = client.query("docs", vector=q, top_k=5)
+\`\`\`",
+    },
+    {
+      "locator": {
+        "selector": "#getting-started",
+      },
+      "ref": "url:https://blog.example.com/vector-dbs#getting-started-4",
+      "text": "Teams that adopted this pattern reported shipping semantic search 3x faster, and hosting costs fell by $1,200 per month.",
+    },
+    {
+      "locator": {
+        "selector": "#getting-started-2",
+      },
+      "ref": "url:https://blog.example.com/vector-dbs#getting-started-2",
+      "text": "Yes, this heading is intentionally duplicated to exercise anchor uniqueness in the extractor tests.",
+    },
+  ],
+  "sections": [
+    {
+      "text": "Search used to mean matching keywords. Modern applications instead compare meaning, which requires turning text, images and audio into embeddings and finding the closest ones quickly.
+
+A vector database stores those embeddings and answers nearest-neighbour queries. In our benchmarks, switching from brute-force search to an HNSW index cut p95 latency from 480 ms to 12 ms on a 10 million vector corpus.",
+    },
+    {
+      "heading": "How approximate search works",
+      "text": "Exact search compares a query against every stored vector, which is too slow at scale. Approximate nearest neighbour (ANN) indexes trade a little recall for a large speed-up.
+
+- HNSW builds a layered proximity graph and typically reaches 95% recall.
+- IVF partitions vectors into clusters and only scans the closest ones.
+- Product quantization compresses vectors to roughly 1/16 of their original size.",
+    },
+    {
+      "heading": "Getting started",
+      "text": "Most clients follow the same shape: create a collection, upsert vectors, then query.
+
+\`\`\`python
+client = VectorClient(url="http://localhost:6333")
+client.upsert("docs", vectors=embeddings)
+hits = client.query("docs", vector=q, top_k=5)
+\`\`\`
+
+Teams that adopted this pattern reported shipping semantic search 3x faster, and hosting costs fell by $1,200 per month.",
+    },
+    {
+      "heading": "Getting started",
+      "text": "Yes, this heading is intentionally duplicated to exercise anchor uniqueness in the extractor tests.",
+    },
+  ],
+  "source": {
+    "kind": "url",
+    "sha256": "6fced4439cf9ae98f3f886c9e26b1deddac48a0a69fb36ce68d4c5282ea1300a",
+    "title": "Why Vector Databases Matter",
+    "uri": "https://blog.example.com/vector-dbs",
+  },
+  "warnings": [],
+}
+`;
+
+exports[`urlExtractor > extracts a docs page (redirected) with code, table and quote 1`] = `
+{
+  "assets": [],
+  "evidence": [
+    {
+      "locator": {
+        "selector": "#installation",
+      },
+      "ref": "url:https://docs.example.com/docs/install#installation",
+      "text": "Widgetron runs on Node.js 22.13 or later and on any operating system supported by Node. The package is about 2 MB unpacked and has no native dependencies.",
+    },
+    {
+      "locator": {
+        "selector": "#install-with-npm",
+      },
+      "ref": "url:https://docs.example.com/docs/install#install-with-npm",
+      "text": "Add the package to your project with your package manager of choice:",
+    },
+    {
+      "locator": {
+        "selector": "#install-with-npm",
+      },
+      "ref": "url:https://docs.example.com/docs/install#install-with-npm-2",
+      "text": "\`\`\`sh
+npm install widgetron
+\`\`\`",
+    },
+    {
+      "locator": {
+        "selector": "#verify-the-installation",
+      },
+      "ref": "url:https://docs.example.com/docs/install#verify-the-installation",
+      "text": "Run the doctor command. It checks your environment and prints a short report; the whole check takes under 5 seconds.",
+    },
+    {
+      "locator": {
+        "selector": "#verify-the-installation",
+      },
+      "ref": "url:https://docs.example.com/docs/install#verify-the-installation-2",
+      "text": "\`\`\`sh
+npx widgetron doctor
+\`\`\`",
+    },
+    {
+      "locator": {
+        "selector": "#verify-the-installation",
+      },
+      "ref": "url:https://docs.example.com/docs/install#verify-the-installation-3",
+      "text": "| Check | Expected |
+| --- | --- |
+| node | \\>= 22.13 |
+| ffmpeg | present |",
+    },
+    {
+      "locator": {
+        "selector": "#verify-the-installation",
+      },
+      "ref": "url:https://docs.example.com/docs/install#verify-the-installation-4",
+      "text": "> Tip: set WIDGETRON\\_LOG=debug to see every step the doctor runs.",
+    },
+  ],
+  "sections": [
+    {
+      "heading": "Installation",
+      "text": "Widgetron runs on Node.js 22.13 or later and on any operating system supported by Node. The package is about 2 MB unpacked and has no native dependencies.",
+    },
+    {
+      "heading": "Install with npm",
+      "text": "Add the package to your project with your package manager of choice:
+
+\`\`\`sh
+npm install widgetron
+\`\`\`",
+    },
+    {
+      "heading": "Verify the installation",
+      "text": "Run the doctor command. It checks your environment and prints a short report; the whole check takes under 5 seconds.
+
+\`\`\`sh
+npx widgetron doctor
+\`\`\`
+
+| Check | Expected |
+| --- | --- |
+| node | >= 22.13 |
+| ffmpeg | present |
+
+Tip: set WIDGETRON_LOG=debug to see every step the doctor runs.",
+    },
+  ],
+  "source": {
+    "kind": "url",
+    "sha256": "0dfdf7a83ebde8a0b686766864a10760a8119bb28e209a452939f59ff474118a",
+    "title": "Installation - Widgetron Docs",
+    "uri": "https://docs.example.com/docs/install",
+  },
+  "warnings": [],
+}
+`;

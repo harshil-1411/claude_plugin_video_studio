@@ -1,0 +1,137 @@
+{
+  "schema_version": "1.0",
+  "id": "ir-ba1e24e107e7",
+  "created_at": "2026-09-25T12:00:00.000Z",
+  "sources": [
+    {
+      "id": "src-1",
+      "kind": "url",
+      "uri": "https://blog.example.com/posts/vector-databases",
+      "sha256": "6fced4439cf9ae98f3f886c9e26b1deddac48a0a69fb36ce68d4c5282ea1300a",
+      "title": "Why Vector Databases Matter"
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec-1",
+      "source_id": "src-1",
+      "text": "Search used to mean matching keywords. Modern applications instead compare meaning, which requires turning text, images and audio into embeddings and finding the closest ones quickly.\n\nA vector database stores those embeddings and answers nearest-neighbour queries. In our benchmarks, switching from brute-force search to an HNSW index cut p95 latency from 480 ms to 12 ms on a 10 million vector corpus."
+    },
+    {
+      "id": "sec-2",
+      "source_id": "src-1",
+      "heading": "How approximate search works",
+      "text": "Exact search compares a query against every stored vector, which is too slow at scale. Approximate nearest neighbour (ANN) indexes trade a little recall for a large speed-up.\n\n- HNSW builds a layered proximity graph and typically reaches 95% recall.\n- IVF partitions vectors into clusters and only scans the closest ones.\n- Product quantization compresses vectors to roughly 1/16 of their original size."
+    },
+    {
+      "id": "sec-3",
+      "source_id": "src-1",
+      "heading": "Getting started",
+      "text": "Most clients follow the same shape: create a collection, upsert vectors, then query.\n\n```python\nclient = VectorClient(url=\"http://localhost:6333\")\nclient.upsert(\"docs\", vectors=embeddings)\nhits = client.query(\"docs\", vector=q, top_k=5)\n```\n\nTeams that adopted this pattern reported shipping semantic search 3x faster, and hosting costs fell by $1,200 per month."
+    },
+    {
+      "id": "sec-4",
+      "source_id": "src-1",
+      "heading": "Getting started",
+      "text": "Yes, this heading is intentionally duplicated to exercise anchor uniqueness in the extractor tests."
+    }
+  ],
+  "evidence": [
+    {
+      "ref": "url:https://blog.example.com/posts/vector-databases#why-vector-databases-matter",
+      "source_id": "src-1",
+      "text": "Search used to mean matching keywords. Modern applications instead compare *meaning*, which requires turning text, images and audio into embeddings and finding the closest ones quickly.",
+      "locator": {}
+    },
+    {
+      "ref": "url:https://blog.example.com/posts/vector-databases#why-vector-databases-matter-2",
+      "source_id": "src-1",
+      "text": "A vector database stores those embeddings and answers nearest-neighbour queries. In our benchmarks, switching from brute-force search to an HNSW index cut p95 latency from 480 ms to 12 ms on a 10 million vector corpus.",
+      "locator": {}
+    },
+    {
+      "ref": "url:https://blog.example.com/posts/vector-databases#how-approximate-search-works",
+      "source_id": "src-1",
+      "text": "Exact search compares a query against every stored vector, which is too slow at scale. Approximate nearest neighbour (ANN) indexes trade a little recall for a large speed-up.",
+      "locator": {
+        "selector": "#how-approximate-search-works"
+      }
+    },
+    {
+      "ref": "url:https://blog.example.com/posts/vector-databases#how-approximate-search-works-2",
+      "source_id": "src-1",
+      "text": "- HNSW builds a layered proximity graph and typically reaches 95% recall.\n- IVF partitions vectors into clusters and only scans the closest ones.\n- Product quantization compresses vectors to roughly 1/16 of their original size.",
+      "locator": {
+        "selector": "#how-approximate-search-works"
+      }
+    },
+    {
+      "ref": "url:https://blog.example.com/posts/vector-databases#getting-started",
+      "source_id": "src-1",
+      "text": "Most clients follow the same shape: create a collection, upsert vectors, then query.",
+      "locator": {
+        "selector": "#getting-started"
+      }
+    },
+    {
+      "ref": "url:https://blog.example.com/posts/vector-databases#getting-started-3",
+      "source_id": "src-1",
+      "text": "```python\nclient = VectorClient(url=\"http://localhost:6333\")\nclient.upsert(\"docs\", vectors=embeddings)\nhits = client.query(\"docs\", vector=q, top_k=5)\n```",
+      "locator": {
+        "selector": "#getting-started"
+      }
+    },
+    {
+      "ref": "url:https://blog.example.com/posts/vector-databases#getting-started-4",
+      "source_id": "src-1",
+      "text": "Teams that adopted this pattern reported shipping semantic search 3x faster, and hosting costs fell by $1,200 per month.",
+      "locator": {
+        "selector": "#getting-started"
+      }
+    },
+    {
+      "ref": "url:https://blog.example.com/posts/vector-databases#getting-started-2",
+      "source_id": "src-1",
+      "text": "Yes, this heading is intentionally duplicated to exercise anchor uniqueness in the extractor tests.",
+      "locator": {
+        "selector": "#getting-started-2"
+      }
+    }
+  ],
+  "entities": [],
+  "claims": [
+    {
+      "id": "claim-1",
+      "text": "In our benchmarks, switching from brute-force search to an HNSW index cut p95 latency from 480 ms to 12 ms on a 10 million vector corpus.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "url:https://blog.example.com/posts/vector-databases#why-vector-databases-matter-2"
+      ]
+    },
+    {
+      "id": "claim-2",
+      "text": "HNSW builds a layered proximity graph and typically reaches 95% recall.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "url:https://blog.example.com/posts/vector-databases#how-approximate-search-works-2"
+      ]
+    },
+    {
+      "id": "claim-3",
+      "text": "Teams that adopted this pattern reported shipping semantic search 3x faster, and hosting costs fell by $1,200 per month.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "url:https://blog.example.com/posts/vector-databases#getting-started-4"
+      ]
+    }
+  ],
+  "assets": [],
+  "classification": {
+    "contains_secrets": false,
+    "contains_pii": false,
+    "contains_likeness": false,
+    "data_class": "public",
+    "notes": []
+  },
+  "warnings": []
+}

@@ -1,0 +1,342 @@
+{
+  "schema_version": "1.0",
+  "id": "ir-6b7b3873d535",
+  "created_at": "2026-09-25T12:00:00.000Z",
+  "sources": [
+    {
+      "id": "src-1",
+      "kind": "repo",
+      "uri": "<repo>/fixtures/repos/sample-lib",
+      "sha256": "4d65a99e400b2f151b778df0697518af1e2600cd275d52197c7aa62bc63ead64",
+      "title": "sample-lib"
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec-1",
+      "source_id": "src-1",
+      "heading": "README.md › sample-lib",
+      "text": "sample-lib is a tiny in-memory LRU cache for Node.js. It keeps hot keys close to your code and evicts the least recently used entry when full.\n\nIn our benchmark, lookups take 45 ns on average, and the cache reduced p99 latency by 38% for a service handling 12,000 requests per second."
+    },
+    {
+      "id": "sec-2",
+      "source_id": "src-1",
+      "heading": "README.md › Install",
+      "text": "```sh\nnpm install sample-lib\n```"
+    },
+    {
+      "id": "sec-3",
+      "source_id": "src-1",
+      "heading": "README.md › Usage",
+      "text": "```js\nimport { LruCache } from \"sample-lib\";\nconst cache = new LruCache({ max: 500 });\ncache.set(\"user:1\", { name: \"Ada\" });\n```\n\nSee docs/getting-started.md for more."
+    },
+    {
+      "id": "sec-4",
+      "source_id": "src-1",
+      "heading": "docs/architecture.md › Architecture",
+      "text": "The cache combines a Map for lookups with a linked list for recency order. Version 2.0 cut memory use per entry by 30% compared with version 1.4."
+    },
+    {
+      "id": "sec-5",
+      "source_id": "src-1",
+      "heading": "docs/getting-started.md › Getting started",
+      "text": "Create a cache with a maximum size. The default size is 1,000 entries."
+    },
+    {
+      "id": "sec-6",
+      "source_id": "src-1",
+      "heading": "docs/getting-started.md › Eviction",
+      "text": "When the cache is full, the least recently used entry is removed first. Eviction runs in constant time, O(1), using a doubly linked list and a Map."
+    },
+    {
+      "id": "sec-7",
+      "source_id": "src-1",
+      "heading": "CHANGELOG.md › Changelog",
+      "text": ""
+    },
+    {
+      "id": "sec-8",
+      "source_id": "src-1",
+      "heading": "CHANGELOG.md › 2.0.0 (2026-06-01)",
+      "text": "- Rewrote the linked list; memory per entry is 30% lower.\n- Added peek() that reads without updating recency."
+    },
+    {
+      "id": "sec-9",
+      "source_id": "src-1",
+      "heading": "CHANGELOG.md › 1.4.0 (2025-11-12)",
+      "text": "- Added TTL support."
+    },
+    {
+      "id": "sec-10",
+      "source_id": "src-1",
+      "heading": "examples/basic.js",
+      "text": "import { LruCache } from \"../src/index.js\";\n\nconst cache = new LruCache({ max: 2 });\ncache.set(\"a\", 1).set(\"b\", 2).set(\"c\", 3);\nconsole.log(cache.get(\"a\")); // undefined: \"a\" was evicted"
+    },
+    {
+      "id": "sec-11",
+      "source_id": "src-1",
+      "heading": "package.json",
+      "text": "{\n  \"name\": \"sample-lib\",\n  \"version\": \"2.0.0\",\n  \"description\": \"A tiny in-memory LRU cache for Node.js\",\n  \"type\": \"module\",\n  \"main\": \"src/index.js\",\n  \"scripts\": {\n    \"postinstall\": \"node -e \\\"require('fs').writeFileSync('POSTINSTALL_RAN','1')\\\"\"\n  },\n  \"license\": \"MIT\"\n}"
+    },
+    {
+      "id": "sec-12",
+      "source_id": "src-1",
+      "heading": ".secretlintrc.js",
+      "text": "// MALICIOUS-CONFIG FIXTURE: must never be loaded by the ingest secret scan.\nrequire(\"node:fs\").writeFileSync(process.env.VS_EXEC_MARKER || __dirname + \"/EXECUTED_MARKER\", \".secretlintrc.js was executed\");\nmodule.exports = { rules: [] };"
+    },
+    {
+      "id": "sec-13",
+      "source_id": "src-1",
+      "heading": "repomix.config.js",
+      "text": "// MALICIOUS-CONFIG FIXTURE. video-studio must never evaluate this file.\n// If it is ever executed (e.g. by repomix's config loader), it writes a marker\n// file that the tests check for.\nimport { writeFileSync } from \"node:fs\";\n\nwriteFileSync(process.env.VS_EXEC_MARKER || new URL(\"./EXECUTED_MARKER\", import.meta.url), \"repomix.config.js was executed\");\n\nexport default { output: { style: \"plain\" } };"
+    },
+    {
+      "id": "sec-14",
+      "source_id": "src-1",
+      "heading": "src/index.js",
+      "text": "export { LruCache } from \"./lru.js\";"
+    },
+    {
+      "id": "sec-15",
+      "source_id": "src-1",
+      "heading": "src/lru.js",
+      "text": "/** Least-recently-used cache backed by a Map (insertion order = recency). */\nexport class LruCache {\n  constructor({ max = 1000 } = {}) {\n    this.max = max;\n    this.map = new Map();\n  }\n\n  get(key) {\n    if (!this.map.has(key)) return undefined;\n    const value = this.map.get(key);\n    this.map.delete(key);\n    this.map.set(key, value);\n    return value;\n  }\n\n  set(key, value) {\n    this.map.delete(key);\n    this.map.set(key, value);\n    if (this.map.size > this.max) this.map.delete(this.map.keys().next().value);\n    return this;\n  }\n\n  peek(key) {\n    return this.map.get(key);\n  }\n}"
+    }
+  ],
+  "evidence": [
+    {
+      "ref": "repo:README.md#L3-L4",
+      "source_id": "src-1",
+      "text": "sample-lib is a tiny in-memory LRU cache for Node.js. It keeps hot keys close\nto your code and evicts the least recently used entry when full.",
+      "locator": {
+        "line_start": 3,
+        "line_end": 4,
+        "selector": "#sample-lib",
+        "char_start": 14,
+        "char_end": 156
+      }
+    },
+    {
+      "ref": "repo:README.md#L6-L7",
+      "source_id": "src-1",
+      "text": "In our benchmark, lookups take 45 ns on average, and the cache reduced p99\nlatency by 38% for a service handling 12,000 requests per second.",
+      "locator": {
+        "line_start": 6,
+        "line_end": 7,
+        "selector": "#sample-lib",
+        "char_start": 158,
+        "char_end": 298
+      }
+    },
+    {
+      "ref": "repo:README.md#L11-L13",
+      "source_id": "src-1",
+      "text": "```sh\nnpm install sample-lib\n```",
+      "locator": {
+        "line_start": 11,
+        "line_end": 13,
+        "selector": "#install",
+        "char_start": 312,
+        "char_end": 344
+      }
+    },
+    {
+      "ref": "repo:README.md#L17-L21",
+      "source_id": "src-1",
+      "text": "```js\nimport { LruCache } from \"sample-lib\";\nconst cache = new LruCache({ max: 500 });\ncache.set(\"user:1\", { name: \"Ada\" });\n```",
+      "locator": {
+        "line_start": 17,
+        "line_end": 21,
+        "selector": "#usage",
+        "char_start": 356,
+        "char_end": 484
+      }
+    },
+    {
+      "ref": "repo:README.md#L23",
+      "source_id": "src-1",
+      "text": "See [docs/getting-started.md](docs/getting-started.md) for more.",
+      "locator": {
+        "line_start": 23,
+        "line_end": 23,
+        "selector": "#usage",
+        "char_start": 486,
+        "char_end": 550
+      }
+    },
+    {
+      "ref": "repo:docs/architecture.md#L3-L4",
+      "source_id": "src-1",
+      "text": "The cache combines a `Map` for lookups with a linked list for recency order.\nVersion 2.0 cut memory use per entry by 30% compared with version 1.4.",
+      "locator": {
+        "line_start": 3,
+        "line_end": 4,
+        "selector": "#architecture",
+        "char_start": 16,
+        "char_end": 163
+      }
+    },
+    {
+      "ref": "repo:docs/getting-started.md#L3",
+      "source_id": "src-1",
+      "text": "Create a cache with a maximum size. The default size is 1,000 entries.",
+      "locator": {
+        "line_start": 3,
+        "line_end": 3,
+        "selector": "#getting-started",
+        "char_start": 19,
+        "char_end": 89
+      }
+    },
+    {
+      "ref": "repo:docs/getting-started.md#L7-L8",
+      "source_id": "src-1",
+      "text": "When the cache is full, the least recently used entry is removed first.\nEviction runs in constant time, O(1), using a doubly linked list and a Map.",
+      "locator": {
+        "line_start": 7,
+        "line_end": 8,
+        "selector": "#eviction",
+        "char_start": 104,
+        "char_end": 251
+      }
+    },
+    {
+      "ref": "repo:CHANGELOG.md#L5-L6",
+      "source_id": "src-1",
+      "text": "- Rewrote the linked list; memory per entry is 30% lower.\n- Added `peek()` that reads without updating recency.",
+      "locator": {
+        "line_start": 5,
+        "line_end": 6,
+        "selector": "#2-0-0-2026-06-01",
+        "char_start": 36,
+        "char_end": 147
+      }
+    },
+    {
+      "ref": "repo:CHANGELOG.md#L10",
+      "source_id": "src-1",
+      "text": "- Added TTL support.",
+      "locator": {
+        "line_start": 10,
+        "line_end": 10,
+        "selector": "#1-4-0-2025-11-12",
+        "char_start": 172,
+        "char_end": 192
+      }
+    },
+    {
+      "ref": "repo:examples/basic.js#L1-L5",
+      "source_id": "src-1",
+      "text": "import { LruCache } from \"../src/index.js\";\n\nconst cache = new LruCache({ max: 2 });\ncache.set(\"a\", 1).set(\"b\", 2).set(\"c\", 3);\nconsole.log(cache.get(\"a\")); // undefined: \"a\" was evicted",
+      "locator": {
+        "line_start": 1,
+        "line_end": 5
+      }
+    },
+    {
+      "ref": "repo:package.json#L1-L11",
+      "source_id": "src-1",
+      "text": "{\n  \"name\": \"sample-lib\",\n  \"version\": \"2.0.0\",\n  \"description\": \"A tiny in-memory LRU cache for Node.js\",\n  \"type\": \"module\",\n  \"main\": \"src/index.js\",\n  \"scripts\": {\n    \"postinstall\": \"node -e \\\"require('fs').writeFileSync('POSTINSTALL_RAN','1')\\\"\"\n  },\n  \"license\": \"MIT\"\n}",
+      "locator": {
+        "line_start": 1,
+        "line_end": 11
+      }
+    },
+    {
+      "ref": "repo:.secretlintrc.js#L1-L3",
+      "source_id": "src-1",
+      "text": "// MALICIOUS-CONFIG FIXTURE: must never be loaded by the ingest secret scan.\nrequire(\"node:fs\").writeFileSync(process.env.VS_EXEC_MARKER || __dirname + \"/EXECUTED_MARKER\", \".secretlintrc.js was executed\");\nmodule.exports = { rules: [] };",
+      "locator": {
+        "line_start": 1,
+        "line_end": 3
+      }
+    },
+    {
+      "ref": "repo:repomix.config.js#L1-L8",
+      "source_id": "src-1",
+      "text": "// MALICIOUS-CONFIG FIXTURE. video-studio must never evaluate this file.\n// If it is ever executed (e.g. by repomix's config loader), it writes a marker\n// file that the tests check for.\nimport { writeFileSync } from \"node:fs\";\n\nwriteFileSync(process.env.VS_EXEC_MARKER || new URL(\"./EXECUTED_MARKER\", import.meta.url), \"repomix.config.js was executed\");\n\nexport default { output: { style: \"plain\" } };",
+      "locator": {
+        "line_start": 1,
+        "line_end": 8
+      }
+    },
+    {
+      "ref": "repo:src/index.js#L1",
+      "source_id": "src-1",
+      "text": "export { LruCache } from \"./lru.js\";",
+      "locator": {
+        "line_start": 1,
+        "line_end": 1
+      }
+    },
+    {
+      "ref": "repo:src/lru.js#L1-L26",
+      "source_id": "src-1",
+      "text": "/** Least-recently-used cache backed by a Map (insertion order = recency). */\nexport class LruCache {\n  constructor({ max = 1000 } = {}) {\n    this.max = max;\n    this.map = new Map();\n  }\n\n  get(key) {\n    if (!this.map.has(key)) return undefined;\n    const value = this.map.get(key);\n    this.map.delete(key);\n    this.map.set(key, value);\n    return value;\n  }\n\n  set(key, value) {\n    this.map.delete(key);\n    this.map.set(key, value);\n    if (this.map.size > this.max) this.map.delete(this.map.keys().next().value);\n    return this;\n  }\n\n  peek(key) {\n    return this.map.get(key);\n  }\n}",
+      "locator": {
+        "line_start": 1,
+        "line_end": 26
+      }
+    }
+  ],
+  "entities": [],
+  "claims": [
+    {
+      "id": "claim-1",
+      "text": "In our benchmark, lookups take 45 ns on average, and the cache reduced p99 latency by 38% for a service handling 12,000 requests per second.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "repo:README.md#L6-L7"
+      ]
+    },
+    {
+      "id": "claim-2",
+      "text": "Version 2.0 cut memory use per entry by 30% compared with version 1.4.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "repo:docs/architecture.md#L3-L4"
+      ]
+    },
+    {
+      "id": "claim-3",
+      "text": "The default size is 1,000 entries.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "repo:docs/getting-started.md#L3"
+      ]
+    },
+    {
+      "id": "claim-4",
+      "text": "Rewrote the linked list; memory per entry is 30% lower.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "repo:CHANGELOG.md#L5-L6"
+      ]
+    },
+    {
+      "id": "claim-5",
+      "text": "/ Least-recently-used cache backed by a Map (insertion order = recency). / export class LruCache { constructor({ max = 1000 } = {}) { this.max = max; this.map = new Map(); }",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "repo:src/lru.js#L1-L26"
+      ]
+    }
+  ],
+  "assets": [],
+  "classification": {
+    "contains_secrets": true,
+    "contains_pii": false,
+    "contains_likeness": false,
+    "data_class": "restricted",
+    "notes": [
+      "src-1: secret-bearing file excluded: deploy/secrets.env (@secretlint/secretlint-rule-aws, classify:high_entropy_assignment:AWS_SECRET_ACCESS_KEY)"
+    ]
+  },
+  "warnings": [
+    {
+      "code": "secret_excluded",
+      "message": "deploy/secrets.env was excluded from the content because it appears to contain a secret (rules: @secretlint/secretlint-rule-aws, classify:high_entropy_assignment:AWS_SECRET_ACCESS_KEY)",
+      "source_id": "src-1"
+    }
+  ]
+}

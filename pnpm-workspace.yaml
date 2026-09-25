@@ -1,0 +1,17 @@
+packages:
+  - "packages/*"
+
+allowBuilds:
+  esbuild: set this to true or false
+  puppeteer: set this to true or false
+
+minimumReleaseAgeExclude:
+  - '@hyperframes/core@0.8.75'
+  - '@hyperframes/engine@0.8.75'
+  - '@hyperframes/lint@0.8.75'
+  - '@hyperframes/parsers@0.8.75'
+  - '@hyperframes/producer@0.8.75'
+  - '@hyperframes/studio-server@0.8.75'
+
+# Pin the store inside the repo so sandboxed and unsandboxed installs agree.
+storeDir: .pnpm-store

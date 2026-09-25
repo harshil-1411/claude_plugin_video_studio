@@ -1,0 +1,9 @@
+Why teams adopt edge caching
+
+Edge caching moves content closer to users. A regional cache in front of an
+origin can cut median response time from 180 ms to 35 ms.
+
+Costs
+
+Egress from the origin fell by 62% in the first quarter after rollout, saving
+about $14,000 per month.

@@ -1,0 +1,54 @@
+# Story template: teach a skill or topic step by step.
+schema_version: "1.0"
+id: educational
+name: Educational lesson
+description: Longer lesson that sets context, teaches two concepts with a worked example, and ends with a recap.
+goals: [educate, explain]
+platforms: [youtube, linkedin, youtube_shorts, instagram_reels, tiktok, generic]
+default_aspect_ratio: "16:9"
+default_duration_sec: 60
+duration_range: { min_sec: 30, max_sec: 180 }
+pacing: { avg_shot_sec: 7, max_words_per_sec: 2.8 }
+caption_preset: minimal
+beats:
+  - purpose: hook
+    share: 0.08
+    guidance: Pose the question the lesson answers, or show the end result the viewer will be able to produce.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: context
+    share: 0.12
+    guidance: Say who this is for and what they need to know first, in one or two sentences.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: point
+    share: 0.18
+    guidance: Teach the first concept with a simple visual model. Define any term before using it.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: diagram
+  - purpose: demo
+    share: 0.18
+    guidance: Work through a concrete example step by step, using real code, data or screens from the source.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: code
+  - purpose: point
+    share: 0.16
+    guidance: Teach the second concept or the common mistake, building on the example.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: diagram
+  - purpose: payoff
+    share: 0.14
+    guidance: Recap the lesson in at most three short bullets.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: cta
+    share: 0.14
+    guidance: Point to the next lesson or resource that matches desired_action.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+hook_mechanisms: [question, promise, curiosity_gap, story]
+rules:
+  - One idea per scene; define a term before using it.
+  - Show, then tell; examples come from the source material.
+  - Every factual or quantitative statement cites a ContentIR ref in claim_refs.
+  - CTA must be an allowed brand CTA if a brand profile is present.

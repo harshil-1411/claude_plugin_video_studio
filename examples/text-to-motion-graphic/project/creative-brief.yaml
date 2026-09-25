@@ -1,0 +1,44 @@
+# Worked example: "Explain vector databases in 30 seconds", planned with
+# skills/plan/SKILL.md from input/vector-databases.md only. See ../README.md.
+schema_version: "1.0"
+id: brief-vector-db-30s
+goal: explain
+audience: Developers new to AI search who know what a keyword search index is
+platform: youtube_shorts
+aspect_ratio: "9:16"
+target_duration_sec: 30
+language: en-US
+tone:
+  - plain
+  - precise
+  - friendly
+desired_action: Try semantic search on your own documents
+key_messages:
+  - Keyword search matches words, so it misses results that mean the same thing in different words.
+  - An embedding model turns text into vectors that sit close together when meanings are similar.
+  - A vector database indexes those vectors and returns the nearest neighbours to a query.
+hook_candidates:
+  - text: Keyword search finds your words. Not what you meant.
+    mechanism: pain_point
+    scores: { relevance: 9, clarity: 9, curiosity: 7, evidence_strength: 8, visual_potential: 8 }
+  - text: Why can't search find low-cost airfare when you type cheap flight?
+    mechanism: question
+    scores: { relevance: 8, clarity: 7, curiosity: 8, evidence_strength: 8, visual_potential: 7 }
+  - text: Search engines don't understand you. Vectors do.
+    mechanism: contrarian
+    scores: { relevance: 7, clarity: 7, curiosity: 8, evidence_strength: 5, visual_potential: 7 }
+chosen_hook: Keyword search finds your words. Not what you meant.
+template: explain
+assumptions:
+  - field: platform
+    value: youtube_shorts
+    reason: A 30-second vertical explainer was requested with no platform named.
+  - field: audience
+    value: Developers new to AI search
+    reason: The source explains embeddings and ANN indexes from first principles.
+  - field: desired_action
+    value: Try semantic search on your own documents
+    reason: The source ends with the four-step flow a reader can try.
+  - field: language
+    value: en-US
+    reason: The source is in English.

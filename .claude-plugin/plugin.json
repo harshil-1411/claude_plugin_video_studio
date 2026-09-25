@@ -1,0 +1,46 @@
+{
+  "name": "video-studio",
+  "displayName": "Video Studio",
+  "version": "0.1.0",
+  "description": "Provider-neutral knowledge-to-video compiler: turns text, URLs, documents and repos into reproducible videos with captions, thumbnails and provenance.",
+  "author": { "name": "Suparn Bector" },
+  "license": "Apache-2.0",
+  "keywords": ["video", "knowledge-to-video", "ffmpeg", "captions", "mcp", "runway", "elevenlabs", "heygen"],
+  "userConfig": {
+    "runway_key": {
+      "type": "string",
+      "title": "Runway API key",
+      "description": "Optional. Runway API secret for generative video (exposed to the engine as RUNWAYML_API_SECRET).",
+      "sensitive": true,
+      "required": false
+    },
+    "elevenlabs_key": {
+      "type": "string",
+      "title": "ElevenLabs API key",
+      "description": "Optional. ElevenLabs key for voiceover and word timings (ELEVENLABS_API_KEY).",
+      "sensitive": true,
+      "required": false
+    },
+    "heygen_key": {
+      "type": "string",
+      "title": "HeyGen API key",
+      "description": "Optional. HeyGen v3 key for presenter videos (HEYGEN_API_KEY).",
+      "sensitive": true,
+      "required": false
+    },
+    "fal_key": {
+      "type": "string",
+      "title": "fal.ai API key",
+      "description": "Optional. fal.ai key for Kling, Veo and Hailuo models (FAL_KEY).",
+      "sensitive": true,
+      "required": false
+    },
+    "kling_key": {
+      "type": "string",
+      "title": "Kling API key",
+      "description": "Optional. Direct Kling API key (KLINGAI_API_KEY).",
+      "sensitive": true,
+      "required": false
+    }
+  }
+}

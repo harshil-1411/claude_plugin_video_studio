@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:video-spec",
+  "title": "VideoSpec",
+  "description": "What we are making: a provider-independent scene graph that declares capability requirements, never model names.",
+  "additionalProperties": false,
+  "properties": {
+    "aspect_ratio": {
+      "enum": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ],
+      "type": "string"
+    },
+    "audience": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "brand_profile": {
+      "description": "Brand profile reference, e.g. `acme@3`.",
+      "type": "string"
+    },
+    "brief_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "captions": {
+      "additionalProperties": false,
+      "properties": {
+        "burn_in": {
+          "type": "boolean"
+        },
+        "preset": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "preset",
+        "burn_in"
+      ],
+      "type": "object"
+    },
+    "content_ir_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "goal": {
+      "enum": [
+        "explain",
+        "launch",
+        "educate",
+        "promote",
+        "announce",
+        "case_study"
+      ],
+      "type": "string"
+    },
+    "grounding": {
+      "enum": [
+        "strict",
+        "loose",
+        "off"
+      ],
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "language": {
+      "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+      "type": "string"
+    },
+    "platform": {
+      "enum": [
+        "instagram_reels",
+        "tiktok",
+        "youtube_shorts",
+        "youtube",
+        "linkedin",
+        "x",
+        "generic"
+      ],
+      "type": "string"
+    },
+    "policy_profile": {
+      "type": "string"
+    },
+    "scenes": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_refs": {
+            "description": "Evidence source_refs or ContentIR claim ids backing this scene.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "deterministic": {
+            "description": "Deterministic (template-rendered) content for this scene.",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "typography",
+                  "code",
+                  "chart",
+                  "diagram",
+                  "screenshot",
+                  "comparison",
+                  "cta",
+                  "end_card"
+                ],
+                "type": "string"
+              },
+              "props": {
+                "description": "Template props passed verbatim to the deterministic renderer.",
+                "additionalProperties": {},
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind",
+              "props"
+            ],
+            "type": "object"
+          },
+          "duration_sec": {
+            "exclusiveMinimum": 0,
+            "maximum": 120,
+            "type": "number"
+          },
+          "id": {
+            "pattern": "^s\\d{2,}$",
+            "type": "string"
+          },
+          "on_screen_text": {
+            "type": "string"
+          },
+          "purpose": {
+            "enum": [
+              "hook",
+              "problem",
+              "context",
+              "point",
+              "proof",
+              "demo",
+              "payoff",
+              "cta",
+              "end_card"
+            ],
+            "type": "string"
+          },
+          "transition": {
+            "enum": [
+              "cut",
+              "crossfade",
+              "fade_black",
+              "slide",
+              "zoom",
+              "whip"
+            ],
+            "type": "string"
+          },
+          "visual_requirements": {
+            "description": "Capability requirements for the router. Never names a provider or model.",
+            "additionalProperties": false,
+            "properties": {
+              "audio_generation": {
+                "enum": [
+                  "required",
+                  "optional",
+                  "none"
+                ],
+                "type": "string"
+              },
+              "camera": {
+                "type": "string"
+              },
+              "character_reference": {
+                "enum": [
+                  "required",
+                  "optional",
+                  "none"
+                ],
+                "type": "string"
+              },
+              "continuity_refs": {
+                "description": "Scene or asset ids this scene must stay visually consistent with.",
+                "items": {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "data_policy": {
+                "enum": [
+                  "external-ok",
+                  "local-only"
+                ],
+                "type": "string"
+              },
+              "max_cost_usd": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "modality": {
+                "enum": [
+                  "video",
+                  "image",
+                  "none"
+                ],
+                "type": "string"
+              },
+              "preference": {
+                "description": "Ordered routing priorities.",
+                "items": {
+                  "enum": [
+                    "continuity",
+                    "quality",
+                    "speed",
+                    "cost"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "realism": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "type": "string"
+              },
+              "style": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "continuity_refs"
+            ],
+            "type": "object"
+          },
+          "visual_strategy": {
+            "enum": [
+              "motion_graphic",
+              "generated_video",
+              "avatar",
+              "screen_capture",
+              "user_asset",
+              "stock"
+            ],
+            "type": "string"
+          },
+          "voiceover": {
+            "description": "Narration for this scene; empty string for silent scenes.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "duration_sec",
+          "purpose",
+          "voiceover",
+          "visual_strategy",
+          "visual_requirements",
+          "claim_refs"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    },
+    "target_duration_sec": {
+      "exclusiveMinimum": 0,
+      "maximum": 600,
+      "type": "number"
+    },
+    "title": {
+      "type": "string"
+    },
+    "voice": {
+      "additionalProperties": false,
+      "properties": {
+        "provider_preference": {
+          "description": "Preferred TTS providers in order; the router may override on policy.",
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "style": {
+          "type": "string"
+        },
+        "voice_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "goal",
+    "audience",
+    "platform",
+    "aspect_ratio",
+    "target_duration_sec",
+    "language",
+    "grounding",
+    "voice",
+    "captions",
+    "scenes"
+  ],
+  "type": "object"
+}

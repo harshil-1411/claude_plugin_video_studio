@@ -1,0 +1,13 @@
+node_modules/
+# Per-package tsc output. The root dist/ holds the shipped MCP bundle (dist/mcp.mjs) and is committed.
+packages/*/dist/
+*.tsbuildinfo
+.DS_Store
+coverage/
+.video-studio-cache/
+.pnpm-store/
+# Rendered media in examples is reproducible; commit only inputs, source/ and project/.
+examples/*/renders/
+examples/*/assets/voice/
+examples/*/dist/
+examples/*/qa/

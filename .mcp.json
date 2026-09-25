@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "engine": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/mcp.mjs"],
+      "env": {
+        "RUNWAYML_API_SECRET": "${user_config.runway_key}",
+        "ELEVENLABS_API_KEY": "${user_config.elevenlabs_key}",
+        "HEYGEN_API_KEY": "${user_config.heygen_key}",
+        "FAL_KEY": "${user_config.fal_key}",
+        "KLINGAI_API_KEY": "${user_config.kling_key}"
+      }
+    }
+  }
+}

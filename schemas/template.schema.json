@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:template",
+  "title": "Template",
+  "description": "A story template as data: beat structure with duration shares, pacing, caption preset, preferred hook mechanisms and rules.",
+  "additionalProperties": false,
+  "properties": {
+    "beats": {
+      "items": {
+        "description": "One beat of a template's story structure; becomes one scene when scaffolded.",
+        "additionalProperties": false,
+        "properties": {
+          "guidance": {
+            "description": "One or two sentences on what this beat must do.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "optional": {
+            "description": "Beat may be dropped for short cuts; remaining shares are renormalized.",
+            "type": "boolean"
+          },
+          "purpose": {
+            "enum": [
+              "hook",
+              "problem",
+              "context",
+              "point",
+              "proof",
+              "demo",
+              "payoff",
+              "cta",
+              "end_card"
+            ],
+            "type": "string"
+          },
+          "share": {
+            "description": "Fraction of the total duration for this beat; all beats sum to 1 (±0.01).",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "type": "number"
+          },
+          "suggested_deterministic_kind": {
+            "enum": [
+              "typography",
+              "code",
+              "chart",
+              "diagram",
+              "screenshot",
+              "comparison",
+              "cta",
+              "end_card"
+            ],
+            "type": "string"
+          },
+          "suggested_visual_strategy": {
+            "enum": [
+              "motion_graphic",
+              "generated_video",
+              "avatar",
+              "screen_capture",
+              "user_asset",
+              "stock"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "purpose",
+          "share",
+          "guidance",
+          "suggested_visual_strategy"
+        ],
+        "type": "object"
+      },
+      "minItems": 2,
+      "type": "array"
+    },
+    "caption_preset": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "default_aspect_ratio": {
+      "enum": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ],
+      "type": "string"
+    },
+    "default_duration_sec": {
+      "exclusiveMinimum": 0,
+      "maximum": 600,
+      "type": "number"
+    },
+    "description": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "duration_range": {
+      "additionalProperties": false,
+      "properties": {
+        "max_sec": {
+          "exclusiveMinimum": 0,
+          "maximum": 600,
+          "type": "number"
+        },
+        "min_sec": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "min_sec",
+        "max_sec"
+      ],
+      "type": "object"
+    },
+    "goals": {
+      "items": {
+        "enum": [
+          "explain",
+          "launch",
+          "educate",
+          "promote",
+          "announce",
+          "case_study"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "hook_mechanisms": {
+      "description": "Preferred hook mechanisms, best first.",
+      "items": {
+        "enum": [
+          "curiosity_gap",
+          "contrarian",
+          "statistic",
+          "question",
+          "pain_point",
+          "promise",
+          "story",
+          "demo",
+          "pattern_interrupt",
+          "before_after",
+          "mistake",
+          "contrarian_claim"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "pacing": {
+      "additionalProperties": false,
+      "properties": {
+        "avg_shot_sec": {
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "type": "number"
+        },
+        "max_words_per_sec": {
+          "exclusiveMinimum": 0,
+          "maximum": 6,
+          "type": "number"
+        }
+      },
+      "required": [
+        "avg_shot_sec",
+        "max_words_per_sec"
+      ],
+      "type": "object"
+    },
+    "platforms": {
+      "items": {
+        "enum": [
+          "instagram_reels",
+          "tiktok",
+          "youtube_shorts",
+          "youtube",
+          "linkedin",
+          "x",
+          "generic"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "rules": {
+      "description": "Story rules the plan must follow, e.g. one idea per scene.",
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "description",
+    "goals",
+    "platforms",
+    "default_duration_sec",
+    "duration_range",
+    "pacing",
+    "caption_preset",
+    "beats",
+    "hook_mechanisms",
+    "rules"
+  ],
+  "type": "object"
+}

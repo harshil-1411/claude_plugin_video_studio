@@ -1,0 +1,55 @@
+# Story template: announce a product or feature to prospective users.
+schema_version: "1.0"
+id: product-launch
+name: Product launch
+description: Launch video that names the pain, shows the product solving it, proves it, and ends on a single call to action.
+goals: [launch, announce, promote]
+platforms: [instagram_reels, tiktok, youtube_shorts, linkedin, x, youtube]
+default_aspect_ratio: "9:16"
+default_duration_sec: 30
+duration_range: { min_sec: 15, max_sec: 90 }
+pacing: { avg_shot_sec: 4, max_words_per_sec: 3.0 }
+caption_preset: bold
+beats:
+  - purpose: hook
+    share: 0.10
+    guidance: Open on the outcome or the pain in under 3 seconds. Show, don't announce.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: problem
+    share: 0.15
+    guidance: Name the specific pain the audience has today, in their words.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: comparison
+  - purpose: demo
+    share: 0.25
+    guidance: Show the product doing the job, ideally the real UI. The viewer should understand what it does without sound.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: screenshot
+  - purpose: proof
+    share: 0.15
+    guidance: One credible proof point from the source (metric, customer quote or benchmark), cited in claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: chart
+  - purpose: payoff
+    share: 0.15
+    guidance: Paint the after-state the viewer gets. Keep it concrete, not a superlative.
+    suggested_visual_strategy: generated_video
+  - purpose: cta
+    share: 0.12
+    guidance: One action (try, sign up, learn more) that matches desired_action and the brand's allowed CTAs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+  - purpose: end_card
+    share: 0.08
+    guidance: Logo, product name and URL. No new information.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: end_card
+    optional: true
+hook_mechanisms: [demo, pain_point, promise, pattern_interrupt]
+rules:
+  - One idea per scene.
+  - Lead with the benefit, not the company name.
+  - Every metric or comparison cites a ContentIR ref in claim_refs; avoid unqualified superlatives.
+  - CTA must be an allowed brand CTA if a brand profile is present.
+  - End on the CTA or end card.

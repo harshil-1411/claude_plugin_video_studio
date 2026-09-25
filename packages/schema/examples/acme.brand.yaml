@@ -1,0 +1,27 @@
+version: 1
+brand:
+  name: Acme
+voice:
+  personality: [precise, optimistic, direct]
+  avoid: [revolutionary, game-changing, guaranteed]
+visual:
+  fonts:
+    heading: Inter
+    body: Inter
+  palette:
+    primary: "#1A4DFF"
+    secondary: "#0B1020"
+  logo: assets/brand/logo.svg
+video:
+  caption_preset: minimal
+  transition_style: restrained
+  shot_pacing: medium
+  end_card: assets/brand/end-card.html
+language:
+  locale: en-US
+  terminology:
+    CI/CD: "C I C D"
+claims:
+  prohibited: [unqualified_superlatives]
+cta:
+  allowed: ["Learn more", "See the demo"]

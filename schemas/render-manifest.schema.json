@@ -1,0 +1,476 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:render-manifest",
+  "title": "RenderManifest",
+  "description": "Exactly what happened: per-scene provider/model, prompts, seeds, task ids, hashes, cost, timestamps, retries, outputs, QA and tool versions.",
+  "additionalProperties": false,
+  "properties": {
+    "captions": {
+      "additionalProperties": false,
+      "properties": {
+        "burn_in": {
+          "type": "boolean"
+        },
+        "files": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "format": {
+                "enum": [
+                  "json",
+                  "srt",
+                  "vtt",
+                  "ass",
+                  "html"
+                ],
+                "type": "string"
+              },
+              "path": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "sha256": {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "format",
+              "path",
+              "sha256"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "preset": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "preset",
+        "burn_in",
+        "files"
+      ],
+      "type": "object"
+    },
+    "content_ir_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "type": "string"
+    },
+    "outputs": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_sec": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "height": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "final",
+              "clean_master",
+              "captions",
+              "thumbnail",
+              "social_copy",
+              "provenance",
+              "manifest",
+              "other"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "width": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "path",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "project_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "qa": {
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "scene_id": {
+                "pattern": "^s\\d{2,}$",
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "pass",
+                  "warn",
+                  "fail"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "report_path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pass",
+            "warn",
+            "fail"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "checks"
+      ],
+      "type": "object"
+    },
+    "renders": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "cost_usd": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "error": {
+            "type": "string"
+          },
+          "finished_at": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "output_path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "output_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "placeholder": {
+            "description": "True when the output is a titled stand-in for a scene a provider must still render.",
+            "type": "boolean"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "provider": {
+            "description": "Adapter id that produced the output, e.g. `mock` or `hyperframes-local`.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "renderer_version": {
+            "description": "Version of the local renderer or adapter that produced the output.",
+            "type": "string"
+          },
+          "request_hash": {
+            "description": "Canonical-JSON hash of the generation request; the idempotency key.",
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "scene_id": {
+            "pattern": "^s\\d{2,}$",
+            "type": "string"
+          },
+          "seed": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "submitted",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "cached"
+            ],
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Provider task/job id, persisted as soon as it is known.",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "scene_id",
+          "provider",
+          "request_hash",
+          "output_path",
+          "output_sha256",
+          "started_at",
+          "finished_at",
+          "attempts",
+          "status"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    },
+    "settings": {
+      "additionalProperties": false,
+      "properties": {
+        "aspect_ratio": {
+          "enum": [
+            "9:16",
+            "16:9",
+            "1:1",
+            "4:5"
+          ],
+          "type": "string"
+        },
+        "fps": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "quality": {
+          "enum": [
+            "preview",
+            "final"
+          ],
+          "type": "string"
+        },
+        "renderer_preference": {
+          "type": "string"
+        },
+        "renderer_reasons": {
+          "description": "Why each renderer was chosen, including fallbacks.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "quality",
+        "width",
+        "height",
+        "fps",
+        "aspect_ratio"
+      ],
+      "type": "object"
+    },
+    "spec_sha256": {
+      "description": "Canonical-JSON hash of the VideoSpec that was rendered.",
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "timing_adjustments": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "render_duration_sec": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "scene_id": {
+            "pattern": "^s\\d{2,}$",
+            "type": "string"
+          },
+          "spec_duration_sec": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "scene_id",
+          "spec_duration_sec",
+          "render_duration_sec",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "tool_versions": {
+      "description": "Versions of every tool involved, e.g. {\"ffmpeg\": \"7.1\", \"hyperframes\": \"0.4.2\"}.",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "propertyNames": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "total_cost_usd": {
+      "minimum": 0,
+      "type": "number"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "type": "string"
+    },
+    "voice": {
+      "additionalProperties": false,
+      "properties": {
+        "alignment_path": {
+          "description": "Word-timing JSON used for captions.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "cost_usd": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "finished_at": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "output_path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "output_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "provider": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why this voice backend was used, including any fallback.",
+          "type": "string"
+        },
+        "request_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string"
+        },
+        "timing_source": {
+          "description": "How word timings were obtained (provider, aligned, estimated, none).",
+          "enum": [
+            "provider",
+            "aligned",
+            "estimated",
+            "none"
+          ],
+          "type": "string"
+        },
+        "voice_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "request_hash",
+        "output_path",
+        "output_sha256"
+      ],
+      "type": "object"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "project_id",
+    "spec_sha256",
+    "created_at",
+    "updated_at",
+    "renders",
+    "outputs",
+    "tool_versions"
+  ],
+  "type": "object"
+}

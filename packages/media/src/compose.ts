@@ -1,0 +1,205 @@
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { extname, join } from "node:path";
+import { type AudioSlot, AUDIO_SAMPLE_RATE, concatAudio, loudnorm2pass, type LoudnessTarget } from "./audio.js";
+import { type RunOptions, escapeFilterPath, ffprobe, filterGraph, runFfmpeg, secs } from "./ffmpeg.js";
+
+/** Final delivery encode: H.264 High, CRF 20, preset medium, yuv420p; AAC 192k 48 kHz; `+faststart`. */
+export interface EncodeSettings {
+  crf?: number;
+  /** x264 preset. Default `medium`. Tests use `ultrafast`. */
+  preset?: string;
+}
+
+export const FINAL_ENCODE = { crf: 20, preset: "medium", profile: "high", audioBitrate: "192k", sampleRate: AUDIO_SAMPLE_RATE } as const;
+
+export function h264Args(e: EncodeSettings = {}): string[] {
+  return ["-c:v", "libx264", "-profile:v", FINAL_ENCODE.profile, "-preset", e.preset ?? FINAL_ENCODE.preset, "-crf", String(e.crf ?? FINAL_ENCODE.crf), "-pix_fmt", "yuv420p"];
+}
+
+export function aacArgs(): string[] {
+  return ["-c:a", "aac", "-b:a", FINAL_ENCODE.audioBitrate, "-ar", String(FINAL_ENCODE.sampleRate)];
+}
+
+export const FASTSTART = ["-movflags", "+faststart"] as const;
+
+export interface ComposeOptions extends RunOptions {
+  encode?: EncodeSettings;
+}
+
+export interface VideoSegment {
+  path: string;
+  /** Exact slot length; shorter segments hold their last frame, longer ones are trimmed. */
+  duration_ms: number;
+}
+
+export type FitMode = "pad" | "crop";
+
+export interface TargetFormat {
+  width: number;
+  height: number;
+  fps: number;
+  /** `pad` letterboxes (default, never loses content); `crop` fills the frame. */
+  fit?: FitMode;
+  /** Pad colour. Default black. */
+  padColor?: string;
+}
+
+const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".bmp"]);
+
+function assertEven(width: number, height: number) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || width % 2 || height % 2) {
+    throw new Error(`target size must be positive even integers for yuv420p H.264, got ${width}x${height}`);
+  }
+}
+
+/** Filters that normalise one segment to the target: scale + pad/crop, square pixels, fps, yuv420p, exact frame count. */
+export function normalizeFilters(t: TargetFormat, durationMs: number): string[] {
+  const { width: W, height: H, fps } = t;
+  const frames = Math.max(1, Math.round((durationMs * fps) / 1000));
+  const fit =
+    (t.fit ?? "pad") === "crop"
+      ? [`scale=${W}:${H}:force_original_aspect_ratio=increase`, `crop=${W}:${H}`]
+      : [`scale=${W}:${H}:force_original_aspect_ratio=decrease`, `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${t.padColor ?? "black"}`];
+  return [
+    ...fit,
+    "setsar=1",
+    `fps=${fps}`,
+    "format=yuv420p",
+    // Hold the last frame if the segment is short, then cut to the exact slot.
+    `tpad=stop_mode=clone:stop_duration=${secs(durationMs)}`,
+    `trim=end_frame=${frames}`,
+    "setpts=PTS-STARTPTS",
+  ];
+}
+
+/**
+ * Concatenate video segments with the concat *filter* (tolerates mixed codecs, sizes and
+ * frame rates): every segment is normalised to the target size/aspect/fps first. Video only;
+ * audio is handled by `concatAudio` + `muxAudio`. Output uses the final H.264 settings.
+ */
+export async function concatVideos(segments: readonly VideoSegment[], out: string, target: TargetFormat, opts: ComposeOptions = {}): Promise<{ path: string; duration_ms: number; frames: number }> {
+  assertEven(target.width, target.height);
+  if (!segments.length) throw new Error("concatVideos: no segments");
+  const inputs: string[] = [];
+  const chains: string[][] = [];
+  let frames = 0;
+  segments.forEach((s, i) => {
+    if (!(s.duration_ms > 0)) throw new Error(`segment ${i}: duration_ms must be > 0`);
+    if (IMAGE_EXT.has(extname(s.path).toLowerCase())) {
+      inputs.push("-loop", "1", "-framerate", String(target.fps), "-t", secs(s.duration_ms), "-i", s.path);
+    } else {
+      inputs.push("-i", s.path);
+    }
+    chains.push([`[${i}:v:0]${normalizeFilters(target, s.duration_ms).join(",")}[v${i}]`]);
+    frames += Math.max(1, Math.round((s.duration_ms * target.fps) / 1000));
+  });
+  chains.push([`${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0[vout]`]);
+  await runFfmpeg(
+    ["-y", ...inputs, "-filter_complex", filterGraph(chains), "-map", "[vout]", "-r", String(target.fps), ...h264Args(opts.encode), "-an", ...FASTSTART, out],
+    opts,
+  );
+  return { path: out, frames, duration_ms: Math.round((frames * 1000) / target.fps) };
+}
+
+/**
+ * Mux an audio track onto a video: video is stream-copied, audio encoded to AAC 192k/48 kHz
+ * and padded or trimmed to exactly the video's duration.
+ */
+export async function muxAudio(video: string, audio: string, out: string, opts: RunOptions = {}): Promise<{ path: string }> {
+  const probe = await ffprobe(video, opts);
+  const d = probe.duration_s.toFixed(3);
+  await runFfmpeg(
+    ["-y", "-i", video, "-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-af", `apad=whole_dur=${d},atrim=duration=${d}`, ...aacArgs(), ...FASTSTART, out],
+    opts,
+  );
+  return { path: out };
+}
+
+export interface BurnOptions extends ComposeOptions {
+  /** Directory of fonts shipped with the project, so output does not depend on host fonts. */
+  fontsDir?: string;
+}
+
+/** The `subtitles=` filter for an ASS/SRT file with correctly escaped paths. */
+export function subtitlesFilter(subsPath: string, fontsDir?: string): string {
+  return `subtitles=filename=${escapeFilterPath(subsPath)}${fontsDir ? `:fontsdir=${escapeFilterPath(fontsDir)}` : ""}`;
+}
+
+/** Burn ASS (karaoke) captions into the video with libass; audio is stream-copied. */
+export async function burnCaptions(video: string, subsPath: string, out: string, opts: BurnOptions = {}): Promise<{ path: string }> {
+  await runFfmpeg(
+    ["-y", "-i", video, "-map", "0:v:0", "-map", "0:a?", "-vf", subtitlesFilter(subsPath, opts.fontsDir), ...h264Args(opts.encode), "-c:a", "copy", ...FASTSTART, out],
+    opts,
+  );
+  return { path: out };
+}
+
+/** Re-encode any input with the final delivery settings. */
+export async function encodeFinal(input: string, out: string, opts: ComposeOptions = {}): Promise<{ path: string }> {
+  await runFfmpeg(["-y", "-i", input, "-map", "0:v:0", "-map", "0:a?", ...h264Args(opts.encode), ...aacArgs(), ...FASTSTART, out], opts);
+  return { path: out };
+}
+
+/** Full-resolution PNG of the frame at `atMs` (clamped into the video). */
+export async function makeThumbnail(video: string, out: string, o: { atMs?: number } & RunOptions = {}): Promise<{ path: string; at_ms: number }> {
+  const probe = await ffprobe(video, o);
+  const maxMs = Math.max(0, Math.floor(probe.duration_s * 1000) - 100);
+  const at = Math.min(Math.max(0, o.atMs ?? 0), maxMs);
+  await runFfmpeg(["-y", "-ss", secs(at), "-i", video, "-frames:v", "1", "-update", "1", "-c:v", "png", out], o);
+  return { path: out, at_ms: at };
+}
+
+// ---------------------------------------------------------------------------------- assembly
+
+export interface AssembleInput extends TargetFormat {
+  segments: readonly VideoSegment[];
+  /** One voice track file, or per-scene slots (missing audio → silence). Omit for a silent video. */
+  audio?: string | readonly AudioSlot[];
+  /** Normalise loudness (two-pass) before muxing. Default true. */
+  loudness?: LoudnessTarget | false;
+  /** Clean master output path (no burned captions). */
+  master: string;
+  /** Captioned reel output path; requires `assPath`. */
+  reel?: string;
+  assPath?: string;
+  fontsDir?: string;
+  /** Scratch directory for intermediates; a temp dir is created and removed when omitted. */
+  workDir?: string;
+}
+
+export interface AssembleResult {
+  master: string;
+  reel?: string;
+  duration_ms: number;
+}
+
+/**
+ * concat → (voice concat) → loudnorm → mux = clean master; master + ASS burn-in = captioned reel.
+ * The reel is only one generation away from the master (video re-encoded once for the burn-in).
+ */
+export async function assemble(input: AssembleInput, opts: ComposeOptions = {}): Promise<AssembleResult> {
+  const work = input.workDir ?? (await mkdtemp(join(tmpdir(), "vs-media-")));
+  await mkdir(work, { recursive: true });
+  try {
+    const silentVideo = join(work, "video.mp4");
+    const v = await concatVideos(input.segments, silentVideo, input, opts);
+    if (input.audio === undefined) {
+      // Silent video: add a silent AAC track so players and platforms see a normal file.
+      await concatAudio([{ duration_ms: v.duration_ms }], join(work, "silence.wav"), opts);
+      await muxAudio(silentVideo, join(work, "silence.wav"), input.master, opts);
+    } else {
+      let voice = typeof input.audio === "string" ? input.audio : (await concatAudio(input.audio, join(work, "voice.wav"), opts)).path;
+      if (input.loudness !== false) voice = (await loudnorm2pass(voice, join(work, "voice.norm.wav"), input.loudness ?? {}, opts)).path;
+      await muxAudio(silentVideo, voice, input.master, opts);
+    }
+    let reel: string | undefined;
+    if (input.reel) {
+      if (!input.assPath) throw new Error("assemble: `reel` requires `assPath`");
+      reel = (await burnCaptions(input.master, input.assPath, input.reel, { ...opts, fontsDir: input.fontsDir })).path;
+    }
+    return { master: input.master, ...(reel ? { reel } : {}), duration_ms: v.duration_ms };
+  } finally {
+    if (!input.workDir) await rm(work, { recursive: true, force: true });
+  }
+}

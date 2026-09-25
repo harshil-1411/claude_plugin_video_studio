@@ -1,0 +1,25 @@
+version: 1
+providers:
+  allow: [runway, elevenlabs, hyperframes-local]
+  deny: ["*-experimental"]
+privacy:
+  source_code: local_only
+  pii: redact
+  confidential_documents: local_only
+  external_reference_images: approved_only
+  data_classes:
+    confidential: local_only
+    restricted: deny
+residency:
+  voice: eu
+retention:
+  prefer_zero_retention: true
+likeness:
+  require_consent_receipt: true
+  voice_clone_requires_consent: true
+spend:
+  project_limit_usd: 25
+  scene_limit_usd: 3
+  approval_above_usd: 10
+grounding:
+  factual_claims: strict

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "ir_id": "ir-a5277b3461f9",
+  "ir_schema_version": "1.0",
+  "created_at": "2026-09-25T06:24:58.962Z",
+  "sources": [
+    {
+      "source_id": "src-1",
+      "uri": "input/vector-databases.md",
+      "kind": "markdown",
+      "sha256": "352a0bc50193550178fb8549bc4fc903096844b81caa95b89ab772e5a7a32be6",
+      "title": "Vector databases in brief",
+      "extractor_version": "1",
+      "fetched_at": "2026-09-25T06:24:58.962Z",
+      "cache_hit": false,
+      "cache_key": "23d27032a8775eec545eeaa1fca0d03a99859af2344e16ba45aad4946beca748"
+    }
+  ],
+  "failures": []
+}

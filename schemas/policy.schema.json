@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:policy",
+  "title": "Policy",
+  "description": "policy.yaml: provider allow/deny globs, data-class routing, residency, retention, likeness consent, spend limits and grounding. Enforced in engine code.",
+  "additionalProperties": false,
+  "properties": {
+    "grounding": {
+      "additionalProperties": false,
+      "properties": {
+        "factual_claims": {
+          "enum": [
+            "strict",
+            "loose",
+            "off"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "factual_claims"
+      ],
+      "type": "object"
+    },
+    "likeness": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_public_figures": {
+          "type": "boolean"
+        },
+        "require_consent_receipt": {
+          "type": "boolean"
+        },
+        "voice_clone_requires_consent": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "privacy": {
+      "additionalProperties": false,
+      "properties": {
+        "confidential_documents": {
+          "enum": [
+            "external_ok",
+            "local_only",
+            "approved_only",
+            "redact",
+            "deny"
+          ],
+          "type": "string"
+        },
+        "data_classes": {
+          "description": "Routing per ContentIR classification.data_class.",
+          "additionalProperties": false,
+          "properties": {
+            "confidential": {
+              "enum": [
+                "external_ok",
+                "local_only",
+                "approved_only",
+                "redact",
+                "deny"
+              ],
+              "type": "string"
+            },
+            "internal": {
+              "enum": [
+                "external_ok",
+                "local_only",
+                "approved_only",
+                "redact",
+                "deny"
+              ],
+              "type": "string"
+            },
+            "public": {
+              "enum": [
+                "external_ok",
+                "local_only",
+                "approved_only",
+                "redact",
+                "deny"
+              ],
+              "type": "string"
+            },
+            "restricted": {
+              "enum": [
+                "external_ok",
+                "local_only",
+                "approved_only",
+                "redact",
+                "deny"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "external_reference_images": {
+          "enum": [
+            "external_ok",
+            "local_only",
+            "approved_only",
+            "redact",
+            "deny"
+          ],
+          "type": "string"
+        },
+        "pii": {
+          "enum": [
+            "external_ok",
+            "local_only",
+            "approved_only",
+            "redact",
+            "deny"
+          ],
+          "type": "string"
+        },
+        "source_code": {
+          "enum": [
+            "external_ok",
+            "local_only",
+            "approved_only",
+            "redact",
+            "deny"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "providers": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "items": {
+            "pattern": "^[A-Za-z0-9*?._/@-]+$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deny": {
+          "items": {
+            "pattern": "^[A-Za-z0-9*?._/@-]+$",
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "residency": {
+      "additionalProperties": false,
+      "properties": {
+        "avatar": {
+          "enum": [
+            "us",
+            "eu",
+            "in",
+            "sg",
+            "provider-default"
+          ],
+          "type": "string"
+        },
+        "storage": {
+          "enum": [
+            "us",
+            "eu",
+            "in",
+            "sg",
+            "provider-default"
+          ],
+          "type": "string"
+        },
+        "video": {
+          "enum": [
+            "us",
+            "eu",
+            "in",
+            "sg",
+            "provider-default"
+          ],
+          "type": "string"
+        },
+        "voice": {
+          "enum": [
+            "us",
+            "eu",
+            "in",
+            "sg",
+            "provider-default"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "retention": {
+      "additionalProperties": false,
+      "properties": {
+        "max_provider_retention_days": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prefer_zero_retention": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "spend": {
+      "additionalProperties": false,
+      "properties": {
+        "approval_above_usd": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "project_limit_usd": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "scene_limit_usd": {
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "version": {
+      "const": 1,
+      "type": "number"
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@video-studio/voice",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "scripts": { "build": "tsc -b" },
+  "dependencies": {
+    "@video-studio/schema": "workspace:*",
+    "@video-studio/core": "workspace:*"
+  }
+}

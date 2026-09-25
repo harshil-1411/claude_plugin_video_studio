@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "id": "ir-9eb11795c879",
+  "created_at": "2026-09-25T12:00:00.000Z",
+  "sources": [
+    {
+      "id": "src-1",
+      "kind": "url",
+      "uri": "https://app.example.com/dashboard",
+      "sha256": "bc498abf8fee3a1e787e577c370fe45e165200b56e2593e9e865558c26668019",
+      "title": "Dashboard"
+    }
+  ],
+  "sections": [],
+  "evidence": [],
+  "entities": [],
+  "claims": [],
+  "assets": [],
+  "classification": {
+    "contains_secrets": false,
+    "contains_pii": false,
+    "contains_likeness": false,
+    "data_class": "public",
+    "notes": []
+  },
+  "warnings": [
+    {
+      "code": "thin_content",
+      "message": "Only 0 characters of main content were extracted from https://app.example.com/dashboard. The page may render client-side; a browser-based fetch would be needed (not implemented yet).",
+      "source_id": "src-1"
+    }
+  ]
+}

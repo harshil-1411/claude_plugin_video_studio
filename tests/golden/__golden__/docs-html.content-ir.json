@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "id": "ir-8393124275e6",
+  "created_at": "2026-09-25T12:00:00.000Z",
+  "sources": [
+    {
+      "id": "src-1",
+      "kind": "url",
+      "uri": "https://docs.example.com/install",
+      "sha256": "0dfdf7a83ebde8a0b686766864a10760a8119bb28e209a452939f59ff474118a",
+      "title": "Installation - Widgetron Docs"
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec-1",
+      "source_id": "src-1",
+      "heading": "Installation",
+      "text": "Widgetron runs on Node.js 22.13 or later and on any operating system supported by Node. The package is about 2 MB unpacked and has no native dependencies."
+    },
+    {
+      "id": "sec-2",
+      "source_id": "src-1",
+      "heading": "Install with npm",
+      "text": "Add the package to your project with your package manager of choice:\n\n```sh\nnpm install widgetron\n```"
+    },
+    {
+      "id": "sec-3",
+      "source_id": "src-1",
+      "heading": "Verify the installation",
+      "text": "Run the doctor command. It checks your environment and prints a short report; the whole check takes under 5 seconds.\n\n```sh\nnpx widgetron doctor\n```\n\n| Check | Expected |\n| --- | --- |\n| node | >= 22.13 |\n| ffmpeg | present |\n\nTip: set WIDGETRON_LOG=debug to see every step the doctor runs."
+    }
+  ],
+  "evidence": [
+    {
+      "ref": "url:https://docs.example.com/install#installation",
+      "source_id": "src-1",
+      "text": "Widgetron runs on Node.js 22.13 or later and on any operating system supported by Node. The package is about 2 MB unpacked and has no native dependencies.",
+      "locator": {
+        "selector": "#installation"
+      }
+    },
+    {
+      "ref": "url:https://docs.example.com/install#install-with-npm",
+      "source_id": "src-1",
+      "text": "Add the package to your project with your package manager of choice:",
+      "locator": {
+        "selector": "#install-with-npm"
+      }
+    },
+    {
+      "ref": "url:https://docs.example.com/install#install-with-npm-2",
+      "source_id": "src-1",
+      "text": "```sh\nnpm install widgetron\n```",
+      "locator": {
+        "selector": "#install-with-npm"
+      }
+    },
+    {
+      "ref": "url:https://docs.example.com/install#verify-the-installation",
+      "source_id": "src-1",
+      "text": "Run the doctor command. It checks your environment and prints a short report; the whole check takes under 5 seconds.",
+      "locator": {
+        "selector": "#verify-the-installation"
+      }
+    },
+    {
+      "ref": "url:https://docs.example.com/install#verify-the-installation-2",
+      "source_id": "src-1",
+      "text": "```sh\nnpx widgetron doctor\n```",
+      "locator": {
+        "selector": "#verify-the-installation"
+      }
+    },
+    {
+      "ref": "url:https://docs.example.com/install#verify-the-installation-3",
+      "source_id": "src-1",
+      "text": "| Check | Expected |\n| --- | --- |\n| node | \\>= 22.13 |\n| ffmpeg | present |",
+      "locator": {
+        "selector": "#verify-the-installation"
+      }
+    },
+    {
+      "ref": "url:https://docs.example.com/install#verify-the-installation-4",
+      "source_id": "src-1",
+      "text": "> Tip: set WIDGETRON\\_LOG=debug to see every step the doctor runs.",
+      "locator": {
+        "selector": "#verify-the-installation"
+      }
+    }
+  ],
+  "entities": [],
+  "claims": [
+    {
+      "id": "claim-1",
+      "text": "Widgetron runs on Node.js 22.13 or later and on any operating system supported by Node.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "url:https://docs.example.com/install#installation"
+      ]
+    },
+    {
+      "id": "claim-2",
+      "text": "The package is about 2 MB unpacked and has no native dependencies.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "url:https://docs.example.com/install#installation"
+      ]
+    },
+    {
+      "id": "claim-3",
+      "text": "It checks your environment and prints a short report; the whole check takes under 5 seconds.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "url:https://docs.example.com/install#verify-the-installation"
+      ]
+    },
+    {
+      "id": "claim-4",
+      "text": "| node | \\>= 22.13 |",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "url:https://docs.example.com/install#verify-the-installation-3"
+      ]
+    }
+  ],
+  "assets": [],
+  "classification": {
+    "contains_secrets": false,
+    "contains_pii": false,
+    "contains_likeness": false,
+    "data_class": "public",
+    "notes": []
+  },
+  "warnings": []
+}

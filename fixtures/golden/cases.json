@@ -1,0 +1,16 @@
+{
+  "$comment": "Golden ingest cases. Paths are relative to this file. `inline` cases pass the file's text as an inline input; `url` cases are served from `html` by an injected fetch (no network).",
+  "now": "2026-09-25T12:00:00.000Z",
+  "cases": [
+    { "name": "inline-text", "inline": "inline-text.txt" },
+    { "name": "markdown-article", "path": "article.md" },
+    { "name": "markdown-frontmatter-code", "path": "frontmatter-code.md" },
+    { "name": "blog-html", "url": "https://blog.example.com/posts/vector-databases", "html": "../html/blog-vector-db.html" },
+    { "name": "docs-html", "url": "https://docs.example.com/install", "html": "../html/docs-install.html" },
+    { "name": "thin-spa", "url": "https://app.example.com/dashboard", "html": "../html/spa-shell.html", "expectWarning": "thin_content" },
+    { "name": "pdf-whitepaper", "path": "../docs/sample.pdf" },
+    { "name": "docx-report", "path": "../docs/sample.docx" },
+    { "name": "pptx-deck", "path": "../docs/sample.pptx" },
+    { "name": "repo-sample-lib", "path": "../repos/sample-lib", "expectWarning": "secret_excluded" }
+  ]
+}

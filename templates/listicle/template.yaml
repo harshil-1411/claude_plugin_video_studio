@@ -1,0 +1,55 @@
+# Story template: a numbered list of tips, tools or facts.
+schema_version: "1.0"
+id: listicle
+name: Listicle
+description: Numbered list video ("3 things you...") with one item per scene and a payoff that ties them together.
+goals: [educate, explain, promote]
+platforms: [instagram_reels, tiktok, youtube_shorts, linkedin, x]
+default_aspect_ratio: "9:16"
+default_duration_sec: 45
+duration_range: { min_sec: 20, max_sec: 90 }
+pacing: { avg_shot_sec: 5, max_words_per_sec: 3.2 }
+caption_preset: bold
+beats:
+  - purpose: hook
+    share: 0.10
+    guidance: Promise the list and its payoff ("3 things that ..."). The count in the hook must match the number of items.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: context
+    share: 0.08
+    guidance: One line on why this list matters to this audience now.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+    optional: true
+  - purpose: point
+    share: 0.18
+    guidance: Item 1. Name it, then give one concrete example or reason. Number it on screen.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: point
+    share: 0.18
+    guidance: Item 2. Same shape as item 1 so the rhythm is predictable.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: point
+    share: 0.18
+    guidance: Item 3. Save the strongest or most surprising item for last.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: payoff
+    share: 0.14
+    guidance: Tie the items together into one takeaway the viewer can repeat.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: cta
+    share: 0.14
+    guidance: Ask for one action (save, follow, try the first item) that matches desired_action.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+hook_mechanisms: [promise, curiosity_gap, statistic, question]
+rules:
+  - One item per scene; add or remove point scenes to match the promised count.
+  - Items share the same structure (name, example) and are numbered on screen.
+  - Each item is grounded in the source; cite it in claim_refs.
+  - CTA must be an allowed brand CTA if a brand profile is present.

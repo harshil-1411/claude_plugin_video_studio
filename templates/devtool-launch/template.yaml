@@ -1,0 +1,56 @@
+# Story template: launch a developer tool, library or API to engineers.
+schema_version: "1.0"
+id: devtool-launch
+name: Developer tool launch
+description: Launch video for developers that shows real code or terminal output early, proves it works, and ends on install or docs.
+goals: [launch, announce, promote]
+platforms: [x, linkedin, youtube, youtube_shorts, instagram_reels, tiktok]
+default_aspect_ratio: "9:16"
+default_duration_sec: 45
+duration_range: { min_sec: 20, max_sec: 90 }
+pacing: { avg_shot_sec: 6, max_words_per_sec: 2.8 }
+caption_preset: minimal
+beats:
+  - purpose: hook
+    share: 0.10
+    guidance: Open on the developer pain or the one-line result ("deploy in one command"). No marketing adjectives.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: problem
+    share: 0.14
+    guidance: Show the before-state developers know, e.g. the boilerplate or error they are tired of.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: code
+  - purpose: demo
+    share: 0.26
+    guidance: Show the tool in use with real code or terminal output from the repo; keep it short enough to read.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: code
+  - purpose: proof
+    share: 0.14
+    guidance: One verifiable fact from the source (benchmark, test count, adoption) cited in claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: chart
+  - purpose: point
+    share: 0.12
+    guidance: Explain how it works in one sentence with a simple architecture diagram.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: diagram
+    optional: true
+  - purpose: cta
+    share: 0.14
+    guidance: Show the install command or docs URL and say it aloud.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+  - purpose: end_card
+    share: 0.10
+    guidance: Project name, repo URL and licence. No new information.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: end_card
+hook_mechanisms: [demo, pain_point, contrarian, statistic]
+rules:
+  - One idea per scene; code on screen is at most about 8 lines and taken from the repo.
+  - Never show secrets, tokens or internal hostnames from the source.
+  - Every benchmark or number cites a ContentIR ref in claim_refs.
+  - CTA must be an allowed brand CTA if a brand profile is present.
+  - End on the CTA or end card.

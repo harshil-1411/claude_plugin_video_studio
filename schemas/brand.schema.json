@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:brand",
+  "title": "Brand",
+  "description": "brand.yaml: brand voice, visual tokens, video defaults, terminology, prohibited claims and allowed CTAs.",
+  "additionalProperties": false,
+  "properties": {
+    "brand": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "claims": {
+      "additionalProperties": false,
+      "properties": {
+        "prohibited": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "prohibited"
+      ],
+      "type": "object"
+    },
+    "cta": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed"
+      ],
+      "type": "object"
+    },
+    "language": {
+      "additionalProperties": false,
+      "properties": {
+        "locale": {
+          "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+          "type": "string"
+        },
+        "terminology": {
+          "description": "Pronunciation or spelling overrides for TTS, e.g. {\"CI/CD\": \"C I C D\"}.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "locale"
+      ],
+      "type": "object"
+    },
+    "version": {
+      "description": "brand.yaml format version.",
+      "const": 1,
+      "type": "number"
+    },
+    "video": {
+      "additionalProperties": false,
+      "properties": {
+        "caption_preset": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+          "type": "string"
+        },
+        "end_card": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "shot_pacing": {
+          "enum": [
+            "slow",
+            "medium",
+            "fast"
+          ],
+          "type": "string"
+        },
+        "transition_style": {
+          "enum": [
+            "restrained",
+            "balanced",
+            "energetic"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "visual": {
+      "additionalProperties": false,
+      "properties": {
+        "fonts": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "heading": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "mono": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "heading",
+            "body"
+          ],
+          "type": "object"
+        },
+        "logo": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "palette": {
+          "description": "Named colour tokens, e.g. primary, secondary, background, text.",
+          "additionalProperties": {
+            "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+            "type": "string"
+          },
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "fonts",
+        "palette"
+      ],
+      "type": "object"
+    },
+    "voice": {
+      "additionalProperties": false,
+      "properties": {
+        "avoid": {
+          "description": "Words and phrases the script must not use.",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "personality": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "personality",
+        "avoid"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "brand"
+  ],
+  "type": "object"
+}

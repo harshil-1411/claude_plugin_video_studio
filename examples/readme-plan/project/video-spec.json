@@ -1,0 +1,177 @@
+{
+  "schema_version": "1.0",
+  "id": "readme-launch",
+  "title": "video-studio: compile your docs into video",
+  "brief_id": "brief-readme-launch",
+  "goal": "launch",
+  "audience": "Developers who use Claude Code and want to turn docs, posts or repos into short videos without writing video prompts",
+  "platform": "youtube_shorts",
+  "aspect_ratio": "9:16",
+  "target_duration_sec": 40,
+  "language": "en-US",
+  "grounding": "strict",
+  "voice": {
+    "style": "calm, precise, developer to developer"
+  },
+  "captions": {
+    "preset": "minimal",
+    "burn_in": true
+  },
+  "scenes": [
+    {
+      "id": "s01",
+      "duration_sec": 3.5,
+      "purpose": "hook",
+      "voiceover": "Stop writing video prompts. Compile your docs instead.",
+      "on_screen_text": "Compile, don't prompt",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "typography",
+        "props": { "lines": ["Stop writing video prompts.", "Compile your docs."], "emphasis": "Compile" }
+      },
+      "visual_requirements": { "continuity_refs": [] },
+      "claim_refs": ["markdown:README.md#L3-L6"],
+      "transition": "cut"
+    },
+    {
+      "id": "s02",
+      "duration_sec": 6,
+      "purpose": "problem",
+      "voiceover": "A real video is more than a clip. It needs captions, a thumbnail and its sources.",
+      "on_screen_text": "More than a clip",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "comparison",
+        "props": {
+          "left": { "label": "A clip", "text": "MP4" },
+          "right": { "label": "A package", "text": "MP4, captions, thumbnail, provenance" },
+          "verdict": "ship the package"
+        }
+      },
+      "visual_requirements": { "continuity_refs": ["s01"] },
+      "claim_refs": ["markdown:README.md#L3-L6"],
+      "transition": "slide"
+    },
+    {
+      "id": "s03",
+      "duration_sec": 7.5,
+      "purpose": "point",
+      "voiceover": "video-studio turns text, URLs, documents or repos into a finished package: MP4, captions, thumbnail, social copy and provenance.",
+      "on_screen_text": "Sources in. Package out.",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "diagram",
+        "props": {
+          "nodes": ["text", "URLs", "documents", "repos", "video-studio", "MP4", "captions", "thumbnail", "social copy", "manifest", "provenance"],
+          "edges": [
+            ["text", "video-studio"], ["URLs", "video-studio"], ["documents", "video-studio"], ["repos", "video-studio"],
+            ["video-studio", "MP4"], ["video-studio", "captions"], ["video-studio", "thumbnail"],
+            ["video-studio", "social copy"], ["video-studio", "manifest"], ["video-studio", "provenance"]
+          ]
+        }
+      },
+      "visual_requirements": { "continuity_refs": ["s02"] },
+      "claim_refs": ["markdown:README.md#L3-L6"],
+      "transition": "cut"
+    },
+    {
+      "id": "s04",
+      "duration_sec": 6.5,
+      "purpose": "point",
+      "voiceover": "Claude writes the brief and the scene spec. A bundled engine validates, renders and runs QA.",
+      "on_screen_text": "Claude writes. Engine checks.",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "diagram",
+        "props": {
+          "nodes": ["Claude", "creative brief", "scene spec", "engine", "validate", "render", "QA"],
+          "edges": [
+            ["Claude", "creative brief"], ["Claude", "scene spec"], ["scene spec", "engine"],
+            ["engine", "validate"], ["engine", "render"], ["engine", "QA"]
+          ]
+        }
+      },
+      "visual_requirements": { "continuity_refs": ["s03"] },
+      "claim_refs": ["markdown:README.md#L3-L6"],
+      "transition": "cut"
+    },
+    {
+      "id": "s05",
+      "duration_sec": 4.5,
+      "purpose": "proof",
+      "voiceover": "The plugin needs no LLM API key. Claude does the writing.",
+      "on_screen_text": "No LLM API key",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "typography",
+        "props": { "lines": ["No LLM API key"], "emphasis": "No" }
+      },
+      "visual_requirements": { "continuity_refs": ["s01"] },
+      "claim_refs": ["markdown:README.md#L3-L6"],
+      "transition": "cut"
+    },
+    {
+      "id": "s06",
+      "duration_sec": 4,
+      "purpose": "demo",
+      "voiceover": "Today it checks your setup and validates a video spec.",
+      "on_screen_text": "Works today: doctor, validate",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "code",
+        "props": {
+          "language": "text",
+          "code": "/video-studio:doctor\n/video-studio:validate\n",
+          "highlight_lines": [1, 2]
+        }
+      },
+      "visual_requirements": { "continuity_refs": [] },
+      "claim_refs": ["markdown:README.md#L12-L15"],
+      "transition": "cut"
+    },
+    {
+      "id": "s07",
+      "duration_sec": 3,
+      "purpose": "context",
+      "voiceover": "Rendering and providers come in later phases.",
+      "on_screen_text": "Rendering: later phases",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "typography",
+        "props": { "lines": ["Rendering and providers:", "later phases"], "emphasis": "later phases" }
+      },
+      "visual_requirements": { "continuity_refs": ["s05"] },
+      "claim_refs": ["markdown:README.md#L17"],
+      "transition": "cut"
+    },
+    {
+      "id": "s08",
+      "duration_sec": 4,
+      "purpose": "cta",
+      "voiceover": "Try it locally. Run claude, dash dash plugin dir, dot.",
+      "on_screen_text": "claude --plugin-dir .",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "cta",
+        "props": { "headline": "Try it locally", "action": "Run", "command": "claude --plugin-dir ." }
+      },
+      "visual_requirements": { "continuity_refs": ["s06"] },
+      "claim_refs": ["markdown:README.md#L26-L28"],
+      "transition": "fade_black"
+    },
+    {
+      "id": "s09",
+      "duration_sec": 2,
+      "purpose": "end_card",
+      "voiceover": "",
+      "on_screen_text": "video-studio · Apache-2.0",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "end_card",
+        "props": { "title": "video-studio", "subtitle": "Apache-2.0" }
+      },
+      "visual_requirements": { "continuity_refs": [] },
+      "claim_refs": ["markdown:README.md#L65"]
+    }
+  ]
+}

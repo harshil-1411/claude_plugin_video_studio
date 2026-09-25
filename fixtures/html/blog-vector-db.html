@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Why Vector Databases Matter | Acme Engineering Blog</title>
+  <meta name="description" content="A practical look at vector databases and approximate nearest neighbour search.">
+  <meta property="og:title" content="Why Vector Databases Matter">
+  <meta name="author" content="Jordan Example">
+  <link rel="stylesheet" href="/static/site.css">
+  <script>window.analytics = { track: function () {} };</script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="logo" href="/">Acme Engineering</a>
+    <nav><ul><li><a href="/blog">Blog</a></li><li><a href="/careers">Careers</a></li><li><a href="/about">About</a></li></ul></nav>
+  </header>
+  <main>
+    <article class="post">
+      <h1>Why Vector Databases Matter</h1>
+      <p class="byline">By Jordan Example &middot; March 3, 2026 &middot; 6 min read</p>
+      <p>Search used to mean matching keywords. Modern applications instead compare <em>meaning</em>, which requires turning text, images and audio into embeddings and finding the closest ones quickly.</p>
+      <p>A vector database stores those embeddings and answers nearest-neighbour queries. In our benchmarks, switching from brute-force search to an HNSW index cut p95 latency from 480 ms to 12 ms on a 10 million vector corpus.</p>
+      <h2>How approximate search works</h2>
+      <p>Exact search compares a query against every stored vector, which is too slow at scale. Approximate nearest neighbour (ANN) indexes trade a little recall for a large speed-up.</p>
+      <ul>
+        <li>HNSW builds a layered proximity graph and typically reaches 95% recall.</li>
+        <li>IVF partitions vectors into clusters and only scans the closest ones.</li>
+        <li>Product quantization compresses vectors to roughly 1/16 of their original size.</li>
+      </ul>
+      <h2>Getting started</h2>
+      <p>Most clients follow the same shape: create a collection, upsert vectors, then query.</p>
+      <pre><code class="language-python">client = VectorClient(url="http://localhost:6333")
+client.upsert("docs", vectors=embeddings)
+hits = client.query("docs", vector=q, top_k=5)</code></pre>
+      <p>Teams that adopted this pattern reported shipping semantic search 3x faster, and hosting costs fell by $1,200 per month.</p>
+      <h2>Getting started</h2>
+      <p>Yes, this heading is intentionally duplicated to exercise anchor uniqueness in the extractor tests.</p>
+    </article>
+    <aside class="related">
+      <h3>Related posts</h3>
+      <ul><li><a href="/blog/embeddings-101">Embeddings 101</a></li><li><a href="/blog/rag">RAG in production</a></li></ul>
+    </aside>
+  </main>
+  <footer class="site-footer"><p>&copy; 2026 Acme Engineering. All rights reserved.</p><a href="/privacy">Privacy</a></footer>
+</body>
+</html>

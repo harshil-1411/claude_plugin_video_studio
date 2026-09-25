@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0",
+  "id": "ir-03caf3fd3c35",
+  "created_at": "2026-09-25T12:00:00.000Z",
+  "sources": [
+    {
+      "id": "src-1",
+      "kind": "pdf",
+      "uri": "<repo>/fixtures/docs/sample.pdf",
+      "sha256": "6030e494b0bf0e75f397506bb53edf18089806dabf1c031778759ee70032422b",
+      "title": "Vector DB Whitepaper"
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec-1",
+      "source_id": "src-1",
+      "heading": "Introduction",
+      "text": "Introduction\n\nVector databases store embeddings for fast similarity search. They power retrieval for AI apps.\n\nBenchmarks\n\nQuery latency dropped 42% after enabling HNSW indexes."
+    }
+  ],
+  "evidence": [
+    {
+      "ref": "pdf:sample.pdf#p1.para-1",
+      "source_id": "src-1",
+      "text": "Introduction",
+      "locator": {
+        "page": 1
+      }
+    },
+    {
+      "ref": "pdf:sample.pdf#p1.para-2",
+      "source_id": "src-1",
+      "text": "Vector databases store embeddings for fast similarity search. They power retrieval for AI apps.",
+      "locator": {
+        "page": 1
+      }
+    },
+    {
+      "ref": "pdf:sample.pdf#p2.para-1",
+      "source_id": "src-1",
+      "text": "Benchmarks",
+      "locator": {
+        "page": 2
+      }
+    },
+    {
+      "ref": "pdf:sample.pdf#p2.para-2",
+      "source_id": "src-1",
+      "text": "Query latency dropped 42% after enabling HNSW indexes.",
+      "locator": {
+        "page": 2
+      }
+    }
+  ],
+  "entities": [
+    {
+      "id": "ent-1",
+      "name": "DB",
+      "kind": "technology",
+      "evidence_refs": [
+        "pdf:sample.pdf#p1.para-1"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "claim-1",
+      "text": "Query latency dropped 42% after enabling HNSW indexes.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "pdf:sample.pdf#p2.para-2"
+      ]
+    }
+  ],
+  "assets": [],
+  "classification": {
+    "contains_secrets": false,
+    "contains_pii": false,
+    "contains_likeness": false,
+    "data_class": "internal",
+    "notes": []
+  },
+  "warnings": [
+    {
+      "code": "scanned_pdf",
+      "message": "1 of 3 page(s) have little or no extractable text (pages 3); they may be scanned images. OCR is not performed.",
+      "source_id": "src-1"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "sample-lib",
+  "version": "2.0.0",
+  "description": "A tiny in-memory LRU cache for Node.js",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "postinstall": "node -e \"require('fs').writeFileSync('POSTINSTALL_RAN','1')\""
+  },
+  "license": "MIT"
+}

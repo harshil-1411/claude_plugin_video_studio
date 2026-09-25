@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "id": "ir-78530dc2f2d2",
+  "created_at": "2026-09-25T12:00:00.000Z",
+  "sources": [
+    {
+      "id": "src-1",
+      "kind": "markdown",
+      "uri": "<repo>/fixtures/golden/frontmatter-code.md",
+      "sha256": "7892579583d6762fc3fb036bc386ebc8b9b4e1742d095cd1280f7614a27845c7",
+      "title": "Streaming uploads with Node.js"
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec-1",
+      "source_id": "src-1",
+      "heading": "Front matter",
+      "text": "title: Streaming uploads with Node.js\nauthor: Dana Kim\ntags:\n  - node\n  - streams\ndate: 2026-08-14"
+    },
+    {
+      "id": "sec-2",
+      "source_id": "src-1",
+      "heading": "Streaming uploads with Node.js",
+      "text": "Buffering a 2 GB upload in memory will crash a small container. Streams keep memory flat at roughly 64 KB per request."
+    },
+    {
+      "id": "sec-3",
+      "source_id": "src-1",
+      "heading": "Pipe the request",
+      "text": "```js\nimport { pipeline } from \"node:stream/promises\";\nimport { createWriteStream } from \"node:fs\";\n\nexport async function save(req, path) {\n  await pipeline(req, createWriteStream(path));\n}\n```"
+    },
+    {
+      "id": "sec-4",
+      "source_id": "src-1",
+      "heading": "Limit the size",
+      "text": "Reject bodies over 100 MB before writing anything to disk."
+    }
+  ],
+  "evidence": [
+    {
+      "ref": "markdown:frontmatter-code.md#L1-L6",
+      "source_id": "src-1",
+      "text": "title: Streaming uploads with Node.js\nauthor: Dana Kim\ntags: [node, streams]\ndate: 2026-08-14",
+      "locator": {
+        "line_start": 1,
+        "line_end": 6,
+        "selector": "front-matter",
+        "char_start": 0,
+        "char_end": 101
+      }
+    },
+    {
+      "ref": "markdown:frontmatter-code.md#L10-L11",
+      "source_id": "src-1",
+      "text": "Buffering a 2 GB upload in memory will crash a small container. Streams keep\nmemory flat at roughly 64 KB per request.",
+      "locator": {
+        "line_start": 10,
+        "line_end": 11,
+        "selector": "#streaming-uploads-with-node-js",
+        "char_start": 137,
+        "char_end": 255
+      }
+    },
+    {
+      "ref": "markdown:frontmatter-code.md#L15-L22",
+      "source_id": "src-1",
+      "text": "```js\nimport { pipeline } from \"node:stream/promises\";\nimport { createWriteStream } from \"node:fs\";\n\nexport async function save(req, path) {\n  await pipeline(req, createWriteStream(path));\n}\n```",
+      "locator": {
+        "line_start": 15,
+        "line_end": 22,
+        "selector": "#pipe-the-request",
+        "char_start": 278,
+        "char_end": 472
+      }
+    },
+    {
+      "ref": "markdown:frontmatter-code.md#L26",
+      "source_id": "src-1",
+      "text": "Reject bodies over 100 MB before writing anything to disk.",
+      "locator": {
+        "line_start": 26,
+        "line_end": 26,
+        "selector": "#limit-the-size",
+        "char_start": 493,
+        "char_end": 551
+      }
+    }
+  ],
+  "entities": [
+    {
+      "id": "ent-1",
+      "name": "Node.js",
+      "kind": "technology",
+      "evidence_refs": [
+        "markdown:frontmatter-code.md#L1-L6"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "claim-1",
+      "text": "Buffering a 2 GB upload in memory will crash a small container.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "markdown:frontmatter-code.md#L10-L11"
+      ]
+    },
+    {
+      "id": "claim-2",
+      "text": "Streams keep memory flat at roughly 64 KB per request.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "markdown:frontmatter-code.md#L10-L11"
+      ]
+    },
+    {
+      "id": "claim-3",
+      "text": "Reject bodies over 100 MB before writing anything to disk.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "markdown:frontmatter-code.md#L26"
+      ]
+    }
+  ],
+  "assets": [],
+  "classification": {
+    "contains_secrets": false,
+    "contains_pii": false,
+    "contains_likeness": false,
+    "data_class": "internal",
+    "notes": []
+  },
+  "warnings": []
+}

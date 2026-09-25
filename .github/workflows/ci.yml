@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.x", "24.x"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        # Version comes from "packageManager" in package.json.
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Regenerate schemas and bundle
+        run: |
+          pnpm schemas
+          pnpm bundle
+
+      - name: Generated files are committed and up to date
+        run: git diff --exit-code -- schemas/ dist/
+
+      - name: Bundle starts and lists tools
+        run: pnpm smoke
+
+      # The claude CLI may not install or run on CI runners; treat as advisory until proven stable.
+      - name: Install Claude Code CLI
+        id: claude
+        continue-on-error: true
+        run: npm install -g @anthropic-ai/claude-code && claude --version
+
+      - name: Validate plugin (strict)
+        if: steps.claude.outcome == 'success'
+        continue-on-error: true
+        run: |
+          # plugin.json path: validates the plugin incl. skills. Repo root: validates marketplace.json only.
+          claude plugin validate --strict .claude-plugin/plugin.json
+          claude plugin validate --strict .

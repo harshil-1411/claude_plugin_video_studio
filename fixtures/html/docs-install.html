@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Installation - Widgetron Docs</title>
+</head>
+<body>
+  <div class="docs-layout">
+    <nav class="sidebar" aria-label="Docs">
+      <ul>
+        <li><a href="/docs/">Introduction</a></li>
+        <li><a href="/docs/install" aria-current="page">Installation</a></li>
+        <li><a href="/docs/config">Configuration</a></li>
+        <li><a href="/docs/api">API reference</a></li>
+      </ul>
+    </nav>
+    <main class="content">
+      <h1 id="installation">Installation</h1>
+      <p>Widgetron runs on Node.js 22.13 or later and on any operating system supported by Node. The package is about 2 MB unpacked and has no native dependencies.</p>
+      <h2 id="install-with-npm">Install with npm</h2>
+      <p>Add the package to your project with your package manager of choice:</p>
+      <pre><code class="language-sh">npm install widgetron</code></pre>
+      <h2 id="verify">Verify the installation</h2>
+      <p>Run the doctor command. It checks your environment and prints a short report; the whole check takes under 5 seconds.</p>
+      <pre><code class="language-sh">npx widgetron doctor</code></pre>
+      <table>
+        <tr><th>Check</th><th>Expected</th></tr>
+        <tr><td>node</td><td>&gt;= 22.13</td></tr>
+        <tr><td>ffmpeg</td><td>present</td></tr>
+      </table>
+      <blockquote><p>Tip: set WIDGETRON_LOG=debug to see every step the doctor runs.</p></blockquote>
+    </main>
+  </div>
+  <footer>Widgetron is released under the Apache-2.0 license.</footer>
+</body>
+</html>

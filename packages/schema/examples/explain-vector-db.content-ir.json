@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "id": "ir-vector-db",
+  "created_at": "2026-09-25T10:00:00Z",
+  "sources": [
+    { "id": "src1", "kind": "url", "uri": "https://example.com/vector-db-guide", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "title": "A practical guide to vector databases" }
+  ],
+  "sections": [
+    { "id": "sec1", "source_id": "src1", "heading": "Why keyword search falls short", "text": "Keyword indexes match tokens, so a query for cheap flight misses documents that only say low-cost airfare." },
+    { "id": "sec2", "source_id": "src1", "heading": "Embeddings", "text": "Embedding models map text to vectors so that semantically similar texts are close together." }
+  ],
+  "evidence": [
+    { "ref": "url:https://example.com/vector-db-guide#keyword-limits", "source_id": "src1", "text": "a query for cheap flight misses documents that only say low-cost airfare", "locator": { "selector": "#keyword-limits" } },
+    { "ref": "url:https://example.com/vector-db-guide#embeddings", "source_id": "src1", "text": "semantically similar texts are close together", "locator": { "selector": "#embeddings" } },
+    { "ref": "url:https://example.com/vector-db-guide#ann-index", "source_id": "src1", "text": "approximate nearest-neighbour indexes answer top-k queries in milliseconds", "locator": { "selector": "#ann-index" } },
+    { "ref": "url:https://example.com/vector-db-guide#quickstart", "source_id": "src1", "text": "q = embed(...); index.query(vector=q, top_k=5)", "locator": { "selector": "#quickstart", "line_start": 1, "line_end": 5 } }
+  ],
+  "entities": [
+    { "id": "ent-ann", "name": "approximate nearest neighbour", "kind": "technology", "aliases": ["ANN"], "evidence_refs": ["url:https://example.com/vector-db-guide#ann-index"] }
+  ],
+  "claims": [
+    { "id": "c1", "text": "ANN indexes answer top-k queries in milliseconds", "kind": "quantitative", "evidence_refs": ["url:https://example.com/vector-db-guide#ann-index"] }
+  ],
+  "assets": [
+    { "id": "a1", "kind": "image", "path": "source/assets/diagram.png", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "source_ref": "url:https://example.com/vector-db-guide#embeddings" }
+  ],
+  "classification": { "contains_secrets": false, "contains_pii": false, "contains_likeness": false, "data_class": "public", "notes": [] },
+  "warnings": [
+    { "code": "image_skipped", "message": "1 decorative image skipped", "source_id": "src1" }
+  ]
+}

@@ -1,0 +1,64 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`textExtractor > splits inline text into heuristic sections with paragraph spans 1`] = `
+{
+  "assets": [],
+  "evidence": [
+    {
+      "locator": {
+        "char_end": 92,
+        "char_start": 18,
+        "line_end": 4,
+        "line_start": 3,
+        "selector": "#quarterly-update",
+      },
+      "ref": "text:inline-424a516f9838#c18-92",
+      "text": "Revenue grew 23% year over year, reaching $4.2 million.
+Churn stayed flat.",
+    },
+    {
+      "locator": {
+        "char_end": 144,
+        "char_start": 106,
+        "line_end": 9,
+        "line_start": 8,
+        "selector": "#next-steps",
+      },
+      "ref": "text:inline-424a516f9838#c106-144",
+      "text": "- Hire two engineers
+- Ship the v2 API",
+    },
+    {
+      "locator": {
+        "char_end": 165,
+        "char_start": 146,
+        "line_end": 11,
+        "line_start": 11,
+        "selector": "#next-steps",
+      },
+      "ref": "text:inline-424a516f9838#c146-165",
+      "text": "Thanks for reading!",
+    },
+  ],
+  "sections": [
+    {
+      "heading": "Quarterly Update",
+      "text": "Revenue grew 23% year over year, reaching $4.2 million. Churn stayed flat.",
+    },
+    {
+      "heading": "Next Steps",
+      "text": "- Hire two engineers
+- Ship the v2 API
+
+Thanks for reading!",
+    },
+  ],
+  "source": {
+    "kind": "text",
+    "sha256": "424a516f9838d9e0a0783449adf675b739befc5a7024efe666fb2a7a5523ad28",
+    "title": "Quarterly Update",
+    "uri": "inline:inline-424a516f9838",
+  },
+  "warnings": [],
+}
+`;

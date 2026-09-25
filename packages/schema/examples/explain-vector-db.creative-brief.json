@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "id": "brief-vector-db",
+  "content_ir_id": "ir-vector-db",
+  "goal": "explain",
+  "audience": "backend engineers new to AI search",
+  "platform": "instagram_reels",
+  "aspect_ratio": "9:16",
+  "target_duration_sec": 30,
+  "language": "en-US",
+  "tone": ["clear", "confident"],
+  "desired_action": "Follow for part two",
+  "hook_candidates": [
+    { "text": "Keyword search can't find what you meant.", "mechanism": "pain_point", "scores": { "clarity": 9, "curiosity": 7 } },
+    { "text": "Your search bar is lying to you.", "mechanism": "contrarian", "scores": { "clarity": 6, "curiosity": 9 } }
+  ],
+  "chosen_hook": "Keyword search can't find what you meant.",
+  "assumptions": [
+    { "field": "platform", "value": "instagram_reels", "reason": "No platform given; 9:16 short-form is the default." }
+  ]
+}
