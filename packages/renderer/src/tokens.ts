@@ -3,8 +3,8 @@ import { access } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runProcess } from "@video-studio/media";
-import type { AspectRatio, Brand } from "@video-studio/schema";
-import type { RenderTarget, VisualTokens } from "./types.js";
+import type { AspectRatio, Brand, Style } from "@video-studio/schema";
+import type { MotionTokens, RenderTarget, VisualTokens } from "./types.js";
 
 /**
  * Visual tokens, font files and render targets shared by the deterministic renderers.
@@ -58,14 +58,61 @@ function withFallbacks(chain: string, extra: readonly string[]): string {
   return parts.join(", ");
 }
 
+/** A style font before the default chain, without repeating a family the chain already has. */
+function styleFontChain(font: string | undefined, fallback: string): string {
+  if (!font) return fallback;
+  if (font.includes(",")) return font;
+  const rest = fallback
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p.replace(/^["']|["']$/g, "").toLowerCase() !== font.toLowerCase());
+  const quoted = /\s/.test(font) && !/^["']/.test(font) ? `"${font}"` : font;
+  return [quoted, ...rest].join(", ");
+}
+
 /**
- * Resolve visual tokens: brand.yaml values where given (palette keys `background|bg`,
- * `text|foreground|fg`, `primary|accent`, `secondary`), else `defaults`, else DEFAULT_TOKENS.
+ * Default motion per personality, used when only brand.motion.personality is set (no style), or
+ * when the brand's personality differs from the style's. Transitions are the default scene join.
+ */
+export const PERSONALITY_MOTION: Readonly<Record<MotionTokens["personality"], Omit<MotionTokens, "personality">>> = Object.freeze({
+  calm: { easing: "ease_out", enter_ms: 600, exit_ms: 250, stagger_ms: 180, transition: "crossfade", transition_ms: 500 },
+  precise: { easing: "snap", enter_ms: 160, exit_ms: 0, stagger_ms: 60, transition: "cut", transition_ms: 0 },
+  friendly: { easing: "ease_in_out", enter_ms: 450, exit_ms: 200, stagger_ms: 120, transition: "crossfade", transition_ms: 350 },
+  energetic: { easing: "spring", enter_ms: 350, exit_ms: 120, stagger_ms: 70, transition: "whip", transition_ms: 250 },
+  playful: { easing: "spring", enter_ms: 500, exit_ms: 150, stagger_ms: 110, transition: "zoom", transition_ms: 300 },
+});
+
+/**
+ * Resolve visual tokens. Precedence: DEFAULT_TOKENS < `defaults` < `style` < brand.yaml.
+ * - Style: palette, fonts (placed before the default chain), weights, text case / heading scale /
+ *   alignment, motion, and `style` = `<id>@<version>`.
+ * - Brand: palette keys `background|bg`, `text|foreground|fg`, `primary|accent`, `secondary`;
+ *   fonts; `visual.weights`; `motion.personality` (a personality other than the style's also
+ *   brings that personality's easing and timings, keeping the style's transition kind) and
+ *   `motion.transition_ms`. A brand personality without a style maps through PERSONALITY_MOTION.
  * `visual.font_fallbacks` are added to every chain before its generic family.
  * `logo_path` is the brand's logo path as written (project-relative); renderers resolve it.
+ * Without a style and without brand weights or motion, the tokens are exactly the v1 tokens.
  */
-export function resolveTokens(brand?: Brand, defaults: Partial<VisualTokens> = {}): VisualTokens {
+export function resolveTokens(brand?: Brand, defaults: Partial<VisualTokens> = {}, style?: Style): VisualTokens {
   const base: VisualTokens = { ...DEFAULT_TOKENS, ...defaults };
+  if (style) {
+    base.style = `${style.id}@${style.version}`;
+    const sp = style.palette ?? {};
+    if (sp.background) base.color_background = sp.background;
+    if (sp.text) base.color_text = sp.text;
+    if (sp.primary) base.color_primary = sp.primary;
+    if (sp.secondary) base.color_secondary = sp.secondary;
+    base.font_heading = styleFontChain(style.fonts?.heading, base.font_heading);
+    base.font_body = styleFontChain(style.fonts?.body, base.font_body);
+    base.font_mono = styleFontChain(style.fonts?.mono, base.font_mono);
+    if (style.weights?.heading !== undefined) base.weight_heading = style.weights.heading;
+    if (style.weights?.body !== undefined) base.weight_body = style.weights.body;
+    if (style.text?.case) base.text_case = style.text.case;
+    if (style.text?.heading_scale !== undefined) base.heading_scale = style.text.heading_scale;
+    if (style.text?.align) base.text_align = style.text.align;
+    base.motion = { ...style.motion };
+  }
   const visual = brand?.visual;
   const extra = visual?.font_fallbacks ?? [];
   const out: VisualTokens = {
@@ -79,6 +126,16 @@ export function resolveTokens(brand?: Brand, defaults: Partial<VisualTokens> = {
     const key = keys.find((k) => palette[k] !== undefined);
     out[token] = normalizeHex(key ? palette[key]! : out[token]);
   }
+  if (visual?.weights?.heading !== undefined) out.weight_heading = visual.weights.heading;
+  if (visual?.weights?.body !== undefined) out.weight_body = visual.weights.body;
+  const bm = brand?.motion;
+  if (bm?.personality && bm.personality !== out.motion?.personality) {
+    const table = PERSONALITY_MOTION[bm.personality];
+    out.motion = out.motion
+      ? { ...out.motion, personality: bm.personality, easing: table.easing, enter_ms: table.enter_ms, exit_ms: table.exit_ms, stagger_ms: table.stagger_ms }
+      : { personality: bm.personality, ...table };
+  }
+  if (bm?.transition_ms !== undefined && out.motion) out.motion = { ...out.motion, transition_ms: bm.transition_ms };
   const logo = visual?.logo ?? base.logo_path;
   if (logo) out.logo_path = logo;
   else delete out.logo_path;

@@ -179,6 +179,14 @@ describe("diffLocks", () => {
       ["creative", "spec_sha256"],
     ]);
   });
+
+  it("classifies a style pack change as creative, not a tool change", () => {
+    const b = clone(base());
+    b.tools.style = "minimal@1";
+    const after = clone(b);
+    after.tools.style = "energetic@1";
+    expect(classes(b, after)).toEqual([["creative", "tools.style"]]);
+  });
 });
 
 describe("lock files and inputs", () => {

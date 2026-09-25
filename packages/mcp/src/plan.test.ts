@@ -16,7 +16,21 @@ import { findTemplatesDir, getTemplate, loadTemplates } from "./templates.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const examples = resolve(here, "../../schema/examples");
-const EXPECTED_TEMPLATES = ["devtool-launch", "educational", "explain", "listicle", "product-launch"];
+const EXPECTED_TEMPLATES = [
+  "animated-explainer",
+  "before-after",
+  "carousel-story",
+  "case-study",
+  "devtool-launch",
+  "educational",
+  "explain",
+  "faceless-listicle",
+  "listicle",
+  "product-demo",
+  "product-launch",
+  "product-ui",
+  "text-over-music",
+];
 
 let tmp: string;
 let templatesDir: string;
@@ -70,7 +84,7 @@ describe("templates", () => {
   });
 
   it("getTemplate rejects unknown and path-like ids with the available list", async () => {
-    await expect(getTemplate(templatesDir, "nope")).rejects.toThrow(/available: devtool-launch, educational/);
+    await expect(getTemplate(templatesDir, "nope")).rejects.toThrow(/available: animated-explainer, before-after/);
     await expect(getTemplate(templatesDir, "../schemas")).rejects.toThrow(/unknown template/);
   });
 });
@@ -93,8 +107,9 @@ describe("spec_scaffold", () => {
 
         // Fill placeholders the way Claude would, then the spec must pass semantics too.
         const filled = structuredClone(r.spec);
+        const silent = filled.voice.mode === "none";
         for (const s of filled.scenes) {
-          s.voiceover = "A short line of narration for this scene.";
+          s.voiceover = silent ? "" : "A short line of narration for this scene.";
           s.on_screen_text = "Key idea";
           if (s.deterministic) s.deterministic.props = structuredClone(DETERMINISTIC_PROPS_EXAMPLES[s.deterministic.kind]);
           // Example props carry numbers (e.g. a 40% stat), which strict grounding requires a ref for.
@@ -122,6 +137,51 @@ describe("spec_scaffold", () => {
     expect(short.spec.master).toEqual({ width: 1920, height: 1080, fps: 30 });
     expect(short.spec.targets).toBeUndefined();
     expect(r.notes.join(" ")).toMatch(/add cover \{headline, focal_time_sec\}/);
+  });
+
+  it("text-over-music scaffolds without voice, with the lofi bed and on-screen word budgets", async () => {
+    const root = await exampleProject("scaffold-tom", { brief: null });
+    const r = await scaffoldSpec(root, templatesDir, { template_id: "text-over-music" });
+    expect(r.spec.voice.mode).toBe("none");
+    expect(r.spec.audio?.music?.file).toBe("bundled:lofi");
+    expect(r.spec.captions.burn_in).toBe(false);
+    expect(r.spec.style).toBe("energetic");
+    expect(r.spec.scenes.every((s) => s.voiceover === "")).toBe(true);
+    for (const g of r.scene_guidance) expect(g.word_budget, g.scene_id).toBe(Math.max(3, Math.floor((g.duration_sec - 1) * 3)));
+    expect(r.notes.join(" ")).toMatch(/voice\.mode "none"/);
+
+    // Overrides: another bed, another style, or narration back on.
+    const o = await scaffoldSpec(root, templatesDir, { template_id: "text-over-music", music: "bundled:ambient", style: "minimal", voice_mode: "narrated" });
+    expect(o.spec.audio?.music?.file).toBe("bundled:ambient");
+    expect(o.spec.style).toBe("minimal");
+    expect(o.spec.voice.mode).toBeUndefined();
+    expect(o.spec.captions.burn_in).toBe(true);
+  });
+
+  it("applies each archetype's default style and lets style override it", async () => {
+    const root = await exampleProject("scaffold-style", { brief: null });
+    const defaults: Record<string, string> = {
+      "animated-explainer": "technical",
+      "before-after": "energetic",
+      "carousel-story": "editorial",
+      "case-study": "editorial",
+      "faceless-listicle": "energetic",
+      "product-demo": "minimal",
+      "product-ui": "minimal",
+      "text-over-music": "energetic",
+    };
+    for (const [id, style] of Object.entries(defaults)) {
+      const r = await scaffoldSpec(root, templatesDir, { template_id: id });
+      expect(r.spec.style, id).toBe(style);
+      if (id !== "text-over-music") {
+        expect(r.spec.voice.mode, id).toBeUndefined();
+        expect(r.spec.audio, id).toBeUndefined();
+      }
+    }
+    const o = await scaffoldSpec(root, templatesDir, { template_id: "case-study", style: "technical" });
+    expect(o.spec.style).toBe("technical");
+    const legacy = await scaffoldSpec(root, templatesDir, { template_id: "explain" });
+    expect(legacy.spec.style).toBeUndefined();
   });
 
   it("takes explicit targets over the brief", async () => {
@@ -173,7 +233,7 @@ assumptions: []
     await writeFile(join(root, "project/creative-brief.yaml"), yaml.replace('"Something else"', '"One"').replace("product-launch", "no-such-template"));
     const unknown = await validateBrief(root, templatesDir);
     expect(unknown.errors.map((e) => e.path)).toEqual(["template"]);
-    expect(unknown.errors[0]!.message).toContain("available: devtool-launch");
+    expect(unknown.errors[0]!.message).toContain("available: animated-explainer");
   });
 
   it("returns schema errors with fixes and throws when no brief exists", async () => {

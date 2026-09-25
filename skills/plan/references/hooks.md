@@ -10,20 +10,25 @@ facts found in the project's ContentIR.
 ## Recording a hook in the brief
 
 `hook_candidates[].mechanism` accepts only these schema values:
-`curiosity_gap`, `contrarian`, `statistic`, `question`, `pain_point`,
-`promise`, `story`, `demo`, `pattern_interrupt`.
+`curiosity_gap`, `contrarian`, `contrarian_claim`, `statistic`, `question`,
+`pain_point`, `promise`, `story`, `demo`, `pattern_interrupt`,
+`before_after`, `mistake`.
 
 | Mechanism (taxonomy) | Record as |
 |---|---|
-| Contrarian claim | `contrarian` |
+| Contrarian claim | `contrarian_claim` (`contrarian` is the older equivalent) |
 | Question | `question` |
 | Surprising stat | `statistic` |
-| Before/after | `demo` (the product shows the change) or `pain_point` (the "before" leads) |
-| Mistake | `pain_point` |
+| Before/after | `before_after` |
+| Mistake | `mistake` |
 | Curiosity gap | `curiosity_gap` |
 | Direct promise | `promise` |
 | Story open | `story` |
+| Product shown working in the first seconds | `demo` |
 | Visual/audio jolt that breaks the scroll | `pattern_interrupt` |
+
+Prefer the template's `hook_mechanisms` (best first); `brief_validate`
+warns when the chosen hook uses one the template does not list.
 
 ## Scoring rubric (0-10 each, stored in `scores`)
 

@@ -1,0 +1,56 @@
+# Archetype: no speech - short on-screen text cards over a music bed.
+schema_version: "1.0"
+id: text-over-music
+name: Text over music
+description: No voiceover - kinetic text, stat, quote and split-screen cards over a music bed, read at a glance. Also covers a music-only product demo (swap a card for a screenshot or split_screen of the product).
+goals: [promote, educate, announce, launch, explain]
+platforms: [instagram_reels, tiktok, youtube_shorts, linkedin, x]
+default_aspect_ratio: "9:16"
+default_duration_sec: 20
+duration_range: { min_sec: 10, max_sec: 45 }
+pacing: { avg_shot_sec: 3.5, max_words_per_sec: 3.0 }
+caption_preset: bold
+voice_mode: none
+default_style: energetic
+default_music: bundled:lofi
+beats:
+  - purpose: hook
+    share: 0.16
+    guidance: At most 6 words that stop the scroll; the whole message of the first card must be readable in 2 seconds.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: kinetic_text
+  - purpose: point
+    share: 0.18
+    guidance: One claim or number as a stat card; label it in a few words. A number cites claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: stat
+  - purpose: comparison
+    share: 0.20
+    guidance: One contrast as a split screen (before/after or old/new), a few words per half. For a product demo use a product screenshot on one half.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: split_screen
+  - purpose: proof
+    share: 0.16
+    guidance: A short verbatim quote from the source with attribution.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: quote
+    optional: true
+  - purpose: payoff
+    share: 0.14
+    guidance: The takeaway as kinetic text, echoing the hook's words.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: kinetic_text
+  - purpose: cta
+    share: 0.16
+    guidance: One action in a few words (a command or URL), matching desired_action.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+hook_mechanisms: [statistic, pattern_interrupt, promise, before_after, contrarian_claim]
+rules:
+  - "voice.mode is none: every scene's voiceover stays empty; all words are on screen."
+  - "On-screen word budget: about 3 words per second after a 1 s settle, per scene (spec_scaffold's word_budget); cut words rather than lengthen cards."
+  - One message per card; no card carries more than two short lines.
+  - Numbers on screen still need grounding - cite the ContentIR ref in claim_refs.
+  - The music bed is bundled (CC0) or a user file with audio.music.license recorded.
+  - "Music-only product demo: use screenshot or split_screen cards with real ContentIR assets and at most two callouts."
+  - CTA must be an allowed brand CTA if a brand profile is present.

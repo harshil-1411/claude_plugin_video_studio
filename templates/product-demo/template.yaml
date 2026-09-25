@@ -1,0 +1,56 @@
+# Archetype: product demo from problem to working result.
+schema_version: "1.0"
+id: product-demo
+name: Product demo
+description: Shows the product solving one problem - problem, demo steps on screenshots or split screens, the result, and a CTA. Works narrated; for a music-only demo use text-over-music.
+goals: [launch, promote, announce, explain]
+platforms: [x, linkedin, youtube_shorts, instagram_reels, tiktok, youtube]
+default_aspect_ratio: "9:16"
+default_duration_sec: 40
+duration_range: { min_sec: 20, max_sec: 90 }
+pacing: { avg_shot_sec: 5, max_words_per_sec: 2.8 }
+caption_preset: minimal
+beats:
+  - purpose: hook
+    share: 0.08
+    guidance: Open on the result or the pain in one line ("from README to video in one command"). No logo, no greeting.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: kinetic_text
+  - purpose: problem
+    share: 0.12
+    guidance: The one problem the demo solves, shown concretely (the tedious way).
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: step
+    share: 0.18
+    guidance: Demo step 1 on a real screenshot of the product with one callout on the thing to look at.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: screenshot
+  - purpose: step
+    share: 0.18
+    guidance: Demo step 2. Use split_screen when the step is input vs output; otherwise another screenshot with one callout.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: split_screen
+  - purpose: step
+    share: 0.12
+    guidance: Demo step 3 (optional) - the finishing move, e.g. the command or export.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: code
+    optional: true
+  - purpose: result
+    share: 0.18
+    guidance: The outcome with proof - a stat or the finished artefact. Numbers cite claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: stat
+  - purpose: cta
+    share: 0.14
+    guidance: One action (install, try, book a demo) that matches desired_action; show the command or URL.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+hook_mechanisms: [demo, before_after, pain_point, promise]
+rules:
+  - Show the real product; screenshots and split_screen assets must be ContentIR asset ids.
+  - One action per step scene with one callout; do not tour every feature.
+  - The result claims only what the source proves; cite it in claim_refs.
+  - CTA must be an allowed brand CTA if a brand profile is present.
+default_style: minimal

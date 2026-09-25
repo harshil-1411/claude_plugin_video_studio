@@ -18,8 +18,11 @@ import {
 } from "@video-studio/media";
 import type { DeterministicKind, Scene, TextBox, TextRole } from "@video-studio/schema";
 import {
+  CHAR_EM_UPPER,
+  type FitOptions,
   type FitResult,
   type Rect,
+  applyTextCase,
   estimateTextWidth,
   fitText,
   inset,
@@ -30,7 +33,7 @@ import {
   wrapText,
 } from "./text-layout.js";
 import { type FontResolver, createFontResolver } from "./tokens.js";
-import type { Availability, LayoutZones, RenderTarget, SceneRenderRequest, SceneRenderResult, SceneRenderer, VisualTokens } from "./types.js";
+import type { Availability, LayoutZones, MotionTokens, RenderTarget, SceneRenderRequest, SceneRenderResult, SceneRenderer, VisualTokens } from "./types.js";
 
 /**
  * Chrome-free fallback renderer for deterministic scenes: one `-f lavfi color=` source at the
@@ -156,6 +159,8 @@ interface Ctx {
   main: TextRole;
   /** Text boxes recorded while laying out. */
   boxes: TextBox[];
+  /** Alignment of heading-like text blocks (style `text.align`; default centred). */
+  align: "left" | "center";
 }
 
 interface Palette {
@@ -259,15 +264,34 @@ function note(
   });
 }
 
+/** Heading text with the style's case transform (hook/headline roles). */
+function headCase(c: Ctx, text: string): string {
+  return applyTextCase(text, c.tokens.text_case);
+}
+
+/**
+ * fitText for a heading: a wider glyph estimate for upper case, then the style's heading scale
+ * applied to the fitted size (re-fitted downwards when the scaled size no longer fits).
+ * Without style tokens this is exactly `fitText(text, box, opts)`.
+ */
+function fitHeading(c: Ctx, text: string | readonly string[], box: { w: number; h: number }, opts: FitOptions): FitResult {
+  const o: FitOptions = c.tokens.text_case === "upper" && !opts.mono ? { ...opts, em: CHAR_EM_UPPER } : opts;
+  const fit = fitText(text, box, o);
+  const k = c.tokens.heading_scale;
+  if (k === undefined || k === 1 || (k > 1 && fit.truncated)) return fit;
+  const size = fit.fontSize * k;
+  return fitText(text, box, { ...o, maxSize: size, minSize: Math.min(o.minSize, size) });
+}
+
 // ---------------------------------------------------------------------------------- per-kind layouts
 
 function typography(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
-  const lines = Array.isArray(p.lines) ? p.lines.filter((l): l is string => typeof l === "string" && l.trim() !== "") : [];
+  const lines = Array.isArray(p.lines) ? p.lines.filter((l): l is string => typeof l === "string" && l.trim() !== "").map((l) => headCase(c, l)) : [];
   if (lines.length === 0) warnings.push("typography: no lines to draw");
   const emphasis = asStr(p.emphasis)?.trim();
   const box = inset(c.safe, r(c.u * 0.02));
-  const fit = fitText(lines, box, { maxSize: c.u * 0.12, minSize: c.u * 0.04 });
+  const fit = fitHeading(c, lines, box, { maxSize: c.u * 0.12, minSize: c.u * 0.04 });
   if (fit.truncated) warnings.push("typography: text did not fit at the minimum size and was truncated");
   const em = emphasis?.toLowerCase();
   const emWords = em ? em.split(/\s+/).filter((w) => w.length >= 3) : [];
@@ -280,7 +304,7 @@ function typography(p: Record<string, unknown>, c: Ctx): Layout {
     }
     return c.colors.text;
   };
-  const els = textLines(fit, box, { font: "heading", color, beat: (i) => i });
+  const els = textLines(fit, box, { font: "heading", color, beat: (i) => i, align: c.align });
   note(c, c.main, lines.join("\n"), box, fit, c.colors.text);
   if (em && !hit) warnings.push(`typography: emphasis "${emphasis}" not found in lines`);
   if (em && hit) warnings.push("typography: emphasis colours the whole line containing it (no per-word styling in ffmpeg-drawtext)");
@@ -340,7 +364,8 @@ function comparison(p: Record<string, unknown>, c: Ctx): Layout {
   const side = (v: unknown) => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
   const left = side(p.left);
   const right = side(p.right);
-  const verdict = asStr(p.verdict);
+  const verdictRaw = asStr(p.verdict);
+  const verdict = verdictRaw ? headCase(c, verdictRaw) : undefined;
   const gap = r(c.u * 0.04);
   const [mainR, verdictR] = verdict ? splitV(c.safe, [5, 1], gap) : [c.safe, undefined];
   const portrait = c.target.height > c.target.width;
@@ -371,9 +396,9 @@ function comparison(p: Record<string, unknown>, c: Ctx): Layout {
     note(c, "body", asStr(s.text) ?? "", bodyBoxes[i]!, bf, c.colors.text, c.colors.panel);
   });
   if (verdict && verdictR) {
-    const vf = fitText(verdict, verdictR, { maxSize: c.u * 0.06, minSize: c.u * 0.03 });
+    const vf = fitHeading(c, verdict, verdictR, { maxSize: c.u * 0.06, minSize: c.u * 0.03 });
     if (vf.truncated) warnings.push("comparison: verdict truncated to fit");
-    els.push(...textLines(vf, verdictR, { font: "heading", color: c.colors.text, beat: 4 }));
+    els.push(...textLines(vf, verdictR, { font: "heading", color: c.colors.text, beat: 4, align: c.align }));
     note(c, "headline", verdict, verdictR, vf, c.colors.text);
   }
   return { elements: els, warnings };
@@ -381,7 +406,7 @@ function comparison(p: Record<string, unknown>, c: Ctx): Layout {
 
 function cta(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
-  const headline = asStr(p.headline) ?? "";
+  const headline = headCase(c, asStr(p.headline) ?? "");
   const action = asStr(p.action);
   const command = asStr(p.command);
   const url = asStr(p.url);
@@ -395,9 +420,9 @@ function cta(p: Record<string, unknown>, c: Ctx): Layout {
   parts.forEach(({ key }, i) => {
     const rect = rects[i]!;
     if (key === "headline") {
-      const f = fitText(headline, rect, { maxSize: c.u * 0.11, minSize: c.u * 0.04 });
+      const f = fitHeading(c, headline, rect, { maxSize: c.u * 0.11, minSize: c.u * 0.04 });
       if (f.truncated) warnings.push("cta: headline truncated to fit");
-      els.push(...textLines(f, rect, { font: "heading", color: c.colors.text, beat: 0, valign: "bottom" }));
+      els.push(...textLines(f, rect, { font: "heading", color: c.colors.text, beat: 0, valign: "bottom", align: c.align }));
       note(c, c.main === "hook" ? "hook" : "cta", headline, rect, f, c.colors.text);
     } else if (key === "action") {
       const maxW = r(rect.w * 0.9);
@@ -432,7 +457,8 @@ function cta(p: Record<string, unknown>, c: Ctx): Layout {
 
 function endCard(p: Record<string, unknown>, c: Ctx, logo: { path: string; width: number; height: number } | null): Layout {
   const warnings: string[] = [];
-  const title = asStr(p.title);
+  const titleRaw = asStr(p.title);
+  const title = titleRaw ? headCase(c, titleRaw) : undefined;
   const subtitle = asStr(p.subtitle);
   const parts: { key: string; weight: number }[] = [];
   if (logo) parts.push({ key: "logo", weight: 1.4 });
@@ -456,14 +482,14 @@ function endCard(p: Record<string, unknown>, c: Ctx, logo: { path: string; width
       const h = Math.max(2, Math.floor((logo.height * s) / 2) * 2);
       els.push({ type: "image", path: logo.path, x: r(rect.x + (rect.w - w) / 2), y: r(rect.y + (rect.h - h) / 2), w, h, beat: 0 });
     } else if (key === "title") {
-      const f = fitText(title!, rect, { maxSize: c.u * 0.12, minSize: c.u * 0.04 });
+      const f = fitHeading(c, title!, rect, { maxSize: c.u * 0.12, minSize: c.u * 0.04 });
       if (f.truncated) warnings.push("end_card: title truncated to fit");
-      els.push(...textLines(f, rect, { font: "heading", color: c.colors.text, beat: 1, valign: parts.length === 1 ? "middle" : "bottom" }));
+      els.push(...textLines(f, rect, { font: "heading", color: c.colors.text, beat: 1, valign: parts.length === 1 ? "middle" : "bottom", align: c.align }));
       note(c, c.main, title!, rect, f, c.colors.text);
     } else {
       const f = fitText(subtitle!, rect, { maxSize: c.u * 0.055, minSize: c.u * 0.025 });
       if (f.truncated) warnings.push("end_card: subtitle truncated to fit");
-      els.push(...textLines(f, rect, { font: "body", color: c.colors.primary, beat: 2, valign: "top" }));
+      els.push(...textLines(f, rect, { font: "body", color: c.colors.primary, beat: 2, valign: "top", align: c.align }));
       note(c, "body", subtitle!, rect, f, c.colors.primary);
     }
   });
@@ -478,7 +504,7 @@ function formatNumber(v: number): string {
 function statLayout(value: string, label: string | undefined, c: Ctx, warnings: string[]): Layout {
   const [numR, labelR] = label ? splitV(c.safe, [3, 2], r(c.u * 0.03)) : [c.safe, undefined];
   const els: El[] = [];
-  const nf = fitText(value, numR!, { maxSize: c.u * 0.32, minSize: c.u * 0.06, maxLines: 1, lineHeight: 1.1 });
+  const nf = fitHeading({ ...c, tokens: { ...c.tokens, text_case: "as_is" } }, value, numR!, { maxSize: c.u * 0.32, minSize: c.u * 0.06, maxLines: 1, lineHeight: 1.1 });
   if (nf.truncated) warnings.push("chart: value truncated to fit");
   els.push(...textLines(nf, numR!, { font: "heading", color: c.colors.primary, beat: 0, valign: label ? "bottom" : "middle" }));
   note(c, c.main, value, numR!, nf, c.colors.primary);
@@ -515,9 +541,10 @@ function chart(p: Record<string, unknown>, c: Ctx): Layout {
     const gap = r(c.u * 0.03);
     const [titleR, barsR] = label ? splitV(c.safe, [1, 5], gap) : [undefined, c.safe];
     if (label && titleR) {
-      const tf = fitText(label, titleR, { maxSize: c.u * 0.065, minSize: c.u * 0.03, maxLines: 2 });
-      els.push(...textLines(tf, titleR, { font: "heading", color: c.colors.text, beat: 0, valign: "bottom" }));
-      note(c, c.main, label, titleR, tf, c.colors.text);
+      const title = headCase(c, label);
+      const tf = fitHeading(c, title, titleR, { maxSize: c.u * 0.065, minSize: c.u * 0.03, maxLines: 2 });
+      els.push(...textLines(tf, titleR, { font: "heading", color: c.colors.text, beat: 0, valign: "bottom", align: c.align }));
+      note(c, c.main, title, titleR, tf, c.colors.text);
     }
     // Compact rows (label + bar of at most 7% of the short side), centred in the chart area.
     const rowGap = r(c.u * 0.03);
@@ -813,26 +840,27 @@ function quote(p: Record<string, unknown>, c: Ctx): Layout {
   const foot = [af, sf].filter((x): x is FitResult => !!x);
   const footH = foot.reduce((a, f) => a + f.height, 0) + (foot.length > 1 ? r(gap / 2) : 0);
   const qBox = { w, h: c.safe.h - markH - gap - (footH ? footH + gap : 0) };
-  const qf = fitText(text, qBox, { maxSize: c.u * 0.1, minSize: c.u * 0.035 });
+  // A quotation keeps its wording and case; only the heading scale and alignment apply.
+  const qf = fitHeading({ ...c, tokens: { ...c.tokens, text_case: "as_is" } }, text, qBox, { maxSize: c.u * 0.1, minSize: c.u * 0.035 });
   if (qf.truncated) warnings.push("quote: text truncated to fit");
   const [markY, textY, footY] = vstack(c.safe, [markH, qf.height, ...(footH ? [footH] : [])], gap);
   const cx = r(c.safe.x + c.safe.w / 2);
   const els: El[] = [{ type: "text", text: "“", font: "heading", size: markSize, color: c.colors.primary, x: cx, cx, y: r(markY! - markSize * 0.12), beat: 0, slide: false }];
   note(c, "decorative", "“", { x: cx - markSize / 2, y: markY!, w: markSize, h: markH }, { fontSize: markSize, truncated: false }, c.colors.primary);
   const qRect: Rect = { x: r(c.safe.x + (c.safe.w - w) / 2), y: textY!, w, h: r(qf.height) };
-  els.push(...textLines(qf, qRect, { font: "heading", color: c.colors.text, beat: (i) => 0.5 + i * 0.5 }));
+  els.push(...textLines(qf, qRect, { font: "heading", color: c.colors.text, beat: (i) => 0.5 + i * 0.5, align: c.align }));
   note(c, c.main, text, qRect, qf, c.colors.text);
   let y = footY ?? 0;
   const beat = 1 + qf.lines.length * 0.5;
   if (af) {
     const rect: Rect = { x: qRect.x, y, w, h: r(af.height) };
-    els.push(...textLines(af, rect, { font: "body", color: c.colors.text, beat }));
+    els.push(...textLines(af, rect, { font: "body", color: c.colors.text, beat, align: c.align }));
     note(c, "label", `— ${attribution}`, rect, af, c.colors.text);
     y += r(af.height + gap / 2);
   }
   if (sf) {
     const rect: Rect = { x: qRect.x, y, w, h: r(sf.height) };
-    els.push(...textLines(sf, rect, { font: "body", color: c.colors.muted, beat: beat + 0.5 }));
+    els.push(...textLines(sf, rect, { font: "body", color: c.colors.muted, beat: beat + 0.5, align: c.align }));
     note(c, "label", source!, rect, sf, c.colors.muted);
   }
   return { elements: els, warnings };
@@ -846,7 +874,7 @@ function stat(p: Record<string, unknown>, c: Ctx): Layout {
   const context = asStr(p.context);
   const gap = r(c.u * 0.035);
   const w = c.safe.w;
-  const vf = fitText(value, { w, h: c.safe.h * 0.45 }, { maxSize: c.u * 0.3, minSize: c.u * 0.06, maxLines: 1, lineHeight: 1.1 });
+  const vf = fitHeading({ ...c, tokens: { ...c.tokens, text_case: "as_is" } }, value, { w, h: c.safe.h * 0.45 }, { maxSize: c.u * 0.3, minSize: c.u * 0.06, maxLines: 1, lineHeight: 1.1 });
   if (vf.truncated) warnings.push("stat: value truncated to fit");
   const lf = label ? fitText(label, { w, h: c.safe.h * 0.25 }, { maxSize: c.u * 0.07, minSize: c.u * 0.03, maxLines: 3 }) : undefined;
   if (lf?.truncated) warnings.push("stat: label truncated to fit");
@@ -1034,7 +1062,8 @@ function lowerThird(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
   const name = asStr(p.name) ?? "";
   const title = asStr(p.title);
-  const headline = asStr(p.headline);
+  const headlineRaw = asStr(p.headline);
+  const headline = headlineRaw ? headCase(c, headlineRaw) : undefined;
   const pad = r(c.u * 0.035);
   const accentW = Math.max(3, r(c.u * 0.015));
   const maxW = r(c.safe.w * 0.92) - 2 * pad - accentW;
@@ -1051,9 +1080,9 @@ function lowerThird(p: Record<string, unknown>, c: Ctx): Layout {
   if (headline) {
     const gap = r(c.u * 0.06);
     const hr: Rect = { x: c.safe.x, y: c.safe.y, w: c.safe.w, h: Math.max(0, bar.y - gap - c.safe.y) };
-    const hf = fitText(headline, hr, { maxSize: c.u * 0.1, minSize: c.u * 0.04 });
+    const hf = fitHeading(c, headline, hr, { maxSize: c.u * 0.1, minSize: c.u * 0.04 });
     if (hf.truncated) warnings.push("lower_third: headline truncated to fit");
-    els.push(...textLines(hf, hr, { font: "heading", color: c.colors.text, beat: 0 }));
+    els.push(...textLines(hf, hr, { font: "heading", color: c.colors.text, beat: 0, align: c.align }));
     note(c, c.main, headline, hr, hf, c.colors.text);
   }
   els.push({ type: "box", ...bar, color: c.colors.panel, beat: 1 });
@@ -1083,7 +1112,7 @@ export function kineticChunks(text: string, rhythm: "word" | "phrase"): string[]
 
 function kineticText(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
-  const text = asStr(p.text) ?? "";
+  const text = headCase(c, asStr(p.text) ?? "");
   const rhythm = p.rhythm === "phrase" ? "phrase" : "word";
   const chunks = kineticChunks(text, rhythm);
   const words = chunks.flatMap((ch) => ch.split(" "));
@@ -1093,7 +1122,7 @@ function kineticText(p: Record<string, unknown>, c: Ctx): Layout {
   const emSet = new Set((emphasis ?? "").split(/\s+/).map(norm).filter(Boolean));
   const box = inset(c.safe, r(c.u * 0.03));
   // Fit narrower than the box: words are placed one by one with a wider (bold) glyph estimate.
-  const fit = fitText(rhythm === "phrase" ? chunks : [words.join(" ")], { w: box.w * 0.85, h: box.h }, { maxSize: c.u * 0.14, minSize: c.u * 0.045 });
+  const fit = fitHeading(c, rhythm === "phrase" ? chunks : [words.join(" ")], { w: box.w * 0.85, h: box.h }, { maxSize: c.u * 0.14, minSize: c.u * 0.045 });
   if (fit.truncated) warnings.push("kinetic_text: text truncated to fit");
   const els: El[] = [];
   let k = 0;
@@ -1105,7 +1134,7 @@ function kineticText(p: Record<string, unknown>, c: Ctx): Layout {
     const widths = parts.map((w) => glyphWidth(w, fit.fontSize));
     const lineW = widths.reduce((a, b) => a + b, 0) + space * Math.max(0, parts.length - 1);
     const scale = lineW > box.w ? box.w / lineW : 1;
-    let x = box.x + (box.w - lineW * scale) / 2;
+    let x = c.align === "left" ? box.x : box.x + (box.w - lineW * scale) / 2;
     parts.forEach((w, j) => {
       const beat = chunkOf[Math.min(k, chunkOf.length - 1)] ?? 0;
       const em = emSet.has(norm(w)) && norm(w) !== "";
@@ -1127,7 +1156,8 @@ function kineticText(p: Record<string, unknown>, c: Ctx): Layout {
 
 function map(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
-  const title = asStr(p.title);
+  const titleRaw = asStr(p.title);
+  const title = titleRaw ? headCase(c, titleRaw) : undefined;
   const clamp = (v: number) => Math.min(1, Math.max(0, v));
   let points = Array.isArray(p.points)
     ? p.points.flatMap((pt): { label: string; x: number; y: number }[] => {
@@ -1143,7 +1173,7 @@ function map(p: Record<string, unknown>, c: Ctx): Layout {
   if (points.length === 0) warnings.push("map: no points");
   const gap = r(c.u * 0.035);
   const els: El[] = [];
-  const tf = title ? fitText(title, { w: c.safe.w, h: c.u * 0.18 }, { maxSize: c.u * 0.075, minSize: c.u * 0.03, maxLines: 2 }) : undefined;
+  const tf = title ? fitHeading(c, title, { w: c.safe.w, h: c.u * 0.18 }, { maxSize: c.u * 0.075, minSize: c.u * 0.03, maxLines: 2 }) : undefined;
   if (tf?.truncated) warnings.push("map: title truncated to fit");
   const titleH = tf ? r(tf.height) : 0;
   const panelH = r(Math.min(c.safe.h - (tf ? titleH + gap : 0), c.safe.w * 1.25));
@@ -1151,7 +1181,7 @@ function map(p: Record<string, unknown>, c: Ctx): Layout {
   const panel: Rect = { x: c.safe.x, y: panelY!, w: c.safe.w, h: panelH };
   if (tf && title) {
     const tr: Rect = { x: c.safe.x, y: titleY!, w: c.safe.w, h: titleH };
-    els.push(...textLines(tf, tr, { font: "heading", color: c.colors.text, beat: 0 }));
+    els.push(...textLines(tf, tr, { font: "heading", color: c.colors.text, beat: 0, align: c.align }));
     note(c, c.main, title, tr, tf, c.colors.text);
   }
   els.push(...roundedBox(panel, c.u * 0.04, c.colors.panel, 0));
@@ -1221,6 +1251,7 @@ export function composeScene(scene: Scene, target: RenderTarget, tokens: VisualT
     colors: palette(tokens),
     main: scene.purpose === "hook" ? "hook" : "headline",
     boxes: [],
+    align: tokens.text_align ?? "center",
   };
   const comp = layoutKind(det, c, inputs);
   return { ...comp, text_boxes: c.boxes };
@@ -1279,11 +1310,43 @@ export interface MotionTiming {
   fade: number;
 }
 
-/** Stagger step and fade length for a clip: every element is fully visible by 60% of the clip. */
-export function motionTiming(durationS: number, maxBeat: number): MotionTiming {
+/**
+ * Stagger step and fade length for a clip: every element is fully visible by 60% of the clip.
+ * With motion tokens, the fade is the style's `enter_ms` and the step its `stagger_ms`, both
+ * capped so the same 60% rule holds.
+ */
+export function motionTiming(durationS: number, maxBeat: number, motion?: MotionTokens): MotionTiming {
+  if (motion) {
+    const fade = Math.max(0.04, Math.min(motion.enter_ms / 1000, durationS * 0.3));
+    const step = maxBeat > 0 ? Math.min(motion.stagger_ms / 1000, Math.max(0, durationS * 0.6 - fade) / maxBeat) : 0;
+    return { step: round3(step), fade: round3(fade) };
+  }
   const fade = Math.min(0.4, durationS * 0.2);
   const step = maxBeat > 0 ? Math.min(0.15, (durationS * 0.4) / maxBeat) : 0;
   return { step: round3(step), fade: round3(fade) };
+}
+
+/**
+ * Entrance curves as FFmpeg expressions of the progress `p` (0..1): the alpha, and the remaining
+ * fraction of the slide-up offset. Undefined easing: the renderer's original curves (linear alpha,
+ * quadratic slide). spring overshoots (the offset swings past zero, damped); snap is a sharp
+ * ease-out with a fast alpha.
+ */
+export function easingExpr(easing: MotionTokens["easing"] | undefined, p: string): { alpha: string; offset: string } {
+  switch (easing) {
+    case undefined:
+      return { alpha: p, offset: `pow(1-${p},2)` };
+    case "linear":
+      return { alpha: p, offset: `(1-${p})` };
+    case "ease_out":
+      return { alpha: `(1-pow(1-${p},2))`, offset: `pow(1-${p},3)` };
+    case "ease_in_out":
+      return { alpha: `(${p}*${p}*(3-2*${p}))`, offset: `(1-${p}*${p}*(3-2*${p}))` };
+    case "spring":
+      return { alpha: `min(1,2*${p})`, offset: `(1.6*pow(1-${p},2)*cos(3*PI*${p}))` };
+    case "snap":
+      return { alpha: `min(1,2*${p})`, offset: `pow(1-${p},4)` };
+  }
 }
 
 function round3(n: number): number {
@@ -1304,10 +1367,18 @@ export interface FontFiles {
   mono: string;
 }
 
+export interface GraphMotion {
+  /** Style motion tokens (entrance timing, easing, exit). Absent: the original motion. */
+  motion?: MotionTokens;
+  /** Colour the exit fades to (the scene background). */
+  background?: string;
+}
+
 /** Build the filtergraph for a composition. `textDir` is where text files will be written. */
-export function buildFilterGraph(comp: Pick<Composition, "elements">, target: RenderTarget, durationS: number, fonts: FontFiles, textDir: string): BuiltGraph {
+export function buildFilterGraph(comp: Pick<Composition, "elements">, target: RenderTarget, durationS: number, fonts: FontFiles, textDir: string, gm: GraphMotion = {}): BuiltGraph {
   const maxBeat = Math.max(0, ...comp.elements.map((e) => e.beat));
-  const { step, fade } = motionTiming(durationS, maxBeat);
+  const { motion } = gm;
+  const { step, fade } = motionTiming(durationS, maxBeat, motion);
   const slide = Math.max(2, r(Math.min(target.width, target.height) * 0.025));
   const inputs: string[][] = [];
   const textFiles = new Map<string, string>();
@@ -1326,6 +1397,7 @@ export function buildFilterGraph(comp: Pick<Composition, "elements">, target: Re
   for (const el of comp.elements) {
     const start = round3(el.beat * step);
     const progress = `min(1,max(0,(t-${start})/${fade}))`;
+    const ease = easingExpr(motion?.easing, progress);
     if (el.type === "box") {
       chain.push(
         f("drawbox", {
@@ -1349,9 +1421,9 @@ export function buildFilterGraph(comp: Pick<Composition, "elements">, target: Re
           fontsize: el.size,
           fontcolor: ffColor(el.color),
           x: el.cx !== undefined ? `${el.cx}-text_w/2` : el.x,
-          y: el.slide ? `${el.y}+${slide}*pow(1-${progress},2)` : el.y,
+          y: el.slide ? `${el.y}+${slide}*${ease.offset}` : el.y,
           y_align: "font",
-          alpha: fade > 0 ? progress : undefined,
+          alpha: fade > 0 ? ease.alpha : undefined,
           ...(el.box ? { box: 1, boxcolor: el.box.color, boxborderw: el.box.border } : {}),
         }),
       );
@@ -1367,6 +1439,9 @@ export function buildFilterGraph(comp: Pick<Composition, "elements">, target: Re
       cur = out;
     }
   }
+  // Exit: the whole frame fades back to the background over the style's exit_ms, ending on the last frame.
+  const exit = motion ? round3(Math.min(motion.exit_ms / 1000, durationS * 0.2)) : 0;
+  if (exit >= 0.02) chain.push(f("fade", { t: "out", st: round3(Math.max(0, durationS - 1 / target.fps - exit)), d: exit, color: ffColor(gm.background ?? "#000000") }));
   chain.push("format=yuv420p");
   const out = "[vout]";
   chains.push(`${cur}${chain.join(",")}${out}`);
@@ -1514,15 +1589,16 @@ export function createFfmpegRenderer(opts: FfmpegRendererOptions = {}): SceneRen
       const comp = composeScene(scene, target, tokens, { image, images, ...(req.zones ? { zones: req.zones } : {}) });
       warnings.push(...comp.warnings);
       const fonts: FontFiles = {
-        // Bold headings, matching the HTML renderer (bundled Inter has a real Bold).
-        heading: await fontResolver(tokens.font_heading, 700),
-        body: await fontResolver(tokens.font_body),
+        // Bold headings by default, matching the HTML renderer (bundled Inter has a real Bold);
+        // style/brand weights pick the nearest bundled file (600+ Bold, lighter Regular).
+        heading: await fontResolver(tokens.font_heading, tokens.weight_heading ?? 700),
+        body: await fontResolver(tokens.font_body, tokens.weight_body),
         mono: await fontResolver(tokens.font_mono),
       };
       const frames = frameCount(scene.duration_sec, target.fps);
       const tmp = await mkdtemp(join(tmpdir(), "vs-ffr-"));
       try {
-        const built = buildFilterGraph(comp, target, frames / target.fps, fonts, tmp);
+        const built = buildFilterGraph(comp, target, frames / target.fps, fonts, tmp, { ...(tokens.motion ? { motion: tokens.motion } : {}), background: tokens.color_background });
         for (const [name, text] of built.textFiles) await writeFile(join(tmp, name), text, "utf8");
         await mkdir(dirname(req.out_path), { recursive: true });
         await runFfmpeg(ffmpegRenderArgs(built, target, tokens, frames, encode, req.out_path), { tools, signal: ropts.signal, timeoutMs: 10 * 60_000 });

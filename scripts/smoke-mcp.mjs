@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bundle = join(root, "dist/mcp.mjs");
 const expected = [
+  "adapt",
   "brief_validate",
   "diff",
   "doctor",
@@ -32,6 +33,7 @@ const expected = [
   "template_get",
   "template_list",
   "test",
+  "variants",
   "verify",
 ];
 const tmp = mkdtempSync(join(tmpdir(), "vs-smoke-"));
@@ -126,7 +128,7 @@ child.stdout.on("data", (chunk) => {
       const r = msg.result;
       if (!r || r.isError) fail(`template_list failed: ${JSON.stringify(r?.content ?? msg.error)}`);
       const ids = r.structuredContent.templates.map((t) => t.id).join(",");
-      if (ids !== "devtool-launch,educational,explain,listicle,product-launch") fail(`unexpected templates: ${ids}`);
+      if (ids !== "animated-explainer,before-after,carousel-story,case-study,devtool-launch,educational,explain,faceless-listicle,listicle,product-demo,product-launch,product-ui,text-over-music") fail(`unexpected templates: ${ids}`);
       console.log(`smoke-mcp: templates ok (${ids})`);
       writeTinyProject();
       renderStarted = Date.now();

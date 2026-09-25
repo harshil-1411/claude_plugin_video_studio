@@ -1,0 +1,57 @@
+# Archetype: UI walkthrough that names each feature as it appears.
+schema_version: "1.0"
+id: product-ui
+name: Product UI walkthrough
+description: Walks through a product's interface screen by screen - screenshot callouts for each feature, lower thirds that name it, and a closing CTA.
+goals: [promote, launch, announce, educate]
+platforms: [linkedin, x, youtube, youtube_shorts, instagram_reels, tiktok]
+default_aspect_ratio: "9:16"
+default_duration_sec: 35
+duration_range: { min_sec: 20, max_sec: 75 }
+pacing: { avg_shot_sec: 5, max_words_per_sec: 2.6 }
+caption_preset: minimal
+beats:
+  - purpose: hook
+    share: 0.10
+    guidance: The one thing the UI lets the viewer do that they could not before, in one line.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: kinetic_text
+  - purpose: context
+    share: 0.10
+    guidance: Name the product and who it is for with a lower third; no feature yet.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: lower_third
+    optional: true
+  - purpose: demo
+    share: 0.18
+    guidance: Feature 1 on a real screenshot, with one or two callouts on the control that matters.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: screenshot
+  - purpose: demo
+    share: 0.16
+    guidance: Name feature 2 with a lower third (name = feature, headline = what it does for the viewer).
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: lower_third
+  - purpose: demo
+    share: 0.18
+    guidance: Feature 2 or 3 on a screenshot with callouts, in the order a user would meet them.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: screenshot
+  - purpose: payoff
+    share: 0.14
+    guidance: What the features add up to, in one line or a stat from the source.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: cta
+    share: 0.14
+    guidance: One action (open the app, sign up, read the docs) that matches desired_action.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+hook_mechanisms: [demo, promise, curiosity_gap, pain_point]
+rules:
+  - Screenshots are the product's real UI (ContentIR asset ids); never mock up screens that do not exist.
+  - At most two callouts per screenshot, each a few words, placed on the control they describe.
+  - Features appear in the order a user meets them; name each once, in a lower third or callout.
+  - Every number, percentage or comparison cites a ContentIR ref in claim_refs.
+  - CTA must be an allowed brand CTA if a brand profile is present.
+default_style: minimal

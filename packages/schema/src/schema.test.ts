@@ -506,6 +506,14 @@ describe("Template schema", () => {
     expect(r.success).toBe(false);
     expect(r.error!.issues.map((i) => i.path.join("."))).toEqual(expect.arrayContaining(["beats", "default_duration_sec"]));
   });
+
+  it("accepts archetype audio/style defaults and rejects an unknown voice_mode", () => {
+    const t = { ...base(), voice_mode: "none", default_style: "energetic", default_music: "bundled:lofi" };
+    expect(Template.safeParse(t).success).toBe(true);
+    const r = Template.safeParse({ ...t, voice_mode: "whisper" });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => i.path.join("."))).toEqual(["voice_mode"]);
+  });
 });
 
 describe("generated JSON Schemas", () => {

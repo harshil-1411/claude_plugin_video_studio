@@ -7,8 +7,10 @@ import { ffprobe, runFfmpeg, runProcess, getTools } from "@video-studio/media";
 import type { DeterministicKind, Scene } from "@video-studio/schema";
 import { DETERMINISTIC_PROPS_EXAMPLES } from "@video-studio/schema";
 import { layoutZones } from "@video-studio/platforms";
-import { buildFilterGraph, composeScene, createFfmpegRenderer, ffColor, frameCount, kineticChunks, motionTiming } from "./ffmpeg-renderer.js";
-import { resolveTokens, targetForAspect } from "./tokens.js";
+import { buildFilterGraph, composeScene, createFfmpegRenderer, easingExpr, ffColor, frameCount, kineticChunks, motionTiming } from "./ffmpeg-renderer.js";
+import { findStylesDir, getStyle } from "./styles.js";
+import { applyTextCase } from "./text-layout.js";
+import { createFontResolver, resolveTokens, targetForAspect } from "./tokens.js";
 import type { RenderTarget } from "./types.js";
 
 // Tiny clips only: 180x320, 1 s, 15 fps, x264 ultrafast.
@@ -288,5 +290,122 @@ describe("determinism and colour", () => {
       expect(Math.abs(g! - 0x64), `g@${x},${y}`).toBeLessThanOrEqual(4);
       expect(Math.abs(b! - 0x32), `b@${x},${y}`).toBeLessThanOrEqual(4);
     }
+  }, T);
+});
+
+describe("style tokens", () => {
+  const stylesDir = findStylesDir({});
+  const styled = async (id: string) => resolveTokens(undefined, {}, await getStyle(stylesDir, id));
+  const FONTS = { heading: "/f/h.ttf", body: "/f/b.ttf", mono: "/f/m.ttf" };
+  const texts = (c: ReturnType<typeof composeScene>) => c.elements.filter((e) => e.type === "text");
+
+  it("applies the heading case transform", () => {
+    expect(applyTextCase("vector search in 30 seconds", "upper")).toBe("VECTOR SEARCH IN 30 SECONDS");
+    expect(applyTextCase("the case for gRPC and an API of vectors", "title")).toBe("The Case for gRPC and an API of Vectors");
+    expect(applyTextCase("keep as is", "as_is")).toBe("keep as is");
+    expect(applyTextCase("keep as is", undefined)).toBe("keep as is");
+  });
+
+  it("upper-cases and scales headings, keeps body text, and records the final size", async () => {
+    const t = await styled("energetic");
+    const s = scene("cta", { headline: "Try it", action: "Install now", url: "example.com" });
+    const base = composeScene(s, target, tokens);
+    const comp = composeScene(s, target, t);
+    const head = texts(comp).find((e) => e.font === "heading" && /TRY/.test(e.text))!;
+    expect(head.text).toBe("TRY IT");
+    expect(texts(comp).some((e) => e.text === "example.com")).toBe(true);
+    const baseHead = texts(base).find((e) => e.text === "Try it")!;
+    expect(head.size).toBeGreaterThan(baseHead.size);
+    expect(head.size).toBeLessThanOrEqual(Math.floor(baseHead.size * 1.12) + 1);
+    const box = comp.text_boxes.find((b) => b.role === "cta" && b.text === "TRY IT")!;
+    expect(box.font_px).toBe(head.size);
+    expect(box.color).toBe(t.color_text);
+  });
+
+  it("scales headings down for a scale below 1 and re-fits when the scaled size no longer fits", async () => {
+    const t = await styled("minimal");
+    const s = scene("typography", { lines: ["Calm"] });
+    const a = texts(composeScene(s, target, tokens))[0]!;
+    const b = texts(composeScene(s, target, t))[0]!;
+    expect(b.size).toBeLessThan(a.size);
+    // A long heading already at the box limit does not grow past it.
+    const long = scene("typography", { lines: ["Vector databases find meaning fast across millions of documents"] });
+    const big = composeScene(long, target, { ...tokens, heading_scale: 1.6 });
+    expect(big.text_boxes[0]!.truncated).toBe(false);
+    for (const e of texts(big)) expect(e.size).toBeLessThanOrEqual(Math.round(Math.min(target.width, target.height) * 0.12 * 1.6));
+  });
+
+  it("left-aligns headings at the box edge; centred text stays centred", async () => {
+    const t = await styled("editorial");
+    const comp = composeScene(scene("typography", { lines: ["one line", "and another"] }), target, t);
+    const lines = texts(comp);
+    expect(lines.map((e) => e.text)).toEqual(["One Line", "And Another"]);
+    expect(lines.every((e) => e.cx === undefined)).toBe(true);
+    expect(new Set(lines.map((e) => e.x)).size).toBe(1);
+    const centred = texts(composeScene(scene("typography", { lines: ["one line"] }), target, tokens));
+    expect(centred[0]!.cx).toBeDefined();
+    // Kinetic words start at the left edge of the box too.
+    const kin = texts(composeScene(scene("kinetic_text", { text: "go go go", rhythm: "word" }), target, t));
+    const kinC = texts(composeScene(scene("kinetic_text", { text: "go go go", rhythm: "word" }), target, tokens));
+    expect(kin[0]!.x).toBeLessThan(kinC[0]!.x);
+  });
+
+  it("times entrances from enter_ms/stagger_ms and keeps the 60% rule", () => {
+    const motion = { personality: "energetic", easing: "spring", enter_ms: 350, exit_ms: 120, stagger_ms: 70, transition: "whip", transition_ms: 250 } as const;
+    expect(motionTiming(3, 4, motion)).toEqual({ step: 0.07, fade: 0.35 });
+    const tight = motionTiming(1, 20, motion);
+    expect(tight.step * 20 + tight.fade).toBeLessThanOrEqual(0.6 + 1e-9);
+    expect(motionTiming(3, 4, { ...motion, enter_ms: 0 }).fade).toBeGreaterThan(0);
+    expect(motionTiming(1, 5)).toEqual(motionTiming(1, 5, undefined));
+  });
+
+  it("maps easing names to curves, with the original curve when no motion is set", () => {
+    expect(easingExpr(undefined, "p")).toEqual({ alpha: "p", offset: "pow(1-p,2)" });
+    expect(easingExpr("spring", "p").offset).toContain("cos(3*PI*p)");
+    expect(easingExpr("linear", "p").offset).toBe("(1-p)");
+    expect(new Set((["linear", "ease_out", "ease_in_out", "spring", "snap"] as const).map((e) => easingExpr(e, "p").offset)).size).toBe(5);
+  });
+
+  it("draws easing and the exit fade into the filtergraph only with motion tokens", async () => {
+    const t = await styled("energetic");
+    const comp = composeScene(scene("typography", { lines: ["A", "B"] }), target, t);
+    const g = buildFilterGraph(comp, target, 1, FONTS, "/tmp/x", { motion: t.motion!, background: t.color_background });
+    expect(g.filtergraph).toContain("cos(3*PI*");
+    expect(g.filtergraph).toMatch(/fade=t=out:st=0\.813:d=0\.12:color=0x160B33/);
+    const plain = buildFilterGraph(composeScene(scene("typography", { lines: ["A", "B"] }), target, tokens), target, 1, FONTS, "/tmp/x");
+    expect(plain.filtergraph).not.toContain("fade=t=out");
+    expect(plain.filtergraph).not.toContain("cos(");
+    const tech = await styled("technical");
+    const g2 = buildFilterGraph(composeScene(scene("typography", { lines: ["A"] }), target, tech), target, 1, FONTS, "/tmp/x", { motion: tech.motion!, background: tech.color_background });
+    expect(g2.filtergraph).not.toContain("fade=t=out");
+  });
+
+  it("resolves heading/body font files at the style weights", async () => {
+    const calls: Array<[string, number | undefined]> = [];
+    const inner = createFontResolver();
+    const r = createFfmpegRenderer({ encodePreset: "ultrafast", fontResolver: (family, weight) => (calls.push([family, weight]), inner(family, weight)) });
+    const t = await styled("minimal");
+    await r.render({ scene: scene("typography", { lines: ["Hi"] }), target, tokens: t, out_path: join(dir, "w.mp4"), project_dir: dir });
+    expect(calls).toContainEqual([t.font_heading, 500]);
+    expect(calls).toContainEqual([t.font_body, 400]);
+    calls.length = 0;
+    await r.render({ scene: scene("typography", { lines: ["Hi"] }), target, tokens, out_path: join(dir, "w2.mp4"), project_dir: dir });
+    expect(calls).toContainEqual([tokens.font_heading, 700]);
+    expect(calls).toContainEqual([tokens.font_body, undefined]);
+  }, T);
+
+  it("renders a styled clip whose last frame has faded to the background", async () => {
+    const t = await styled("energetic");
+    const out = join(dir, "energetic.mp4");
+    const res = await renderer.render({ scene: scene("typography", { lines: ["Big", "Energy"] }), target, tokens: t, out_path: out, project_dir: dir });
+    expect(res.text_boxes?.[0]?.text).toBe("BIG\nENERGY");
+    const raw = join(dir, "last.rgb");
+    await runFfmpeg(["-y", "-i", out, "-vf", "select=eq(n\\,14)", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", raw]);
+    const buf = await readFile(raw);
+    expect(buf.length).toBe(180 * 320 * 3);
+    let maxDiff = 0;
+    const bg = [0x16, 0x0b, 0x33];
+    for (let i = 0; i < buf.length; i += 3) for (let k = 0; k < 3; k++) maxDiff = Math.max(maxDiff, Math.abs(buf[i + k]! - bg[k]!));
+    expect(maxDiff).toBeLessThanOrEqual(24);
   }, T);
 });

@@ -1,0 +1,29 @@
+# Magazine feel: near-black page, cream text, a warm accent, title-case headings set flush left.
+id: editorial
+name: Editorial
+version: 1
+description: High-contrast near-black and cream with a warm accent, title-case headings aligned left, smooth ease-in-out reveals. For stories, opinions, case studies and quotes.
+palette:
+  background: "#121110"
+  text: "#FAF6EE"
+  primary: "#F26B3A"
+  secondary: "#F2C14E"
+fonts:
+  heading: Noto Sans
+  body: Noto Sans
+  mono: JetBrains Mono
+weights:
+  heading: 700
+  body: 400
+text:
+  case: title
+  heading_scale: 1
+  align: left
+motion:
+  personality: friendly
+  easing: ease_in_out
+  enter_ms: 450
+  exit_ms: 250
+  stagger_ms: 140
+  transition: crossfade
+  transition_ms: 400

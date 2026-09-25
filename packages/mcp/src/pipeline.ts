@@ -22,6 +22,9 @@ import {
   bundledFontsStatus,
   createFfmpegRenderer,
   findFontsDir,
+  findStylesDir,
+  getStyle,
+  styleRef,
   createHyperframesRenderer,
   LAYOUT_VERSION,
   parseFontChain,
@@ -47,6 +50,7 @@ import {
   resolveTargets,
   voiceMode,
   type AudioLicense,
+  type Style,
 } from "@video-studio/schema";
 import { ZONES_VERSION, findPlatformSpecsDir, layoutZones, loadContracts } from "@video-studio/platforms";
 import { type BackendChoice, type BackendSet, type SynthesizeSpecResult, defaultBackends, selectBackend, synthesizeSpec } from "@video-studio/voice";
@@ -249,6 +253,8 @@ interface RenderState {
   brand_path?: string;
   /** Font files the render resolved (for video.lock). */
   fonts?: LockFont[];
+  /** Style pack the render used, `<id>@<version>` (also in tool_versions.style). */
+  style?: string;
 }
 
 const toPosix = (p: string) => p.split(sep).join("/");
@@ -285,8 +291,8 @@ async function loadBrand(projectDir: string, brandPath?: string): Promise<{ bran
 /** Font chains and weights the renderers, captions and cover ask for (see lockFonts). */
 function fontRequests(tokens: VisualTokens, captionFamily: string | undefined, burnIn: boolean): FontRequest[] {
   const reqs: FontRequest[] = [
-    { chain: tokens.font_heading, weight: 700 },
-    { chain: tokens.font_body, weight: 400 },
+    { chain: tokens.font_heading, weight: tokens.weight_heading ?? 700 },
+    { chain: tokens.font_body, weight: tokens.weight_body ?? 400 },
     { chain: tokens.font_mono, weight: 400 },
   ];
   // Burned-in captions use both weights (emphasis toggles bold).
@@ -373,10 +379,13 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   for (const w of specWarnings) warnings.push(`spec: ${w.path || "(root)"}: ${w.message}`);
   const brandFile = await loadBrand(root, o.brandPath);
   const brand = brandFile?.brand;
-  const tokens: VisualTokens = resolveTokens(brand);
+  // Style pack (styles/<id>.yaml): defaults < style < brand. Unknown ids fail with the available ones.
+  const style: Style | undefined = spec.style ? await getStyle(findStylesDir(env), spec.style) : undefined;
+  const tokens: VisualTokens = resolveTokens(brand, {}, style);
   const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
   const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
-  const brandCaptions = brand?.captions;
+  // Caption styling: the style's, overridden field by field by the brand's.
+  const brandCaptions = style?.captions || brand?.captions ? { ...style?.captions, ...brand?.captions } : undefined;
   // Bundled fonts (fonts/): libass burn-in, the cover and the scene renderers use them first.
   const fontsDir = findFontsDir(env);
   const fonts = bundledFontsStatus(fontsDir);
@@ -652,6 +661,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   }
   for (const e of ordered) if (e.renderer && e.renderer_version) tool_versions[e.renderer] = e.renderer_version;
   tool_versions[`voice:${voice.backend}`] = voice.backend === "silent" ? "n/a" : "local";
+  if (style) tool_versions.style = styleRef(style);
 
   const lockedFonts = await lockFonts(fontRequests(tokens, assOpts.font, burn), { fontsDir, env: env as NodeJS.ProcessEnv });
 
@@ -714,6 +724,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     ...(music ? { music: { ref: music.ref, sha256: music.sha256, ...(music.title ? { title: music.title } : {}), ...(music.license ? { license: music.license } : {}) } } : {}),
     ...(brandFile ? { brand_path: brandRel(root, brandFile.path) } : {}),
     fonts: lockedFonts,
+    ...(style ? { style: styleRef(style) } : {}),
   };
 
   // f'. technical QA on the reel (reused when the reel is unchanged)
@@ -1175,7 +1186,9 @@ async function lockFromState(root: string, state: RenderState, projectId: string
   let fonts = state.fonts;
   if (!fonts) {
     const brandFile = await loadBrand(root).catch(() => undefined);
-    const tokens = resolveTokens(brandFile?.brand);
+    const styleId = state.style?.split("@")[0];
+    const style = styleId ? await getStyle(findStylesDir(process.env), styleId).catch(() => undefined) : undefined;
+    const tokens = resolveTokens(brandFile?.brand, {}, style);
     const captionFamily = brandFile?.brand.captions?.family ?? parseFontChain(tokens.font_body)[0];
     fonts = await lockFonts(fontRequests(tokens, captionFamily, state.burn_in), { fontsDir: findFontsDir(process.env) });
   }

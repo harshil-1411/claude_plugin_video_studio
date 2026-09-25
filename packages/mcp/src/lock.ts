@@ -156,7 +156,7 @@ const CLASS_ORDER: readonly LockChangeClass[] = ["creative", "renderer", "spec",
  * class then path.
  *
  * - spec hash, voice request hash, scene list/order → creative.
- * - engine.*, tools.*, voice backend/voice id, fonts, a scene's renderer or renderer_version → renderer.
+ * - engine.*, tools.* (except tools.style: creative), voice backend/voice id, fonts, a scene's renderer or renderer_version → renderer.
  * - targets (contract_version, verified, added/removed) → spec.
  * - content_ir_sha256 and assets.* → asset.
  * - a scene's cache_key/clip_sha256 → creative when the spec changed; otherwise the class of the
@@ -211,7 +211,11 @@ export function diffLocks(before: VideoLock, after: VideoLock): LockChange[] {
   field("creative", "spec_sha256", before.spec_sha256, after.spec_sha256, "video spec");
   field("asset", "content_ir_sha256", before.content_ir_sha256, after.content_ir_sha256, "ContentIR");
   record("renderer", "engine", before.engine, after.engine, "engine component");
-  record("renderer", "tools", before.tools, after.tools, "tool");
+  // The style pack is a creative choice (the look), not a tool version.
+  const { style: bStyle, ...bTools } = before.tools;
+  const { style: aStyle, ...aTools } = after.tools;
+  record("renderer", "tools", bTools, aTools, "tool");
+  field("creative", "tools.style", bStyle, aStyle, "style pack");
   field("renderer", "voice.backend", before.voice.backend, after.voice.backend, "voice backend");
   field("renderer", "voice.voice_id", before.voice.voice_id, after.voice.voice_id, "voice id");
   field("creative", "voice.request_hash", before.voice.request_hash, after.voice.request_hash, "voiceover request");

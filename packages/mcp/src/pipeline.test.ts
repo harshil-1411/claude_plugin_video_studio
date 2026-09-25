@@ -13,6 +13,7 @@ import { RenderManifest, VideoLock, type VideoSpec } from "@video-studio/schema"
 import { type VoiceBackend, tokenize } from "@video-studio/voice";
 import { type RenderProjectOptions, SpecInvalidError, exportProject, loadValidSpec, renderProject, runQa, socialCopy } from "./pipeline.js";
 import { diffLocks, readLock } from "./lock.js";
+import { validateSpecFile } from "./spec-validate.js";
 import { RenderJobManager } from "./render-jobs.js";
 import { createServer } from "./server.js";
 
@@ -360,6 +361,45 @@ describe("cover and caption styling", () => {
     },
     T,
   );
+});
+
+describe("style packs", () => {
+  it(
+    "renders with style: energetic; the look reaches the clips, the state and video.lock",
+    async () => {
+      const dir = await makeProject("styled", { ...spec, style: "energetic" });
+      const r = await renderProject(dir, opts({ voice: "silent" }));
+      const state = JSON.parse(await readFile(join(dir, "renders", "preview", "render-state.json"), "utf8"));
+      expect(state.style).toBe("energetic@1");
+      expect(state.tool_versions.style).toBe("energetic@1");
+      expect(state.background).toBe("#160B33");
+      const hook = state.scenes[0].text_boxes.find((b: { role: string }) => b.role === "hook");
+      expect(hook.text).toBe("SEARCH FINDS WORDS");
+      expect(hook.color).toBe("#FFFFFF");
+      const lock = (await readLock(r.dist.lock))!;
+      expect(lock.tools.style).toBe("energetic@1");
+      // Bundled Inter Bold for the 800 heading, Regular for the 500 body (the lock records bundled weights).
+      expect(lock.fonts.map((f) => `${f.family}@${f.weight}:${f.file}`)).toEqual(expect.arrayContaining(["Inter@700:fonts/Inter/Inter-Bold.ttf", "Inter@400:fonts/Inter/Inter-Regular.ttf"]));
+
+      // Switching the style changes the scene cache keys (the tokens are part of them).
+      await writeFile(join(dir, "project", "video-spec.json"), JSON.stringify({ ...spec, style: "minimal" }, null, 2));
+      const m = await renderProject(dir, opts({ voice: "silent" }));
+      const lock2 = (await readLock(m.dist.lock))!;
+      expect(lock2.tools.style).toBe("minimal@1");
+      expect(lock2.scenes.map((x) => x.cache_key)).not.toEqual(lock.scenes.map((x) => x.cache_key));
+    },
+    T,
+  );
+
+  it("refuses an unknown style with the available ids", async () => {
+    const bad = await makeProject("bad-style", { ...spec, style: "energtic" });
+    const err = await renderProject(bad, opts({ voice: "silent" })).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SpecInvalidError);
+    expect(String((err as Error).message)).toMatch(/no style pack "energtic".*available: .*energetic.*minimal/s);
+    const v = await validateSpecFile(join(bad, "project", "video-spec.json"), null);
+    expect(v.ok).toBe(false);
+    expect(v.errors).toContainEqual(expect.objectContaining({ path: "style", stage: "style", fix: expect.stringContaining('"energetic"') }));
+  });
 });
 
 describe("music bed and voice.mode none", () => {

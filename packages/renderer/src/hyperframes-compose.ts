@@ -2,9 +2,9 @@ import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DeterministicKind, TextBox, TextRole } from "@video-studio/schema";
 import { codeLabel, escapeHtml, highlightLines, languageFamily } from "./hyperframes-highlight.js";
-import { safeArea, wrapText } from "./text-layout.js";
+import { applyTextCase, safeArea, wrapText } from "./text-layout.js";
 import { fontFaceCss } from "./tokens.js";
-import type { SceneRenderRequest, VisualTokens } from "./types.js";
+import type { MotionTokens, SceneRenderRequest, VisualTokens } from "./types.js";
 
 /**
  * Pure HTML composition builder for the HyperFrames renderer (pinned @hyperframes/producer 0.8.75).
@@ -158,8 +158,35 @@ interface Stage {
   dur: number;
 }
 
+/**
+ * Easing names → CSS timing functions (the runtime seeks CSS animations; GSAP is not bundled).
+ * ease_out is the renderer's original curve; spring overshoots (y > 1); snap is a sharp ease-out.
+ */
+export const EASING_CSS: Readonly<Record<MotionTokens["easing"], string>> = Object.freeze({
+  linear: "linear",
+  ease_out: "cubic-bezier(0.22, 1, 0.36, 1)",
+  ease_in_out: "cubic-bezier(0.65, 0, 0.35, 1)",
+  spring: "cubic-bezier(0.34, 1.56, 0.64, 1)",
+  snap: "cubic-bezier(0.2, 0.9, 0.1, 1)",
+});
+
+/** Effects that are element entrances (their length follows the style's `enter_ms`). */
+const ENTRANCES = new Set(["fade", "fade-up", "scale-in", "pop", "pop-center", "slide-right", "slide-left", "grow-x", "grow-x-rev", "grow-x-center", "grow-y", "kin"]);
+
+/**
+ * Motion tokens of the composition being built. buildComposition is synchronous and sets this for
+ * the duration of one build (and always resets it), so anim()/stagger() stay plain functions.
+ */
+let activeMotion: MotionTokens | undefined;
+
 /** Entrance timing: `n` staggered items, all finished by ~60% of the scene. */
 function stagger(n: number, dur: number, first = 0.1): { at: (i: number) => number; len: number } {
+  if (activeMotion) {
+    const len = Math.max(0.05, Math.min(activeMotion.enter_ms / 1000, dur * 0.3));
+    const budget = Math.max(0, dur * 0.6 - first - len);
+    const step = n > 1 ? Math.min(activeMotion.stagger_ms / 1000, budget / (n - 1)) : 0;
+    return { at: (i) => first + i * step, len };
+  }
   const len = Math.max(0.2, Math.min(0.6, dur * 0.25));
   const budget = Math.max(0, dur * 0.6 - first - len);
   const step = n > 1 ? Math.min(0.18, budget / (n - 1)) : 0;
@@ -168,6 +195,7 @@ function stagger(n: number, dur: number, first = 0.1): { at: (i: number) => numb
 
 /** Attributes for an animated element. Only computed numbers reach the style attribute. */
 function anim(effect: string, at: number, len: number, cls = "", style = ""): string {
+  if (activeMotion && ENTRANCES.has(effect)) len = Math.max(0.05, activeMotion.enter_ms / 1000);
   const c = `${cls ? `${cls} ` : ""}vs-a vs-${effect}`;
   return `class="${c}" style="--t:${fmtSec(at)}s;--d:${fmtSec(len)}s${style ? `;${style}` : ""}"`;
 }
@@ -227,6 +255,39 @@ interface KindCtx {
   /** Resolved colours (#RRGGBB) for text-box contrast. */
   colors: { bg: string; text: string; primary: string; secondary: string; panel: string };
   boxes: TextBox[];
+  /** Style heading treatment: case transform and size multiplier (absent: as authored, 1). */
+  head: { case?: VisualTokens["text_case"]; scale?: number };
+}
+
+/** Heading text with the style's case transform (hook/headline roles). */
+function hc(ctx: KindCtx, text: string): string {
+  return applyTextCase(text, ctx.head.case);
+}
+
+/** Glyph advance for heading fits: capitals are wider than the mixed-case estimate. */
+function headEm(ctx: KindCtx, em: number): number {
+  return ctx.head.case === "upper" ? Math.max(em, 0.7) : em;
+}
+
+/**
+ * fitFontInfo for a heading: the style's heading scale multiplies the fitted size, which is
+ * re-fitted downwards when it no longer fits. Without style tokens this is exactly fitFontInfo.
+ */
+function headFit(ctx: KindCtx, texts: readonly string[], boxW: number, boxH: number, maxFs: number, minFs: number, lineHeight = 1.2, em = 0.56, caseAware = true): FontFit {
+  const e = caseAware ? headEm(ctx, em) : em;
+  const fit = fitFontInfo(texts, boxW, boxH, maxFs, minFs, lineHeight, e);
+  const k = ctx.head.scale;
+  if (k === undefined || k === 1 || (k > 1 && !fit.fits)) return fit;
+  const size = fit.fs * k;
+  return fitFontInfo(texts, boxW, boxH, size, Math.min(minFs, size), lineHeight, e);
+}
+
+/** textBlock for a heading (see headFit). */
+function headBlock(ctx: KindCtx, text: string, w: number, maxH: number, maxFs: number, minFs: number, lineHeight = 1.2, em = 0.56, caseAware = true): { fit: FontFit; h: number } {
+  const e = caseAware ? headEm(ctx, em) : em;
+  const fit = headFit(ctx, [text], w, maxH, maxFs, minFs, lineHeight, em, caseAware);
+  const lines = wrapText(text, fit.fs, w, e === em ? {} : { em: e }).length;
+  return { fit, h: fit.fits ? Math.min(maxH, lines * fit.fs * lineHeight) : maxH };
 }
 
 /** Record a text block drawn in `box` (stage px relative to the safe area unless `abs`). */
@@ -259,11 +320,11 @@ function rec(
 
 function renderTypography(ctx: KindCtx): string {
   const { stage, props, warnings } = ctx;
-  const lines = Array.isArray(props.lines) ? props.lines.map(str).filter((l): l is string => Boolean(l)) : [];
+  const lines = Array.isArray(props.lines) ? props.lines.map(str).filter((l): l is string => Boolean(l)).map((l) => hc(ctx, l)) : [];
   if (lines.length === 0) warnings.push("typography: no `lines` to show");
   const emphasis = str(props.emphasis);
   const { u, safe } = stage;
-  const fit = fitFontInfo(lines, safe.w, safe.h * 0.9, u * 11, u * 3.2, 1.15, 0.58);
+  const fit = headFit(ctx, lines, safe.w, safe.h * 0.9, u * 11, u * 3.2, 1.15, 0.58);
   const fs = fit.fs;
   rec(ctx, ctx.main, lines.join("\n"), { y: safe.h * 0.05, w: safe.w, h: safe.h * 0.9 }, fit, ctx.colors.text);
   const st = stagger(lines.length, stage.dur);
@@ -350,14 +411,14 @@ function renderChart(ctx: KindCtx): string {
   const unit = str(props.unit) ?? "";
   const label = str(props.label);
   const { u, safe } = stage;
-  const title = label ? `<div ${anim("fade-up", 0.05, 0.5, `vs-chart-title`)}>${esc(label)}</div>` : "";
+  const title = label ? `<div ${anim("fade-up", 0.05, 0.5, `vs-chart-title`)}>${esc(hc(ctx, label))}</div>` : "";
   const titleFs = u * 5.5;
 
   if (type === "stat" || series.length === 0) {
     if (type !== "stat") warnings.push(`chart: type "${type}" needs \`series\`; showing the value as a stat`);
     const raw = props.value ?? series[0]?.value;
     const value = typeof raw === "number" ? fmtNumber(raw) : (str(raw) ?? "");
-    const vfit = fitFontInfo([value + unit], safe.w, safe.h * 0.45, u * 30, u * 6, 1, 0.6);
+    const vfit = headFit(ctx, [value + unit], safe.w, safe.h * 0.45, u * 30, u * 6, 1, 0.6, false);
     const fs = vfit.fs;
     const lfit = label ? fitFontInfo([label], safe.w, safe.h * 0.25, u * 7, u * 3) : undefined;
     rec(ctx, ctx.main, value + unit, { y: safe.h * 0.05, w: safe.w, h: safe.h * 0.45 }, vfit, ctx.colors.primary);
@@ -376,7 +437,7 @@ function renderChart(ctx: KindCtx): string {
   const chartH = safe.h * (label ? 0.78 : 0.9);
   if (label) {
     const perLine = Math.max(1, Math.floor(safe.w / (titleFs * 0.56)));
-    rec(ctx, ctx.main, label, { w: safe.w, h: safe.h - chartH }, { fs: r2(titleFs), fits: Math.ceil(Array.from(label).length / perLine) * titleFs * 1.2 <= safe.h - chartH }, ctx.colors.text);
+    rec(ctx, ctx.main, hc(ctx, label), { w: safe.w, h: safe.h - chartH }, { fs: r2(titleFs), fits: Math.ceil(Array.from(label).length / perLine) * titleFs * 1.2 <= safe.h - chartH }, ctx.colors.text);
   }
   const fs = Math.max(8, u * 3);
   const max = Math.max(0, ...series.map((s) => s.value));
@@ -628,7 +689,8 @@ function renderComparison(ctx: KindCtx): string {
   const { stage, props } = ctx;
   const left = side(props.left);
   const right = side(props.right);
-  const verdict = str(props.verdict);
+  const verdictRaw = str(props.verdict);
+  const verdict = verdictRaw ? hc(ctx, verdictRaw) : undefined;
   const { u, safe } = stage;
   const columns = !stage.portrait && stage.W > stage.H;
   const cardW = columns ? (safe.w - u * 4) / 2 : safe.w;
@@ -644,7 +706,7 @@ function renderComparison(ctx: KindCtx): string {
     rec(ctx, "label", sd.label, { ...at, w: cardW - u * 6, h: cardH * 0.3 }, labelFit, accent, ctx.colors.panel);
     rec(ctx, "body", sd.text, { x: at.x, y: at.y + cardH * 0.34, w: cardW - u * 6, h: cardH * 0.62 }, textFit, ctx.colors.text, ctx.colors.panel);
   });
-  const verdictFit = verdict ? fitFontInfo([verdict], safe.w - u * 6, safe.h * 0.14, u * 5.5, u * 2.4) : undefined;
+  const verdictFit = verdict ? headFit(ctx, [verdict], safe.w - u * 6, safe.h * 0.14, u * 5.5, u * 2.4) : undefined;
   if (verdict && verdictFit) {
     rec(ctx, "headline", verdict, { x: u * 3, y: safe.h * 0.84, w: safe.w - u * 6, h: safe.h * 0.14 }, verdictFit, ctx.colors.text, mixHex(ctx.colors.bg, ctx.colors.primary, 0.18));
   }
@@ -671,14 +733,14 @@ function logoHtml(ctx: KindCtx, at: number): string {
 
 function renderCta(ctx: KindCtx): string {
   const { stage, props } = ctx;
-  const headline = str(props.headline) ?? "";
+  const headline = hc(ctx, str(props.headline) ?? "");
   const action = str(props.action) ?? "";
   const command = str(props.command);
   const url = str(props.url);
   const { u, safe } = stage;
   const st = stagger(2 + (command ? 1 : 0) + (url ? 1 : 0), stage.dur);
   let i = 0;
-  const hf = fitFontInfo([headline], safe.w, safe.h * 0.35, u * 10, u * 3.5, 1.1);
+  const hf = headFit(ctx, [headline], safe.w, safe.h * 0.35, u * 10, u * 3.5, 1.1);
   const af = fitFontInfo([action], safe.w * 0.8, safe.h * 0.12, u * 6, u * 2.5);
   const cf = command ? fitFontInfo([command], safe.w - u * 8, safe.h * 0.12, u * 4.5, u * 1.8, 1.2, 0.62) : undefined;
   const uf = url ? fitFontInfo([url], safe.w, safe.h * 0.08, u * 4, u * 2) : undefined;
@@ -710,11 +772,12 @@ function renderCta(ctx: KindCtx): string {
 
 function renderEndCard(ctx: KindCtx): string {
   const { stage, props, warnings } = ctx;
-  const title = str(props.title);
+  const titleRaw = str(props.title);
+  const title = titleRaw ? hc(ctx, titleRaw) : undefined;
   const subtitle = str(props.subtitle);
   const { u, safe } = stage;
   if (!title && !subtitle && !ctx.logo) warnings.push("end_card: no title, subtitle or logo; card is empty");
-  const tf = title ? fitFontInfo([title], safe.w, safe.h * 0.3, u * 11, u * 4, 1.1) : undefined;
+  const tf = title ? headFit(ctx, [title], safe.w, safe.h * 0.3, u * 11, u * 4, 1.1) : undefined;
   const sf = subtitle ? fitFontInfo([subtitle], safe.w, safe.h * 0.15, u * 5, u * 2.2) : undefined;
   if (title && tf) rec(ctx, ctx.main, title, { y: safe.h * 0.25, w: safe.w, h: safe.h * 0.3 }, tf, ctx.colors.text);
   if (subtitle && sf) rec(ctx, "body", subtitle, { y: safe.h * 0.58, w: safe.w, h: safe.h * 0.15 }, sf, ctx.colors.text);
@@ -826,7 +889,8 @@ function renderQuote(ctx: KindCtx): string {
   const attr = attribution ? textBlock(`— ${attribution}`, safe.w, safe.h * 0.12, u * 4.8, u * 2.4) : undefined;
   const src = source ? textBlock(source, safe.w, safe.h * 0.1, u * 3.8, u * 2.2) : undefined;
   const tailH = (attr ? attr.h + gap : 0) + (src ? src.h + gap : 0);
-  const body = textBlock(text, safe.w, safe.h - markH - gap - tailH, u * 8.5, u * 3.2, 1.25);
+  // A quotation keeps its wording and case; only the heading scale applies.
+  const body = headBlock(ctx, text, safe.w, safe.h - markH - gap - tailH, u * 8.5, u * 3.2, 1.25, 0.56, false);
   const heights = [markH, body.h, ...(attr ? [attr.h] : []), ...(src ? [src.h] : [])];
   const ys = column(heights, gap, safe.h);
   rec(ctx, "decorative", "“", { y: ys[0], w: markFs * 0.6, h: markH }, { fs: r2(markFs), fits: true }, ctx.colors.primary);
@@ -874,7 +938,7 @@ function renderStat(ctx: KindCtx): string {
   const context = str(props.context);
   const { u, safe } = stage;
   const gap = u * 3;
-  const vfit = fitFontInfo([value + unit], safe.w, safe.h * 0.45, u * 30, u * 6, 1, 0.6);
+  const vfit = headFit(ctx, [value + unit], safe.w, safe.h * 0.45, u * 30, u * 6, 1, 0.6, false);
   const valueH = vfit.fits ? Math.min(safe.h * 0.45, wrapText(value + unit, vfit.fs, safe.w, { mono: true }).length * vfit.fs) : safe.h * 0.45;
   const lab = label ? textBlock(label, safe.w, safe.h * 0.22, u * 7, u * 3, 1.15) : undefined;
   const con = context ? textBlock(context, safe.w, safe.h * 0.12, u * 4.5, u * 2.2) : undefined;
@@ -1051,7 +1115,8 @@ function renderLowerThird(ctx: KindCtx): string {
   const { stage, props } = ctx;
   const name = str(props.name) ?? "";
   const title = str(props.title);
-  const headline = str(props.headline);
+  const headlineRaw = str(props.headline);
+  const headline = headlineRaw ? hc(ctx, headlineRaw) : undefined;
   const { u, safe } = stage;
   const barW = stage.portrait ? safe.w : Math.min(safe.w, Math.max(safe.w * 0.55, u * 90));
   const stripe = u * 1.4;
@@ -1067,7 +1132,7 @@ function renderLowerThird(ctx: KindCtx): string {
   let head = "";
   if (headline) {
     const room = barY - u * 6;
-    const hb = textBlock(headline, safe.w, room, u * 10, u * 3.5, 1.1);
+    const hb = headBlock(ctx, headline, safe.w, room, u * 10, u * 3.5, 1.1);
     const hy = Math.max(0, (room - hb.h) / 2);
     rec(ctx, ctx.main, headline, { y: hy, w: safe.w, h: hb.h }, hb.fit, ctx.colors.text);
     head = `<div class="vs-lt-headline" style="left:0;top:${px(hy)};width:${px(safe.w)};height:${px(hb.h)}"><div ${anim("fade-up", 0.1, 0.6, `vs-headline`, `font-size:${px(hb.fit.fs)}`)}>${esc(headline)}</div></div>`;
@@ -1103,7 +1168,7 @@ export function kineticChunks(text: string, rhythm: "word" | "phrase"): Array<{ 
 
 function renderKineticText(ctx: KindCtx): string {
   const { stage, props, warnings } = ctx;
-  const text = (str(props.text) ?? "").replace(/\s+/g, " ").trim();
+  const text = hc(ctx, (str(props.text) ?? "").replace(/\s+/g, " ").trim());
   const rhythmRaw = str(props.rhythm) ?? "word";
   if (rhythmRaw !== "word" && rhythmRaw !== "phrase") warnings.push(`kinetic_text: unknown rhythm "${rhythmRaw}"; revealed word by word`);
   const rhythm = rhythmRaw === "phrase" ? "phrase" : "word";
@@ -1117,7 +1182,7 @@ function renderKineticText(ctx: KindCtx): string {
     if (es < 0) warnings.push(`kinetic_text: emphasis "${emphasis}" does not occur in the text`);
   }
   const ee = es >= 0 && emphasis ? es + emphasis.length : -1;
-  const block = textBlock(text, safe.w, safe.h * 0.85, u * 12, u * 3.5, 1.15, 0.58);
+  const block = headBlock(ctx, text, safe.w, safe.h * 0.85, u * 12, u * 3.5, 1.15, 0.58);
   rec(ctx, ctx.main, text, { y: (safe.h - block.h) / 2, w: safe.w, h: block.h }, block.fit, ctx.colors.text);
   // The reveal spreads over ~65% of the scene, so the full text holds for the rest.
   const first = 0.15;
@@ -1137,7 +1202,8 @@ function renderKineticText(ctx: KindCtx): string {
 
 function renderMap(ctx: KindCtx): string {
   const { stage, props, warnings } = ctx;
-  const title = str(props.title);
+  const titleRaw = str(props.title);
+  const title = titleRaw ? hc(ctx, titleRaw) : undefined;
   const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
   let points = (Array.isArray(props.points) ? props.points : [])
     .map((p) => (p && typeof p === "object" ? (p as Record<string, unknown>) : {}))
@@ -1156,7 +1222,7 @@ function renderMap(ctx: KindCtx): string {
   if (props.route === true && points.length < 2) warnings.push("map: route needs at least 2 points");
   const { u, safe } = stage;
   const gap = u * 3;
-  const tb = title ? textBlock(title, safe.w, safe.h * 0.16, u * 7, u * 3.2, 1.1) : undefined;
+  const tb = title ? headBlock(ctx, title, safe.w, safe.h * 0.16, u * 7, u * 3.2, 1.1) : undefined;
   const titleH = tb ? tb.h + gap : 0;
   if (title && tb) rec(ctx, ctx.main, title, { w: safe.w, h: tb.h }, tb.fit, ctx.colors.text);
   const panel: Box = { x: 0, y: titleH, w: safe.w, h: safe.h - titleH };
@@ -1235,8 +1301,55 @@ const RENDERERS: Record<DeterministicKind, (ctx: KindCtx) => string> = {
 
 // ---------------------------------------------------------------------------------- document
 
-function stylesheet(stage: Stage, tokens: Record<keyof typeof FALLBACK_TOKENS, string>, fontNames: string[], bundledFaces = ""): string {
+/** Style-pack look for the stylesheet (all optional: absent keeps the renderer's defaults). */
+type Look = Pick<VisualTokens, "weight_heading" | "weight_body" | "text_align" | "motion">;
+
+/** Selectors of heading-weight text (the stylesheet's 700/800 rules). */
+const HEADING_SELECTORS = [
+  ".vs-typography",
+  ".vs-kinetic",
+  ".vs-headline",
+  ".vs-stat-value",
+  ".vs-quote-mark",
+  ".vs-quote-text",
+  ".vs-chart-title",
+  ".vs-verdict",
+  ".vs-card-label",
+  ".vs-tl-label",
+  ".vs-lt-name",
+  ".vs-split-label",
+  ".vs-split-text.vs-split-only",
+  ".vs-node > div",
+  ".vs-action",
+  ".vs-value",
+];
+
+/** CSS appended after the base rules for style tokens; empty without any. */
+function lookCss(look: Look): string {
+  const rules: string[] = [];
+  if (look.weight_heading !== undefined) rules.push(`${HEADING_SELECTORS.join(", ")} { font-weight: ${look.weight_heading}; }`);
+  if (look.weight_body !== undefined) rules.push(`#vs-root { font-weight: ${look.weight_body}; }`);
+  if (look.text_align === "left") {
+    rules.push(
+      ".vs-typography, .vs-kinetic, .vs-quote, .vs-verdict, .vs-cta, .vs-end { text-align: left; }",
+      ".vs-cta, .vs-end { align-items: flex-start; }",
+      ".vs-lt-headline, .vs-map-title { justify-content: flex-start; text-align: left; }",
+    );
+  } else if (look.text_align === "center") {
+    rules.push(".vs-quote { text-align: center; }");
+  }
+  if (look.motion && look.motion.exit_ms > 0) {
+    rules.push(
+      ".vs-exit { animation: vs-exit var(--xd) linear var(--xt) both paused; }",
+      "@keyframes vs-exit { from { opacity: 1; } to { opacity: 0; } }",
+    );
+  }
+  return rules.length ? `\n/* style pack */\n${rules.join("\n")}` : "";
+}
+
+function stylesheet(stage: Stage, tokens: Record<keyof typeof FALLBACK_TOKENS, string>, fontNames: string[], bundledFaces = "", look: Look = {}): string {
   const { W, H, u, safe } = stage;
+  const easing = look.motion ? EASING_CSS[look.motion.easing] : EASING_CSS.ease_out;
   const faces = fontNames.map((n) => `@font-face { font-family: "${n}"; src: local("${n}"); }`).join("\n");
   // Bundled fonts (fontFaceCss) come first; the local() rules still cover system families.
   return `${bundledFaces ? `${bundledFaces}\n` : ""}${faces}
@@ -1257,7 +1370,7 @@ html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--
 .clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
 .vs-safe { position: absolute; left: ${safe.x}px; top: ${safe.y}px; width: ${safe.w}px; height: ${safe.h}px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
 .vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
-.vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
+.vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: ${easing}; animation-play-state: paused; }
 .vs-fade { animation-name: vs-fade; }
 .vs-fade-up { animation-name: vs-fade-up; }
 .vs-scale-in { animation-name: vs-scale-in; }
@@ -1395,7 +1508,7 @@ html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--
 .vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
 .vs-map-slot { align-items: center; }
 .vs-map-slot.vs-map-left { justify-content: flex-end; }
-.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }`;
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }${lookCss(look)}`;
 }
 
 /**
@@ -1535,7 +1648,25 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
   }
 
   const main: TextRole = scene.purpose === "hook" ? "hook" : "headline";
-  const content = render({ stage, props: det.props ?? {}, warnings, asset: addAsset, resolveAsset, logo, main, colors, boxes });
+  const t = req.tokens;
+  const head: KindCtx["head"] = { ...(t.text_case ? { case: t.text_case } : {}), ...(t.heading_scale !== undefined ? { scale: t.heading_scale } : {}) };
+  let content: string;
+  activeMotion = t.motion;
+  try {
+    content = render({ stage, props: det.props ?? {}, warnings, asset: addAsset, resolveAsset, logo, main, colors, boxes, head });
+  } finally {
+    activeMotion = undefined;
+  }
+  // Exit: the scene content fades out over the style's exit_ms at the end of the clip.
+  const exitS = t.motion ? Math.min(t.motion.exit_ms / 1000, dur * 0.2) : 0;
+  const exitAt = Math.max(0, dur - 1 / target.fps - exitS);
+  const safeOpen = exitS >= 0.02 ? `<div class="vs-safe vs-exit" style="--xt:${fmtSec(exitAt)}s;--xd:${fmtSec(exitS)}s">` : `<div class="vs-safe">`;
+  const look: Look = {
+    ...(t.weight_heading !== undefined ? { weight_heading: t.weight_heading } : {}),
+    ...(t.weight_body !== undefined ? { weight_body: t.weight_body } : {}),
+    ...(t.text_align ? { text_align: t.text_align } : {}),
+    ...(t.motion ? { motion: t.motion } : {}),
+  };
   // Bundled font files are copied next to the composition and referenced relatively, so the
   // page loads nothing from outside its directory and the HTML does not embed host paths.
   const bundledFaces = fontFaceCss(req.tokens).replace(/url\("(file:[^"]+)"\)/g, (_m, href: string) => {
@@ -1553,13 +1684,13 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
 <meta name="viewport" content="width=${W}, height=${H}">
 <title>${esc(`${scene.id} ${det.kind}`)}</title>
 <style>
-${stylesheet(stage, tok.values, tok.fontNames, bundledFaces)}
+${stylesheet(stage, tok.values, tok.fontNames, bundledFaces, look)}
 </style>
 </head>
 <body>
 <div id="vs-root" data-composition-id="${compositionId}" data-start="0" data-duration="${d}" data-width="${W}" data-height="${H}" data-fps="${target.fps}">
 <div id="vs-scene" class="clip vs-kind-${det.kind.replace(/_/g, "-")}" data-start="0" data-duration="${d}" data-track-index="0">
-<div class="vs-safe">
+${safeOpen}
 ${content}
 </div>
 </div>

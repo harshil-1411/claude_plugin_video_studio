@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:experiment-manifest",
+  "title": "ExperimentManifest",
+  "description": "variants/experiment.json: which variant projects an experiment produced, from which base spec, and their render status.",
+  "additionalProperties": false,
+  "properties": {
+    "base_spec_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "type": "string"
+    },
+    "experiment_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "hypothesis": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "metric": {
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "type": "string"
+    },
+    "variants": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "cover_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "dist": {
+            "description": "variants/<id>/dist once rendered.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "hook_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "id": {
+            "description": "<hook id>-<cover id>",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "lock_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "project_dir": {
+            "description": "variants/<id>, relative to the base project.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "spec_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "prepared",
+              "rendering",
+              "rendered",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "hook_id",
+          "project_dir",
+          "spec_sha256",
+          "status"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "experiment_id",
+    "hypothesis",
+    "base_spec_sha256",
+    "created_at",
+    "updated_at",
+    "variants"
+  ],
+  "type": "object"
+}

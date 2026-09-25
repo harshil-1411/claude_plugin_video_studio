@@ -55,10 +55,10 @@ are strict: unknown keys are errors.
 | `desired_action` | yes | what the viewer does after watching |
 | `key_messages` | no | 2-4 grounded points |
 | `hook_candidates` | yes, ≥ 1 (write ≥ 3) | `{text, mechanism, scores}` |
-| `hook_candidates[].mechanism` | yes | `curiosity_gap`, `contrarian`, `statistic`, `question`, `pain_point`, `promise`, `story`, `demo`, `pattern_interrupt` |
+| `hook_candidates[].mechanism` | yes | `curiosity_gap`, `contrarian`, `contrarian_claim`, `statistic`, `question`, `pain_point`, `promise`, `story`, `demo`, `pattern_interrupt`, `before_after`, `mistake` |
 | `hook_candidates[].scores` | yes | map name → 0-10; use `relevance`, `clarity`, `curiosity`, `evidence_strength`, `visual_potential` |
 | `chosen_hook` | yes | exact text of one candidate |
-| `template` | no | template id, e.g. `devtool-launch` |
+| `template` | no | template id from `template_list`, e.g. `devtool-launch`, `text-over-music` |
 | `assumptions` | yes (may be `[]`) | `{field, value, reason}`; `value` is a string |
 
 ## VideoSpec (`project/video-spec.json`)
@@ -75,8 +75,10 @@ Top level:
 | `brand_profile` | no | e.g. `acme@3` |
 | `policy_profile` | no | string |
 | `grounding` | yes | `strict` by default |
-| `voice` | yes | `{provider_preference?, voice_id?, style?}`; leave `provider_preference` out unless the user asked; `style` in plain words ("calm, precise") |
-| `captions` | yes | `{preset, burn_in}`; preset from brand `video.caption_preset` or the template, else `minimal`; `burn_in: true` for short-form |
+| `voice` | yes | `{mode?, provider_preference?, voice_id?, style?}`; `mode`: `narrated` (default) or `none` (no speech: every `voiceover` is `""`); leave `provider_preference` out unless the user asked; `style` in plain words ("calm, precise") |
+| `style` | no | style pack id: `minimal`, `editorial`, `technical`, `energetic` (look and motion; brand colours and fonts override it). `spec_scaffold` sets the template's `default_style` |
+| `audio` | no | `{music?: {file, volume_db?, duck_db?, fade_in_ms?, fade_out_ms?, loop?, start_sec?, license?}}`. `file`: `bundled:ambient` / `bundled:lofi` / `bundled:upbeat` / `bundled:minimal` (CC0, bundled) or a path relative to the project; a user file needs `license {id, source?, attribution?}` (e.g. `CC0-1.0`, `CC-BY-4.0`, `user-owned`) and only a track the user has the rights to |
+| `captions` | yes | `{preset, burn_in, position?}`; preset from brand `video.caption_preset` or the template, else `minimal`; `burn_in: true` for short-form narrated videos, `false` with `voice.mode: none` (no speech to caption) |
 | `cover` | no (write it) | `{headline, focal_time_sec}`: thumbnail text ≤ 6 words, different from the hook voiceover; `focal_time_sec` inside the hook scene |
 | `publish` | no (write it) | map target id → `{post_caption, hashtags?, ai_disclosure?}`; one entry per target; hashtags look like `#devtools`; the post caption is not the voiceover |
 | `scenes` | yes, ≥ 1 | see below |
@@ -87,11 +89,11 @@ Scene:
 |---|---|---|
 | `id` | yes | `s01`, `s02`, ... unique, in order |
 | `duration_sec` | yes | > 0, ≤ 120; all scenes sum within ±10% of target |
-| `purpose` | yes | `hook`, `problem`, `context`, `point`, `proof`, `demo`, `payoff`, `cta`, `end_card`; first scene should be `hook` |
-| `voiceover` | yes | `""` for silent scenes |
+| `purpose` | yes | `hook`, `problem`, `context`, `point`, `proof`, `demo`, `payoff`, `cta`, `end_card`, and the reel-grammar purposes `question`, `contrarian_claim`, `story`, `step`, `comparison`, `reveal`, `objection`, `testimonial`, `result`, `loop_back` (ending that echoes the hook for a rewatch); first scene should be `hook` |
+| `voiceover` | yes | `""` for silent scenes and for every scene when `voice.mode` is `none` |
 | `on_screen_text` | no | ≤ 6 words |
 | `visual_strategy` | yes | `motion_graphic`, `generated_video`, `avatar`, `screen_capture`, `user_asset`, `stock` |
-| `deterministic` | if `motion_graphic` | `{kind, props}`; kind: `typography`, `code`, `chart`, `diagram`, `screenshot`, `comparison`, `cta`, `end_card`; props non-empty except `end_card` |
+| `deterministic` | if `motion_graphic` | `{kind, props}`; kind: `typography`, `code`, `chart`, `diagram`, `screenshot`, `comparison`, `cta`, `end_card`, `quote`, `stat`, `timeline`, `split_screen`, `lower_third`, `kinetic_text`, `map`; props non-empty except `end_card` (shapes in `visual-strategy.md`) |
 | `visual_requirements` | yes | object; `continuity_refs` required (may be `[]`); optional `subject`, `camera`, `style`, `modality` (`video`/`image`/`none`), `realism` (`low`/`medium`/`high`), `character_reference` & `audio_generation` (`required`/`optional`/`none`), `max_cost_usd` (≥ 0), `data_policy` (`external-ok`/`local-only`), `preference` (list of `continuity`/`quality`/`speed`/`cost`) |
 | `claim_refs` | yes (may be `[]`) | ContentIR `evidence[].ref` or `claims[].id`, copied exactly |
 | `transition` | no | `cut`, `crossfade`, `fade_black`, `slide`, `zoom`, `whip` |

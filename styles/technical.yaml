@@ -1,0 +1,29 @@
+# Precise and dense: a dark editor-like page, green accent, left-aligned text, short snappy entrances.
+id: technical
+name: Technical
+version: 1
+description: Dark editor palette with a terminal-green accent and blue secondary, left-aligned semibold headings, JetBrains Mono for code, snap entrances and hard cuts. For developer tools, code and architecture.
+palette:
+  background: "#0D1117"
+  text: "#E6EDF3"
+  primary: "#3FB950"
+  secondary: "#58A6FF"
+fonts:
+  heading: Inter
+  body: Inter
+  mono: JetBrains Mono
+weights:
+  heading: 600
+  body: 400
+text:
+  case: as_is
+  heading_scale: 0.94
+  align: left
+motion:
+  personality: precise
+  easing: snap
+  enter_ms: 160
+  exit_ms: 0
+  stagger_ms: 60
+  transition: cut
+  transition_ms: 0

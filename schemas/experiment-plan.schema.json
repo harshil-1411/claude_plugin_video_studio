@@ -1,0 +1,314 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:experiment-plan",
+  "title": "ExperimentPlan",
+  "description": "project/variants.json: hypothesis, hook variants and cover variants for an A/B experiment.",
+  "additionalProperties": false,
+  "properties": {
+    "covers": {
+      "description": "Omit to keep the base spec's cover for every variant.",
+      "items": {
+        "description": "One cover to test.",
+        "additionalProperties": false,
+        "properties": {
+          "cover": {
+            "description": "Cover (thumbnail) text and focal frame.",
+            "additionalProperties": false,
+            "properties": {
+              "focal_time_sec": {
+                "description": "Video time of the frame the cover is composed from (TikTok uses it as the cover timestamp).",
+                "minimum": 0,
+                "type": "number"
+              },
+              "headline": {
+                "description": "Cover/thumbnail text; separate from on-screen text, captions and post captions.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "headline",
+              "focal_time_sec"
+            ],
+            "type": "object"
+          },
+          "id": {
+            "description": "Short id, e.g. c1, bold.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "cover"
+        ],
+        "type": "object"
+      },
+      "maxItems": 4,
+      "minItems": 1,
+      "type": "array"
+    },
+    "hooks": {
+      "items": {
+        "description": "One hook to test.",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Short id, e.g. h1, question, stat.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "label": {
+            "description": "What this hook tries, e.g. 'question hook'.",
+            "type": "string"
+          },
+          "scene": {
+            "description": "Replacement for the base spec's hook scene (same id is not required; it takes the hook's place).",
+            "additionalProperties": false,
+            "properties": {
+              "claim_refs": {
+                "description": "Evidence source_refs or ContentIR claim ids backing this scene.",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "deterministic": {
+                "description": "Deterministic (template-rendered) content for this scene.",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "typography",
+                      "code",
+                      "chart",
+                      "diagram",
+                      "screenshot",
+                      "comparison",
+                      "cta",
+                      "end_card",
+                      "quote",
+                      "stat",
+                      "timeline",
+                      "split_screen",
+                      "lower_third",
+                      "kinetic_text",
+                      "map"
+                    ],
+                    "type": "string"
+                  },
+                  "props": {
+                    "description": "Template props passed verbatim to the deterministic renderer.",
+                    "additionalProperties": {},
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "props"
+                ],
+                "type": "object"
+              },
+              "duration_sec": {
+                "exclusiveMinimum": 0,
+                "maximum": 120,
+                "type": "number"
+              },
+              "id": {
+                "pattern": "^s\\d{2,}$",
+                "type": "string"
+              },
+              "on_screen_text": {
+                "type": "string"
+              },
+              "purpose": {
+                "enum": [
+                  "hook",
+                  "problem",
+                  "context",
+                  "point",
+                  "proof",
+                  "demo",
+                  "payoff",
+                  "cta",
+                  "end_card",
+                  "question",
+                  "contrarian_claim",
+                  "story",
+                  "step",
+                  "comparison",
+                  "reveal",
+                  "objection",
+                  "testimonial",
+                  "result",
+                  "loop_back"
+                ],
+                "type": "string"
+              },
+              "transition": {
+                "enum": [
+                  "cut",
+                  "crossfade",
+                  "fade_black",
+                  "slide",
+                  "zoom",
+                  "whip"
+                ],
+                "type": "string"
+              },
+              "visual_requirements": {
+                "description": "Capability requirements for the router. Never names a provider or model.",
+                "additionalProperties": false,
+                "properties": {
+                  "audio_generation": {
+                    "enum": [
+                      "required",
+                      "optional",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "camera": {
+                    "type": "string"
+                  },
+                  "character_reference": {
+                    "enum": [
+                      "required",
+                      "optional",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "continuity_refs": {
+                    "description": "Scene or asset ids this scene must stay visually consistent with.",
+                    "items": {
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "data_policy": {
+                    "enum": [
+                      "external-ok",
+                      "local-only"
+                    ],
+                    "type": "string"
+                  },
+                  "max_cost_usd": {
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "modality": {
+                    "enum": [
+                      "video",
+                      "image",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "preference": {
+                    "description": "Ordered routing priorities.",
+                    "items": {
+                      "enum": [
+                        "continuity",
+                        "quality",
+                        "speed",
+                        "cost"
+                      ],
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "realism": {
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high"
+                    ],
+                    "type": "string"
+                  },
+                  "style": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "continuity_refs"
+                ],
+                "type": "object"
+              },
+              "visual_strategy": {
+                "enum": [
+                  "motion_graphic",
+                  "generated_video",
+                  "avatar",
+                  "screen_capture",
+                  "user_asset",
+                  "stock"
+                ],
+                "type": "string"
+              },
+              "voiceover": {
+                "description": "Narration for this scene; empty string for silent scenes.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "duration_sec",
+              "purpose",
+              "voiceover",
+              "visual_strategy",
+              "visual_requirements",
+              "claim_refs"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "scene"
+        ],
+        "type": "object"
+      },
+      "maxItems": 6,
+      "minItems": 1,
+      "type": "array"
+    },
+    "hypothesis": {
+      "description": "What the experiment tests, e.g. 'a question hook beats a stat hook on 3 s retention'.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "id": {
+      "description": "Experiment id, e.g. readme-hooks-1.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "metric": {
+      "description": "Primary metric to compare, e.g. 3s_retention, completion_rate, saves.",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "hypothesis",
+    "hooks"
+  ],
+  "type": "object"
+}

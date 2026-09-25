@@ -1,0 +1,29 @@
+# Calm and quiet: a light page, regular-weight headings, slightly smaller type and slow fades.
+id: minimal
+name: Minimal
+version: 1
+description: Light background, regular-weight headings with room around them, calm ease-out fades. For explainers and thoughtful, low-key topics.
+palette:
+  background: "#F6F5F2"
+  text: "#1C1F24"
+  primary: "#2F55C8"
+  secondary: "#1D6B45"
+fonts:
+  heading: Inter
+  body: Inter
+  mono: JetBrains Mono
+weights:
+  heading: 500
+  body: 400
+text:
+  case: as_is
+  heading_scale: 0.88
+  align: center
+motion:
+  personality: calm
+  easing: ease_out
+  enter_ms: 600
+  exit_ms: 200
+  stagger_ms: 180
+  transition: crossfade
+  transition_ms: 500

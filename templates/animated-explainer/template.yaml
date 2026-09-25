@@ -1,0 +1,63 @@
+# Archetype: animated explainer that answers one question with a diagram-led walk-through.
+schema_version: "1.0"
+id: animated-explainer
+name: Animated explainer
+description: Answers one question in order - question, context, the steps of how it works (diagram, timeline), and the result - with every scene a motion graphic.
+goals: [explain, educate]
+platforms: [youtube_shorts, instagram_reels, tiktok, linkedin, youtube, x]
+default_aspect_ratio: "9:16"
+default_duration_sec: 45
+duration_range: { min_sec: 25, max_sec: 90 }
+pacing: { avg_shot_sec: 5, max_words_per_sec: 2.9 }
+caption_preset: minimal
+beats:
+  - purpose: hook
+    share: 0.08
+    guidance: The surprising answer or the stakes in one line. The question comes next, so do not ask it twice.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: kinetic_text
+  - purpose: question
+    share: 0.10
+    guidance: State the single question the video answers, in the viewer's words.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: context
+    share: 0.12
+    guidance: The one piece of background needed to follow the steps. Skip history the answer does not depend on.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: diagram
+    optional: true
+  - purpose: step
+    share: 0.16
+    guidance: Step 1 of the mechanism. Draw it (diagram nodes and edges) rather than listing it.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: diagram
+  - purpose: step
+    share: 0.16
+    guidance: Step 2, building on the same diagram or advancing a timeline so the viewer sees progress.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: timeline
+  - purpose: step
+    share: 0.14
+    guidance: Step 3, the one that makes the answer click. Highlight what changed.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: diagram
+    optional: true
+  - purpose: result
+    share: 0.14
+    guidance: Answer the question in one sentence and show the outcome (a stat or a before/after). Cite numbers in claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: stat
+  - purpose: cta
+    share: 0.10
+    guidance: One next step that matches desired_action (read, try, follow for part 2).
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+hook_mechanisms: [question, curiosity_gap, contrarian_claim, statistic]
+rules:
+  - One question per video; every scene must move toward its answer.
+  - Steps are shown (diagram, timeline), not read out; on-screen text is labels, not sentences.
+  - Keep diagram node names identical across step scenes so the viewer can track them.
+  - Every number, percentage or comparison cites a ContentIR ref in claim_refs.
+  - CTA must be an allowed brand CTA if a brand profile is present.
+default_style: technical

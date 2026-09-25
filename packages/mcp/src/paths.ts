@@ -23,6 +23,8 @@ export const SCHEMA_NAMES = [
   "platform-contract",
   "video-lock",
   "style",
+  "experiment-plan",
+  "experiment-manifest",
 ] as const;
 export type SchemaName = (typeof SCHEMA_NAMES)[number];
 

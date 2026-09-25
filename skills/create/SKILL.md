@@ -23,6 +23,13 @@ Split what the user wrote into **inputs** and **creative direction**:
 - **Creative direction**: everything else, e.g. "30-second reel",
   "for developers", "launch video", "precise, no hype", "--grounding loose".
   Keep it verbatim and pass it to the plan step; it overrides inference.
+- **Format**: the plan step picks a template (reel grammar: explainer,
+  listicle, carousel story, product demo, UI walkthrough, case study,
+  before/after, ...). "No voiceover", "music only" or "text on screen" means
+  `text-over-music` (short text cards on a bundled music bed; also for a
+  music-only product demo). A named look ("minimal", "editorial",
+  "technical", "energetic") is the `style`; a user's own music file needs
+  its licence. Talking-head videos need footage and are not available yet.
 - **Only an idea** (e.g. "Explain vector DBs in 30s") with no sources: say
   in one line that video-studio grounds videos in sources and that you will
   proceed from your own short notes unless they give a document, URL or
@@ -71,7 +78,8 @@ Invoke the `render` skill (`video-studio:render`) for the same project, or
 Read `../render/SKILL.md` and follow it: `render_submit` with
 `quality: "preview"`, poll `job_status` every 10-20 s with a one-line
 progress note, then present the reel path, QA, and which voice and renderer
-were used and why (including any fallback, e.g. silent voice because system
+were used and why (with `voice.mode: none` there is no voice and no
+burned-in captions, only the music bed; including any fallback, e.g. silent voice because system
 TTS is unavailable, or ffmpeg because HyperFrames is not installed).
 
 ## 6. QA and revisions

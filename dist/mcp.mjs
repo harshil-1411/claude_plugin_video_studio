@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import process$1 from "node:process";
 import fs, { accessSync, constants, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import * as fs$1 from "node:fs/promises";
-import fsPromises, { access, chmod, copyFile, link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import fsPromises, { access, chmod, copyFile, cp, link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path, { basename, delimiter, dirname, extname, isAbsolute, join, normalize, posix, relative, resolve, sep } from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import os, { homedir, platform, tmpdir } from "node:os";
@@ -226778,7 +226778,7 @@ const regExpEscape$1 = (s) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
 const qmark = "[^/]";
 const star$1 = "[^/]*?";
 const starNoEmpty = "[^/]+?";
-let ID = 0;
+let ID$1 = 0;
 var AST = class {
 	type;
 	#root;
@@ -226792,7 +226792,7 @@ var AST = class {
 	#options;
 	#toString;
 	#emptyExt = false;
-	id = ++ID;
+	id = ++ID$1;
 	get depth() {
 		return (this.#parent?.depth ?? -1) + 1;
 	}
@@ -230486,6 +230486,82 @@ strictObject({
 	message: string()
 });
 //#endregion
+//#region ../schema/dist/experiment.js
+/**
+* project/variants.json: an A/B experiment Claude writes. Every hook × cover pair becomes one
+* variant project under variants/<hook>-<cover>/ with its own dist/ packages. The base spec's
+* other scenes are shared, so variants only re-render the hook scene (and the cover).
+*/
+const HookVariant = strictObject({
+	id: Id.describe("Short id, e.g. h1, question, stat."),
+	label: string().optional().describe("What this hook tries, e.g. 'question hook'."),
+	scene: Scene.describe("Replacement for the base spec's hook scene (same id is not required; it takes the hook's place).")
+}).describe("One hook to test.");
+const CoverVariant = strictObject({
+	id: Id.describe("Short id, e.g. c1, bold."),
+	label: string().optional(),
+	cover: Cover
+}).describe("One cover to test.");
+const ExperimentPlan = strictObject({
+	schema_version: SchemaVersion,
+	id: Id.describe("Experiment id, e.g. readme-hooks-1."),
+	hypothesis: NonEmptyString.describe("What the experiment tests, e.g. 'a question hook beats a stat hook on 3 s retention'."),
+	metric: string().optional().describe("Primary metric to compare, e.g. 3s_retention, completion_rate, saves."),
+	hooks: array(HookVariant).min(1).max(6),
+	covers: array(CoverVariant).min(1).max(4).optional().describe("Omit to keep the base spec's cover for every variant.")
+}).superRefine((p, ctx) => {
+	for (const [key, list] of [["hooks", p.hooks], ["covers", p.covers ?? []]]) {
+		const seen = /* @__PURE__ */ new Set();
+		list.forEach((v, i) => {
+			if (seen.has(v.id)) ctx.addIssue({
+				code: "custom",
+				path: [
+					key,
+					i,
+					"id"
+				],
+				message: `duplicate ${key} id "${v.id}"`
+			});
+			seen.add(v.id);
+		});
+	}
+}).meta({
+	id: "ExperimentPlan",
+	title: "ExperimentPlan",
+	description: "project/variants.json: hypothesis, hook variants and cover variants for an A/B experiment."
+});
+const ExperimentVariant = strictObject({
+	id: Id.describe("<hook id>-<cover id>"),
+	hook_id: Id,
+	cover_id: Id.optional(),
+	project_dir: FilePath.describe("variants/<id>, relative to the base project."),
+	spec_sha256: Sha256,
+	status: _enum([
+		"prepared",
+		"rendering",
+		"rendered",
+		"failed"
+	]),
+	job_id: string().optional(),
+	dist: FilePath.optional().describe("variants/<id>/dist once rendered."),
+	lock_sha256: Sha256.optional(),
+	error: string().optional()
+});
+const ExperimentManifest = strictObject({
+	schema_version: SchemaVersion,
+	experiment_id: Id,
+	hypothesis: NonEmptyString,
+	metric: string().optional(),
+	base_spec_sha256: Sha256,
+	created_at: IsoDateTime,
+	updated_at: IsoDateTime,
+	variants: array(ExperimentVariant).min(1)
+}).meta({
+	id: "ExperimentManifest",
+	title: "ExperimentManifest",
+	description: "variants/experiment.json: which variant projects an experiment produced, from which base spec, and their render status."
+});
+//#endregion
 //#region ../schema/dist/brand.js
 /** CSS font weight, 100–900 in steps of 100. */
 const FontWeight = int().min(100).max(900).multipleOf(100);
@@ -230587,7 +230663,12 @@ const StyleMotion = strictObject({
 	transition: Transition.describe("Default transition between scenes."),
 	transition_ms: int().min(0).max(2e3)
 }).describe("Motion tokens; brand.motion overrides personality and transition_ms when set.");
-strictObject({
+/**
+* styles/<id>.yaml: a look-and-motion pack (minimal, editorial, technical, energetic, ...).
+* Precedence when rendering: renderer defaults < style < brand (brand colours, fonts, weights and
+* motion win, because they are the user's identity).
+*/
+const Style = strictObject({
 	id: Id.describe("Must equal the file name: styles/<id>.yaml."),
 	name: NonEmptyString,
 	version: int().positive().describe("Bumped whenever a value changes (part of the scene cache key)."),
@@ -233331,17 +233412,93 @@ function withFallbacks(chain, extra) {
 	parts.splice(at === -1 ? parts.length : at, 0, ...add);
 	return parts.join(", ");
 }
+/** A style font before the default chain, without repeating a family the chain already has. */
+function styleFontChain(font, fallback) {
+	if (!font) return fallback;
+	if (font.includes(",")) return font;
+	const rest = fallback.split(",").map((p) => p.trim()).filter((p) => p.replace(/^["']|["']$/g, "").toLowerCase() !== font.toLowerCase());
+	return [/\s/.test(font) && !/^["']/.test(font) ? `"${font}"` : font, ...rest].join(", ");
+}
 /**
-* Resolve visual tokens: brand.yaml values where given (palette keys `background|bg`,
-* `text|foreground|fg`, `primary|accent`, `secondary`), else `defaults`, else DEFAULT_TOKENS.
+* Default motion per personality, used when only brand.motion.personality is set (no style), or
+* when the brand's personality differs from the style's. Transitions are the default scene join.
+*/
+const PERSONALITY_MOTION = Object.freeze({
+	calm: {
+		easing: "ease_out",
+		enter_ms: 600,
+		exit_ms: 250,
+		stagger_ms: 180,
+		transition: "crossfade",
+		transition_ms: 500
+	},
+	precise: {
+		easing: "snap",
+		enter_ms: 160,
+		exit_ms: 0,
+		stagger_ms: 60,
+		transition: "cut",
+		transition_ms: 0
+	},
+	friendly: {
+		easing: "ease_in_out",
+		enter_ms: 450,
+		exit_ms: 200,
+		stagger_ms: 120,
+		transition: "crossfade",
+		transition_ms: 350
+	},
+	energetic: {
+		easing: "spring",
+		enter_ms: 350,
+		exit_ms: 120,
+		stagger_ms: 70,
+		transition: "whip",
+		transition_ms: 250
+	},
+	playful: {
+		easing: "spring",
+		enter_ms: 500,
+		exit_ms: 150,
+		stagger_ms: 110,
+		transition: "zoom",
+		transition_ms: 300
+	}
+});
+/**
+* Resolve visual tokens. Precedence: DEFAULT_TOKENS < `defaults` < `style` < brand.yaml.
+* - Style: palette, fonts (placed before the default chain), weights, text case / heading scale /
+*   alignment, motion, and `style` = `<id>@<version>`.
+* - Brand: palette keys `background|bg`, `text|foreground|fg`, `primary|accent`, `secondary`;
+*   fonts; `visual.weights`; `motion.personality` (a personality other than the style's also
+*   brings that personality's easing and timings, keeping the style's transition kind) and
+*   `motion.transition_ms`. A brand personality without a style maps through PERSONALITY_MOTION.
 * `visual.font_fallbacks` are added to every chain before its generic family.
 * `logo_path` is the brand's logo path as written (project-relative); renderers resolve it.
+* Without a style and without brand weights or motion, the tokens are exactly the v1 tokens.
 */
-function resolveTokens$1(brand, defaults = {}) {
+function resolveTokens$1(brand, defaults = {}, style) {
 	const base = {
 		...DEFAULT_TOKENS,
 		...defaults
 	};
+	if (style) {
+		base.style = `${style.id}@${style.version}`;
+		const sp = style.palette ?? {};
+		if (sp.background) base.color_background = sp.background;
+		if (sp.text) base.color_text = sp.text;
+		if (sp.primary) base.color_primary = sp.primary;
+		if (sp.secondary) base.color_secondary = sp.secondary;
+		base.font_heading = styleFontChain(style.fonts?.heading, base.font_heading);
+		base.font_body = styleFontChain(style.fonts?.body, base.font_body);
+		base.font_mono = styleFontChain(style.fonts?.mono, base.font_mono);
+		if (style.weights?.heading !== void 0) base.weight_heading = style.weights.heading;
+		if (style.weights?.body !== void 0) base.weight_body = style.weights.body;
+		if (style.text?.case) base.text_case = style.text.case;
+		if (style.text?.heading_scale !== void 0) base.heading_scale = style.text.heading_scale;
+		if (style.text?.align) base.text_align = style.text.align;
+		base.motion = { ...style.motion };
+	}
 	const visual = brand?.visual;
 	const extra = visual?.font_fallbacks ?? [];
 	const out = {
@@ -233355,6 +233512,27 @@ function resolveTokens$1(brand, defaults = {}) {
 		const key = keys.find((k) => palette[k] !== void 0);
 		out[token] = normalizeHex(key ? palette[key] : out[token]);
 	}
+	if (visual?.weights?.heading !== void 0) out.weight_heading = visual.weights.heading;
+	if (visual?.weights?.body !== void 0) out.weight_body = visual.weights.body;
+	const bm = brand?.motion;
+	if (bm?.personality && bm.personality !== out.motion?.personality) {
+		const table = PERSONALITY_MOTION[bm.personality];
+		out.motion = out.motion ? {
+			...out.motion,
+			personality: bm.personality,
+			easing: table.easing,
+			enter_ms: table.enter_ms,
+			exit_ms: table.exit_ms,
+			stagger_ms: table.stagger_ms
+		} : {
+			personality: bm.personality,
+			...table
+		};
+	}
+	if (bm?.transition_ms !== void 0 && out.motion) out.motion = {
+		...out.motion,
+		transition_ms: bm.transition_ms
+	};
 	const logo = visual?.logo ?? base.logo_path;
 	if (logo) out.logo_path = logo;
 	else delete out.logo_path;
@@ -233606,18 +233784,18 @@ function targetForAspect(aspect, opts = {}) {
 //#endregion
 //#region ../platforms/dist/registry.js
 /** Present in every `platform-specs/` directory, so it can be found before any contract exists. */
-const MARKER$1 = "README.md";
+const MARKER$2 = "README.md";
 /**
 * Locate the bundled `platform-specs/` directory: `${CLAUDE_PLUGIN_ROOT}/platform-specs` first, then
 * walk up from this module (works from `packages/*\/src`, `packages/*\/dist` and `dist/mcp.mjs`).
 */
 function findPlatformSpecsDir(env = process.env, from) {
 	const root = env.CLAUDE_PLUGIN_ROOT;
-	if (root && existsSync(join(root, "platform-specs", MARKER$1))) return join(root, "platform-specs");
+	if (root && existsSync(join(root, "platform-specs", MARKER$2))) return join(root, "platform-specs");
 	let dir = from ?? dirname(fileURLToPath(import.meta.url));
 	for (let i = 0; i < 6; i++) {
 		const candidate = join(dir, "platform-specs");
-		if (existsSync(join(candidate, MARKER$1))) return candidate;
+		if (existsSync(join(candidate, MARKER$2))) return candidate;
 		const parent = dirname(dir);
 		if (parent === dir) break;
 		dir = parent;
@@ -233813,9 +233991,14 @@ const CHAR_EM = {
 	proportional: .55,
 	mono: .6
 };
+/** Average advance for upper-case text (capitals are wider than the mixed-case average). */
+const CHAR_EM_UPPER = .68;
+function charEm(opts) {
+	return opts.em ?? (opts.mono ? CHAR_EM.mono : CHAR_EM.proportional);
+}
 /** Estimated rendered width in px. */
 function estimateTextWidth(text, fontSize, opts = {}) {
-	const em = opts.mono ? CHAR_EM.mono : CHAR_EM.proportional;
+	const em = charEm(opts);
 	return Array.from(text).length * fontSize * em;
 }
 /** Break a single word that is wider than `maxWidth` into pieces that fit. */
@@ -233827,7 +234010,7 @@ function hardBreak(word, maxChars) {
 }
 /** Greedy word wrap to `maxWidth` px. Explicit newlines are kept; over-long words are hard-broken. */
 function wrapText(text, fontSize, maxWidth, opts = {}) {
-	const em = opts.mono ? CHAR_EM.mono : CHAR_EM.proportional;
+	const em = charEm(opts);
 	const maxChars = Math.max(1, Math.floor(maxWidth / (fontSize * em)));
 	const lines = [];
 	for (const para of text.replace(/\r\n?/g, "\n").split("\n")) {
@@ -233890,7 +234073,7 @@ function fitText(text, box, opts) {
 		if (size <= min) break;
 		size = Math.max(min, size > 40 ? Math.floor(size * .95) : size - 1);
 	}
-	const em = opts.mono ? CHAR_EM.mono : CHAR_EM.proportional;
+	const em = charEm(opts);
 	const maxChars = Math.max(1, Math.floor(box.w / (size * em)));
 	const maxLines = Math.max(1, Math.min(opts.maxLines ?? Infinity, Math.floor((box.h - size) / (size * lh)) + 1));
 	let lines = layout(size).map((l) => ellipsize(l, maxChars));
@@ -233922,6 +234105,48 @@ function placeLines(fit, box, align = "center", valign = "middle", opts = {}) {
 			y: Math.round(top + i * fit.lineAdvance)
 		};
 	});
+}
+const SMALL_WORDS = /* @__PURE__ */ new Set([
+	"a",
+	"an",
+	"and",
+	"as",
+	"at",
+	"but",
+	"by",
+	"for",
+	"in",
+	"nor",
+	"of",
+	"on",
+	"or",
+	"per",
+	"the",
+	"to",
+	"vs",
+	"via",
+	"with"
+]);
+/**
+* Heading case transform (style `text.case`). `title` capitalises words that are all lower case
+* (so API, gRPC and iOS keep their spelling), leaving short function words lower case except at
+* the start and end. `as_is` and undefined return the text unchanged.
+*/
+function applyTextCase(text, mode) {
+	if (mode === "upper") return text.toLocaleUpperCase("en");
+	if (mode !== "title") return text;
+	return text.split("\n").map((line) => {
+		const words = line.split(" ");
+		const last = words.length - 1;
+		return words.map((w, i) => {
+			const m = /^([^\p{L}]*)(\p{L}[\p{L}\p{N}'’-]*)(.*)$/u.exec(w);
+			if (!m) return w;
+			const [, lead, word, tail] = m;
+			if (word !== word.toLowerCase()) return w;
+			if (i !== 0 && i !== last && SMALL_WORDS.has(word)) return w;
+			return `${lead}${word.charAt(0).toLocaleUpperCase("en")}${word.slice(1)}${tail}`;
+		}).join(" ");
+	}).join("\n");
 }
 /**
 * The content-safe rectangle of a target, in px (integers): `zones.content` when the pipeline
@@ -234366,13 +234591,37 @@ function note(c, role, text, box, fit, color, background = c.colors.bg) {
 		background: toHex(rgb(background))
 	});
 }
+/** Heading text with the style's case transform (hook/headline roles). */
+function headCase(c, text) {
+	return applyTextCase(text, c.tokens.text_case);
+}
+/**
+* fitText for a heading: a wider glyph estimate for upper case, then the style's heading scale
+* applied to the fitted size (re-fitted downwards when the scaled size no longer fits).
+* Without style tokens this is exactly `fitText(text, box, opts)`.
+*/
+function fitHeading(c, text, box, opts) {
+	const o = c.tokens.text_case === "upper" && !opts.mono ? {
+		...opts,
+		em: CHAR_EM_UPPER
+	} : opts;
+	const fit = fitText(text, box, o);
+	const k = c.tokens.heading_scale;
+	if (k === void 0 || k === 1 || k > 1 && fit.truncated) return fit;
+	const size = fit.fontSize * k;
+	return fitText(text, box, {
+		...o,
+		maxSize: size,
+		minSize: Math.min(o.minSize, size)
+	});
+}
 function typography(p, c) {
 	const warnings = [];
-	const lines = Array.isArray(p.lines) ? p.lines.filter((l) => typeof l === "string" && l.trim() !== "") : [];
+	const lines = Array.isArray(p.lines) ? p.lines.filter((l) => typeof l === "string" && l.trim() !== "").map((l) => headCase(c, l)) : [];
 	if (lines.length === 0) warnings.push("typography: no lines to draw");
 	const emphasis = asStr(p.emphasis)?.trim();
 	const box = inset(c.safe, r(c.u * .02));
-	const fit = fitText(lines, box, {
+	const fit = fitHeading(c, lines, box, {
 		maxSize: c.u * .12,
 		minSize: c.u * .04
 	});
@@ -234391,7 +234640,8 @@ function typography(p, c) {
 	const els = textLines(fit, box, {
 		font: "heading",
 		color,
-		beat: (i) => i
+		beat: (i) => i,
+		align: c.align
 	});
 	note(c, c.main, lines.join("\n"), box, fit, c.colors.text);
 	if (em && !hit) warnings.push(`typography: emphasis "${emphasis}" not found in lines`);
@@ -234515,7 +234765,8 @@ function comparison(p, c) {
 	const side = (v) => v && typeof v === "object" ? v : {};
 	const left = side(p.left);
 	const right = side(p.right);
-	const verdict = asStr(p.verdict);
+	const verdictRaw = asStr(p.verdict);
+	const verdict = verdictRaw ? headCase(c, verdictRaw) : void 0;
 	const gap = r(c.u * .04);
 	const [mainR, verdictR] = verdict ? splitV(c.safe, [5, 1], gap) : [c.safe, void 0];
 	const panels = c.target.height > c.target.width ? splitV(mainR, [1, 1], gap) : splitH(mainR, [1, 1], gap);
@@ -234587,7 +234838,7 @@ function comparison(p, c) {
 		note(c, "body", asStr(s.text) ?? "", bodyBoxes[i], bf, c.colors.text, c.colors.panel);
 	});
 	if (verdict && verdictR) {
-		const vf = fitText(verdict, verdictR, {
+		const vf = fitHeading(c, verdict, verdictR, {
 			maxSize: c.u * .06,
 			minSize: c.u * .03
 		});
@@ -234595,7 +234846,8 @@ function comparison(p, c) {
 		els.push(...textLines(vf, verdictR, {
 			font: "heading",
 			color: c.colors.text,
-			beat: 4
+			beat: 4,
+			align: c.align
 		}));
 		note(c, "headline", verdict, verdictR, vf, c.colors.text);
 	}
@@ -234606,7 +234858,7 @@ function comparison(p, c) {
 }
 function cta(p, c) {
 	const warnings = [];
-	const headline = asStr(p.headline) ?? "";
+	const headline = headCase(c, asStr(p.headline) ?? "");
 	const action = asStr(p.action);
 	const command = asStr(p.command);
 	const url = asStr(p.url);
@@ -234632,7 +234884,7 @@ function cta(p, c) {
 	parts.forEach(({ key }, i) => {
 		const rect = rects[i];
 		if (key === "headline") {
-			const f = fitText(headline, rect, {
+			const f = fitHeading(c, headline, rect, {
 				maxSize: c.u * .11,
 				minSize: c.u * .04
 			});
@@ -234641,7 +234893,8 @@ function cta(p, c) {
 				font: "heading",
 				color: c.colors.text,
 				beat: 0,
-				valign: "bottom"
+				valign: "bottom",
+				align: c.align
 			}));
 			note(c, c.main === "hook" ? "hook" : "cta", headline, rect, f, c.colors.text);
 		} else if (key === "action") {
@@ -234739,7 +234992,8 @@ function cta(p, c) {
 }
 function endCard(p, c, logo) {
 	const warnings = [];
-	const title = asStr(p.title);
+	const titleRaw = asStr(p.title);
+	const title = titleRaw ? headCase(c, titleRaw) : void 0;
 	const subtitle = asStr(p.subtitle);
 	const parts = [];
 	if (logo) parts.push({
@@ -234786,7 +235040,7 @@ function endCard(p, c, logo) {
 				beat: 0
 			});
 		} else if (key === "title") {
-			const f = fitText(title, rect, {
+			const f = fitHeading(c, title, rect, {
 				maxSize: c.u * .12,
 				minSize: c.u * .04
 			});
@@ -234795,7 +235049,8 @@ function endCard(p, c, logo) {
 				font: "heading",
 				color: c.colors.text,
 				beat: 1,
-				valign: parts.length === 1 ? "middle" : "bottom"
+				valign: parts.length === 1 ? "middle" : "bottom",
+				align: c.align
 			}));
 			note(c, c.main, title, rect, f, c.colors.text);
 		} else {
@@ -234808,7 +235063,8 @@ function endCard(p, c, logo) {
 				font: "body",
 				color: c.colors.primary,
 				beat: 2,
-				valign: "top"
+				valign: "top",
+				align: c.align
 			}));
 			note(c, "body", subtitle, rect, f, c.colors.primary);
 		}
@@ -234825,7 +235081,13 @@ function formatNumber(v) {
 function statLayout(value, label, c, warnings) {
 	const [numR, labelR] = label ? splitV(c.safe, [3, 2], r(c.u * .03)) : [c.safe, void 0];
 	const els = [];
-	const nf = fitText(value, numR, {
+	const nf = fitHeading({
+		...c,
+		tokens: {
+			...c.tokens,
+			text_case: "as_is"
+		}
+	}, value, numR, {
 		maxSize: c.u * .32,
 		minSize: c.u * .06,
 		maxLines: 1,
@@ -234878,7 +235140,8 @@ function chart(p, c) {
 		const gap = r(c.u * .03);
 		const [titleR, barsR] = label ? splitV(c.safe, [1, 5], gap) : [void 0, c.safe];
 		if (label && titleR) {
-			const tf = fitText(label, titleR, {
+			const title = headCase(c, label);
+			const tf = fitHeading(c, title, titleR, {
 				maxSize: c.u * .065,
 				minSize: c.u * .03,
 				maxLines: 2
@@ -234887,9 +235150,10 @@ function chart(p, c) {
 				font: "heading",
 				color: c.colors.text,
 				beat: 0,
-				valign: "bottom"
+				valign: "bottom",
+				align: c.align
 			}));
-			note(c, c.main, label, titleR, tf, c.colors.text);
+			note(c, c.main, title, titleR, tf, c.colors.text);
 		}
 		const rowGap = r(c.u * .03);
 		const rowH = Math.min((barsR.h - rowGap * (rows.length - 1)) / rows.length, c.u * .07 + c.u * .045 * 1.35);
@@ -235392,10 +235656,17 @@ function quote(p, c) {
 	}) : void 0;
 	const foot = [af, sf].filter((x) => !!x);
 	const footH = foot.reduce((a, f) => a + f.height, 0) + (foot.length > 1 ? r(gap / 2) : 0);
-	const qf = fitText(text, {
+	const qBox = {
 		w,
 		h: c.safe.h - markH - gap - (footH ? footH + gap : 0)
-	}, {
+	};
+	const qf = fitHeading({
+		...c,
+		tokens: {
+			...c.tokens,
+			text_case: "as_is"
+		}
+	}, text, qBox, {
 		maxSize: c.u * .1,
 		minSize: c.u * .035
 	});
@@ -235436,7 +235707,8 @@ function quote(p, c) {
 	els.push(...textLines(qf, qRect, {
 		font: "heading",
 		color: c.colors.text,
-		beat: (i) => .5 + i * .5
+		beat: (i) => .5 + i * .5,
+		align: c.align
 	}));
 	note(c, c.main, text, qRect, qf, c.colors.text);
 	let y = footY ?? 0;
@@ -235451,7 +235723,8 @@ function quote(p, c) {
 		els.push(...textLines(af, rect, {
 			font: "body",
 			color: c.colors.text,
-			beat
+			beat,
+			align: c.align
 		}));
 		note(c, "label", `— ${attribution}`, rect, af, c.colors.text);
 		y += r(af.height + gap / 2);
@@ -235466,7 +235739,8 @@ function quote(p, c) {
 		els.push(...textLines(sf, rect, {
 			font: "body",
 			color: c.colors.muted,
-			beat: beat + .5
+			beat: beat + .5,
+			align: c.align
 		}));
 		note(c, "label", source, rect, sf, c.colors.muted);
 	}
@@ -235483,7 +235757,13 @@ function stat$1(p, c) {
 	const context = asStr(p.context);
 	const gap = r(c.u * .035);
 	const w = c.safe.w;
-	const vf = fitText(value, {
+	const vf = fitHeading({
+		...c,
+		tokens: {
+			...c.tokens,
+			text_case: "as_is"
+		}
+	}, value, {
 		w,
 		h: c.safe.h * .45
 	}, {
@@ -235911,7 +236191,8 @@ function lowerThird(p, c) {
 	const warnings = [];
 	const name = asStr(p.name) ?? "";
 	const title = asStr(p.title);
-	const headline = asStr(p.headline);
+	const headlineRaw = asStr(p.headline);
+	const headline = headlineRaw ? headCase(c, headlineRaw) : void 0;
 	const pad = r(c.u * .035);
 	const accentW = Math.max(3, r(c.u * .015));
 	const maxW = r(c.safe.w * .92) - 2 * pad - accentW;
@@ -235951,7 +236232,7 @@ function lowerThird(p, c) {
 			w: c.safe.w,
 			h: Math.max(0, bar.y - gap - c.safe.y)
 		};
-		const hf = fitText(headline, hr, {
+		const hf = fitHeading(c, headline, hr, {
 			maxSize: c.u * .1,
 			minSize: c.u * .04
 		});
@@ -235959,7 +236240,8 @@ function lowerThird(p, c) {
 		els.push(...textLines(hf, hr, {
 			font: "heading",
 			color: c.colors.text,
-			beat: 0
+			beat: 0,
+			align: c.align
 		}));
 		note(c, c.main, headline, hr, hf, c.colors.text);
 	}
@@ -236023,7 +236305,7 @@ function kineticChunks$1(text, rhythm) {
 }
 function kineticText(p, c) {
 	const warnings = [];
-	const text = asStr(p.text) ?? "";
+	const text = headCase(c, asStr(p.text) ?? "");
 	const rhythm = p.rhythm === "phrase" ? "phrase" : "word";
 	const chunks = kineticChunks$1(text, rhythm);
 	const words = chunks.flatMap((ch) => ch.split(" "));
@@ -236032,7 +236314,7 @@ function kineticText(p, c) {
 	const emphasis = asStr(p.emphasis);
 	const emSet = new Set((emphasis ?? "").split(/\s+/).map(norm).filter(Boolean));
 	const box = inset(c.safe, r(c.u * .03));
-	const fit = fitText(rhythm === "phrase" ? chunks : [words.join(" ")], {
+	const fit = fitHeading(c, rhythm === "phrase" ? chunks : [words.join(" ")], {
 		w: box.w * .85,
 		h: box.h
 	}, {
@@ -236050,7 +236332,7 @@ function kineticText(p, c) {
 		const widths = parts.map((w) => glyphWidth(w, fit.fontSize));
 		const lineW = widths.reduce((a, b) => a + b, 0) + space * Math.max(0, parts.length - 1);
 		const scale = lineW > box.w ? box.w / lineW : 1;
-		let x = box.x + (box.w - lineW * scale) / 2;
+		let x = c.align === "left" ? box.x : box.x + (box.w - lineW * scale) / 2;
 		parts.forEach((w, j) => {
 			const beat = chunkOf[Math.min(k, chunkOf.length - 1)] ?? 0;
 			const em = emSet.has(norm(w)) && norm(w) !== "";
@@ -236083,7 +236365,8 @@ function kineticText(p, c) {
 }
 function map(p, c) {
 	const warnings = [];
-	const title = asStr(p.title);
+	const titleRaw = asStr(p.title);
+	const title = titleRaw ? headCase(c, titleRaw) : void 0;
 	const clamp = (v) => Math.min(1, Math.max(0, v));
 	let points = Array.isArray(p.points) ? p.points.flatMap((pt) => {
 		if (!pt || typeof pt !== "object") return [];
@@ -236101,7 +236384,7 @@ function map(p, c) {
 	if (points.length === 0) warnings.push("map: no points");
 	const gap = r(c.u * .035);
 	const els = [];
-	const tf = title ? fitText(title, {
+	const tf = title ? fitHeading(c, title, {
 		w: c.safe.w,
 		h: c.u * .18
 	}, {
@@ -236129,7 +236412,8 @@ function map(p, c) {
 		els.push(...textLines(tf, tr, {
 			font: "heading",
 			color: c.colors.text,
-			beat: 0
+			beat: 0,
+			align: c.align
 		}));
 		note(c, c.main, title, tr, tf, c.colors.text);
 	}
@@ -236255,7 +236539,8 @@ function composeScene(scene, target, tokens, inputs = {}) {
 		u: Math.min(target.width, target.height),
 		colors: palette(tokens),
 		main: scene.purpose === "hook" ? "hook" : "headline",
-		boxes: []
+		boxes: [],
+		align: tokens.text_align ?? "center"
 	};
 	return {
 		...layoutKind(det, c, inputs),
@@ -236287,20 +236572,67 @@ function layoutKind(det, c, inputs) {
 function f$1(name, opts) {
 	return `${name}=${Object.entries(opts).filter(([, v]) => v !== void 0).map(([k, v]) => `${k}=${escapeFiltergraph(escapeFilterOption(String(v)))}`).join(":")}`;
 }
-/** Stagger step and fade length for a clip: every element is fully visible by 60% of the clip. */
-function motionTiming(durationS, maxBeat) {
+/**
+* Stagger step and fade length for a clip: every element is fully visible by 60% of the clip.
+* With motion tokens, the fade is the style's `enter_ms` and the step its `stagger_ms`, both
+* capped so the same 60% rule holds.
+*/
+function motionTiming(durationS, maxBeat, motion) {
+	if (motion) {
+		const fade = Math.max(.04, Math.min(motion.enter_ms / 1e3, durationS * .3));
+		return {
+			step: round3$1(maxBeat > 0 ? Math.min(motion.stagger_ms / 1e3, Math.max(0, durationS * .6 - fade) / maxBeat) : 0),
+			fade: round3$1(fade)
+		};
+	}
 	const fade = Math.min(.4, durationS * .2);
 	return {
 		step: round3$1(maxBeat > 0 ? Math.min(.15, durationS * .4 / maxBeat) : 0),
 		fade: round3$1(fade)
 	};
 }
+/**
+* Entrance curves as FFmpeg expressions of the progress `p` (0..1): the alpha, and the remaining
+* fraction of the slide-up offset. Undefined easing: the renderer's original curves (linear alpha,
+* quadratic slide). spring overshoots (the offset swings past zero, damped); snap is a sharp
+* ease-out with a fast alpha.
+*/
+function easingExpr(easing, p) {
+	switch (easing) {
+		case void 0: return {
+			alpha: p,
+			offset: `pow(1-${p},2)`
+		};
+		case "linear": return {
+			alpha: p,
+			offset: `(1-${p})`
+		};
+		case "ease_out": return {
+			alpha: `(1-pow(1-${p},2))`,
+			offset: `pow(1-${p},3)`
+		};
+		case "ease_in_out": return {
+			alpha: `(${p}*${p}*(3-2*${p}))`,
+			offset: `(1-${p}*${p}*(3-2*${p}))`
+		};
+		case "spring": return {
+			alpha: `min(1,2*${p})`,
+			offset: `(1.6*pow(1-${p},2)*cos(3*PI*${p}))`
+		};
+		case "snap": return {
+			alpha: `min(1,2*${p})`,
+			offset: `pow(1-${p},4)`
+		};
+	}
+}
 function round3$1(n) {
 	return Math.round(n * 1e3) / 1e3;
 }
 /** Build the filtergraph for a composition. `textDir` is where text files will be written. */
-function buildFilterGraph(comp, target, durationS, fonts, textDir) {
-	const { step, fade } = motionTiming(durationS, Math.max(0, ...comp.elements.map((e) => e.beat)));
+function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
+	const maxBeat = Math.max(0, ...comp.elements.map((e) => e.beat));
+	const { motion } = gm;
+	const { step, fade } = motionTiming(durationS, maxBeat, motion);
 	const slide = Math.max(2, r(Math.min(target.width, target.height) * .025));
 	const inputs = [];
 	const textFiles = /* @__PURE__ */ new Map();
@@ -236318,6 +236650,7 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir) {
 	for (const el of comp.elements) {
 		const start = round3$1(el.beat * step);
 		const progress = `min(1,max(0,(t-${start})/${fade}))`;
+		const ease = easingExpr(motion?.easing, progress);
 		if (el.type === "box") chain.push(f$1("drawbox", {
 			x: el.x,
 			y: el.y,
@@ -236337,9 +236670,9 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir) {
 				fontsize: el.size,
 				fontcolor: ffColor(el.color),
 				x: el.cx !== void 0 ? `${el.cx}-text_w/2` : el.x,
-				y: el.slide ? `${el.y}+${slide}*pow(1-${progress},2)` : el.y,
+				y: el.slide ? `${el.y}+${slide}*${ease.offset}` : el.y,
 				y_align: "font",
-				alpha: fade > 0 ? progress : void 0,
+				alpha: fade > 0 ? ease.alpha : void 0,
 				...el.box ? {
 					box: 1,
 					boxcolor: el.box.color,
@@ -236381,6 +236714,13 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir) {
 			cur = out;
 		}
 	}
+	const exit = motion ? round3$1(Math.min(motion.exit_ms / 1e3, durationS * .2)) : 0;
+	if (exit >= .02) chain.push(f$1("fade", {
+		t: "out",
+		st: round3$1(Math.max(0, durationS - 1 / target.fps - exit)),
+		d: exit,
+		color: ffColor(gm.background ?? "#000000")
+	}));
 	chain.push("format=yuv420p");
 	chains.push(`${cur}${chain.join(",")}[vout]`);
 	return {
@@ -236549,14 +236889,17 @@ function createFfmpegRenderer(opts = {}) {
 			});
 			warnings.push(...comp.warnings);
 			const fonts = {
-				heading: await fontResolver(tokens.font_heading, 700),
-				body: await fontResolver(tokens.font_body),
+				heading: await fontResolver(tokens.font_heading, tokens.weight_heading ?? 700),
+				body: await fontResolver(tokens.font_body, tokens.weight_body),
 				mono: await fontResolver(tokens.font_mono)
 			};
 			const frames = frameCount(scene.duration_sec, target.fps);
 			const tmp = await mkdtemp(join(tmpdir(), "vs-ffr-"));
 			try {
-				const built = buildFilterGraph(comp, target, frames / target.fps, fonts, tmp);
+				const built = buildFilterGraph(comp, target, frames / target.fps, fonts, tmp, {
+					...tokens.motion ? { motion: tokens.motion } : {},
+					background: tokens.color_background
+				});
 				for (const [name, text] of built.textFiles) await writeFile(join(tmp, name), text, "utf8");
 				await mkdir(dirname(req.out_path), { recursive: true });
 				await runFfmpeg(ffmpegRenderArgs(built, target, tokens, frames, encode, req.out_path), {
@@ -236888,8 +237231,48 @@ function sanitizeFontChain(chain, fallback) {
 		names
 	};
 }
+/**
+* Easing names → CSS timing functions (the runtime seeks CSS animations; GSAP is not bundled).
+* ease_out is the renderer's original curve; spring overshoots (y > 1); snap is a sharp ease-out.
+*/
+const EASING_CSS = Object.freeze({
+	linear: "linear",
+	ease_out: "cubic-bezier(0.22, 1, 0.36, 1)",
+	ease_in_out: "cubic-bezier(0.65, 0, 0.35, 1)",
+	spring: "cubic-bezier(0.34, 1.56, 0.64, 1)",
+	snap: "cubic-bezier(0.2, 0.9, 0.1, 1)"
+});
+/** Effects that are element entrances (their length follows the style's `enter_ms`). */
+const ENTRANCES = /* @__PURE__ */ new Set([
+	"fade",
+	"fade-up",
+	"scale-in",
+	"pop",
+	"pop-center",
+	"slide-right",
+	"slide-left",
+	"grow-x",
+	"grow-x-rev",
+	"grow-x-center",
+	"grow-y",
+	"kin"
+]);
+/**
+* Motion tokens of the composition being built. buildComposition is synchronous and sets this for
+* the duration of one build (and always resets it), so anim()/stagger() stay plain functions.
+*/
+let activeMotion;
 /** Entrance timing: `n` staggered items, all finished by ~60% of the scene. */
 function stagger(n, dur, first = .1) {
+	if (activeMotion) {
+		const len = Math.max(.05, Math.min(activeMotion.enter_ms / 1e3, dur * .3));
+		const budget = Math.max(0, dur * .6 - first - len);
+		const step = n > 1 ? Math.min(activeMotion.stagger_ms / 1e3, budget / (n - 1)) : 0;
+		return {
+			at: (i) => first + i * step,
+			len
+		};
+	}
 	const len = Math.max(.2, Math.min(.6, dur * .25));
 	const budget = Math.max(0, dur * .6 - first - len);
 	const step = n > 1 ? Math.min(.18, budget / (n - 1)) : 0;
@@ -236900,6 +237283,7 @@ function stagger(n, dur, first = .1) {
 }
 /** Attributes for an animated element. Only computed numbers reach the style attribute. */
 function anim(effect, at, len, cls = "", style = "") {
+	if (activeMotion && ENTRANCES.has(effect)) len = Math.max(.05, activeMotion.enter_ms / 1e3);
 	return `class="${`${cls ? `${cls} ` : ""}vs-a vs-${effect}`}" style="--t:${fmtSec(at)}s;--d:${fmtSec(len)}s${style ? `;${style}` : ""}"`;
 }
 /**
@@ -236940,6 +237324,36 @@ function mixHex(a, b, t) {
 	const [p, q] = [ch(a), ch(b)];
 	return `#${p.map((v, i) => Math.round(v + (q[i] - v) * t).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 }
+/** Heading text with the style's case transform (hook/headline roles). */
+function hc(ctx, text) {
+	return applyTextCase(text, ctx.head.case);
+}
+/** Glyph advance for heading fits: capitals are wider than the mixed-case estimate. */
+function headEm(ctx, em) {
+	return ctx.head.case === "upper" ? Math.max(em, .7) : em;
+}
+/**
+* fitFontInfo for a heading: the style's heading scale multiplies the fitted size, which is
+* re-fitted downwards when it no longer fits. Without style tokens this is exactly fitFontInfo.
+*/
+function headFit(ctx, texts, boxW, boxH, maxFs, minFs, lineHeight = 1.2, em = .56, caseAware = true) {
+	const e = caseAware ? headEm(ctx, em) : em;
+	const fit = fitFontInfo(texts, boxW, boxH, maxFs, minFs, lineHeight, e);
+	const k = ctx.head.scale;
+	if (k === void 0 || k === 1 || k > 1 && !fit.fits) return fit;
+	const size = fit.fs * k;
+	return fitFontInfo(texts, boxW, boxH, size, Math.min(minFs, size), lineHeight, e);
+}
+/** textBlock for a heading (see headFit). */
+function headBlock(ctx, text, w, maxH, maxFs, minFs, lineHeight = 1.2, em = .56, caseAware = true) {
+	const e = caseAware ? headEm(ctx, em) : em;
+	const fit = headFit(ctx, [text], w, maxH, maxFs, minFs, lineHeight, em, caseAware);
+	const lines = wrapText(text, fit.fs, w, e === em ? {} : { em: e }).length;
+	return {
+		fit,
+		h: fit.fits ? Math.min(maxH, lines * fit.fs * lineHeight) : maxH
+	};
+}
 /** Record a text block drawn in `box` (stage px relative to the safe area unless `abs`). */
 function rec(ctx, role, text, box, fit, color, background = ctx.colors.bg, abs = false) {
 	if (!text.trim()) return;
@@ -236965,11 +237379,11 @@ function rec(ctx, role, text, box, fit, color, background = ctx.colors.bg, abs =
 }
 function renderTypography(ctx) {
 	const { stage, props, warnings } = ctx;
-	const lines = Array.isArray(props.lines) ? props.lines.map(str$1).filter((l) => Boolean(l)) : [];
+	const lines = Array.isArray(props.lines) ? props.lines.map(str$1).filter((l) => Boolean(l)).map((l) => hc(ctx, l)) : [];
 	if (lines.length === 0) warnings.push("typography: no `lines` to show");
 	const emphasis = str$1(props.emphasis);
 	const { u, safe } = stage;
-	const fit = fitFontInfo(lines, safe.w, safe.h * .9, u * 11, u * 3.2, 1.15, .58);
+	const fit = headFit(ctx, lines, safe.w, safe.h * .9, u * 11, u * 3.2, 1.15, .58);
 	const fs = fit.fs;
 	rec(ctx, ctx.main, lines.join("\n"), {
 		y: safe.h * .05,
@@ -237052,13 +237466,13 @@ function renderChart(ctx) {
 	const unit = str$1(props.unit) ?? "";
 	const label = str$1(props.label);
 	const { u, safe } = stage;
-	const title = label ? `<div ${anim("fade-up", .05, .5, `vs-chart-title`)}>${esc(label)}</div>` : "";
+	const title = label ? `<div ${anim("fade-up", .05, .5, `vs-chart-title`)}>${esc(hc(ctx, label))}</div>` : "";
 	const titleFs = u * 5.5;
 	if (type === "stat" || series.length === 0) {
 		if (type !== "stat") warnings.push(`chart: type "${type}" needs \`series\`; showing the value as a stat`);
 		const raw = props.value ?? series[0]?.value;
 		const value = typeof raw === "number" ? fmtNumber(raw) : str$1(raw) ?? "";
-		const vfit = fitFontInfo([value + unit], safe.w, safe.h * .45, u * 30, u * 6, 1, .6);
+		const vfit = headFit(ctx, [value + unit], safe.w, safe.h * .45, u * 30, u * 6, 1, .6, false);
 		const fs = vfit.fs;
 		const lfit = label ? fitFontInfo([label], safe.w, safe.h * .25, u * 7, u * 3) : void 0;
 		rec(ctx, ctx.main, value + unit, {
@@ -237082,7 +237496,7 @@ function renderChart(ctx) {
 	const chartH = safe.h * (label ? .78 : .9);
 	if (label) {
 		const perLine = Math.max(1, Math.floor(safe.w / (titleFs * .56)));
-		rec(ctx, ctx.main, label, {
+		rec(ctx, ctx.main, hc(ctx, label), {
 			w: safe.w,
 			h: safe.h - chartH
 		}, {
@@ -237335,7 +237749,8 @@ function renderComparison(ctx) {
 	const { stage, props } = ctx;
 	const left = side(props.left);
 	const right = side(props.right);
-	const verdict = str$1(props.verdict);
+	const verdictRaw = str$1(props.verdict);
+	const verdict = verdictRaw ? hc(ctx, verdictRaw) : void 0;
 	const { u, safe } = stage;
 	const columns = !stage.portrait && stage.W > stage.H;
 	const cardW = columns ? (safe.w - u * 4) / 2 : safe.w;
@@ -237363,7 +237778,7 @@ function renderComparison(ctx) {
 			h: cardH * .62
 		}, textFit, ctx.colors.text, ctx.colors.panel);
 	});
-	const verdictFit = verdict ? fitFontInfo([verdict], safe.w - u * 6, safe.h * .14, u * 5.5, u * 2.4) : void 0;
+	const verdictFit = verdict ? headFit(ctx, [verdict], safe.w - u * 6, safe.h * .14, u * 5.5, u * 2.4) : void 0;
 	if (verdict && verdictFit) rec(ctx, "headline", verdict, {
 		x: u * 3,
 		y: safe.h * .84,
@@ -237386,14 +237801,14 @@ function logoHtml(ctx, at) {
 }
 function renderCta(ctx) {
 	const { stage, props } = ctx;
-	const headline = str$1(props.headline) ?? "";
+	const headline = hc(ctx, str$1(props.headline) ?? "");
 	const action = str$1(props.action) ?? "";
 	const command = str$1(props.command);
 	const url = str$1(props.url);
 	const { u, safe } = stage;
 	const st = stagger(2 + (command ? 1 : 0) + (url ? 1 : 0), stage.dur);
 	let i = 0;
-	const hf = fitFontInfo([headline], safe.w, safe.h * .35, u * 10, u * 3.5, 1.1);
+	const hf = headFit(ctx, [headline], safe.w, safe.h * .35, u * 10, u * 3.5, 1.1);
 	const af = fitFontInfo([action], safe.w * .8, safe.h * .12, u * 6, u * 2.5);
 	const cf = command ? fitFontInfo([command], safe.w - u * 8, safe.h * .12, u * 4.5, u * 1.8, 1.2, .62) : void 0;
 	const uf = url ? fitFontInfo([url], safe.w, safe.h * .08, u * 4, u * 2) : void 0;
@@ -237437,11 +237852,12 @@ function renderCta(ctx) {
 }
 function renderEndCard(ctx) {
 	const { stage, props, warnings } = ctx;
-	const title = str$1(props.title);
+	const titleRaw = str$1(props.title);
+	const title = titleRaw ? hc(ctx, titleRaw) : void 0;
 	const subtitle = str$1(props.subtitle);
 	const { u, safe } = stage;
 	if (!title && !subtitle && !ctx.logo) warnings.push("end_card: no title, subtitle or logo; card is empty");
-	const tf = title ? fitFontInfo([title], safe.w, safe.h * .3, u * 11, u * 4, 1.1) : void 0;
+	const tf = title ? headFit(ctx, [title], safe.w, safe.h * .3, u * 11, u * 4, 1.1) : void 0;
 	const sf = subtitle ? fitFontInfo([subtitle], safe.w, safe.h * .15, u * 5, u * 2.2) : void 0;
 	if (title && tf) rec(ctx, ctx.main, title, {
 		y: safe.h * .25,
@@ -237574,7 +237990,7 @@ function renderQuote(ctx) {
 	const attr = attribution ? textBlock(`— ${attribution}`, safe.w, safe.h * .12, u * 4.8, u * 2.4) : void 0;
 	const src = source ? textBlock(source, safe.w, safe.h * .1, u * 3.8, u * 2.2) : void 0;
 	const tailH = (attr ? attr.h + gap : 0) + (src ? src.h + gap : 0);
-	const body = textBlock(text, safe.w, safe.h - markH - gap - tailH, u * 8.5, u * 3.2, 1.25);
+	const body = headBlock(ctx, text, safe.w, safe.h - markH - gap - tailH, u * 8.5, u * 3.2, 1.25, .56, false);
 	const heights = [
 		markH,
 		body.h,
@@ -237642,7 +238058,7 @@ function renderStat(ctx) {
 	const context = str$1(props.context);
 	const { u, safe } = stage;
 	const gap = u * 3;
-	const vfit = fitFontInfo([value + unit], safe.w, safe.h * .45, u * 30, u * 6, 1, .6);
+	const vfit = headFit(ctx, [value + unit], safe.w, safe.h * .45, u * 30, u * 6, 1, .6, false);
 	const valueH = vfit.fits ? Math.min(safe.h * .45, wrapText(value + unit, vfit.fs, safe.w, { mono: true }).length * vfit.fs) : safe.h * .45;
 	const lab = label ? textBlock(label, safe.w, safe.h * .22, u * 7, u * 3, 1.15) : void 0;
 	const con = context ? textBlock(context, safe.w, safe.h * .12, u * 4.5, u * 2.2) : void 0;
@@ -237888,7 +238304,8 @@ function renderLowerThird(ctx) {
 	const { stage, props } = ctx;
 	const name = str$1(props.name) ?? "";
 	const title = str$1(props.title);
-	const headline = str$1(props.headline);
+	const headlineRaw = str$1(props.headline);
+	const headline = headlineRaw ? hc(ctx, headlineRaw) : void 0;
 	const { u, safe } = stage;
 	const barW = stage.portrait ? safe.w : Math.min(safe.w, Math.max(safe.w * .55, u * 90));
 	const stripe = u * 1.4;
@@ -237914,7 +238331,7 @@ function renderLowerThird(ctx) {
 	let head = "";
 	if (headline) {
 		const room = barY - u * 6;
-		const hb = textBlock(headline, safe.w, room, u * 10, u * 3.5, 1.1);
+		const hb = headBlock(ctx, headline, safe.w, room, u * 10, u * 3.5, 1.1);
 		const hy = Math.max(0, (room - hb.h) / 2);
 		rec(ctx, ctx.main, headline, {
 			y: hy,
@@ -237954,7 +238371,7 @@ function kineticChunks(text, rhythm) {
 }
 function renderKineticText(ctx) {
 	const { stage, props, warnings } = ctx;
-	const text = (str$1(props.text) ?? "").replace(/\s+/g, " ").trim();
+	const text = hc(ctx, (str$1(props.text) ?? "").replace(/\s+/g, " ").trim());
 	const rhythmRaw = str$1(props.rhythm) ?? "word";
 	if (rhythmRaw !== "word" && rhythmRaw !== "phrase") warnings.push(`kinetic_text: unknown rhythm "${rhythmRaw}"; revealed word by word`);
 	const rhythm = rhythmRaw === "phrase" ? "phrase" : "word";
@@ -237968,7 +238385,7 @@ function renderKineticText(ctx) {
 		if (es < 0) warnings.push(`kinetic_text: emphasis "${emphasis}" does not occur in the text`);
 	}
 	const ee = es >= 0 && emphasis ? es + emphasis.length : -1;
-	const block = textBlock(text, safe.w, safe.h * .85, u * 12, u * 3.5, 1.15, .58);
+	const block = headBlock(ctx, text, safe.w, safe.h * .85, u * 12, u * 3.5, 1.15, .58);
 	rec(ctx, ctx.main, text, {
 		y: (safe.h - block.h) / 2,
 		w: safe.w,
@@ -237988,7 +238405,8 @@ function renderKineticText(ctx) {
 }
 function renderMap(ctx) {
 	const { stage, props, warnings } = ctx;
-	const title = str$1(props.title);
+	const titleRaw = str$1(props.title);
+	const title = titleRaw ? hc(ctx, titleRaw) : void 0;
 	const clamp01 = (v) => Math.min(1, Math.max(0, v));
 	let points = (Array.isArray(props.points) ? props.points : []).map((p) => p && typeof p === "object" ? p : {}).filter((p) => {
 		const ok = typeof p.x === "number" && Number.isFinite(p.x) && typeof p.y === "number" && Number.isFinite(p.y);
@@ -238008,7 +238426,7 @@ function renderMap(ctx) {
 	if (props.route === true && points.length < 2) warnings.push("map: route needs at least 2 points");
 	const { u, safe } = stage;
 	const gap = u * 3;
-	const tb = title ? textBlock(title, safe.w, safe.h * .16, u * 7, u * 3.2, 1.1) : void 0;
+	const tb = title ? headBlock(ctx, title, safe.w, safe.h * .16, u * 7, u * 3.2, 1.1) : void 0;
 	const titleH = tb ? tb.h + gap : 0;
 	if (title && tb) rec(ctx, ctx.main, title, {
 		w: safe.w,
@@ -238098,8 +238516,38 @@ const RENDERERS = {
 	kinetic_text: renderKineticText,
 	map: renderMap
 };
-function stylesheet(stage, tokens, fontNames, bundledFaces = "") {
+/** Selectors of heading-weight text (the stylesheet's 700/800 rules). */
+const HEADING_SELECTORS = [
+	".vs-typography",
+	".vs-kinetic",
+	".vs-headline",
+	".vs-stat-value",
+	".vs-quote-mark",
+	".vs-quote-text",
+	".vs-chart-title",
+	".vs-verdict",
+	".vs-card-label",
+	".vs-tl-label",
+	".vs-lt-name",
+	".vs-split-label",
+	".vs-split-text.vs-split-only",
+	".vs-node > div",
+	".vs-action",
+	".vs-value"
+];
+/** CSS appended after the base rules for style tokens; empty without any. */
+function lookCss(look) {
+	const rules = [];
+	if (look.weight_heading !== void 0) rules.push(`${HEADING_SELECTORS.join(", ")} { font-weight: ${look.weight_heading}; }`);
+	if (look.weight_body !== void 0) rules.push(`#vs-root { font-weight: ${look.weight_body}; }`);
+	if (look.text_align === "left") rules.push(".vs-typography, .vs-kinetic, .vs-quote, .vs-verdict, .vs-cta, .vs-end { text-align: left; }", ".vs-cta, .vs-end { align-items: flex-start; }", ".vs-lt-headline, .vs-map-title { justify-content: flex-start; text-align: left; }");
+	else if (look.text_align === "center") rules.push(".vs-quote { text-align: center; }");
+	if (look.motion && look.motion.exit_ms > 0) rules.push(".vs-exit { animation: vs-exit var(--xd) linear var(--xt) both paused; }", "@keyframes vs-exit { from { opacity: 1; } to { opacity: 0; } }");
+	return rules.length ? `\n/* style pack */\n${rules.join("\n")}` : "";
+}
+function stylesheet(stage, tokens, fontNames, bundledFaces = "", look = {}) {
 	const { W, H, u, safe } = stage;
+	const easing = look.motion ? EASING_CSS[look.motion.easing] : EASING_CSS.ease_out;
 	const faces = fontNames.map((n) => `@font-face { font-family: "${n}"; src: local("${n}"); }`).join("\n");
 	return `${bundledFaces ? `${bundledFaces}\n` : ""}${faces}
 :root {
@@ -238119,7 +238567,7 @@ html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--
 .clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
 .vs-safe { position: absolute; left: ${safe.x}px; top: ${safe.y}px; width: ${safe.w}px; height: ${safe.h}px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
 .vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
-.vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
+.vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: ${easing}; animation-play-state: paused; }
 .vs-fade { animation-name: vs-fade; }
 .vs-fade-up { animation-name: vs-fade-up; }
 .vs-scale-in { animation-name: vs-scale-in; }
@@ -238257,7 +238705,7 @@ html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--
 .vs-map-pin { fill: var(--vs-primary); stroke: var(--vs-bg); stroke-width: 3; }
 .vs-map-slot { align-items: center; }
 .vs-map-slot.vs-map-left { justify-content: flex-end; }
-.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }`;
+.vs-map-label { background: var(--vs-bg); color: var(--vs-text); font-weight: 700; padding: 0.3em 0.7em; border-radius: 0.6em; white-space: nowrap; overflow: hidden; max-width: 100%; }${lookCss(look)}`;
 }
 /**
 * The registered timeline. It is a GSAP-shaped object (the runtime only requires `duration`,
@@ -238412,17 +238860,38 @@ function buildComposition(req, opts = {}) {
 		else warnings.push(`tokens: logo_path "${req.tokens.logo_path}" is outside the project or not an image; logo omitted`);
 	}
 	const main = scene.purpose === "hook" ? "hook" : "headline";
-	const content = render({
-		stage,
-		props: det.props ?? {},
-		warnings,
-		asset: addAsset,
-		resolveAsset,
-		logo,
-		main,
-		colors,
-		boxes
-	});
+	const t = req.tokens;
+	const head = {
+		...t.text_case ? { case: t.text_case } : {},
+		...t.heading_scale !== void 0 ? { scale: t.heading_scale } : {}
+	};
+	let content;
+	activeMotion = t.motion;
+	try {
+		content = render({
+			stage,
+			props: det.props ?? {},
+			warnings,
+			asset: addAsset,
+			resolveAsset,
+			logo,
+			main,
+			colors,
+			boxes,
+			head
+		});
+	} finally {
+		activeMotion = void 0;
+	}
+	const exitS = t.motion ? Math.min(t.motion.exit_ms / 1e3, dur * .2) : 0;
+	const exitAt = Math.max(0, dur - 1 / target.fps - exitS);
+	const safeOpen = exitS >= .02 ? `<div class="vs-safe vs-exit" style="--xt:${fmtSec(exitAt)}s;--xd:${fmtSec(exitS)}s">` : `<div class="vs-safe">`;
+	const look = {
+		...t.weight_heading !== void 0 ? { weight_heading: t.weight_heading } : {},
+		...t.weight_body !== void 0 ? { weight_body: t.weight_body } : {},
+		...t.text_align ? { text_align: t.text_align } : {},
+		...t.motion ? { motion: t.motion } : {}
+	};
 	const bundledFaces = fontFaceCss(req.tokens).replace(/url\("(file:[^"]+)"\)/g, (_m, href) => {
 		const src = fileURLToPath(href);
 		const dest = `assets/fonts/${basename(src).replace(/[^A-Za-z0-9._-]/g, "_")}`;
@@ -238443,13 +238912,13 @@ function buildComposition(req, opts = {}) {
 <meta name="viewport" content="width=${W}, height=${H}">
 <title>${esc(`${scene.id} ${det.kind}`)}</title>
 <style>
-${stylesheet(stage, tok.values, tok.fontNames, bundledFaces)}
+${stylesheet(stage, tok.values, tok.fontNames, bundledFaces, look)}
 </style>
 </head>
 <body>
 <div id="vs-root" data-composition-id="${compositionId}" data-start="0" data-duration="${d}" data-width="${W}" data-height="${H}" data-fps="${target.fps}">
 <div id="vs-scene" class="clip vs-kind-${det.kind.replace(/_/g, "-")}" data-start="0" data-duration="${d}" data-track-index="0">
-<div class="vs-safe">
+${safeOpen}
 ${content}
 </div>
 </div>
@@ -238852,6 +239321,57 @@ function createHyperframesRenderer(opts = {}) {
 			};
 		}
 	};
+}
+//#endregion
+//#region ../renderer/dist/styles.js
+/**
+* Style packs: `styles/<id>.yaml` (look and motion), selected by `VideoSpec.style`.
+* See styles/README.md for the packs and the precedence rules (defaults < style < brand).
+*/
+/** Present in every `styles/` directory, so it can be found before any pack exists. */
+const MARKER$1 = "README.md";
+const ID = /^[a-z0-9][a-z0-9-]*$/;
+/**
+* The bundled `styles/` directory: `${CLAUDE_PLUGIN_ROOT}/styles`, else the first `styles/` with a
+* README.md found walking up from this module (the repo root in dev, the plugin root from
+* `dist/mcp.mjs`). Null when not installed.
+*/
+function findStylesDir(env = process.env, from) {
+	const root = env.CLAUDE_PLUGIN_ROOT;
+	if (root && existsSync(join(root, "styles", MARKER$1))) return join(root, "styles");
+	let dir = from ?? dirname(fileURLToPath(import.meta.url));
+	for (let i = 0; i < 6; i++) {
+		const candidate = join(dir, "styles");
+		if (existsSync(join(candidate, MARKER$1))) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+function parseStyle(text, file, fileId) {
+	const parsed = parseYamlOrJson(Style, text);
+	if (!parsed.ok) throw new Error(`invalid style ${file}: ${parsed.errors.map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
+	if (parsed.data.id !== fileId) throw new Error(`style ${file} has id "${parsed.data.id}" but is named "${fileId}.yaml"`);
+	return parsed.data;
+}
+/** Ids of the packs in `dir` (null dir: none). */
+async function styleIds(dir) {
+	if (!dir) return [];
+	return (await readdir(dir)).filter((n) => n.endsWith(".yaml")).map((n) => n.slice(0, -5)).sort();
+}
+/** Load one pack by id. The error lists the available ids. */
+async function getStyle(dir, id) {
+	if (dir && ID.test(id)) {
+		const file = join(dir, `${id}.yaml`);
+		if (existsSync(file)) return parseStyle(await readFile(file, "utf8"), file, id);
+	}
+	const ids = await styleIds(dir);
+	throw new Error(`unknown style "${id}"; available: ${ids.join(", ") || "(none: no styles/ directory found)"}`);
+}
+/** `<id>@<version>`, as recorded in tokens, the cache key and video.lock. */
+function styleRef(style) {
+	return `${style.id}@${style.version}`;
 }
 //#endregion
 //#region src/hyperframes.ts
@@ -239367,7 +239887,9 @@ const SCHEMA_NAMES = [
 	"template",
 	"platform-contract",
 	"video-lock",
-	"style"
+	"style",
+	"experiment-plan",
+	"experiment-manifest"
 ];
 /**
 * Locate the bundled `schemas/` directory: `${CLAUDE_PLUGIN_ROOT}/schemas` first, then
@@ -239386,6 +239908,235 @@ function findSchemasDir(env = process.env, from) {
 		dir = parent;
 	}
 	return null;
+}
+//#endregion
+//#region src/spec-validate.ts
+async function readIfExists$2(path) {
+	try {
+		return await readFile(path, "utf8");
+	} catch (err) {
+		if (err.code === "ENOENT") return null;
+		throw err;
+	}
+}
+/** Conventional locations inside a project folder. */
+function projectSpecPaths(projectDir) {
+	return {
+		spec: join(projectDir, "project", "video-spec.json"),
+		contentIr: join(projectDir, "source", "content-ir.json")
+	};
+}
+/**
+* Validate a VideoSpec file: schema first, then semantic rules. If a ContentIR path
+* is given and exists, evidence refs and asset ids are cross-checked against it.
+*/
+async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = findPlatformSpecsDir(), stylesDir = findStylesDir()) {
+	const result = {
+		ok: false,
+		spec_path: specPath,
+		content_ir_path: null,
+		errors: [],
+		warnings: []
+	};
+	const text = await readIfExists$2(specPath);
+	if (text === null) throw new Error(`spec file not found: ${specPath}`);
+	const parsed = parseYamlOrJson(VideoSpec, text);
+	if (!parsed.ok) {
+		for (const e of parsed.errors) {
+			const syntax = e.message.startsWith("syntax error");
+			result.errors.push({
+				...e,
+				stage: syntax ? "syntax" : "schema",
+				fix: syntax ? "fix the JSON/YAML syntax at the reported position" : `correct ${e.path || "the document"} to match the VideoSpec schema (schema_get name=video-spec)`
+			});
+		}
+		return result;
+	}
+	let ir;
+	if (contentIrPath) {
+		const irText = await readIfExists$2(contentIrPath);
+		if (irText !== null) {
+			result.content_ir_path = contentIrPath;
+			const irParsed = parseYamlOrJson(ContentIR, irText);
+			if (irParsed.ok) ir = irParsed.data;
+			else result.warnings.push({
+				path: "",
+				stage: "content-ir",
+				fix: "re-run ingest to regenerate source/content-ir.json",
+				message: `content IR at ${contentIrPath} is invalid, so evidence refs were not cross-checked: ${irParsed.errors.slice(0, 3).map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`
+			});
+		}
+	}
+	if (!ir) result.warnings.push({
+		path: "",
+		stage: "content-ir",
+		message: "no valid ContentIR available; evidence_refs and asset ids were not cross-checked",
+		fix: "run ingest for this project (or pass content_ir_path) so claim_refs can be verified"
+	});
+	const semantic = validateVideoSpecSemantics(parsed.data, ir);
+	result.errors.push(...semantic.errors.map((e) => ({
+		...e,
+		stage: "semantic"
+	})));
+	result.warnings.push(...semantic.warnings.map((e) => ({
+		...e,
+		stage: "semantic"
+	})));
+	const contracts = platformSpecsDir ? await loadContracts(platformSpecsDir) : [];
+	if (contracts.length > 0) {
+		const t = checkSpecTargets(parsed.data, contracts);
+		result.errors.push(...t.errors.map((e) => ({
+			...e,
+			stage: "platform"
+		})));
+		result.warnings.push(...t.warnings.map((e) => ({
+			...e,
+			stage: "platform"
+		})));
+	}
+	if (parsed.data.style) {
+		const style = await checkSpecStyle(parsed.data.style, stylesDir);
+		if (style) result.errors.push(style);
+	}
+	result.ok = result.errors.length === 0;
+	return result;
+}
+/** An error when `id` is not a loadable style pack in `dir`, listing the available ids. */
+async function checkSpecStyle(id, dir) {
+	const ids = await styleIds(dir).catch(() => []);
+	if (!ids.includes(id)) {
+		const near = closestMatches(id, ids);
+		return {
+			path: "style",
+			stage: "style",
+			message: `no style pack "${id}" in styles/; available: ${ids.join(", ") || "(none)"}`,
+			fix: near.length ? `use one of ${near.map((n) => `"${n}"`).join(", ")}, or remove style` : `use one of the available ids, or remove style`
+		};
+	}
+	try {
+		await getStyle(dir, id);
+		return null;
+	} catch (e) {
+		return {
+			path: "style",
+			stage: "style",
+			message: e instanceof Error ? e.message : String(e),
+			fix: `fix styles/${id}.yaml or pick another style`
+		};
+	}
+}
+function formatSpecValidation(r) {
+	const lines = [`${r.ok ? "VALID" : "INVALID"}: ${r.spec_path}`];
+	if (r.content_ir_path) lines.push(`cross-checked against ${r.content_ir_path}`);
+	for (const e of r.errors) lines.push(`error   [${e.stage}] ${e.path || "(root)"}: ${e.message}\n        fix: ${e.fix}`);
+	for (const w of r.warnings) lines.push(`warning [${w.stage}] ${w.path || "(root)"}: ${w.message}\n        fix: ${w.fix}`);
+	return lines.join("\n");
+}
+//#endregion
+//#region src/adapt.ts
+/** Words per second above which narration is too dense (matches lint's MAX_WORDS_PER_SEC). */
+const MAX_WPS = 3.3;
+/** Shortest scene the schema allows. */
+const MIN_SCENE_SEC = .5;
+const round1$1 = (n) => Math.round(n * 10) / 10;
+/** Scale scene durations to `target`, keeping proportions, each ≥ 0.5 s, summing exactly (to 0.1 s). */
+function scaleDurations(durations, target) {
+	const total = durations.reduce((a, b) => a + b, 0);
+	const scaled = durations.map((d) => Math.max(MIN_SCENE_SEC, round1$1(d / total * target)));
+	const diff = round1$1(target - scaled.reduce((a, b) => a + b, 0));
+	const longest = scaled.indexOf(Math.max(...scaled));
+	scaled[longest] = Math.max(MIN_SCENE_SEC, round1$1(scaled[longest] + diff));
+	return scaled;
+}
+async function adaptProject(projectDir, outDir, opts) {
+	const root = projectPaths(projectDir).root;
+	const out = resolve(outDir);
+	if (out === root) throw new Error("out_dir must differ from the source project (adapt never modifies the source)");
+	if (existsSync(out) && (await readdir(out)).length > 0) throw new Error(`out_dir ${out} is not empty; choose a new folder`);
+	const parsed = parseYamlOrJson(VideoSpec, await readFile(projectSpecPaths(root).spec, "utf8"));
+	if (!parsed.ok) throw new Error(`project/video-spec.json is invalid; run spec_validate first (${parsed.errors.slice(0, 3).map((e) => `${e.path}: ${e.message}`).join("; ")})`);
+	const src = parsed.data;
+	const spec = structuredClone(src);
+	const changes = [];
+	const notes = [];
+	if (opts.platform && opts.platform !== src.platform) {
+		spec.platform = opts.platform;
+		changes.push(`platform ${src.platform} → ${opts.platform}`);
+	}
+	if (opts.aspect_ratio && opts.aspect_ratio !== src.aspect_ratio) {
+		const fps = resolveMaster(src).fps;
+		spec.aspect_ratio = opts.aspect_ratio;
+		spec.master = {
+			...defaultMaster(opts.aspect_ratio),
+			fps
+		};
+		changes.push(`aspect_ratio ${src.aspect_ratio} → ${opts.aspect_ratio} (master ${spec.master.width}×${spec.master.height})`);
+		notes.push("layouts re-flow for the new frame automatically; check on-screen text and screenshots in the storyboard");
+	}
+	if (opts.targets) {
+		spec.targets = [...new Set(opts.targets)];
+		changes.push(`targets → ${spec.targets.join(", ") || "none"}`);
+	} else if (opts.platform && opts.platform !== src.platform) {
+		delete spec.targets;
+		const t = resolveTargets(spec);
+		if (t.length) spec.targets = t;
+		changes.push(`targets → ${t.join(", ") || "none"} (the new platform's own contract)`);
+	}
+	if (spec.publish) {
+		const keep = new Set(resolveTargets(spec));
+		for (const k of Object.keys(spec.publish)) if (!keep.has(k)) delete spec.publish[k];
+	}
+	if (opts.target_duration_sec && opts.target_duration_sec !== src.target_duration_sec) {
+		const factor = opts.target_duration_sec / src.scenes.reduce((a, s) => a + s.duration_sec, 0);
+		const durations = scaleDurations(src.scenes.map((s) => s.duration_sec), opts.target_duration_sec);
+		spec.scenes.forEach((s, i) => s.duration_sec = durations[i]);
+		spec.target_duration_sec = opts.target_duration_sec;
+		if (spec.cover) spec.cover.focal_time_sec = round1$1(spec.cover.focal_time_sec * factor);
+		changes.push(`duration ${src.target_duration_sec}s → ${opts.target_duration_sec}s (scenes scaled ×${Math.round(factor * 100) / 100})`);
+		if (voiceMode(spec) === "narrated") for (const s of spec.scenes) {
+			const words = s.voiceover.trim() ? s.voiceover.trim().split(/\s+/).length : 0;
+			const max = Math.floor(s.duration_sec * MAX_WPS);
+			if (words > max) notes.push(`${s.id}: ${words} voiceover words in ${s.duration_sec}s; trim to ≤ ${max} words (or merge/drop a scene)`);
+		}
+	}
+	if (changes.length === 0) notes.push("nothing to adapt: the options match the source spec");
+	const specsDir = findPlatformSpecsDir();
+	if (specsDir) {
+		const contracts = await loadContracts(specsDir);
+		for (const t of resolveTargets(spec)) {
+			const c = contracts.find((x) => x.id === t);
+			if (c && !c.video.aspect_ratios.includes(spec.aspect_ratio)) notes.push(`${t} does not accept ${spec.aspect_ratio} (accepts ${c.video.aspect_ratios.join(", ")})`);
+		}
+	}
+	await mkdir(out, { recursive: true });
+	for (const part of [
+		"source",
+		"input",
+		"assets",
+		"brand.yaml",
+		"project"
+	]) {
+		const from = join(root, part);
+		if (existsSync(from)) await cp(from, join(out, part), { recursive: true });
+	}
+	spec.id = `${src.id ?? "video"}-${spec.aspect_ratio.replace(":", "x")}-${spec.target_duration_sec}s`.replace(/[^A-Za-z0-9_.@:-]/g, "-");
+	const { spec: specPath, contentIr } = projectSpecPaths(out);
+	await writeFile(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+	return {
+		out_dir: out,
+		spec,
+		changes,
+		notes,
+		validation: await validateSpecFile(specPath, existsSync(contentIr) ? contentIr : null)
+	};
+}
+function formatAdapt(r) {
+	return [
+		`adapted into ${r.out_dir}: ${r.changes.join("; ") || "no changes"}`,
+		`spec ${r.validation.ok ? "valid" : `has ${r.validation.errors.length} error(s)`}${r.validation.warnings.length ? `, ${r.validation.warnings.length} warning(s)` : ""}`,
+		...r.validation.errors.map((e) => `- error ${e.path}: ${e.message} (fix: ${e.fix})`),
+		...r.notes.map((n) => `note: ${n}`)
+	].join("\n");
 }
 /**
 * A frame passes when its SSIM against the golden is at least this. Tolerant of encoder and
@@ -239851,7 +240602,7 @@ const CLASS_ORDER = [
 * class then path.
 *
 * - spec hash, voice request hash, scene list/order → creative.
-* - engine.*, tools.*, voice backend/voice id, fonts, a scene's renderer or renderer_version → renderer.
+* - engine.*, tools.* (except tools.style: creative), voice backend/voice id, fonts, a scene's renderer or renderer_version → renderer.
 * - targets (contract_version, verified, added/removed) → spec.
 * - content_ir_sha256 and assets.* → asset.
 * - a scene's cache_key/clip_sha256 → creative when the spec changed; otherwise the class of the
@@ -239902,7 +240653,10 @@ function diffLocks(before, after) {
 	field("creative", "spec_sha256", before.spec_sha256, after.spec_sha256, "video spec");
 	field("asset", "content_ir_sha256", before.content_ir_sha256, after.content_ir_sha256, "ContentIR");
 	record("renderer", "engine", before.engine, after.engine, "engine component");
-	record("renderer", "tools", before.tools, after.tools, "tool");
+	const { style: bStyle, ...bTools } = before.tools;
+	const { style: aStyle, ...aTools } = after.tools;
+	record("renderer", "tools", bTools, aTools, "tool");
+	field("creative", "tools.style", bStyle, aStyle, "style pack");
 	field("renderer", "voice.backend", before.voice.backend, after.voice.backend, "voice backend");
 	field("renderer", "voice.voice_id", before.voice.voice_id, after.voice.voice_id, "voice id");
 	field("creative", "voice.request_hash", before.voice.request_hash, after.voice.request_hash, "voiceover request");
@@ -240260,101 +241014,6 @@ function formatDiff(r) {
 	];
 	for (const c of r.spec.changes.slice(0, 10)) lines.push(`  - ${c.kind} ${c.path || "(root)"}${c.before !== void 0 ? `: ${c.before}` : ""}${c.after !== void 0 ? ` → ${c.after}` : ""}`);
 	if (r.spec.changes.length > 10) lines.push(`  - …${r.spec.changes.length - 10} more in ${r.report_md}`);
-	return lines.join("\n");
-}
-//#endregion
-//#region src/spec-validate.ts
-async function readIfExists$2(path) {
-	try {
-		return await readFile(path, "utf8");
-	} catch (err) {
-		if (err.code === "ENOENT") return null;
-		throw err;
-	}
-}
-/** Conventional locations inside a project folder. */
-function projectSpecPaths(projectDir) {
-	return {
-		spec: join(projectDir, "project", "video-spec.json"),
-		contentIr: join(projectDir, "source", "content-ir.json")
-	};
-}
-/**
-* Validate a VideoSpec file: schema first, then semantic rules. If a ContentIR path
-* is given and exists, evidence refs and asset ids are cross-checked against it.
-*/
-async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = findPlatformSpecsDir()) {
-	const result = {
-		ok: false,
-		spec_path: specPath,
-		content_ir_path: null,
-		errors: [],
-		warnings: []
-	};
-	const text = await readIfExists$2(specPath);
-	if (text === null) throw new Error(`spec file not found: ${specPath}`);
-	const parsed = parseYamlOrJson(VideoSpec, text);
-	if (!parsed.ok) {
-		for (const e of parsed.errors) {
-			const syntax = e.message.startsWith("syntax error");
-			result.errors.push({
-				...e,
-				stage: syntax ? "syntax" : "schema",
-				fix: syntax ? "fix the JSON/YAML syntax at the reported position" : `correct ${e.path || "the document"} to match the VideoSpec schema (schema_get name=video-spec)`
-			});
-		}
-		return result;
-	}
-	let ir;
-	if (contentIrPath) {
-		const irText = await readIfExists$2(contentIrPath);
-		if (irText !== null) {
-			result.content_ir_path = contentIrPath;
-			const irParsed = parseYamlOrJson(ContentIR, irText);
-			if (irParsed.ok) ir = irParsed.data;
-			else result.warnings.push({
-				path: "",
-				stage: "content-ir",
-				fix: "re-run ingest to regenerate source/content-ir.json",
-				message: `content IR at ${contentIrPath} is invalid, so evidence refs were not cross-checked: ${irParsed.errors.slice(0, 3).map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`
-			});
-		}
-	}
-	if (!ir) result.warnings.push({
-		path: "",
-		stage: "content-ir",
-		message: "no valid ContentIR available; evidence_refs and asset ids were not cross-checked",
-		fix: "run ingest for this project (or pass content_ir_path) so claim_refs can be verified"
-	});
-	const semantic = validateVideoSpecSemantics(parsed.data, ir);
-	result.errors.push(...semantic.errors.map((e) => ({
-		...e,
-		stage: "semantic"
-	})));
-	result.warnings.push(...semantic.warnings.map((e) => ({
-		...e,
-		stage: "semantic"
-	})));
-	const contracts = platformSpecsDir ? await loadContracts(platformSpecsDir) : [];
-	if (contracts.length > 0) {
-		const t = checkSpecTargets(parsed.data, contracts);
-		result.errors.push(...t.errors.map((e) => ({
-			...e,
-			stage: "platform"
-		})));
-		result.warnings.push(...t.warnings.map((e) => ({
-			...e,
-			stage: "platform"
-		})));
-	}
-	result.ok = result.errors.length === 0;
-	return result;
-}
-function formatSpecValidation(r) {
-	const lines = [`${r.ok ? "VALID" : "INVALID"}: ${r.spec_path}`];
-	if (r.content_ir_path) lines.push(`cross-checked against ${r.content_ir_path}`);
-	for (const e of r.errors) lines.push(`error   [${e.stage}] ${e.path || "(root)"}: ${e.message}\n        fix: ${e.fix}`);
-	for (const w of r.warnings) lines.push(`warning [${w.stage}] ${w.path || "(root)"}: ${w.message}\n        fix: ${w.fix}`);
 	return lines.join("\n");
 }
 //#endregion
@@ -242834,11 +243493,11 @@ function fontRequests(tokens, captionFamily, burnIn) {
 	const reqs = [
 		{
 			chain: tokens.font_heading,
-			weight: 700
+			weight: tokens.weight_heading ?? 700
 		},
 		{
 			chain: tokens.font_body,
-			weight: 400
+			weight: tokens.weight_body ?? 400
 		},
 		{
 			chain: tokens.font_mono,
@@ -242941,10 +243600,14 @@ async function renderProject(projectDir, o = {}) {
 	for (const w of specWarnings) warnings.push(`spec: ${w.path || "(root)"}: ${w.message}`);
 	const brandFile = await loadBrand(root, o.brandPath);
 	const brand = brandFile?.brand;
-	const tokens = resolveTokens$1(brand);
+	const style = spec.style ? await getStyle(findStylesDir(env), spec.style) : void 0;
+	const tokens = resolveTokens$1(brand, {}, style);
 	const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
 	const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
-	const brandCaptions = brand?.captions;
+	const brandCaptions = style?.captions || brand?.captions ? {
+		...style?.captions,
+		...brand?.captions
+	} : void 0;
 	const fontsDir = findFontsDir(env);
 	const fonts = bundledFontsStatus(fontsDir);
 	if (fonts.missing.length) warnings.push(`fonts: bundled fonts missing (${fonts.missing.join(", ")}${fontsDir ? ` in ${fontsDir}` : "; no fonts/ directory found"}); using host fonts, so text may look different on other machines`);
@@ -243304,6 +243967,7 @@ async function renderProject(projectDir, o = {}) {
 	}
 	for (const e of ordered) if (e.renderer && e.renderer_version) tool_versions[e.renderer] = e.renderer_version;
 	tool_versions[`voice:${voice.backend}`] = voice.backend === "silent" ? "n/a" : "local";
+	if (style) tool_versions.style = styleRef(style);
 	const lockedFonts = await lockFonts(fontRequests(tokens, assOpts.font, burn), {
 		fontsDir,
 		env
@@ -243382,7 +244046,8 @@ async function renderProject(projectDir, o = {}) {
 			...music.license ? { license: music.license } : {}
 		} } : {},
 		...brandFile ? { brand_path: brandRel(root, brandFile.path) } : {},
-		fonts: lockedFonts
+		fonts: lockedFonts,
+		...style ? { style: styleRef(style) } : {}
 	};
 	const reelSha = await hashFile(reel);
 	let qa;
@@ -243988,7 +244653,9 @@ async function lockFromState(root, state, projectId, outputs) {
 	let fonts = state.fonts;
 	if (!fonts) {
 		const brandFile = await loadBrand(root).catch(() => void 0);
-		const tokens = resolveTokens$1(brandFile?.brand);
+		const styleId = state.style?.split("@")[0];
+		const style = styleId ? await getStyle(findStylesDir(process.env), styleId).catch(() => void 0) : void 0;
+		const tokens = resolveTokens$1(brandFile?.brand, {}, style);
 		fonts = await lockFonts(fontRequests(tokens, brandFile?.brand.captions?.family ?? parseFontChain(tokens.font_body)[0], state.burn_in), { fontsDir: findFontsDir(process.env) });
 	}
 	const specsDir = findPlatformSpecsDir();
@@ -244219,6 +244886,175 @@ var RenderJobManager = class {
 		this.ledger = null;
 	}
 };
+//#endregion
+//#region src/variants.ts
+/**
+* variants: an A/B experiment from one planned project. `project/variants.json` (ExperimentPlan)
+* lists hook scenes and covers; every hook × cover pair becomes `variants/<hook>-<cover>/`, a full
+* project whose spec is the base spec with the hook scene and cover swapped. Base renders' scene
+* clips are copied along, so a variant only re-renders its hook scene (the cover is composed from
+* the master). `variants/experiment.json` records the experiment; statuses are recomputed from
+* each variant's dist/video.lock, so the file never goes stale.
+*/
+const VARIANTS_FILE = "variants.json";
+const EXPERIMENT_FILE = "experiment.json";
+/** Project parts a variant needs (everything else is regenerated or belongs to the base). */
+const COPY = [
+	"source",
+	"input",
+	"assets",
+	"brand.yaml",
+	"project"
+];
+function variantsDir(root) {
+	return join(root, "variants");
+}
+async function loadPlan(root) {
+	const path = join(root, "project", VARIANTS_FILE);
+	if (!existsSync(path)) throw new Error(`no project/${VARIANTS_FILE}; write an ExperimentPlan there first (schema_get experiment-plan): {schema_version, id, hypothesis, hooks: [{id, scene}], covers?: [{id, cover}]}`);
+	const r = parseYamlOrJson(ExperimentPlan, await readFile(path, "utf8"));
+	if (!r.ok) throw new Error(`project/${VARIANTS_FILE} is invalid: ${r.errors.slice(0, 5).map((e) => `${e.path}: ${e.message}`).join("; ")}`);
+	return r.data;
+}
+async function loadBaseSpec(root) {
+	const r = parseYamlOrJson(VideoSpec, await readFile(projectSpecPaths(root).spec, "utf8"));
+	if (!r.ok) throw new Error(`project/video-spec.json is invalid; run spec_validate first (${r.errors.slice(0, 3).map((e) => `${e.path}: ${e.message}`).join("; ")})`);
+	return r.data;
+}
+/** The variant's spec: base spec with the hook scene replaced (keeping its id and slot) and the cover swapped. */
+function variantSpec(base, plan, hookId, coverId) {
+	const hook = plan.hooks.find((h) => h.id === hookId);
+	const cover = coverId ? plan.covers?.find((c) => c.id === coverId) : void 0;
+	const idx = Math.max(0, base.scenes.findIndex((s) => s.purpose === "hook"));
+	const spec = structuredClone(base);
+	const baseHook = base.scenes[idx];
+	spec.scenes[idx] = {
+		...structuredClone(hook.scene),
+		id: baseHook.id
+	};
+	spec.target_duration_sec = Math.round((base.target_duration_sec + (hook.scene.duration_sec - baseHook.duration_sec)) * 100) / 100;
+	if (cover) spec.cover = structuredClone(cover.cover);
+	const suffix = coverId ? `${hookId}-${coverId}` : hookId;
+	spec.id = `${base.id ?? "video"}-${suffix}`.replace(/[^A-Za-z0-9_.@:-]/g, "-");
+	return spec;
+}
+/** Status of a prepared variant from its files: rendered when its dist lock matches its spec. */
+async function variantStatus(root, v) {
+	const dir = join(root, v.project_dir);
+	const lockPath = join(dir, "dist", LOCK_FILE);
+	if (v.status === "failed" && v.error) return v;
+	try {
+		const lock = await readLock(lockPath);
+		if (lock && lock.spec_sha256 === v.spec_sha256) return {
+			...v,
+			status: "rendered",
+			dist: `${v.project_dir}/dist`,
+			lock_sha256: await hashFile(lockPath)
+		};
+	} catch {}
+	return {
+		...v,
+		status: v.job_id ? "rendering" : "prepared"
+	};
+}
+/**
+* Create (or refresh) variants/<hook>-<cover>/ projects from project/variants.json and write
+* variants/experiment.json. Existing variant folders are rebuilt from the base, keeping their
+* renders/ so unchanged work stays cached.
+*/
+async function prepareVariants(projectDir, now = () => /* @__PURE__ */ new Date()) {
+	const root = projectPaths(projectDir).root;
+	const plan = await loadPlan(root);
+	const base = await loadBaseSpec(root);
+	const vdir = variantsDir(root);
+	await mkdir(vdir, { recursive: true });
+	const prev = await readJson(join(vdir, EXPERIMENT_FILE)).catch(() => void 0);
+	const covers = plan.covers?.length ? plan.covers.map((c) => c.id) : [void 0];
+	const variants = [];
+	const invalid = [];
+	for (const hook of plan.hooks) for (const coverId of covers) {
+		const id = coverId ? `${hook.id}-${coverId}` : hook.id;
+		const dir = join(vdir, id);
+		await mkdir(dir, { recursive: true });
+		for (const part of COPY) {
+			const src = join(root, part);
+			await rm(join(dir, part), {
+				recursive: true,
+				force: true
+			});
+			if (existsSync(src)) await cp(src, join(dir, part), { recursive: true });
+		}
+		await rm(join(dir, "project", VARIANTS_FILE), { force: true });
+		for (const q of ["preview", "final"]) {
+			const scenes = join(root, "renders", q, "scenes");
+			if (existsSync(scenes) && !existsSync(join(dir, "renders", q, "scenes"))) await cp(scenes, join(dir, "renders", q, "scenes"), { recursive: true });
+		}
+		const spec = variantSpec(base, plan, hook.id, coverId);
+		const { spec: specPath, contentIr } = projectSpecPaths(dir);
+		await writeFile(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+		const check = await validateSpecFile(specPath, existsSync(contentIr) ? contentIr : null);
+		const spec_sha256 = sha256Hex(canonicalJson(spec));
+		const old = prev?.variants.find((v) => v.id === id && v.spec_sha256 === spec_sha256);
+		const entry = {
+			id,
+			hook_id: hook.id,
+			...coverId ? { cover_id: coverId } : {},
+			project_dir: `variants/${id}`,
+			spec_sha256,
+			status: check.ok ? "prepared" : "failed",
+			...old?.job_id ? { job_id: old.job_id } : {},
+			...check.ok ? {} : { error: `spec invalid: ${check.errors.map((e) => `${e.path}: ${e.message}`).join("; ")}` }
+		};
+		if (!check.ok) invalid.push({
+			id,
+			errors: check.errors.map((e) => `${e.path}: ${e.message} (fix: ${e.fix})`)
+		});
+		variants.push(await variantStatus(root, entry));
+	}
+	const ts = now().toISOString();
+	const manifest = ExperimentManifest.parse({
+		schema_version: "1.0",
+		experiment_id: plan.id,
+		hypothesis: plan.hypothesis,
+		...plan.metric ? { metric: plan.metric } : {},
+		base_spec_sha256: sha256Hex(canonicalJson(base)),
+		created_at: prev?.experiment_id === plan.id ? prev.created_at : ts,
+		updated_at: ts,
+		variants
+	});
+	const manifest_path = join(vdir, EXPERIMENT_FILE);
+	await writeJsonAtomic(manifest_path, manifest);
+	return {
+		manifest,
+		manifest_path,
+		invalid
+	};
+}
+/** Re-read variants/experiment.json and refresh each variant's status from its files. */
+async function experimentStatus(projectDir, jobs = {}) {
+	const root = projectPaths(projectDir).root;
+	const path = join(variantsDir(root), EXPERIMENT_FILE);
+	if (!existsSync(path)) throw new Error("no variants/experiment.json; run variants first");
+	const m = ExperimentManifest.parse(await readJson(path));
+	const variants = await Promise.all(m.variants.map((v) => variantStatus(root, jobs[v.id] ? {
+		...v,
+		job_id: jobs[v.id]
+	} : v)));
+	const next = {
+		...m,
+		variants
+	};
+	await writeJsonAtomic(path, next);
+	return next;
+}
+/** One-screen summary. */
+function formatVariants(m, invalid = []) {
+	return [
+		`experiment ${m.experiment_id}: ${m.variants.length} variant(s); hypothesis: ${m.hypothesis}`,
+		...m.variants.map((v) => `- ${v.id} (hook ${v.hook_id}${v.cover_id ? `, cover ${v.cover_id}` : ""}): ${v.status}${v.job_id ? ` [job ${v.job_id}]` : ""}${v.dist ? ` → ${v.dist}` : ""}${v.error ? ` — ${v.error}` : ""}`),
+		...invalid.flatMap((i) => i.errors.slice(0, 3).map((e) => `  ${i.id}: ${e}`))
+	].join("\n");
+}
 //#endregion
 //#region src/verify.ts
 /**
@@ -244929,6 +245765,81 @@ function createServer(options = {}) {
 			...quality_b ? { quality_b } : {}
 		});
 		return jsonResult(formatDiff(r), r);
+	}));
+	server.registerTool("variants", {
+		title: "Prepare (and render) A/B variants",
+		description: "Build an A/B experiment from <project_dir>/project/variants.json (ExperimentPlan: {schema_version, id, hypothesis, metric?, hooks: [{id, label?, scene}], covers?: [{id, label?, cover: {headline, focal_time_sec}}]}; schema_get experiment-plan). Every hook × cover pair becomes variants/<hook>-<cover>/, a full project whose spec is the base spec with the hook scene and cover swapped (validated like spec_validate). Writes variants/experiment.json (hypothesis, base spec hash, variants with status). With render: true, queues one render job per variant that is not rendered yet (renders run one at a time; poll job_status or call variants again with status_only: true). Base scene clips are reused, so a variant mostly re-renders its hook scene.",
+		inputSchema: {
+			project_dir: string().min(1).describe("Planned (ideally rendered) base project"),
+			render: boolean().optional().describe("Queue a render job per unrendered variant (default false: prepare only)"),
+			status_only: boolean().optional().describe("Only refresh and report variants/experiment.json"),
+			quality: QUALITY.optional().describe("Render quality for render: true (default preview)"),
+			voice: _enum([
+				"auto",
+				"system",
+				"elevenlabs",
+				"silent"
+			]).optional(),
+			renderer: _enum([
+				"auto",
+				"hyperframes",
+				"ffmpeg"
+			]).optional()
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async (args) => {
+		const root = resolveInputPath(args.project_dir, cwd());
+		if (args.status_only) {
+			const m = await experimentStatus(root);
+			return jsonResult(formatVariants(m), m);
+		}
+		const r = await prepareVariants(root);
+		let manifest = r.manifest;
+		if (args.render) {
+			const jobs = {};
+			for (const v of manifest.variants) {
+				if (v.status !== "prepared" && v.status !== "rendering") continue;
+				const view = getJobs().submit(join(root, v.project_dir), {
+					...args.quality ? { quality: args.quality } : {},
+					...args.voice ? { voice: args.voice } : {},
+					...args.renderer ? { renderer: args.renderer } : {}
+				});
+				jobs[v.id] = view.job_id;
+			}
+			manifest = await experimentStatus(root, jobs);
+		}
+		return jsonResult(formatVariants(manifest, r.invalid), {
+			...manifest,
+			manifest_path: r.manifest_path,
+			invalid: r.invalid
+		});
+	}));
+	server.registerTool("adapt", {
+		title: "Adapt a project to another shape",
+		description: "Copy <project_dir> into out_dir (a new, empty folder) with its spec retargeted: aspect_ratio (master resized, layouts re-flow), target_duration_sec (scene durations scaled proportionally, cover time scaled; notes list scenes whose narration no longer fits), platform and targets (publish copy kept only for remaining targets). The source is never modified. Returns the new spec, the changes, notes and a spec_validate result; edit the flagged scenes, then render the new project.",
+		inputSchema: {
+			project_dir: string().min(1).describe("Source project folder"),
+			out_dir: string().min(1).describe("New folder for the adapted project (must not exist or be empty)"),
+			aspect_ratio: AspectRatio.optional(),
+			target_duration_sec: number().positive().max(600).optional(),
+			platform: Platform.optional(),
+			targets: array(PlatformTargetId).optional().describe("Platform contract ids for the adapted project")
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: false,
+			openWorldHint: false
+		}
+	}, safe(async (args) => {
+		const { project_dir, out_dir, ...opts } = args;
+		const r = await adaptProject(resolveInputPath(project_dir, cwd()), resolveInputPath(out_dir, cwd()), opts);
+		return jsonResult(formatAdapt(r), r);
 	}));
 	return server;
 }

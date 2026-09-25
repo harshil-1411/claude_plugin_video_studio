@@ -1,0 +1,56 @@
+# Archetype: customer or project case study from context to measured result.
+schema_version: "1.0"
+id: case-study
+name: Case study
+description: Context, problem, approach, measured results, a testimonial quote and a CTA. Every result and quote comes from the source.
+goals: [case_study, promote, launch]
+platforms: [linkedin, x, youtube, youtube_shorts, instagram_reels, tiktok]
+default_aspect_ratio: "9:16"
+default_duration_sec: 45
+duration_range: { min_sec: 25, max_sec: 90 }
+pacing: { avg_shot_sec: 5.5, max_words_per_sec: 2.7 }
+caption_preset: minimal
+beats:
+  - purpose: hook
+    share: 0.08
+    guidance: Lead with the headline result or the before/after in one line ("cut build time from 20 to 4 minutes").
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: kinetic_text
+  - purpose: context
+    share: 0.12
+    guidance: Who the customer or project is, with a lower third (name, role or industry).
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: lower_third
+  - purpose: problem
+    share: 0.14
+    guidance: The problem they had, concretely and in their terms.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: step
+    share: 0.16
+    guidance: The approach - what they changed, as a short timeline or diagram.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: timeline
+  - purpose: result
+    share: 0.18
+    guidance: The measured result as a stat with its baseline in context. The number must cite claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: stat
+  - purpose: testimonial
+    share: 0.18
+    guidance: A real quote from the source with attribution. Never invent or paraphrase inside quote marks.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: quote
+    optional: true
+  - purpose: cta
+    share: 0.14
+    guidance: One action (read the full case study, talk to us) that matches desired_action.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+hook_mechanisms: [statistic, before_after, story, promise]
+rules:
+  - Results and quotes come verbatim from the source and cite claim_refs; drop the testimonial beat if the source has no quote.
+  - A result states its baseline (from X to Y, or vs. what).
+  - Name the customer only as the source does; no invented names or titles.
+  - CTA must be an allowed brand CTA if a brand profile is present.
+default_style: editorial

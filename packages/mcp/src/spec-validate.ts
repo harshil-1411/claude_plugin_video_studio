@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { checkSpecTargets, findPlatformSpecsDir, loadContracts } from "@video-studio/platforms";
-import { ContentIR, VideoSpec, parseYamlOrJson, validateVideoSpecSemantics } from "@video-studio/schema";
+import { findStylesDir, getStyle, styleIds } from "@video-studio/renderer";
+import { ContentIR, VideoSpec, closestMatches, parseYamlOrJson, validateVideoSpecSemantics } from "@video-studio/schema";
 
 export interface ValidationIssue {
   path: string;
@@ -9,7 +10,7 @@ export interface ValidationIssue {
   /** Concrete instruction for resolving the issue. */
   fix: string;
   /** Which stage found it. */
-  stage: "syntax" | "schema" | "semantic" | "content-ir" | "platform";
+  stage: "syntax" | "schema" | "semantic" | "content-ir" | "platform" | "style";
 }
 
 export interface SpecValidationResult {
@@ -42,6 +43,7 @@ export async function validateSpecFile(
   specPath: string,
   contentIrPath: string | null,
   platformSpecsDir: string | null = findPlatformSpecsDir(),
+  stylesDir: string | null = findStylesDir(),
 ): Promise<SpecValidationResult> {
   const result: SpecValidationResult = {
     ok: false,
@@ -109,8 +111,33 @@ export async function validateSpecFile(
     result.errors.push(...t.errors.map((e) => ({ ...e, stage: "platform" as const })));
     result.warnings.push(...t.warnings.map((e) => ({ ...e, stage: "platform" as const })));
   }
+  // The style pack must exist in styles/ (and be a valid pack).
+  if (parsed.data.style) {
+    const style = await checkSpecStyle(parsed.data.style, stylesDir);
+    if (style) result.errors.push(style);
+  }
   result.ok = result.errors.length === 0;
   return result;
+}
+
+/** An error when `id` is not a loadable style pack in `dir`, listing the available ids. */
+export async function checkSpecStyle(id: string, dir: string | null): Promise<ValidationIssue | null> {
+  const ids = await styleIds(dir).catch(() => [] as string[]);
+  if (!ids.includes(id)) {
+    const near = closestMatches(id, ids);
+    return {
+      path: "style",
+      stage: "style",
+      message: `no style pack "${id}" in styles/; available: ${ids.join(", ") || "(none)"}`,
+      fix: near.length ? `use one of ${near.map((n) => `"${n}"`).join(", ")}, or remove style` : `use one of the available ids, or remove style`,
+    };
+  }
+  try {
+    await getStyle(dir, id);
+    return null;
+  } catch (e) {
+    return { path: "style", stage: "style", message: e instanceof Error ? e.message : String(e), fix: `fix styles/${id}.yaml or pick another style` };
+  }
 }
 
 export function formatSpecValidation(r: SpecValidationResult): string {

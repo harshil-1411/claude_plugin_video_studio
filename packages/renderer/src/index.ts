@@ -3,7 +3,7 @@ export * from "./tokens.js";
 export * from "./text-layout.js";
 export * from "./ffmpeg-renderer.js";
 export * from "./select.js";
-export { buildComposition, compositionIdFor, HYPERFRAMES_KINDS, type BuildCompositionOptions, type Composition, type CompositionAsset } from "./hyperframes-compose.js";
+export { buildComposition, compositionIdFor, EASING_CSS, HYPERFRAMES_KINDS, type BuildCompositionOptions, type Composition, type CompositionAsset } from "./hyperframes-compose.js";
 export {
   createHyperframesRenderer,
   findChrome,
@@ -15,3 +15,4 @@ export {
   type HyperframesRendererOptions,
   type HyperframesProducer,
 } from "./hyperframes-renderer.js";
+export * from "./styles.js";

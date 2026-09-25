@@ -1,0 +1,57 @@
+# Archetype: a story told card by card, like a swipeable carousel in motion.
+schema_version: "1.0"
+id: carousel-story
+name: Carousel story
+description: Slide-by-slide story with one idea per card. Each card advances the story one step and the last card reveals the point.
+goals: [educate, explain, promote, case_study]
+platforms: [instagram_reels, linkedin, tiktok, youtube_shorts, x]
+default_aspect_ratio: "4:5"
+default_duration_sec: 30
+duration_range: { min_sec: 15, max_sec: 60 }
+pacing: { avg_shot_sec: 4, max_words_per_sec: 2.8 }
+caption_preset: minimal
+beats:
+  - purpose: hook
+    share: 0.12
+    guidance: Card 1 is the cover. One short line that makes the viewer want the next card (the stakes or the surprising end).
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: kinetic_text
+  - purpose: story
+    share: 0.16
+    guidance: Set the scene in one card; who, where and what was at stake. Concrete, not abstract.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: step
+    share: 0.16
+    guidance: First turn of the story. One idea on the card; the voiceover adds the detail.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: step
+    share: 0.16
+    guidance: Second turn, building on the first. Keep the same card layout so the rhythm stays predictable.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: timeline
+    optional: true
+  - purpose: reveal
+    share: 0.18
+    guidance: The card the story was building to - the outcome, the number or the lesson. Ground any number in claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: stat
+  - purpose: payoff
+    share: 0.10
+    guidance: One line the viewer can repeat - what the story means for them.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: cta
+    share: 0.12
+    guidance: Ask for one action (save, follow, read the source) that matches desired_action.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+hook_mechanisms: [story, curiosity_gap, promise, contrarian_claim]
+rules:
+  - One idea per card; if a card needs two sentences on screen, split it.
+  - Cards share one layout and type scale so the story reads as a sequence.
+  - Every card except the reveal leaves a reason to keep watching.
+  - Every number, percentage or comparison cites a ContentIR ref in claim_refs.
+  - CTA must be an allowed brand CTA if a brand profile is present.
+default_style: editorial

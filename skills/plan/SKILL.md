@@ -64,11 +64,30 @@ proposed default. Otherwise proceed and let the user correct the assumptions.
 
 ### 3. Template
 
-Call `template_list`, pick the template whose beats fit the goal
-(`launch` of a developer tool → `devtool-launch`; concept → `explain`;
-how-to → `educational`; "N tips/reasons" → `listicle`; product/feature news
-→ `product-launch`), then `template_get {id}`. Follow its beats (purpose,
+Call `template_list`, pick the template (reel grammar) whose beats fit the
+goal and the source, then `template_get {id}`. Follow its beats (purpose,
 share of duration, guidance), pacing and rules. Beats come before scenes.
+
+| Source / request | Template |
+|---|---|
+| Developer tool launch | `devtool-launch` |
+| Product or feature news | `product-launch` |
+| One concept, quick | `explain` |
+| "How does X work?" with steps (diagram, timeline) | `animated-explainer` |
+| How-to or lesson | `educational` |
+| "N tips/reasons", narrated | `listicle` |
+| Numbered list, kinetic type and stats, fast | `faceless-listicle` |
+| A story or thread, one idea per card | `carousel-story` |
+| Product solving one problem, with screenshots | `product-demo` |
+| Tour of a UI, feature by feature | `product-ui` |
+| Customer/project results with a quote | `case-study` |
+| A transformation (old way vs new way) | `before-after` |
+| No narration: text cards on music, incl. a music-only product demo | `text-over-music` |
+
+A presenter/talking-head video needs footage and is not available yet.
+Pick `text-over-music` when the user asks for no voice, music only, or
+"text on screen"; any other template can also run without voice by passing
+`voice_mode: "none"` to `spec_scaffold`.
 
 ### 4. Hooks
 
@@ -90,18 +109,32 @@ points). Call `brief_validate {project_dir}` and fix every error before going on
 ### 6. Spec
 
 1. Call `spec_scaffold {project_dir, template_id, target_duration_sec,
-   aspect_ratio, platform, targets?}`. It returns a skeleton (not written to
+   aspect_ratio, platform, targets?, style?, music?, voice_mode?}`. It returns a skeleton (not written to
    disk) with one scene per beat and timing, plus `master` (the production
-   canvas) and `targets` (platform contract ids, e.g. `instagram`, `tiktok`,
-   `youtube-shorts`). Keep its structure unless the story needs a
+   canvas), `targets` (platform contract ids, e.g. `instagram`, `tiktok`,
+   `youtube-shorts`), the template's `style`, and for music-led templates
+   `voice.mode: "none"` and `audio.music`. Keep its structure unless the story needs a
    beat split or merged; keep ids `s01`, `s02`, ... in order.
+   - `style`: `minimal` (quiet, clean), `editorial` (story and quotes),
+     `technical` (code, diagrams), `energetic` (bold, fast cuts). Pass the
+     user's choice; otherwise keep the template default.
+   - `music`: `bundled:ambient` (calm), `bundled:lofi` (relaxed),
+     `bundled:upbeat` (energetic), `bundled:minimal`. A user's own track is
+     a project-relative path and needs `audio.music.license` (only a track
+     they have the rights to). Narrated videos have no music unless asked.
 2. Fill every scene following `references/script-writing.md` and
    `references/visual-strategy.md`:
    - **One idea per scene.** A second idea means a second scene.
+   - With `voice.mode: "none"`: every `voiceover` stays `""`, words go on
+     screen within each scene's `word_budget`, numbers still need
+     `claim_refs` (`references/script-writing.md`, "No voiceover").
    - `voiceover` written for the ear: short sentences, contractions, no
      parentheses, spell out symbols. Duration ≈ words ÷ 2.3-2.8 (+0.3 s
      breath). Scene 1 is the chosen hook, verbatim or nearly.
    - `on_screen_text` ≤ 6 words; it reinforces, never transcribes, the voiceover.
+   - `deterministic.kind` per scene from the beat's suggestion; kinds and
+     props (incl. `quote`, `stat`, `timeline`, `split_screen`,
+     `lower_third`, `kinetic_text`, `map`) are in `references/visual-strategy.md`.
    - `visual_strategy`: typography, code, charts, diagrams, UI, comparisons,
      CTA, end card → `motion_graphic` with `deterministic {kind, props}`;
      B-roll and visual metaphors → `generated_video` with capability-only

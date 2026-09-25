@@ -1,0 +1,57 @@
+# Archetype: before/after transformation centred on a split screen.
+schema_version: "1.0"
+id: before-after
+name: Before / after
+description: A transformation video centred on a before/after split screen - the old way, the objection, the reveal of the new way, and the result.
+goals: [promote, launch, explain, case_study]
+platforms: [tiktok, instagram_reels, youtube_shorts, x, linkedin]
+default_aspect_ratio: "9:16"
+default_duration_sec: 30
+duration_range: { min_sec: 15, max_sec: 60 }
+pacing: { avg_shot_sec: 4.5, max_words_per_sec: 3.0 }
+caption_preset: bold
+beats:
+  - purpose: hook
+    share: 0.10
+    guidance: Tease the transformation in one line; show the gap, not the method.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: kinetic_text
+  - purpose: problem
+    share: 0.14
+    guidance: The "before" alone - the painful state, concrete enough to recognise.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: objection
+    share: 0.12
+    guidance: Name the objection the viewer has ("isn't this just ...?") and answer it in one line.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+    optional: true
+  - purpose: comparison
+    share: 0.28
+    guidance: The centre of the video - a before/after split screen (mode before_after) with matching framing on both halves.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: split_screen
+  - purpose: reveal
+    share: 0.14
+    guidance: Reveal what made the difference, in one line or one short command.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: kinetic_text
+  - purpose: result
+    share: 0.10
+    guidance: The measured gain as a stat, if the source has one; cite it in claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: stat
+    optional: true
+  - purpose: cta
+    share: 0.12
+    guidance: One action that matches desired_action.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+hook_mechanisms: [before_after, pain_point, pattern_interrupt, demo]
+rules:
+  - The before and after halves use the same framing and scale so the difference is the only change.
+  - Do not exaggerate the before; it must be the real old state from the source.
+  - Every number, percentage or comparison cites a ContentIR ref in claim_refs.
+  - CTA must be an allowed brand CTA if a brand profile is present.
+default_style: energetic

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Brand } from "@video-studio/schema";
+import type { Brand, Style } from "@video-studio/schema";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +12,7 @@ import {
   findFontsDir,
   fontFaceCss,
   normalizeHex,
+  PERSONALITY_MOTION,
   parseFontChain,
   resolveFontFile,
   resolveTokens,
@@ -60,6 +61,77 @@ describe("resolveTokens", () => {
   it("normalises hex colours", () => {
     expect(normalizeHex("#abc")).toBe("#AABBCC");
     expect(() => normalizeHex("red")).toThrow();
+  });
+});
+
+describe("resolveTokens with a style pack (defaults < style < brand)", () => {
+  const STYLE: Style = {
+    id: "punchy",
+    name: "Punchy",
+    version: 3,
+    description: "test pack",
+    palette: { background: "#160b33", text: "#ffffff", primary: "#FFD60A", secondary: "#FF5C9A" },
+    fonts: { heading: "Noto Sans", body: "Inter" },
+    weights: { heading: 800, body: 500 },
+    text: { case: "upper", heading_scale: 1.12, align: "left" },
+    motion: { personality: "energetic", easing: "spring", enter_ms: 350, exit_ms: 120, stagger_ms: 70, transition: "whip", transition_ms: 250 },
+  };
+  const BRAND: Brand = { brand: { name: "Acme" }, visual: { fonts: { heading: "Acme Sans", body: "Acme Text" }, palette: { primary: "#123456" }, weights: { heading: 600 } } };
+
+  it("none: exactly the defaults (no style keys at all)", () => {
+    const t = resolveTokens(undefined, {}, undefined);
+    expect(t).toEqual({ ...DEFAULT_TOKENS });
+    for (const k of ["style", "weight_heading", "weight_body", "text_case", "heading_scale", "text_align", "motion"]) expect(t).not.toHaveProperty(k);
+  });
+
+  it("style: fills palette, fonts, weights, text and motion, and names itself", () => {
+    const t = resolveTokens(undefined, {}, STYLE);
+    expect(t.style).toBe("punchy@3");
+    expect([t.color_background, t.color_text, t.color_primary, t.color_secondary]).toEqual(["#160B33", "#FFFFFF", "#FFD60A", "#FF5C9A"]);
+    expect(parseFontChain(t.font_heading)).toEqual(["Noto Sans", "Inter", "Helvetica", "Arial", "sans-serif"]);
+    expect(parseFontChain(t.font_body)[0]).toBe("Inter");
+    expect(parseFontChain(t.font_body).filter((n) => n === "Inter")).toHaveLength(1);
+    expect(t.font_mono).toBe(DEFAULT_TOKENS.font_mono);
+    expect([t.weight_heading, t.weight_body, t.text_case, t.heading_scale, t.text_align]).toEqual([800, 500, "upper", 1.12, "left"]);
+    expect(t.motion).toEqual(STYLE.motion);
+    expect(t.motion).not.toBe(STYLE.motion);
+  });
+
+  it("brand overrides the style's colours, fonts and weights; the rest of the style stays", () => {
+    const t = resolveTokens(BRAND, {}, STYLE);
+    expect(t.color_primary).toBe("#123456");
+    expect(t.color_background).toBe("#160B33");
+    expect(parseFontChain(t.font_heading).slice(0, 2)).toEqual(["Acme Sans", "Noto Sans"]);
+    expect(parseFontChain(t.font_body)[0]).toBe("Acme Text");
+    expect(t.weight_heading).toBe(600);
+    expect(t.weight_body).toBe(500);
+    expect(t.text_case).toBe("upper");
+    expect(t.motion).toEqual(STYLE.motion);
+  });
+
+  it("brand motion: same personality keeps the style's curve, a different one brings its own timings; transition_ms always wins", () => {
+    const same = resolveTokens({ brand: { name: "A" }, motion: { personality: "energetic", transition_ms: 90 } }, {}, STYLE);
+    expect(same.motion).toEqual({ ...STYLE.motion, transition_ms: 90 });
+    const calm = resolveTokens({ brand: { name: "A" }, motion: { personality: "calm" } }, {}, STYLE);
+    const { transition: _t, transition_ms: _ms, ...curve } = PERSONALITY_MOTION.calm;
+    expect(calm.motion).toEqual({ ...STYLE.motion, personality: "calm", ...curve });
+    expect(calm.motion?.transition).toBe("whip");
+  });
+
+  it("brand personality only (no style): the personality table", () => {
+    const t = resolveTokens({ brand: { name: "A" }, motion: { personality: "precise", transition_ms: 40 } });
+    expect(t.motion).toEqual({ personality: "precise", ...PERSONALITY_MOTION.precise, transition_ms: 40 });
+    expect(t).not.toHaveProperty("style");
+    expect(t).not.toHaveProperty("text_case");
+    // transition_ms alone has nothing to attach to.
+    expect(resolveTokens({ brand: { name: "A" }, motion: { transition_ms: 40 } })).toEqual({ ...DEFAULT_TOKENS });
+  });
+
+  it("every personality maps to valid motion", () => {
+    for (const [p, m] of Object.entries(PERSONALITY_MOTION)) {
+      expect(["linear", "ease_out", "ease_in_out", "spring", "snap"], p).toContain(m.easing);
+      expect(m.enter_ms).toBeGreaterThan(0);
+    }
   });
 });
 

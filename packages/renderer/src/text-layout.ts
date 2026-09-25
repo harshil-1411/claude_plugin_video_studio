@@ -19,11 +19,20 @@ export const DEFAULT_LINE_HEIGHT = 1.25;
 
 export interface MeasureOptions {
   mono?: boolean;
+  /** Average advance per character in em, overriding CHAR_EM (e.g. CHAR_EM_UPPER for capitals). */
+  em?: number;
+}
+
+/** Average advance for upper-case text (capitals are wider than the mixed-case average). */
+export const CHAR_EM_UPPER = 0.68;
+
+function charEm(opts: MeasureOptions): number {
+  return opts.em ?? (opts.mono ? CHAR_EM.mono : CHAR_EM.proportional);
 }
 
 /** Estimated rendered width in px. */
 export function estimateTextWidth(text: string, fontSize: number, opts: MeasureOptions = {}): number {
-  const em = opts.mono ? CHAR_EM.mono : CHAR_EM.proportional;
+  const em = charEm(opts);
   return Array.from(text).length * fontSize * em;
 }
 
@@ -37,7 +46,7 @@ function hardBreak(word: string, maxChars: number): string[] {
 
 /** Greedy word wrap to `maxWidth` px. Explicit newlines are kept; over-long words are hard-broken. */
 export function wrapText(text: string, fontSize: number, maxWidth: number, opts: MeasureOptions = {}): string[] {
-  const em = opts.mono ? CHAR_EM.mono : CHAR_EM.proportional;
+  const em = charEm(opts);
   const maxChars = Math.max(1, Math.floor(maxWidth / (fontSize * em)));
   const lines: string[] = [];
   for (const para of text.replace(/\r\n?/g, "\n").split("\n")) {
@@ -120,7 +129,7 @@ export function fitText(text: string | readonly string[], box: { w: number; h: n
     size = Math.max(min, size > 40 ? Math.floor(size * 0.95) : size - 1);
   }
   // Truncate at the minimum size.
-  const em = opts.mono ? CHAR_EM.mono : CHAR_EM.proportional;
+  const em = charEm(opts);
   const maxChars = Math.max(1, Math.floor(box.w / (size * em)));
   const maxLines = Math.max(1, Math.min(opts.maxLines ?? Infinity, Math.floor((box.h - size) / (size * lh)) + 1));
   let lines = layout(size).map((l) => ellipsize(l, maxChars));
@@ -165,6 +174,37 @@ export function placeLines(
       y: Math.round(top + i * fit.lineAdvance),
     };
   });
+}
+
+// ---------------------------------------------------------------------------------- text treatment
+
+const SMALL_WORDS = new Set(["a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on", "or", "per", "the", "to", "vs", "via", "with"]);
+
+/**
+ * Heading case transform (style `text.case`). `title` capitalises words that are all lower case
+ * (so API, gRPC and iOS keep their spelling), leaving short function words lower case except at
+ * the start and end. `as_is` and undefined return the text unchanged.
+ */
+export function applyTextCase(text: string, mode: "as_is" | "upper" | "title" | undefined): string {
+  if (mode === "upper") return text.toLocaleUpperCase("en");
+  if (mode !== "title") return text;
+  return text
+    .split("\n")
+    .map((line) => {
+      const words = line.split(" ");
+      const last = words.length - 1;
+      return words
+        .map((w, i) => {
+          const m = /^([^\p{L}]*)(\p{L}[\p{L}\p{N}'’-]*)(.*)$/u.exec(w);
+          if (!m) return w;
+          const [, lead, word, tail] = m as unknown as [string, string, string, string];
+          if (word !== word.toLowerCase()) return w;
+          if (i !== 0 && i !== last && SMALL_WORDS.has(word)) return w;
+          return `${lead}${word.charAt(0).toLocaleUpperCase("en")}${word.slice(1)}${tail}`;
+        })
+        .join(" ");
+    })
+    .join("\n");
 }
 
 // ---------------------------------------------------------------------------------- safe areas

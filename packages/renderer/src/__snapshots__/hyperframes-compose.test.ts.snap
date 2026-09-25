@@ -3548,3 +3548,241 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > typograph
   "warnings": [],
 }
 `;
+
+exports[`buildComposition: style tokens > snapshots one styled scene per core style > editorial 1`] = `
+"/* style pack */
+.vs-typography, .vs-kinetic, .vs-headline, .vs-stat-value, .vs-quote-mark, .vs-quote-text, .vs-chart-title, .vs-verdict, .vs-card-label, .vs-tl-label, .vs-lt-name, .vs-split-label, .vs-split-text.vs-split-only, .vs-node > div, .vs-action, .vs-value { font-weight: 700; }
+#vs-root { font-weight: 400; }
+.vs-typography, .vs-kinetic, .vs-quote, .vs-verdict, .vs-cta, .vs-end { text-align: left; }
+.vs-cta, .vs-end { align-items: flex-start; }
+.vs-lt-headline, .vs-map-title { justify-content: flex-start; text-align: left; }
+.vs-exit { animation: vs-exit var(--xd) linear var(--xt) both paused; }
+@keyframes vs-exit { from { opacity: 1; } to { opacity: 0; } }
+</style>
+</head>
+<body>
+<div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
+<div id="vs-scene" class="clip vs-kind-typography" data-start="0" data-duration="3" data-track-index="0">
+<div class="vs-safe vs-exit" style="--xt:2.717s;--xd:0.25s">
+<div class="vs-stack vs-typography" style="font-size:118.8px">
+<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.45s"><span class="vs-line"><span class="vs-em">Key</span> Line</span></div>
+</div>
+</div>
+</div>
+</div>
+<script>
+(function () {
+  var DURATION = 3;
+  var t = 0;
+  var playing = false;
+  function animations() {
+    return typeof document.getAnimations === "function" ? document.getAnimations() : [];
+  }
+  function apply(seconds) {
+    t = Math.min(Math.max(0, Number(seconds) || 0), DURATION);
+    var list = animations();
+    for (var i = 0; i < list.length; i++) {
+      try { list[i].currentTime = t * 1000; list[i].pause(); } catch (e) {}
+    }
+  }
+  var tl = {
+    duration: function () { return DURATION; },
+    totalDuration: function () { return DURATION; },
+    seek: function (s) { apply(s); return tl; },
+    totalTime: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    time: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    progress: function (p) { if (p === undefined) return DURATION ? t / DURATION : 0; apply(p * DURATION); return tl; },
+    pause: function () { playing = false; apply(t); return tl; },
+    play: function () { playing = true; return tl; },
+    paused: function (v) { if (v === undefined) return !playing; playing = !v; return tl; },
+    isActive: function () { return false; },
+    timeScale: function (v) { return v === undefined ? 1 : tl; },
+    getChildren: function () { return []; },
+    kill: function () { return tl; }
+  };
+  window.__timelines = window.__timelines || {};
+  window.__timelines["vs-s01"] = tl;
+  apply(0);
+})();
+</script>
+</body>
+</html>
+"
+`;
+
+exports[`buildComposition: style tokens > snapshots one styled scene per core style > energetic 1`] = `
+"/* style pack */
+.vs-typography, .vs-kinetic, .vs-headline, .vs-stat-value, .vs-quote-mark, .vs-quote-text, .vs-chart-title, .vs-verdict, .vs-card-label, .vs-tl-label, .vs-lt-name, .vs-split-label, .vs-split-text.vs-split-only, .vs-node > div, .vs-action, .vs-value { font-weight: 800; }
+#vs-root { font-weight: 500; }
+.vs-quote { text-align: center; }
+.vs-exit { animation: vs-exit var(--xd) linear var(--xt) both paused; }
+@keyframes vs-exit { from { opacity: 1; } to { opacity: 0; } }
+</style>
+</head>
+<body>
+<div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
+<div id="vs-scene" class="clip vs-kind-typography" data-start="0" data-duration="3" data-track-index="0">
+<div class="vs-safe vs-exit" style="--xt:2.847s;--xd:0.12s">
+<div class="vs-stack vs-typography" style="font-size:133.06px">
+<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.35s"><span class="vs-line"><span class="vs-em">KEY</span> LINE</span></div>
+</div>
+</div>
+</div>
+</div>
+<script>
+(function () {
+  var DURATION = 3;
+  var t = 0;
+  var playing = false;
+  function animations() {
+    return typeof document.getAnimations === "function" ? document.getAnimations() : [];
+  }
+  function apply(seconds) {
+    t = Math.min(Math.max(0, Number(seconds) || 0), DURATION);
+    var list = animations();
+    for (var i = 0; i < list.length; i++) {
+      try { list[i].currentTime = t * 1000; list[i].pause(); } catch (e) {}
+    }
+  }
+  var tl = {
+    duration: function () { return DURATION; },
+    totalDuration: function () { return DURATION; },
+    seek: function (s) { apply(s); return tl; },
+    totalTime: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    time: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    progress: function (p) { if (p === undefined) return DURATION ? t / DURATION : 0; apply(p * DURATION); return tl; },
+    pause: function () { playing = false; apply(t); return tl; },
+    play: function () { playing = true; return tl; },
+    paused: function (v) { if (v === undefined) return !playing; playing = !v; return tl; },
+    isActive: function () { return false; },
+    timeScale: function (v) { return v === undefined ? 1 : tl; },
+    getChildren: function () { return []; },
+    kill: function () { return tl; }
+  };
+  window.__timelines = window.__timelines || {};
+  window.__timelines["vs-s01"] = tl;
+  apply(0);
+})();
+</script>
+</body>
+</html>
+"
+`;
+
+exports[`buildComposition: style tokens > snapshots one styled scene per core style > minimal 1`] = `
+"/* style pack */
+.vs-typography, .vs-kinetic, .vs-headline, .vs-stat-value, .vs-quote-mark, .vs-quote-text, .vs-chart-title, .vs-verdict, .vs-card-label, .vs-tl-label, .vs-lt-name, .vs-split-label, .vs-split-text.vs-split-only, .vs-node > div, .vs-action, .vs-value { font-weight: 500; }
+#vs-root { font-weight: 400; }
+.vs-quote { text-align: center; }
+.vs-exit { animation: vs-exit var(--xd) linear var(--xt) both paused; }
+@keyframes vs-exit { from { opacity: 1; } to { opacity: 0; } }
+</style>
+</head>
+<body>
+<div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
+<div id="vs-scene" class="clip vs-kind-typography" data-start="0" data-duration="3" data-track-index="0">
+<div class="vs-safe vs-exit" style="--xt:2.767s;--xd:0.2s">
+<div class="vs-stack vs-typography" style="font-size:104.54px">
+<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line"><span class="vs-em">Key</span> line</span></div>
+</div>
+</div>
+</div>
+</div>
+<script>
+(function () {
+  var DURATION = 3;
+  var t = 0;
+  var playing = false;
+  function animations() {
+    return typeof document.getAnimations === "function" ? document.getAnimations() : [];
+  }
+  function apply(seconds) {
+    t = Math.min(Math.max(0, Number(seconds) || 0), DURATION);
+    var list = animations();
+    for (var i = 0; i < list.length; i++) {
+      try { list[i].currentTime = t * 1000; list[i].pause(); } catch (e) {}
+    }
+  }
+  var tl = {
+    duration: function () { return DURATION; },
+    totalDuration: function () { return DURATION; },
+    seek: function (s) { apply(s); return tl; },
+    totalTime: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    time: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    progress: function (p) { if (p === undefined) return DURATION ? t / DURATION : 0; apply(p * DURATION); return tl; },
+    pause: function () { playing = false; apply(t); return tl; },
+    play: function () { playing = true; return tl; },
+    paused: function (v) { if (v === undefined) return !playing; playing = !v; return tl; },
+    isActive: function () { return false; },
+    timeScale: function (v) { return v === undefined ? 1 : tl; },
+    getChildren: function () { return []; },
+    kill: function () { return tl; }
+  };
+  window.__timelines = window.__timelines || {};
+  window.__timelines["vs-s01"] = tl;
+  apply(0);
+})();
+</script>
+</body>
+</html>
+"
+`;
+
+exports[`buildComposition: style tokens > snapshots one styled scene per core style > technical 1`] = `
+"/* style pack */
+.vs-typography, .vs-kinetic, .vs-headline, .vs-stat-value, .vs-quote-mark, .vs-quote-text, .vs-chart-title, .vs-verdict, .vs-card-label, .vs-tl-label, .vs-lt-name, .vs-split-label, .vs-split-text.vs-split-only, .vs-node > div, .vs-action, .vs-value { font-weight: 600; }
+#vs-root { font-weight: 400; }
+.vs-typography, .vs-kinetic, .vs-quote, .vs-verdict, .vs-cta, .vs-end { text-align: left; }
+.vs-cta, .vs-end { align-items: flex-start; }
+.vs-lt-headline, .vs-map-title { justify-content: flex-start; text-align: left; }
+</style>
+</head>
+<body>
+<div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
+<div id="vs-scene" class="clip vs-kind-typography" data-start="0" data-duration="3" data-track-index="0">
+<div class="vs-safe">
+<div class="vs-stack vs-typography" style="font-size:111.67px">
+<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.16s"><span class="vs-line"><span class="vs-em">Key</span> line</span></div>
+</div>
+</div>
+</div>
+</div>
+<script>
+(function () {
+  var DURATION = 3;
+  var t = 0;
+  var playing = false;
+  function animations() {
+    return typeof document.getAnimations === "function" ? document.getAnimations() : [];
+  }
+  function apply(seconds) {
+    t = Math.min(Math.max(0, Number(seconds) || 0), DURATION);
+    var list = animations();
+    for (var i = 0; i < list.length; i++) {
+      try { list[i].currentTime = t * 1000; list[i].pause(); } catch (e) {}
+    }
+  }
+  var tl = {
+    duration: function () { return DURATION; },
+    totalDuration: function () { return DURATION; },
+    seek: function (s) { apply(s); return tl; },
+    totalTime: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    time: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    progress: function (p) { if (p === undefined) return DURATION ? t / DURATION : 0; apply(p * DURATION); return tl; },
+    pause: function () { playing = false; apply(t); return tl; },
+    play: function () { playing = true; return tl; },
+    paused: function (v) { if (v === undefined) return !playing; playing = !v; return tl; },
+    isActive: function () { return false; },
+    timeScale: function (v) { return v === undefined ? 1 : tl; },
+    getChildren: function () { return []; },
+    kill: function () { return tl; }
+  };
+  window.__timelines = window.__timelines || {};
+  window.__timelines["vs-s01"] = tl;
+  apply(0);
+})();
+</script>
+</body>
+</html>
+"
+`;

@@ -110,6 +110,7 @@ describe("MCP server (in-memory)", () => {
     const { client, close } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "adapt",
       "brief_validate",
       "diff",
       "doctor",
@@ -127,6 +128,7 @@ describe("MCP server (in-memory)", () => {
       "template_get",
       "template_list",
       "test",
+      "variants",
       "verify",
     ]);
     await close();

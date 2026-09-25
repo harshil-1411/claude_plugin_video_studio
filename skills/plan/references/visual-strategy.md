@@ -8,11 +8,18 @@ Use generative video only where a picture adds meaning that text cannot.
 
 | Scene content | `visual_strategy` | `deterministic.kind` | Typical `props` |
 |---|---|---|---|
-| Hook line, key phrase, quote, single takeaway | `motion_graphic` | `typography` | `lines: [..]`, `emphasis` |
+| Hook line, key phrase, single takeaway | `motion_graphic` | `typography` | `lines: [..]`, `emphasis` |
+| Punchy line revealed word by word (hooks, text-over-music cards) | `motion_graphic` | `kinetic_text` | `text`, `rhythm` (`word`/`phrase`), `emphasis` |
+| Verbatim quote or testimonial from the source | `motion_graphic` | `quote` | `text`, `attribution`, `source` |
+| One headline number | `motion_graphic` | `stat` | `value` (number or string), `unit`, `label`, `context` (baseline) |
 | Code, CLI command, config, terminal output | `motion_graphic` | `code` | `language`, `code`, `highlight_lines` |
-| Numbers, trends, benchmarks | `motion_graphic` | `chart` | `type` (bar/line/stat), `series`/`value`, `unit`, `label` |
+| Several numbers, trends, benchmarks | `motion_graphic` | `chart` | `type` (bar/line/pie/stat), `series`/`value`, `unit`, `label` |
+| Sequence, history, steps with progress | `motion_graphic` | `timeline` | `events: [{label, text?}]` (2-6), `current` (highlighted index) |
 | Architecture, pipeline, flow, relationships | `motion_graphic` | `diagram` | `nodes`, `edges` |
-| Before/after, A vs B, old vs new | `motion_graphic` | `comparison` | `left {label,text}`, `right {label,text}`, `verdict` |
+| A vs B as text with a verdict | `motion_graphic` | `comparison` | `left {label,text}`, `right {label,text}`, `verdict` |
+| Before/after or side by side, text or images | `motion_graphic` | `split_screen` | `mode` (`side_by_side`/`before_after`), `left`/`right` `{label?, text?, asset?}` |
+| Name a person, product or feature | `motion_graphic` | `lower_third` | `name`, `title`, `headline` (main text above it) |
+| Places or nodes on an abstract map | `motion_graphic` | `map` | `title`, `points: [{label, x, y}]` (0-1, max 8), `route` |
 | Product UI from a supplied image | `motion_graphic` | `screenshot` | `asset` (ContentIR asset id), `callouts` |
 | Call to action | `motion_graphic` | `cta` | `headline`, `action`, `command`/`url` |
 | Closing logo / title card | `motion_graphic` | `end_card` | `title`, `subtitle` (props may be empty) |
@@ -29,6 +36,9 @@ Rules:
   non-empty `props` (except `end_card`). Props should echo the scene's
   on-screen text and cited facts, never add new ones.
 - Do not use `avatar` or real people's likeness without explicit consent.
+- `asset` in `screenshot`/`split_screen` must be a ContentIR asset id.
+- Numbers in any props (`stat.value`, `chart.series`, `timeline` text) need
+  `claim_refs` like numbers in voiceover.
 - Short developer videos can be 100% deterministic; that is a good default.
   Mix in at most 1-2 generative scenes where a metaphor genuinely helps.
 - With `data_policy: "local-only"` (confidential sources), avoid

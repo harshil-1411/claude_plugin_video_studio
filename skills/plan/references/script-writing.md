@@ -26,6 +26,22 @@
   ~4 s (a new line of text, a highlight, a cut).
 - Scene durations must sum to within ±10% of `target_duration_sec`.
 
+## No voiceover (`voice.mode: "none"`)
+
+Text-over-music reels (`text-over-music`, or any template with
+`voice_mode: none` passed to `spec_scaffold`) have no speech:
+
+- Every `voiceover` is `""` (the validator errors otherwise). The words live
+  in `on_screen_text` or the deterministic props; do not repeat them in both.
+- Budget on-screen words, not spoken ones: about **3 words per second after
+  a 1 s settle** per scene (`spec_scaffold`'s `word_budget`; lint uses the
+  same rule). A 3 s card holds about 6 words. Cut words before lengthening cards.
+- One message per card, at most two short lines; the hook card readable in 2 s.
+- Grounding is unchanged: a number or claim on screen still needs
+  `claim_refs`.
+- `captions.burn_in: false` (nothing to caption) and a music bed in
+  `audio.music` (see `brief-and-spec-fields.md`), or the video is silent.
+
 ## One idea per scene
 
 - Each scene makes exactly one point: one claim, one step, one example.

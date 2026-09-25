@@ -9,6 +9,7 @@ import { AspectRatio, Platform, PlatformTargetId } from "@video-studio/schema";
 import { z } from "zod";
 import { type DoctorDeps, defaultDoctorDeps, formatDoctorReport, runDoctor } from "./doctor.js";
 import { SCHEMA_NAMES, findSchemasDir, resolveInputPath } from "./paths.js";
+import { type AdaptOptions, adaptProject, formatAdapt } from "./adapt.js";
 import { diffProjects, formatDiff } from "./diff.js";
 import { formatGolden, testProject } from "./golden.js";
 import { formatLint, lintProject } from "./lint.js";
@@ -17,6 +18,7 @@ import { type RenderProjectOptions, SpecInvalidError, exportProject, loadValidSp
 import { type RenderJobView, RenderJobManager } from "./render-jobs.js";
 import { formatSpecValidation, projectSpecPaths, validateSpecFile } from "./spec-validate.js";
 import { findTemplatesDir, getTemplate, loadTemplates, requireTemplatesDir, summarizeTemplate } from "./templates.js";
+import { experimentStatus, formatVariants, prepareVariants } from "./variants.js";
 import { formatVerify, verifyProject } from "./verify.js";
 
 export const SERVER_NAME = "engine";
@@ -530,6 +532,72 @@ export function createServer(options: ServerOptions = {}): McpServer {
         return jsonResult(formatDiff(r), r as unknown as Record<string, unknown>);
       },
     ),
+  );
+
+  server.registerTool(
+    "variants",
+    {
+      title: "Prepare (and render) A/B variants",
+      description:
+        "Build an A/B experiment from <project_dir>/project/variants.json (ExperimentPlan: {schema_version, id, hypothesis, metric?, hooks: [{id, label?, scene}], covers?: [{id, label?, cover: {headline, focal_time_sec}}]}; schema_get experiment-plan). Every hook × cover pair becomes variants/<hook>-<cover>/, a full project whose spec is the base spec with the hook scene and cover swapped (validated like spec_validate). Writes variants/experiment.json (hypothesis, base spec hash, variants with status). With render: true, queues one render job per variant that is not rendered yet (renders run one at a time; poll job_status or call variants again with status_only: true). Base scene clips are reused, so a variant mostly re-renders its hook scene.",
+      inputSchema: {
+        project_dir: z.string().min(1).describe("Planned (ideally rendered) base project"),
+        render: z.boolean().optional().describe("Queue a render job per unrendered variant (default false: prepare only)"),
+        status_only: z.boolean().optional().describe("Only refresh and report variants/experiment.json"),
+        quality: QUALITY.optional().describe("Render quality for render: true (default preview)"),
+        voice: z.enum(["auto", "system", "elevenlabs", "silent"]).optional(),
+        renderer: z.enum(["auto", "hyperframes", "ffmpeg"]).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(
+      async (args: { project_dir: string; render?: boolean; status_only?: boolean; quality?: "preview" | "final"; voice?: "auto" | "system" | "elevenlabs" | "silent"; renderer?: "auto" | "hyperframes" | "ffmpeg" }) => {
+        const root = resolveInputPath(args.project_dir, cwd());
+        if (args.status_only) {
+          const m = await experimentStatus(root);
+          return jsonResult(formatVariants(m), m as unknown as Record<string, unknown>);
+        }
+        const r = await prepareVariants(root);
+        let manifest = r.manifest;
+        if (args.render) {
+          const jobs: Record<string, string> = {};
+          for (const v of manifest.variants) {
+            if (v.status !== "prepared" && v.status !== "rendering") continue;
+            const view = getJobs().submit(join(root, v.project_dir), {
+              ...(args.quality ? { quality: args.quality } : {}),
+              ...(args.voice ? { voice: args.voice } : {}),
+              ...(args.renderer ? { renderer: args.renderer } : {}),
+            });
+            jobs[v.id] = view.job_id;
+          }
+          manifest = await experimentStatus(root, jobs);
+        }
+        return jsonResult(formatVariants(manifest, r.invalid), { ...manifest, manifest_path: r.manifest_path, invalid: r.invalid } as unknown as Record<string, unknown>);
+      },
+    ),
+  );
+
+  server.registerTool(
+    "adapt",
+    {
+      title: "Adapt a project to another shape",
+      description:
+        "Copy <project_dir> into out_dir (a new, empty folder) with its spec retargeted: aspect_ratio (master resized, layouts re-flow), target_duration_sec (scene durations scaled proportionally, cover time scaled; notes list scenes whose narration no longer fits), platform and targets (publish copy kept only for remaining targets). The source is never modified. Returns the new spec, the changes, notes and a spec_validate result; edit the flagged scenes, then render the new project.",
+      inputSchema: {
+        project_dir: z.string().min(1).describe("Source project folder"),
+        out_dir: z.string().min(1).describe("New folder for the adapted project (must not exist or be empty)"),
+        aspect_ratio: AspectRatio.optional(),
+        target_duration_sec: z.number().positive().max(600).optional(),
+        platform: Platform.optional(),
+        targets: z.array(PlatformTargetId).optional().describe("Platform contract ids for the adapted project"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    safe(async (args: { project_dir: string; out_dir: string } & AdaptOptions) => {
+      const { project_dir, out_dir, ...opts } = args;
+      const r = await adaptProject(resolveInputPath(project_dir, cwd()), resolveInputPath(out_dir, cwd()), opts);
+      return jsonResult(formatAdapt(r), r as unknown as Record<string, unknown>);
+    }),
   );
 
   return server;

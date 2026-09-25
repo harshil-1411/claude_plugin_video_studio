@@ -4,6 +4,8 @@ import { layoutZones } from "@video-studio/platforms";
 import { describe, expect, it } from "vitest";
 import { buildComposition, compositionIdFor, fmtNumber, HYPERFRAMES_KINDS, kineticChunks, layerNodes, sanitizeFontChain } from "./hyperframes-compose.js";
 import { codeLabel, highlightLines, languageFamily, tokenize } from "./hyperframes-highlight.js";
+import { findStylesDir, getStyle } from "./styles.js";
+import { resolveTokens } from "./tokens.js";
 import type { RenderTarget, SceneRenderRequest, VisualTokens } from "./types.js";
 
 const TOKENS: VisualTokens = {
@@ -476,5 +478,79 @@ describe("syntax highlighting", () => {
     expect(lines[0]).toContain('<span class="tk-str">&quot;&lt;x&gt;&quot;</span>');
     expect(lines[1]).toBe('<span class="tk-com">/* multi</span>');
     expect(lines[2]).toBe('<span class="tk-com">line */</span>');
+  });
+});
+
+describe("buildComposition: style tokens", () => {
+  const stylesDir = findStylesDir({});
+  const styled = async (id: string): Promise<VisualTokens> => ({ ...resolveTokens(undefined, {}, await getStyle(stylesDir, id)), font_mono: TOKENS.font_mono });
+  const fontSizes = (html: string) => [...html.matchAll(/font-size:([\d.]+)px/g)].map((m) => Number(m[1]));
+
+  it("heading and body weights, easing, entrance length and stagger reach the CSS and timeline", async () => {
+    const t = await styled("energetic");
+    const { html } = buildComposition(req("typography", { lines: ["one", "two", "three"] }, { tokens: t }));
+    expect(html).toContain("/* style pack */");
+    expect(html).toMatch(/\.vs-typography, [^{]*\.vs-headline[^{]*\{ font-weight: 800; \}/);
+    expect(html).toContain("#vs-root { font-weight: 500; }");
+    expect(html).toContain("animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1)");
+    const starts = [...html.matchAll(/vs-fade-up" style="--t:([\d.]+)s;--d:([\d.]+)s/g)].map((m) => [Number(m[1]), Number(m[2])]);
+    expect(starts).toHaveLength(3);
+    expect(starts.map(([, d]) => d)).toEqual([0.35, 0.35, 0.35]);
+    expect(Math.round((starts[1]![0]! - starts[0]![0]!) * 1000)).toBe(70);
+    expect(html).toContain(">ONE</span>");
+  });
+
+  it("exits: the safe area fades out over exit_ms ending on the last frame (none for technical)", async () => {
+    const e = buildComposition(req("typography", { lines: ["x"] }, { tokens: await styled("energetic") }));
+    expect(e.html).toContain('<div class="vs-safe vs-exit" style="--xt:2.847s;--xd:0.12s">');
+    expect(e.html).toContain("@keyframes vs-exit");
+    const tech = buildComposition(req("typography", { lines: ["x"] }, { tokens: await styled("technical") }));
+    expect(tech.html).toContain('<div class="vs-safe">');
+    expect(tech.html).not.toContain("vs-exit");
+    expect(tech.html).toContain("animation-timing-function: cubic-bezier(0.2, 0.9, 0.1, 1)");
+  });
+
+  it("text case, left alignment and heading scale; text boxes carry the final text and size", async () => {
+    const ed = await styled("editorial");
+    const c = buildComposition(req("cta", { headline: "the case for vectors", action: "Read more" }, { tokens: ed }));
+    expect(c.html).toContain(">The Case for Vectors</div>");
+    expect(c.html).toContain(".vs-cta, .vs-end { align-items: flex-start; }");
+    expect(c.text_boxes.find((b) => b.role === "cta" && b.text === "The Case for Vectors")).toBeDefined();
+    const base = buildComposition(req("end_card", { title: "Hi" }));
+    const big = buildComposition(req("end_card", { title: "Hi" }, { tokens: await styled("energetic") }));
+    const small = buildComposition(req("end_card", { title: "Hi" }, { tokens: await styled("minimal") }));
+    const [b0, b1, b2] = [base, big, small].map((x) => x.text_boxes.find((b) => b.role === "headline")!);
+    expect(b1!.font_px).toBeCloseTo(b0!.font_px * 1.12, 0);
+    expect(b2!.font_px).toBeLessThan(b0!.font_px);
+    expect(fontSizes(big.html)).toContain(b1!.font_px);
+    expect(big.html).toContain(">HI</div>");
+    expect(small.html).toContain(".vs-quote { text-align: center; }");
+  });
+
+  it("a style-less build after a styled one is unchanged (motion state is reset)", async () => {
+    const before = buildComposition(req("quote", DETERMINISTIC_PROPS_EXAMPLES.quote)).html;
+    buildComposition(req("quote", DETERMINISTIC_PROPS_EXAMPLES.quote, { tokens: await styled("energetic") }));
+    expect(buildComposition(req("quote", DETERMINISTIC_PROPS_EXAMPLES.quote)).html).toBe(before);
+    expect(before).not.toContain("style pack");
+  });
+
+  it("passes the HyperFrames linter with zero errors for every kind in every core style", async () => {
+    const lint = await loadLint();
+    if (!lint) return;
+    for (const id of ["minimal", "editorial", "technical", "energetic"]) {
+      const t = await styled(id);
+      for (const kind of KINDS) {
+        const r = await lint.lintHyperframeHtml(buildComposition(req(kind, DETERMINISTIC_PROPS_EXAMPLES[kind], { tokens: t })).html);
+        const errors = r.findings.filter((f) => f.severity === "error");
+        expect(errors, `${id}/${kind}: ${JSON.stringify(errors)}`).toEqual([]);
+      }
+    }
+  });
+
+  it("snapshots one styled scene per core style", async () => {
+    for (const id of ["minimal", "editorial", "technical", "energetic"]) {
+      const c = buildComposition(req("typography", DETERMINISTIC_PROPS_EXAMPLES.typography, { tokens: await styled(id) }));
+      expect(c.html.slice(c.html.indexOf("/* style pack */"))).toMatchSnapshot(id);
+    }
   });
 });
