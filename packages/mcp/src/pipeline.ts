@@ -86,8 +86,8 @@ type Env = Record<string, string | undefined>;
 export const ENGINE_VERSION = "0.1.0";
 /** Bump when technical QA's checks change, so cached QA results are re-run. 2: background-aware black frames, intended silence. */
 export const QA_VERSION = 2;
-/** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). */
-export const ASSEMBLY_VERSION = 3;
+/** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). 4: the caption plate is its own ASS layer (no dark bars around highlighted words). */
+export const ASSEMBLY_VERSION = 4;
 
 export type Quality = "preview" | "final";
 

@@ -203,14 +203,23 @@
       "type": "string"
     },
     "viewport": {
+      "description": "Recording size. 1080x1920 records a phone-width layout at reel resolution; 1920x1080 a desktop layout.",
       "additionalProperties": false,
       "properties": {
+        "device_scale_factor": {
+          "description": "Output pixels per CSS pixel: the page lays out at width / factor CSS px. Default: portrait recordings wider than 600 px lay out at phone width (390 CSS px), others at 1.",
+          "maximum": 4,
+          "minimum": 1,
+          "type": "number"
+        },
         "height": {
+          "description": "Recording height in output pixels.",
           "maximum": 3840,
           "minimum": 320,
           "type": "integer"
         },
         "width": {
+          "description": "Recording width in output pixels.",
           "maximum": 3840,
           "minimum": 320,
           "type": "integer"

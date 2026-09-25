@@ -55,7 +55,26 @@ export interface DemoBrowser {
   newPage(): Promise<DemoPage>;
   close(): Promise<void>;
 }
-export type BrowserFactory = (opts: { viewport: { width: number; height: number }; env: Record<string, string | undefined> }) => Promise<DemoBrowser>;
+/** CSS viewport handed to the browser: width/height in CSS px plus the device scale factor. */
+export interface DemoViewport {
+  width: number;
+  height: number;
+  deviceScaleFactor: number;
+}
+export type BrowserFactory = (opts: { viewport: DemoViewport; env: Record<string, string | undefined> }) => Promise<DemoBrowser>;
+
+/** CSS width a phone-sized page is laid out at when recording a portrait reel. */
+export const PHONE_CSS_WIDTH = 390;
+
+/**
+ * CSS viewport for a recording size: portrait recordings wider than 600 px lay the page out at
+ * phone width (390 CSS px) and render at the full resolution; everything else at 1:1, unless
+ * the script sets device_scale_factor.
+ */
+export function cssViewport(v: DemoScript["viewport"]): DemoViewport {
+  const dsf = v.device_scale_factor ?? (v.height > v.width && v.width > 600 ? v.width / PHONE_CSS_WIDTH : 1);
+  return { width: Math.round(v.width / dsf), height: Math.round(v.height / dsf), deviceScaleFactor: Math.round(dsf * 1000) / 1000 };
+}
 
 export interface RecordDemoOptions {
   /** The user approved the URL and the steps. Required. */
@@ -249,7 +268,7 @@ export async function recordDemo(projectDir: string, opts: RecordDemoOptions = {
 
   const work = await mkdtemp(join(tmpdir(), "vs-demo-"));
   const webm = join(work, "demo.webm");
-  const browser = await (opts.browser ?? systemChrome)({ viewport: script.viewport, env });
+  const browser = await (opts.browser ?? systemChrome)({ viewport: cssViewport(script.viewport), env });
   const steps: DemoStepRecord[] = [];
   const setup = setupScript(maskCss(script.mask_selectors));
   let recorder: DemoRecorder | undefined;
@@ -331,7 +350,9 @@ export async function recordDemo(projectDir: string, opts: RecordDemoOptions = {
     const out = join(root, rel);
     await mkdir(join(root, "source", "assets"), { recursive: true });
     // H.264 + a constant frame rate, so the footage renderer can trim it frame-accurately.
-    await runFfmpeg(["-y", "-i", webm, "-vf", "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", out]);
+    // Exactly the requested size, whatever the screencast delivered (it may be CSS or device pixels).
+    const { width: W, height: H } = script.viewport;
+    await runFfmpeg(["-y", "-i", webm, "-vf", `fps=30,scale=${W - (W % 2)}:${H - (H % 2)}:flags=lanczos,setsar=1`, "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", out]);
     const p = await ffprobe(out);
     const asset: IrAsset = {
       id,

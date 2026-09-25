@@ -13,7 +13,9 @@ The plugin never starts an app. The user starts it and gives you the URL.
 1. Ask for the URL of the running app (and which flow to show) if the user
    did not say. Never guess a URL; never record a site the user did not name.
 2. Write `project/demo.json` (`schema_get demo-script`): `id`, `url`,
-   `viewport` (1080×1920 for a vertical reel, 1920×1080 for 16:9), and
+   `viewport` (1080×1920 for a vertical reel: the page lays out at phone width,
+   390 CSS px, and records at full resolution; 1920×1080 for a desktop layout; set
+   `device_scale_factor` only to override), and
    `steps` using stable selectors (ids, `data-testid`, roles). Keep it short:
    one flow, 5–15 steps, `max_duration_sec` ≤ 60. Add `mask_selectors` for
    anything sensitive on screen (API keys, emails, account names); inputs are

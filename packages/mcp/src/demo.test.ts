@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runFfmpeg } from "@video-studio/media";
 import { ContentIR, type DemoScript } from "@video-studio/schema";
-import { type BrowserFactory, type DemoPage, maskCss, recordDemo } from "./demo.js";
+import { type BrowserFactory, type DemoPage, cssViewport, maskCss, recordDemo } from "./demo.js";
 
 let tmp: string;
 
@@ -107,6 +107,20 @@ describe("demo capture", () => {
     await writeFile(join(dir, "project", "demo.json"), JSON.stringify({ ...script, url: "https://example.com", steps: [{ action: "wait", ms: 1 }] }));
     const r = await recordDemo(dir, { confirm: true, browser: fakeBrowser([]), sleep: async () => undefined });
     expect(r.warnings.join(" ")).toMatch(/not a local address/);
+  }, 30_000);
+
+  it("lays portrait recordings out at phone width and records at the full size", async () => {
+    expect(cssViewport({ width: 1080, height: 1920 })).toEqual({ width: 390, height: 693, deviceScaleFactor: 2.769 });
+    expect(cssViewport({ width: 1920, height: 1080 })).toEqual({ width: 1920, height: 1080, deviceScaleFactor: 1 });
+    expect(cssViewport({ width: 1080, height: 1920, device_scale_factor: 1 })).toEqual({ width: 1080, height: 1920, deviceScaleFactor: 1 });
+    const dir = await project("portrait");
+    await writeFile(join(dir, "project", "demo.json"), JSON.stringify({ ...script, viewport: { width: 1080, height: 1920 }, steps: [{ action: "wait", ms: 1 }] }));
+    let seen: unknown;
+    const inner = fakeBrowser([]);
+    const r = await recordDemo(dir, { confirm: true, sleep: async () => undefined, browser: async (o) => ((seen = o.viewport), inner(o)) });
+    expect(seen).toEqual({ width: 390, height: 693, deviceScaleFactor: 2.769 });
+    const ir = ContentIR.parse(JSON.parse(await readFile(join(dir, "source", "content-ir.json"), "utf8")));
+    expect(ir.assets.find((a) => a.id === r.asset)!.media).toMatchObject({ width: 1080, height: 1920 });
   }, 30_000);
 
   it("mask CSS covers inputs and extra selectors", () => {

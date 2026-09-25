@@ -26,7 +26,20 @@ export const DemoScript = z
     schema_version: SchemaVersion,
     id: Id,
     url: z.url().describe("The app the USER started, e.g. http://localhost:3000. The plugin never starts it."),
-    viewport: z.strictObject({ width: z.int().min(320).max(3840), height: z.int().min(320).max(3840) }),
+    viewport: z
+      .strictObject({
+        width: z.int().min(320).max(3840).describe("Recording width in output pixels."),
+        height: z.int().min(320).max(3840).describe("Recording height in output pixels."),
+        device_scale_factor: z
+          .number()
+          .min(1)
+          .max(4)
+          .optional()
+          .describe(
+            "Output pixels per CSS pixel: the page lays out at width / factor CSS px. Default: portrait recordings wider than 600 px lay out at phone width (390 CSS px), others at 1.",
+          ),
+      })
+      .describe("Recording size. 1080x1920 records a phone-width layout at reel resolution; 1920x1080 a desktop layout."),
     steps: z.array(DemoStep).min(1).max(60),
     mask_selectors: z.array(NonEmptyString).optional().describe("Elements blurred in the recording (inputs are always masked)."),
     max_duration_sec: z.number().positive().max(300).optional(),
