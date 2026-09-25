@@ -21,7 +21,7 @@ Phases 0–3 are built. A planned project renders to a finished, captioned 9:16 
 - **Skills:** create, plan, ingest, validate, render, qa, export, doctor.
 - **Agents:** source-researcher, creative-director.
 
-**Phase 3 exit check:** the plugin loads in Claude Code, and its tools resolve as `mcp__plugin_video-studio_engine__*`. Still to confirm: a full interactive `/video-studio:create "Explain vector DBs in 30s"` run ending in `dist/reel.mp4`.
+**Phase 3 exit check:** the plugin loads in Claude Code, and its tools resolve as `mcp__plugin_video-studio_engine__*`. Still to confirm: a full interactive `/video-studio:create "Explain vector DBs in 30s"` run ending in `dist/reel.mp4`. A first attempt created `vector-dbs-explainer/` (untracked, not committed) but stopped after ingest: there is no brief, spec or `dist/` yet. Resume it with `/video-studio:plan` then `/video-studio:render` on that folder, or delete it and re-run `create`.
 
 ## Environment facts that shape everything
 
