@@ -39,49 +39,31 @@ Show the user the candidates, best first. For each one, give its time range,
 length, score, the hook in quotes and one line on why it scored well. Ask
 which ones to make; default to all.
 
-## 3. Write one spec per chosen clip
+## 3. Make one project per chosen clip
 
-For each chosen candidate, write `project/shorts/<candidate id>.video-spec.json`.
-Check the fields with `schema_get video-spec` if unsure. Write a talking-head
-spec:
+Call `shorts {project_dir, asset, min_sec?, max_sec?, make_projects: true,
+ids: [<chosen ids>], aspect_ratio?, targets?}` (defaults: 9:16 for tiktok,
+instagram and youtube-shorts). Each chosen clip becomes its own project,
+`shorts/<id>/`, with the sources copied and a talking-head spec already
+written:
 
-- Top level:
-  - `voice: {mode: "native"}`, because the speech comes from the footage and
-    nothing is synthesized.
-  - Same `platform`, `aspect_ratio` and `targets` as the user asked for
-    (default: a 9:16 reel).
-  - `captions` on. Captions come from the transcript.
-- `scenes`: one scene, or a few that split at the candidate's sentence
-  boundaries. Every scene has:
-  - `visual_strategy: "user_asset"`
-  - `footage: {asset: "<asset id>", in_sec, out_sec}`: the scene's slice of
-    the candidate's `start_sec`–`end_sec`. Consecutive scenes are contiguous,
-    and the first starts at `start_sec`.
-  - `duration_sec` = `out_sec - in_sec`
-  - `audio: {mode: "native"}`
-  - `voiceover: ""`
-  - `claim_refs`: the candidate's `evidence_refs` whose times fall inside
-    that scene
-  - `purpose`: `hook` for the first scene, then `point` or `proof`
-  - `visual_requirements: {continuity_refs: []}`
-  - For a vertical target from horizontal footage, `footage.fit: "cover"`
-    with a `focus` on the speaker (or `blur_pad` if the user prefers the
-    whole frame).
-  - `on_screen_text`: optional. Use only a short label taken from the hook's
-    own words.
-- `cover.headline`: a few words taken from the hook.
+- `voice: {mode: "native"}` (the speech is the footage; captions come from
+  the transcript)
+- footage scenes (`visual_strategy: "user_asset"`, `audio: {mode: "native"}`,
+  `voiceover: ""`) split at sentence boundaries, at most 12 s each, with
+  the transcript refs of each scene as `claim_refs`
+- `footage.fit: "cover"`
 
-Then run `spec_validate {spec_path, content_ir_path: "<project_dir>/source/content-ir.json"}`
-on each spec file and fix what it reports.
+Then refine each `shorts/<id>/project/video-spec.json`:
+- For horizontal footage in a vertical frame, add `footage.focus` on the
+  speaker, or use `fit: "blur_pad"` if the user wants the whole frame.
+- Optionally add a `lower_third` or `kinetic_text` block (`deterministic`)
+  on the first scene with the speaker's name or a few words of the hook.
+- Add `cover.headline` from the hook's own words and `publish.<target>` copy.
 
-Rendering reads only `project/video-spec.json` and writes `dist/`. To render
-a clip:
-1. Copy its spec to `project/video-spec.json`. If a spec already exists there,
-   ask the user before you replace it.
-2. Run `/video-studio:render`.
-
-Render one clip at a time. Each render replaces `dist/`, so tell the user to
-keep each package before rendering the next clip.
+Run `spec_validate {project_dir: "<project_dir>/shorts/<id>"}` and fix what it
+reports, then render each short with the `render` skill on its own folder.
+Each folder has its own `dist/`, so the clips don't overwrite each other.
 
 ## Notes
 

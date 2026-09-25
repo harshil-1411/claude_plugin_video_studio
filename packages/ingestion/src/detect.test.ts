@@ -43,3 +43,20 @@ describe("detectKind", () => {
     expect(detectKind("see file.pdf for details")).toBe("text");
   });
 });
+
+describe("mediaFolderFiles", () => {
+  it("expands a folder of clips (not a repo) into its media files, in natural order", async () => {
+    const { mkdtempSync, writeFileSync, mkdirSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { mediaFolderFiles } = await import("./detect.js");
+    const dir = mkdtempSync(join(tmpdir(), "vs-clips-"));
+    for (const f of ["clip10.mp4", "clip2.mov", "notes.txt", ".hidden.mp4", "bed.mp3"]) writeFileSync(join(dir, f), "x");
+    expect(mediaFolderFiles(dir)!.map((p) => p.slice(dir.length + 1))).toEqual(["bed.mp3", "clip2.mov", "clip10.mp4"]);
+    const repo = mkdtempSync(join(tmpdir(), "vs-repo-"));
+    mkdirSync(join(repo, ".git"));
+    writeFileSync(join(repo, "a.mp4"), "x");
+    expect(mediaFolderFiles(repo)).toBeNull();
+    expect(mediaFolderFiles(join(dir, "clip2.mov"))).toBeNull();
+  });
+});

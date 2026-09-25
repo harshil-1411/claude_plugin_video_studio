@@ -836,11 +836,12 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
         });
       }
     });
-    if (!spec.audio?.music) {
+    const nativeSound = spec.scenes.some((sc) => sc.footage && (sc.audio?.mode === "native" || sc.audio?.mode === "mix"));
+    if (!spec.audio?.music && !nativeSound) {
       warnings.push({
         path: "audio.music",
-        message: 'voice.mode is "none" and there is no music bed, so the video is silent',
-        fix: 'add audio.music {file: "bundled:<id>"} (see the music catalogue), or keep it silent on purpose',
+        message: 'voice.mode is "none", there is no music bed and no footage plays its own sound, so the video is silent',
+        fix: 'add audio.music {file: "bundled:<id>"} (see the music catalogue), give footage scenes audio.mode "native", or keep it silent on purpose',
       });
     }
   }

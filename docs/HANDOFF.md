@@ -147,7 +147,7 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 
 Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md` (Phases 4 → 5 → 6 → local 8, no human intervention; Phase 7, Phase 9 and CI are out of scope).
 
-- **Current:** Phase 6 step 1 (interfaces: footage and media assets, scene audio, `voice.mode: native`, demo script, format grammar).
+- **Current:** Phase 8 (local subset): fonts (Noto JP, Devanagari and Arabic, already downloaded to the scratchpad), `localize`, accessibility, C2PA, docs, README and hero video.
 - **Done:**
   - Step 0 (Phase 4 closed).
   - Phase 5 step 1 (`489dbbd`): schema for the new purposes and kinds, `audio.music`, `voice.mode` and `Style`.
@@ -165,6 +165,25 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
     - `variants` with 3 hooks × 2 covers gave 6 variant projects, all rendered, with `experiment.json` reporting each as `rendered`. A fresh variant re-renders only its hook (5 of 6 scenes reused).
     - A `voice: none` text-over-music reel on `bundled:lofi` has only a frozen-frames warning (no silence or loudness warnings) and lints 0/0. The CC0 licence is in `video.lock`, provenance and `post.json`.
     - The exit found a bug: `fitText` hard-broke long words ("Thumbnai/l"). Now whole words must fit, and breaks inside a word only happen at the minimum size (`LAYOUT_VERSION` 5).
+  - Phase 6 (`83a5219`, `7a74a80`, `cf1b51e` + close):
+    - **Ingest and analysis:**
+      - video/audio ingest (shots, keyframes, loudness), and a folder of clips expands to its media files
+      - `transcribe` (whisper.cpp or SRT/VTT; sentence evidence refs `video:<file>#t=a-b`)
+      - `analyze` (clean-room format grammar)
+      - `shorts` (scored spans; `make_projects` writes `shorts/<id>/` talking-head projects)
+    - **Rendering and audio:**
+      - the footage renderer (fits, trim/speed/hold/loop, stills, text overlays)
+      - scene audio (native/mix/music/mute, crossfades, sfx)
+      - `voice.mode: native` captions from transcripts
+      - beat detection and beat-synced cuts
+    - **Tools and templates:**
+      - `demo` capture (system Chrome through runtime puppeteer-core, inputs blurred, steps as evidence)
+      - 5 footage templates (18 in total)
+  - **Phase 6 exit passed (sandbox):**
+    - A 60 s synthetic interview (4 shots + the JFK sample): ingest, then whisper transcribe (88 words, CPU), then `shorts` gave 3 candidates and 3 projects. `short-1` rendered with cover-cropped footage, native audio and transcript captions.
+    - A folder of 6 clips (ingested as a folder) became an aesthetic-broll reel on `bundled:upbeat` with beat sync (5 cuts moved onto 120 bpm beats), −13.8 LUFS.
+    - A silent-vlog reel with native ambient sound, 300 ms crossfades and a lower third over the footage: QA pass, −14.0 LUFS.
+    - Demo capture against a real app: user checklist (no Chrome in the sandbox).
 - **Deferred to `docs/USER_CHECKLIST.md`** (written at the end):
   - real `say` renders
   - HyperFrames install and renders of new kinds and styles
@@ -180,6 +199,11 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
 - Strict grounding now also reads viewer-facing props text (stat values, quotes), so a numeric stat card needs a `claim_ref`.
 - Style motion: `transition`/`transition_ms` are recorded but not drawn, because assembly still hard-cuts between scenes. Crossfades between scenes arrive with Phase 6's footage crossfades.
 - A style change is classified as creative in lock diffs (`tools.style`).
+- Video footage is always marked `contains_likeness` (there is no face detection).
+- `crossfade_ms` crossfades audio only; video still cuts.
+- Looped footage tails get no captions.
+- ingestion now depends on `@video-studio/media` through a hand-made symlink; **`pnpm-lock.yaml` needs `pnpm install` outside the sandbox** (checklist).
+- The whisper model pin is sha256 `a03779c8…d002` (`ggml-base.en.bin`, 147,964,211 bytes).
 - **Unverified in the sandbox** (goes to `docs/USER_CHECKLIST.md`):
   - HyperFrames renders of the new kinds and styles; the stat count-up relies on CSS animation seeking.
   - Whether HyperFrames' own font fitting also keeps long words whole.

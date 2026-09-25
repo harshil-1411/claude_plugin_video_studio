@@ -117,7 +117,8 @@ export function planFootage(clip: FootageClip, media: Pick<MediaInfo, "duration_
   const play = span / speed;
   const short = play < D - 0.5 / fps;
   const fill: FootagePlan["fill"] = short ? (clip.loop ? "loop" : "hold") : play > D + 0.5 / fps ? "trim" : "exact";
-  if (short) {
+  // Frame rounding of the scene slot (a frame or so) is not worth a warning; a real gap is.
+  if (short && D - play > Math.max(1.5 / fps, 0.1)) {
     warnings.push(
       `footage: the clip gives ${n3(play)}s${speed !== 1 ? ` at speed ${speed}` : ""}, shorter than the ${n3(D)}s scene; ${clip.loop ? "looped" : "last frame held"}`,
     );

@@ -41,6 +41,27 @@ export function isRepoDir(dir: string): boolean {
 }
 
 /**
+ * A folder of clips (not a repository): its top-level video and audio files, sorted by name,
+ * or null when `dir` is not such a folder. Lets users ingest "a folder of my clips".
+ */
+export function mediaFolderFiles(dir: string): string[] | null {
+  try {
+    if (!statSync(dir).isDirectory() || isRepoDir(dir)) return null;
+    const files = readdirSync(dir)
+      .filter((f) => !f.startsWith("."))
+      .filter((f) => {
+        const k = EXTENSION_KINDS[extname(f).toLowerCase()];
+        return k === "video" || k === "audio";
+      })
+      .sort((a, b) => a.localeCompare(b, "en", { numeric: true }))
+      .map((f) => join(dir, f));
+    return files.length ? files : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Guess the SourceKind of an ingest input:
  * - `http(s)://` → `repo` for github.com/<owner>/<repo>, else `url`;
  * - an existing directory with .git / package.json / README → `repo`;

@@ -1,7 +1,11 @@
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { writeJsonAtomic } from "@video-studio/core";
+import { PROJECT_SCHEMA_VERSION, writeJsonAtomic } from "@video-studio/core";
 import { type TimedSentence, type TimedWord, groupSentences } from "@video-studio/media";
-import { SCHEMA_VERSION, type ShortCandidate, ShortCandidates } from "@video-studio/schema";
+import { type AspectRatio, SCHEMA_VERSION, type Scene, type ShortCandidate, ShortCandidates, type VideoSpec, defaultMaster } from "@video-studio/schema";
+import { projectSpecPaths, validateSpecFile } from "./spec-validate.js";
 import { findMediaAsset, loadContentIr, loadTranscriptWords, mediaRefBase } from "./transcribe.js";
 
 /**
@@ -188,4 +192,108 @@ export function formatShorts(s: ShortCandidates & { evidence_refs?: Record<strin
     if (refs?.length) lines.push(`  claim_refs: ${refs.join(", ")}`);
   }
   return lines.join("\n");
+}
+
+// ------------------------------------------------------------------------------------ short projects
+
+/** Longest scene a short is split into (at sentence boundaries). */
+const SHORT_SCENE_MAX_SEC = 12;
+
+export interface ShortProject {
+  id: string;
+  project_dir: string;
+  scenes: number;
+  duration_sec: number;
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Turn chosen candidates into ready talking-head projects under shorts/<id>/: the base's
+ * source/, input/, assets/ and brand are copied, and project/video-spec.json holds footage scenes
+ * (native sound, voice.mode native, captions from the transcript) split at sentence boundaries,
+ * each citing its transcript evidence. Claude refines the hook text, cover and post copy.
+ */
+export async function makeShortProjects(
+  projectDir: string,
+  result: ShortsResult,
+  opts: { ids?: string[]; aspect_ratio?: AspectRatio; targets?: string[] } = {},
+): Promise<ShortProject[]> {
+  const root = resolve(projectDir);
+  const { ir } = await loadContentIr(root);
+  const base = mediaRefBase(findMediaAsset(ir, result.asset));
+  const spans = ir.evidence
+    .filter((e) => e.ref.startsWith(`${base}#t=`) && e.locator.time_start_sec !== undefined)
+    .sort((a, b) => a.locator.time_start_sec! - b.locator.time_start_sec!);
+  const aspect = opts.aspect_ratio ?? "9:16";
+  const out: ShortProject[] = [];
+  for (const c of result.candidates.filter((x) => !opts.ids || opts.ids.includes(x.id))) {
+    const dir = join(root, "shorts", c.id);
+    await mkdir(join(dir, "project"), { recursive: true });
+    for (const part of ["source", "input", "assets", "brand.yaml"]) {
+      await rm(join(dir, part), { recursive: true, force: true });
+      if (existsSync(join(root, part))) await cp(join(root, part), join(dir, part), { recursive: true });
+    }
+    // Sentences inside the span become scene chunks of at most SHORT_SCENE_MAX_SEC.
+    const inside = spans.filter((e) => e.locator.time_start_sec! >= c.start_sec - 0.05 && (e.locator.time_end_sec ?? e.locator.time_start_sec!) <= c.end_sec + 0.05);
+    const chunks: Array<{ start: number; end: number; refs: string[] }> = [];
+    for (const e of inside) {
+      const last = chunks[chunks.length - 1];
+      const end = e.locator.time_end_sec ?? e.locator.time_start_sec!;
+      if (last && end - last.start <= SHORT_SCENE_MAX_SEC) {
+        last.end = end;
+        last.refs.push(e.ref);
+      } else {
+        chunks.push({ start: last ? last.end : c.start_sec, end, refs: [e.ref] });
+      }
+    }
+    if (chunks.length === 0) chunks.push({ start: c.start_sec, end: c.end_sec, refs: [] });
+    chunks[0]!.start = c.start_sec;
+    chunks[chunks.length - 1]!.end = c.end_sec;
+    const r2 = (x: number) => Math.round(x * 100) / 100;
+    const scenes: Scene[] = chunks.map((ch, i) => ({
+      id: `s${String(i + 1).padStart(2, "0")}`,
+      duration_sec: r2(ch.end - ch.start),
+      purpose: i === 0 ? "hook" : i === chunks.length - 1 && chunks.length > 1 ? "payoff" : "point",
+      voiceover: "",
+      visual_strategy: "user_asset",
+      footage: { asset: c.asset, in_sec: r2(ch.start), out_sec: r2(ch.end), fit: "cover" },
+      audio: { mode: "native" },
+      visual_requirements: { continuity_refs: [] },
+      claim_refs: ch.refs,
+    }));
+    const spec: VideoSpec = {
+      schema_version: "1.0",
+      id: `${c.asset}-${c.id}`.replace(/[^A-Za-z0-9_.@:-]/g, "-"),
+      title: c.hook.slice(0, 80),
+      goal: "educate",
+      audience: "viewers of the original recording",
+      platform: "tiktok",
+      aspect_ratio: aspect,
+      master: defaultMaster(aspect),
+      targets: opts.targets ?? ["tiktok", "instagram", "youtube-shorts"],
+      target_duration_sec: r2(scenes.reduce((a, s) => a + s.duration_sec, 0)),
+      language: "en-US",
+      grounding: "strict",
+      voice: { mode: "native" },
+      captions: { preset: "bold", burn_in: true },
+      scenes,
+    };
+    const { spec: specPath, contentIr } = projectSpecPaths(dir);
+    await writeFile(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+    await writeFile(
+      join(dir, "project", "project.json"),
+      `${JSON.stringify({ id: randomUUID(), name: `${c.id} of ${c.asset}`, created_at: new Date().toISOString(), schema_version: PROJECT_SCHEMA_VERSION }, null, 2)}\n`,
+    );
+    const check = await validateSpecFile(specPath, existsSync(contentIr) ? contentIr : null);
+    out.push({
+      id: c.id,
+      project_dir: `shorts/${c.id}`,
+      scenes: scenes.length,
+      duration_sec: spec.target_duration_sec,
+      valid: check.ok,
+      errors: check.errors.map((e) => `${e.path}: ${e.message} (fix: ${e.fix})`),
+    });
+  }
+  return out;
 }

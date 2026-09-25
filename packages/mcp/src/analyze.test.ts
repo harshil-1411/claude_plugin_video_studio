@@ -8,6 +8,7 @@ import type { TimedWord } from "@video-studio/media";
 import { type ContentIR, SCHEMA_VERSION, ShortCandidates } from "@video-studio/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { analyzeVideo, aspectRatioOf, findCaptionBand, findShorts, formatGrammar, formatShorts, pacingFor } from "./analyze.js";
+import { makeShortProjects } from "./shorts.js";
 import { hookScore } from "./shorts.js";
 import { applyTranscript } from "./transcribe.js";
 
@@ -211,6 +212,24 @@ describe("shorts", () => {
     const file = ShortCandidates.parse(JSON.parse(await readFile(join(project, "qa", "shorts.json"), "utf8")));
     expect(file.candidates).toEqual(r.candidates);
     expect(formatShorts(r)).toMatch(/short-1 .* score[\s\S]*claim_refs: video:talk\.mp4#t=/);
+  });
+
+  it("turns chosen candidates into valid talking-head projects under shorts/<id>/", async () => {
+    const { project } = await syntheticProject();
+    const r = await findShorts(project, "asset-1", { min_sec: 8, max_sec: 16, count: 2 });
+    const made = await makeShortProjects(project, r, { ids: [r.candidates[0]!.id] });
+    expect(made).toHaveLength(1);
+    const m = made[0]!;
+    expect(m.errors).toEqual([]);
+    expect(m.valid).toBe(true);
+    const spec = JSON.parse(await readFile(join(project, m.project_dir, "project", "video-spec.json"), "utf8"));
+    expect(spec.voice).toEqual({ mode: "native" });
+    expect(spec.scenes[0]).toMatchObject({ purpose: "hook", visual_strategy: "user_asset", voiceover: "", audio: { mode: "native" } });
+    expect(spec.scenes[0].footage.in_sec).toBeCloseTo(r.candidates[0]!.start_sec, 2);
+    expect(spec.scenes.at(-1).footage.out_sec).toBeCloseTo(r.candidates[0]!.end_sec, 2);
+    expect(spec.scenes.every((sc: { duration_sec: number }) => sc.duration_sec <= 12.5)).toBe(true);
+    expect(spec.scenes.flatMap((sc: { claim_refs: string[] }) => sc.claim_refs)).toEqual(r.evidence_refs[r.candidates[0]!.id]);
+    expect((await readFile(join(project, m.project_dir, "source", "content-ir.json"), "utf8")).length).toBeGreaterThan(0);
   });
 
   it("needs a transcript", async () => {

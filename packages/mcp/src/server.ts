@@ -11,6 +11,7 @@ import { type DoctorDeps, defaultDoctorDeps, formatDoctorReport, runDoctor } fro
 import { SCHEMA_NAMES, findSchemasDir, resolveInputPath } from "./paths.js";
 import { type AdaptOptions, adaptProject, formatAdapt } from "./adapt.js";
 import { analyzeVideo, findShorts, formatGrammar, formatShorts } from "./analyze.js";
+import { makeShortProjects } from "./shorts.js";
 import { transcribeAsset } from "./transcribe.js";
 import { formatDemo, recordDemo } from "./demo.js";
 import { diffProjects, formatDiff } from "./diff.js";
@@ -639,14 +640,24 @@ export function createServer(options: ServerOptions = {}): McpServer {
         min_sec: z.number().positive().optional(),
         max_sec: z.number().positive().optional(),
         count: z.int().positive().max(10).optional().describe("How many candidates (default 3)"),
+        make_projects: z.boolean().optional().describe("Also create a ready talking-head project per candidate under shorts/<id>/ (footage scenes, native voice, transcript claim_refs)"),
+        ids: z.array(z.string()).optional().describe("Only these candidate ids for make_projects"),
+        aspect_ratio: AspectRatio.optional().describe("Aspect for the short projects (default 9:16)"),
+        targets: z.array(PlatformTargetId).optional().describe("Targets for the short projects (default tiktok, instagram, youtube-shorts)"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    safe(async (args: { project_dir: string; asset: string; min_sec?: number; max_sec?: number; count?: number }) => {
-      const { project_dir, asset, ...opts } = args;
-      const r = await findShorts(resolveInputPath(project_dir, cwd()), asset, opts);
-      return jsonResult(formatShorts(r), r as unknown as Record<string, unknown>);
-    }),
+    safe(
+      async (args: { project_dir: string; asset: string; min_sec?: number; max_sec?: number; count?: number; make_projects?: boolean; ids?: string[]; aspect_ratio?: AspectRatio; targets?: string[] }) => {
+        const { project_dir, asset, make_projects, ids, aspect_ratio, targets, ...opts } = args;
+        const root = resolveInputPath(project_dir, cwd());
+        const r = await findShorts(root, asset, opts);
+        if (!make_projects) return jsonResult(formatShorts(r), r as unknown as Record<string, unknown>);
+        const projects = await makeShortProjects(root, r, { ...(ids ? { ids } : {}), ...(aspect_ratio ? { aspect_ratio } : {}), ...(targets ? { targets } : {}) });
+        const lines = projects.map((p) => `- ${p.project_dir}: ${p.scenes} scene(s), ${p.duration_sec}s, ${p.valid ? "valid" : `invalid: ${p.errors.slice(0, 2).join("; ")}`}`);
+        return jsonResult(`${formatShorts(r)}\nprojects:\n${lines.join("\n")}`, { ...r, projects } as unknown as Record<string, unknown>);
+      },
+    ),
   );
 
   server.registerTool(

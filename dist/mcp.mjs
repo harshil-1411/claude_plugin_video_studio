@@ -232827,10 +232827,11 @@ function validateVideoSpecSemantics(spec, ir) {
 				fix: "move the words into on_screen_text or the deterministic props and set voiceover to \"\", or set voice.mode to \"narrated\""
 			});
 		});
-		if (!spec.audio?.music) warnings.push({
+		const nativeSound = spec.scenes.some((sc) => sc.footage && (sc.audio?.mode === "native" || sc.audio?.mode === "mix"));
+		if (!spec.audio?.music && !nativeSound) warnings.push({
 			path: "audio.music",
-			message: "voice.mode is \"none\" and there is no music bed, so the video is silent",
-			fix: "add audio.music {file: \"bundled:<id>\"} (see the music catalogue), or keep it silent on purpose"
+			message: "voice.mode is \"none\", there is no music bed and no footage plays its own sound, so the video is silent",
+			fix: "add audio.music {file: \"bundled:<id>\"} (see the music catalogue), give footage scenes audio.mode \"native\", or keep it silent on purpose"
 		});
 	}
 	const music = spec.audio?.music;
@@ -234103,6 +234104,22 @@ function isRepoDir(dir) {
 	}
 }
 /**
+* A folder of clips (not a repository): its top-level video and audio files, sorted by name,
+* or null when `dir` is not such a folder. Lets users ingest "a folder of my clips".
+*/
+function mediaFolderFiles(dir) {
+	try {
+		if (!statSync(dir).isDirectory() || isRepoDir(dir)) return null;
+		const files = readdirSync(dir).filter((f) => !f.startsWith(".")).filter((f) => {
+			const k = EXTENSION_KINDS[extname(f).toLowerCase()];
+			return k === "video" || k === "audio";
+		}).sort((a, b) => a.localeCompare(b, "en", { numeric: true })).map((f) => join(dir, f));
+		return files.length ? files : null;
+	} catch {
+		return null;
+	}
+}
+/**
 * Guess the SourceKind of an ingest input:
 * - `http(s)://` → `repo` for github.com/<owner>/<repo>, else `url`;
 * - an existing directory with .git / package.json / README → `repo`;
@@ -234278,6 +234295,7 @@ async function ingest(inputs, options) {
 	if (inputs.length === 0) throw new Error("ingest: at least one input is required");
 	const projectDir = resolve(options.projectDir);
 	const cwd = options.cwd ?? process.cwd();
+	inputs = inputs.flatMap((raw) => typeof raw === "string" ? mediaFolderFiles(resolve(cwd, raw.trim())) ?? [raw] : [raw]);
 	const now = toIso(options.now);
 	const registry = {
 		...createExtractors({
@@ -238071,7 +238089,7 @@ function planFootage(clip, media, path, target, durationSec, background) {
 	const play = span / speed;
 	const short = play < D - .5 / fps;
 	const fill = short ? clip.loop ? "loop" : "hold" : play > D + .5 / fps ? "trim" : "exact";
-	if (short) warnings.push(`footage: the clip gives ${n3(play)}s${speed !== 1 ? ` at speed ${speed}` : ""}, shorter than the ${n3(D)}s scene; ${clip.loop ? "looped" : "last frame held"}`);
+	if (short && D - play > Math.max(1.5 / fps, .1)) warnings.push(`footage: the clip gives ${n3(play)}s${speed !== 1 ? ` at speed ${speed}` : ""}, shorter than the ${n3(D)}s scene; ${clip.loop ? "looped" : "last frame held"}`);
 	const clipFrames = Math.max(1, Math.floor(play * fps + 1e-6));
 	const fillFilter = fill === "loop" ? [`loop=loop=-1:size=${clipFrames}:start=0`, "setpts=N/FRAME_RATE/TB"] : fill === "hold" ? [`tpad=stop_mode=clone:stop_duration=${n3(D)}`] : [];
 	return {
@@ -241942,6 +241960,118 @@ function formatShorts(s) {
 		if (refs?.length) lines.push(`  claim_refs: ${refs.join(", ")}`);
 	}
 	return lines.join("\n");
+}
+/** Longest scene a short is split into (at sentence boundaries). */
+const SHORT_SCENE_MAX_SEC = 12;
+/**
+* Turn chosen candidates into ready talking-head projects under shorts/<id>/: the base's
+* source/, input/, assets/ and brand are copied, and project/video-spec.json holds footage scenes
+* (native sound, voice.mode native, captions from the transcript) split at sentence boundaries,
+* each citing its transcript evidence. Claude refines the hook text, cover and post copy.
+*/
+async function makeShortProjects(projectDir, result, opts = {}) {
+	const root = resolve(projectDir);
+	const { ir } = await loadContentIr$1(root);
+	const base = mediaRefBase(findMediaAsset(ir, result.asset));
+	const spans = ir.evidence.filter((e) => e.ref.startsWith(`${base}#t=`) && e.locator.time_start_sec !== void 0).sort((a, b) => a.locator.time_start_sec - b.locator.time_start_sec);
+	const aspect = opts.aspect_ratio ?? "9:16";
+	const out = [];
+	for (const c of result.candidates.filter((x) => !opts.ids || opts.ids.includes(x.id))) {
+		const dir = join(root, "shorts", c.id);
+		await mkdir(join(dir, "project"), { recursive: true });
+		for (const part of [
+			"source",
+			"input",
+			"assets",
+			"brand.yaml"
+		]) {
+			await rm(join(dir, part), {
+				recursive: true,
+				force: true
+			});
+			if (existsSync(join(root, part))) await cp(join(root, part), join(dir, part), { recursive: true });
+		}
+		const inside = spans.filter((e) => e.locator.time_start_sec >= c.start_sec - .05 && (e.locator.time_end_sec ?? e.locator.time_start_sec) <= c.end_sec + .05);
+		const chunks = [];
+		for (const e of inside) {
+			const last = chunks[chunks.length - 1];
+			const end = e.locator.time_end_sec ?? e.locator.time_start_sec;
+			if (last && end - last.start <= SHORT_SCENE_MAX_SEC) {
+				last.end = end;
+				last.refs.push(e.ref);
+			} else chunks.push({
+				start: last ? last.end : c.start_sec,
+				end,
+				refs: [e.ref]
+			});
+		}
+		if (chunks.length === 0) chunks.push({
+			start: c.start_sec,
+			end: c.end_sec,
+			refs: []
+		});
+		chunks[0].start = c.start_sec;
+		chunks[chunks.length - 1].end = c.end_sec;
+		const r2 = (x) => Math.round(x * 100) / 100;
+		const scenes = chunks.map((ch, i) => ({
+			id: `s${String(i + 1).padStart(2, "0")}`,
+			duration_sec: r2(ch.end - ch.start),
+			purpose: i === 0 ? "hook" : i === chunks.length - 1 && chunks.length > 1 ? "payoff" : "point",
+			voiceover: "",
+			visual_strategy: "user_asset",
+			footage: {
+				asset: c.asset,
+				in_sec: r2(ch.start),
+				out_sec: r2(ch.end),
+				fit: "cover"
+			},
+			audio: { mode: "native" },
+			visual_requirements: { continuity_refs: [] },
+			claim_refs: ch.refs
+		}));
+		const spec = {
+			schema_version: "1.0",
+			id: `${c.asset}-${c.id}`.replace(/[^A-Za-z0-9_.@:-]/g, "-"),
+			title: c.hook.slice(0, 80),
+			goal: "educate",
+			audience: "viewers of the original recording",
+			platform: "tiktok",
+			aspect_ratio: aspect,
+			master: defaultMaster(aspect),
+			targets: opts.targets ?? [
+				"tiktok",
+				"instagram",
+				"youtube-shorts"
+			],
+			target_duration_sec: r2(scenes.reduce((a, s) => a + s.duration_sec, 0)),
+			language: "en-US",
+			grounding: "strict",
+			voice: { mode: "native" },
+			captions: {
+				preset: "bold",
+				burn_in: true
+			},
+			scenes
+		};
+		const { spec: specPath, contentIr } = projectSpecPaths(dir);
+		await writeFile(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+		await writeFile(join(dir, "project", "project.json"), `${JSON.stringify({
+			id: randomUUID(),
+			name: `${c.id} of ${c.asset}`,
+			created_at: (/* @__PURE__ */ new Date()).toISOString(),
+			schema_version: 1
+		}, null, 2)}\n`);
+		const check = await validateSpecFile(specPath, existsSync(contentIr) ? contentIr : null);
+		out.push({
+			id: c.id,
+			project_dir: `shorts/${c.id}`,
+			scenes: scenes.length,
+			duration_sec: spec.target_duration_sec,
+			valid: check.ok,
+			errors: check.errors.map((e) => `${e.path}: ${e.message} (fix: ${e.fix})`)
+		});
+	}
+	return out;
 }
 const SAMPLE_FRAMES = 6;
 const EDGE_WIDTH = 192;
@@ -248597,7 +248727,11 @@ function createServer(options = {}) {
 			asset: string().min(1).describe("Transcribed video asset id"),
 			min_sec: number().positive().optional(),
 			max_sec: number().positive().optional(),
-			count: int().positive().max(10).optional().describe("How many candidates (default 3)")
+			count: int().positive().max(10).optional().describe("How many candidates (default 3)"),
+			make_projects: boolean().optional().describe("Also create a ready talking-head project per candidate under shorts/<id>/ (footage scenes, native voice, transcript claim_refs)"),
+			ids: array(string()).optional().describe("Only these candidate ids for make_projects"),
+			aspect_ratio: AspectRatio.optional().describe("Aspect for the short projects (default 9:16)"),
+			targets: array(PlatformTargetId).optional().describe("Targets for the short projects (default tiktok, instagram, youtube-shorts)")
 		},
 		annotations: {
 			readOnlyHint: false,
@@ -248606,9 +248740,20 @@ function createServer(options = {}) {
 			openWorldHint: false
 		}
 	}, safe(async (args) => {
-		const { project_dir, asset, ...opts } = args;
-		const r = await findShorts(resolveInputPath(project_dir, cwd()), asset, opts);
-		return jsonResult(formatShorts(r), r);
+		const { project_dir, asset, make_projects, ids, aspect_ratio, targets, ...opts } = args;
+		const root = resolveInputPath(project_dir, cwd());
+		const r = await findShorts(root, asset, opts);
+		if (!make_projects) return jsonResult(formatShorts(r), r);
+		const projects = await makeShortProjects(root, r, {
+			...ids ? { ids } : {},
+			...aspect_ratio ? { aspect_ratio } : {},
+			...targets ? { targets } : {}
+		});
+		const lines = projects.map((p) => `- ${p.project_dir}: ${p.scenes} scene(s), ${p.duration_sec}s, ${p.valid ? "valid" : `invalid: ${p.errors.slice(0, 2).join("; ")}`}`);
+		return jsonResult(`${formatShorts(r)}\nprojects:\n${lines.join("\n")}`, {
+			...r,
+			projects
+		});
 	}));
 	server.registerTool("analyze", {
 		title: "Analyze a reference video's format",

@@ -19,7 +19,7 @@ import {
   type SourceKind,
 } from "@video-studio/schema";
 import { buildContentIR } from "./builder.js";
-import { detectKind } from "./detect.js";
+import { detectKind, mediaFolderFiles } from "./detect.js";
 import { type ExtractorRegistry, createExtractors } from "./extractors.js";
 import { displayPath } from "./refs.js";
 import type { FetchRepo } from "./repo.js";
@@ -224,6 +224,8 @@ export async function ingest(inputs: ReadonlyArray<string | IngestInput>, option
   if (inputs.length === 0) throw new Error("ingest: at least one input is required");
   const projectDir = resolve(options.projectDir);
   const cwd = options.cwd ?? process.cwd();
+  // A folder of clips (not a repository) stands for its video and audio files.
+  inputs = inputs.flatMap((raw): Array<string | IngestInput> => (typeof raw === "string" ? (mediaFolderFiles(resolve(cwd, raw.trim())) ?? [raw]) : [raw]));
   const now = toIso(options.now);
   const registry: ExtractorRegistry = {
     ...createExtractors({
