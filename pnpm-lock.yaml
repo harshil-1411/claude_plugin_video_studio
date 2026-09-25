@@ -89,6 +89,9 @@ importers:
       '@video-studio/media':
         specifier: workspace:*
         version: link:../media
+      '@video-studio/platforms':
+        specifier: workspace:*
+        version: link:../platforms
       '@video-studio/renderer':
         specifier: workspace:*
         version: link:../renderer
@@ -111,6 +114,12 @@ importers:
         specifier: workspace:*
         version: link:../schema
 
+  packages/platforms:
+    dependencies:
+      '@video-studio/schema':
+        specifier: workspace:*
+        version: link:../schema
+
   packages/renderer:
     dependencies:
       '@hyperframes/producer':
@@ -122,6 +131,9 @@ importers:
       '@video-studio/media':
         specifier: workspace:*
         version: link:../media
+      '@video-studio/platforms':
+        specifier: workspace:*
+        version: link:../platforms
       '@video-studio/schema':
         specifier: workspace:*
         version: link:../schema
