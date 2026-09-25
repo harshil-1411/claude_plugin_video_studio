@@ -238107,9 +238107,9 @@ async function diffProjects(a, b, opts = {}) {
 		};
 	}
 	let lock;
-	const lockPath = (r) => join(projectPaths(r.root).dist, LOCK_FILE);
+	const lockFor = async (r) => (r.quality ? await readLock(join(projectPaths(r.root).renders, r.quality, "video.lock")) : void 0) ?? readLock(join(projectPaths(r.root).dist, "video.lock"));
 	try {
-		const [la, lb] = await Promise.all([readLock(lockPath(ra)), readLock(lockPath(rb))]);
+		const [la, lb] = await Promise.all([lockFor(ra), lockFor(rb)]);
 		if (!la || !lb) lock = {
 			compared: false,
 			reason: `no dist/${LOCK_FILE} in ${[!la ? ra.root : "", !lb ? rb.root : ""].filter(Boolean).join(" and ")} (re-export to write one)`,
@@ -238811,7 +238811,7 @@ async function lintProject(projectDir, opts = {}) {
 	checkOverflow(boxes, findings);
 	checkTextMasks(boxes, zones.masks, W, H, findings);
 	const burnIn = state?.burn_in ?? manifest?.captions?.burn_in ?? spec.captions.burn_in;
-	checkCaptions(spec, zones, state?.captions?.box ?? manifest?.captions?.box, burnIn, findings);
+	checkCaptions(spec, zones, state?.caption_layout?.box ?? state?.captions?.box ?? manifest?.captions?.box, burnIn, findings);
 	checkContrast(boxes, H, findings);
 	checkDensity(spec, findings);
 	checkPostCopy(spec, contracts, findings);
@@ -241801,6 +241801,7 @@ async function exportFromState(root, state, now) {
 	};
 	const lock = await lockFromState(root, state, projectId, outputs);
 	await writeFile(out.lock, serializeLock(lock));
+	await writeFile(join(renderDir(root, state.quality), LOCK_FILE), serializeLock(lock));
 	manifest.outputs.push({
 		kind: "lock",
 		path: rel(root, out.lock),

@@ -17,7 +17,7 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 | 1 Ingestion | Done: text/markdown/URL/PDF/DOCX/PPTX/repo → ContentIR, secret scanning, 10 golden fixtures | golden snapshots |
 | 2 Planning | Done: 5 templates, `plan`/`create` skills, `brief_validate`, strict-grounding `spec_validate`, `storyboard_render` | `examples/readme-plan` end to end |
 | 3 Local render | Done: voice (`say`/silent/ElevenLabs), FFmpeg + HyperFrames renderers, captions, assembly, QA, `dist/` export, job tools | User's machine: `/video-studio:create "Explain vector DBs in 30s"` → `vector-dbs-explainer/dist/reel.mp4` |
-| 4 Platform compiler | **Steps 1–3 done except CI (deferred).** Exit run next (`docs/PHASE4_EXIT.md`) | tests, smoke, 3-target bundle check, example goldens |
+| 4 Platform compiler | **Done** (CI deferred by the user) | user exit run Parts 1–2 (real `say` voice, 3 packages, 0 errors); Parts 3–6 re-run in the sandbox on a copy |
 
 - **Tests:** 494 pass, 3 skipped. The skipped ones are env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1` must run outside the sandbox; `VS_TEST_GOLDEN=1` runs anywhere.
 - **Smoke:** `node scripts/smoke-mcp.mjs` passes: 15 tools, ingest, templates, and a tiny render.
@@ -129,11 +129,35 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
   - The goldens are committed in `tests/golden-frames/text-to-motion-graphic/preview/`; they were recorded in the sandbox on 2026-09-25 and checked by eye.
 - **Verified through the bundle** on a 3-target project: export (writes the lock), verify, test (missing → updated → pass) and diff (identical).
 
-## Next
+## Phase 4 exit (done 2026-09-25)
 
-1. **Phase 4 exit run** (the user, outside the sandbox): follow `docs/PHASE4_EXIT.md`.
-2. **CI (step 3 item 4, deferred by the user):** a GitHub Action that renders the examples with the silent voice and FFmpeg, runs lint and `VS_TEST_GOLDEN=1` golden frames, and uploads artifacts. No paid keys. The repo has no remote yet.
-3. Then Phase 5 (reel grammar, archetypes, style packs, variants; see `docs/PLAN.md`).
+- **Parts 1–2, run by the user outside the sandbox** (`~/vs-exit/readme-reel`):
+  - `pnpm install`, then tests, bundle and smoke all green.
+  - `/video-studio:create README.md` with 3 targets and the real `say` voice rendered preview and final.
+  - Result: 3 packages plus `video.lock`, and every `qa.json` passes with 0 errors.
+- **Parts 3–6, re-run by the coordinator in the sandbox** on a copy (silent voice + ffmpeg):
+  - `captions.position.y = 0.9` → lint `caption_mask` error for tiktok (and instagram, youtube-shorts). The fix (remove `position`) → 0 errors in every `dist/<target>/qa.json`.
+  - verify passes. test goes missing → updated → pass. diff preview vs final classifies lock changes. The example golden test passes.
+- **Bugs this found and fixed:**
+  - Lint during export read the caption box from the previous export's manifest, so `dist/<target>/qa.json` was stale. It now prefers `RenderState.caption_layout.box`.
+  - diff could not compare preview vs final locks. Export now also writes `renders/<q>/video.lock`, and diff prefers it.
+- **CI** (a GitHub Action) is deferred by the user. The repo has no remote yet.
+
+## Loop state (autonomous run; resume from here)
+
+Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md` (Phases 4 → 5 → 6 → local 8, no human intervention; Phase 7, Phase 9 and CI are out of scope).
+
+- **Current:** Phase 5 step 1 (schema: purposes, kinds, `audio.music`, `voice.mode`, `Style`).
+- **Done:** Step 0 (Phase 4 closed).
+- **Deferred to `docs/USER_CHECKLIST.md`** (written at the end):
+  - real `say` renders
+  - HyperFrames install and renders of new kinds and styles
+  - demo capture against a local app
+  - a real interview mp4
+  - CI once there is a remote
+
+**Loop decisions** (defaults chosen without asking; revisit if needed):
+- Phase 4 Parts 3–6 were verified in the sandbox instead of interactively.
 
 **Open decisions from step 3** (defaults chosen; revisit if needed):
 - "Key claims" means claims restated by the brief's `key_messages`.
@@ -161,14 +185,14 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 ## Open issues
 
 1. **TikTok contract not re-verified.** Re-check `platform-specs/tiktok.yaml` against developers.tiktok.com and bump `contract_version`/`verified`.
-2. **Deprecated caption helpers.** `captionReserveFraction` and `defaultMarginV` in `packages/media/src/captions.ts` are no longer used by the renderer; remove them.
+2. ~~Deprecated caption helpers~~: already removed.
 3. **Brand v2 fields not used yet:** `motion` and `weights` (Phase 5 motion work), `logo_placement`, and `forbidden` (no lint check yet).
 4. **HyperFrames 404.** HyperFrames logs a non-blocking 404 for one resource, probably a favicon or font lookup. Re-check now that fonts are embedded.
 5. **QA noise in silent mode.** Silent-voice renders report `silence`/`loudness` warnings in `qa/report.md`; they are labelled "expected" only in `job_status`.
 6. **No render lock.** There is no cross-process lock, so two Claude sessions could render at the same time.
 7. **Scenes open empty.** Scenes fade in from an empty first frame (Phase 5 motion work).
 8. **Spec vs. actual timing.** The render plan lengthens scenes to fit the voiceover and records `timing_adjustments`; the spec is left unchanged by design.
-9. **Stale lockfile entries.** `pnpm-lock.yaml` has 2 orphan `@secretlint/node` entries, and it doesn't yet list `@video-studio/platforms`. Run `pnpm install` outside the sandbox and commit the lockfile.
+9. **Lockfile:** refreshed by the user on 2026-09-25 (`0958554`); 2 harmless orphan `@secretlint/node` entries remain.
 10. **Warnings.** Node prints an `ExperimentalWarning` for `node:sqlite`. It is harmless.
 
 ## How work is run

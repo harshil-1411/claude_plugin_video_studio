@@ -195,9 +195,10 @@ export async function diffProjects(a: string, b: string, opts: { quality_a?: Qua
 
   // 2. lock
   let lock: DiffResult["lock"];
-  const lockPath = (r: ResolvedRender) => join(projectPaths(r.root).dist, LOCK_FILE);
+  // Prefer the per-quality copy in renders/<q>/ (export writes it next to dist/video.lock).
+  const lockFor = async (r: ResolvedRender) => (r.quality ? await readLock(join(projectPaths(r.root).renders, r.quality, LOCK_FILE)) : undefined) ?? readLock(join(projectPaths(r.root).dist, LOCK_FILE));
   try {
-    const [la, lb] = await Promise.all([readLock(lockPath(ra)), readLock(lockPath(rb))]);
+    const [la, lb] = await Promise.all([lockFor(ra), lockFor(rb)]);
     if (!la || !lb) {
       lock = { compared: false, reason: `no dist/${LOCK_FILE} in ${[!la ? ra.root : "", !lb ? rb.root : ""].filter(Boolean).join(" and ")} (re-export to write one)`, changes: [] };
     } else if ((ra.quality && la.quality !== ra.quality) || (rb.quality && lb.quality !== rb.quality)) {

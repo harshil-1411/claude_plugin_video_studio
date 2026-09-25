@@ -80,6 +80,8 @@ interface RenderStateView {
   burn_in?: boolean;
   scenes?: Array<{ scene_id: string; text_boxes?: TextBox[] }>;
   captions?: { box?: PxBox };
+  /** Where the pipeline placed burned-in captions (RenderState.caption_layout). */
+  caption_layout?: { box?: PxBox };
   cover?: { headline_box?: TextBox; crops?: Array<{ id: string; targets: string[]; x: number; y: number; w: number; h: number }> };
 }
 
@@ -567,7 +569,8 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   checkOverflow(boxes, findings);
   checkTextMasks(boxes, zones.masks, W, H, findings);
   const burnIn = state?.burn_in ?? manifest?.captions?.burn_in ?? spec.captions.burn_in;
-  checkCaptions(spec, zones, state?.captions?.box ?? manifest?.captions?.box, burnIn, findings);
+  // The render state is current; the dist manifest may be from the previous export (lint runs during export).
+  checkCaptions(spec, zones, state?.caption_layout?.box ?? state?.captions?.box ?? manifest?.captions?.box, burnIn, findings);
   checkContrast(boxes, H, findings);
   checkDensity(spec, findings);
   checkPostCopy(spec, contracts, findings);

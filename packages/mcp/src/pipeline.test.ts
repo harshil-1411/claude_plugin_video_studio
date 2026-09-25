@@ -235,6 +235,8 @@ describe("renderProject (tiny, silent, ffmpeg)", () => {
       expect(lockText).not.toContain(tmp);
       expect(lockText).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
       expect(manifest.outputs.find((o) => o.kind === "lock")?.path).toBe("dist/video.lock");
+      // A per-quality copy lets diff compare preview and final.
+      expect(await readFile(join(dir, "renders", "preview", "video.lock"), "utf8")).toBe(await readFile(join(dir, "dist", "video.lock"), "utf8"));
     },
     T,
   );

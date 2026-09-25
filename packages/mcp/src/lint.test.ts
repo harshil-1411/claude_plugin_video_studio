@@ -127,6 +127,15 @@ describe("lint checks", () => {
     expect((await lintProject(dir, { quality: "preview" })).findings.filter((f) => f.id === "caption_mask")).toEqual([]);
   });
 
+  it("prefers the render state's caption box over a stale manifest (lint during export)", async () => {
+    const dir = project((s) => delete s.captions.position);
+    // The previous export put captions under the footer mask; the new render moved them up.
+    mkdirSync(join(dir, "dist"), { recursive: true });
+    writeFileSync(join(dir, "dist", "render-manifest.json"), JSON.stringify({ settings: { quality: "final", width: 1080, height: 1920 }, captions: { burn_in: true, box: { x: 90, y: 1600, w: 900, h: 200 } } }));
+    writeState(dir, { target: { width: 1080, height: 1920, fps: 30, aspect_ratio: "9:16" }, duration_ms: 8000, burn_in: true, scenes: [], caption_layout: { box: { x: 90, y: 1200, w: 800, h: 200 }, max_lines: 2, font_size: 60 } });
+    expect((await lintProject(dir)).findings.filter((f) => f.id === "caption_mask")).toEqual([]);
+  });
+
   it("warns on reading density, post copy limits, cover and banned phrases", async () => {
     const dir = project((s) => {
       delete s.captions.position;

@@ -1102,6 +1102,8 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
   // video.lock (before the manifest, which lists it)
   const lock = await lockFromState(root, state, projectId, outputs);
   await writeFile(out.lock, serializeLock(lock));
+  // A copy per quality, so diff can compare preview and final after dist/ moved on to the other one.
+  await writeFile(join(renderDir(root, state.quality), LOCK_FILE), serializeLock(lock));
   manifest.outputs.push({ kind: "lock", path: rel(root, out.lock), sha256: await sha(out.lock) });
 
   const parsed = RenderManifest.safeParse(manifest);
