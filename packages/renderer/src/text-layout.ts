@@ -115,9 +115,12 @@ export function fitText(text: string | readonly string[], box: { w: number; h: n
   const paras = typeof text === "string" ? [text] : [...text];
   const layout = (size: number): string[] =>
     opts.noWrap ? paras.flatMap((p) => p.split("\n")) : paras.flatMap((p) => wrapText(p, size, box.w, opts));
+  // Whole words must fit on a line: hard-breaking inside a word ("Thumbnai/l") is a last resort at the minimum size.
+  const words = opts.noWrap ? [] : [...new Set(paras.flatMap((p) => p.split(/\s+/)).filter(Boolean))];
+  const wordsFit = (size: number) => words.every((w) => blockSize([w], size, lh, opts).width <= box.w + 0.01);
   const fits = (lines: string[], size: number) => {
     const b = blockSize(lines, size, lh, opts);
-    return b.width <= box.w + 0.01 && b.height <= box.h + 0.01 && (opts.maxLines === undefined || lines.length <= opts.maxLines);
+    return b.width <= box.w + 0.01 && b.height <= box.h + 0.01 && (opts.maxLines === undefined || lines.length <= opts.maxLines) && (size <= min || wordsFit(size));
   };
   const max = Math.max(1, Math.floor(opts.maxSize));
   const min = Math.max(1, Math.min(max, Math.floor(opts.minSize)));
@@ -214,8 +217,9 @@ export function applyTextCase(text: string, mode: "as_is" | "upper" | "title" | 
  * areas, wrapping); it is part of every scene cache key so stale clips re-render.
  * v3: the safe area is the platform zones' content rect (design grid minus UI masks).
  * v4: code panels show no language label for plain text (`text`, `txt`, `plaintext`).
+ * v5: text shrinks until every whole word fits a line; words are only hard-broken at the minimum size.
  */
-export const LAYOUT_VERSION = 4;
+export const LAYOUT_VERSION = 5;
 
 /**
  * The content-safe rectangle of a target, in px (integers): `zones.content` when the pipeline

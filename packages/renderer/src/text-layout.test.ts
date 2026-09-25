@@ -100,3 +100,11 @@ describe("safeArea", () => {
     expect(splitH({ x: 0, y: 0, w: 100, h: 10 }, [3, 1]).map((r) => r.w)).toEqual([75, 25]);
   });
 });
+
+describe("whole words", () => {
+  it("shrinks instead of breaking a long word across lines", () => {
+    const r = fitText(["Captions. Thumbnail. Provenance."], { w: 300, h: 600 }, { maxSize: 120, minSize: 20 });
+    expect(r.truncated).toBe(false);
+    for (const w of ["Captions.", "Thumbnail.", "Provenance."]) expect(r.lines.some((l) => l.split(" ").includes(w))).toBe(true);
+  });
+});

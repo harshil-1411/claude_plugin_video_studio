@@ -234054,9 +234054,11 @@ function fitText(text, box, opts) {
 	const lh = opts.lineHeight ?? 1.25;
 	const paras = typeof text === "string" ? [text] : [...text];
 	const layout = (size) => opts.noWrap ? paras.flatMap((p) => p.split("\n")) : paras.flatMap((p) => wrapText(p, size, box.w, opts));
+	const words = opts.noWrap ? [] : [...new Set(paras.flatMap((p) => p.split(/\s+/)).filter(Boolean))];
+	const wordsFit = (size) => words.every((w) => blockSize([w], size, lh, opts).width <= box.w + .01);
 	const fits = (lines, size) => {
 		const b = blockSize(lines, size, lh, opts);
-		return b.width <= box.w + .01 && b.height <= box.h + .01 && (opts.maxLines === void 0 || lines.length <= opts.maxLines);
+		return b.width <= box.w + .01 && b.height <= box.h + .01 && (opts.maxLines === void 0 || lines.length <= opts.maxLines) && (size <= min || wordsFit(size));
 	};
 	const max = Math.max(1, Math.floor(opts.maxSize));
 	const min = Math.max(1, Math.min(max, Math.floor(opts.minSize)));
@@ -236988,7 +236990,7 @@ const PENDING_REASON = "provider rendering arrives in Phase 4";
 function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones) {
 	return sha256Hex(canonicalJson({
 		v: 1,
-		layout: 4,
+		layout: 5,
 		scene,
 		tokens,
 		target,
@@ -244674,7 +244676,7 @@ async function lockFromState(root, state, projectId, outputs) {
 			cover: String(2),
 			target_package: String(1),
 			zones: String(2),
-			layout: String(4)
+			layout: String(5)
 		},
 		tools,
 		voice: {

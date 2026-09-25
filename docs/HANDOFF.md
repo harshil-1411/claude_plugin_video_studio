@@ -147,7 +147,7 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 
 Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md` (Phases 4 → 5 → 6 → local 8, no human intervention; Phase 7, Phase 9 and CI are out of scope).
 
-- **Current:** Phase 5 steps 4 (style packs) and 5 (archetype templates), then step 6 (`variants`/`adapt`), then the Phase 5 exit.
+- **Current:** Phase 6 step 1 (interfaces: footage and media assets, scene audio, `voice.mode: native`, demo script, format grammar).
 - **Done:**
   - Step 0 (Phase 4 closed).
   - Phase 5 step 1 (`489dbbd`): schema for the new purposes and kinds, `audio.music`, `voice.mode` and `Style`.
@@ -156,6 +156,15 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
     - `music/` CC0 beds with ducking
     - `voice.mode: none`
     - background-aware black-frame QA, with `QA_VERSION`
+  - Phase 5 steps 4–6 (`58b72b0`):
+    - `styles/` packs and motion tokens in both renderers
+    - 8 archetype templates (13 in total)
+    - `variants` and `adapt` tools and skills
+  - **Phase 5 exit passed (2026-09-25, sandbox, silent voice + ffmpeg, preview):**
+    - The repo README was ingested, and specs were written for 3 archetypes (animated-explainer, faceless-listicle, before-after) × 2 styles (technical, energetic). That gives 6 renders; each lints 0/0 and has 3 platform packages.
+    - `variants` with 3 hooks × 2 covers gave 6 variant projects, all rendered, with `experiment.json` reporting each as `rendered`. A fresh variant re-renders only its hook (5 of 6 scenes reused).
+    - A `voice: none` text-over-music reel on `bundled:lofi` has only a frozen-frames warning (no silence or loudness warnings) and lints 0/0. The CC0 licence is in `video.lock`, provenance and `post.json`.
+    - The exit found a bug: `fitText` hard-broke long words ("Thumbnai/l"). Now whole words must fit, and breaks inside a word only happen at the minimum size (`LAYOUT_VERSION` 5).
 - **Deferred to `docs/USER_CHECKLIST.md`** (written at the end):
   - real `say` renders
   - HyperFrames install and renders of new kinds and styles
@@ -169,6 +178,11 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
 - Ducking uses the known speech intervals (scene voice slots), not a sidechain compressor, so it is exact and deterministic.
 - On-screen reading rule without narration: at most 3 words/s after a 1 s settle (a design constant in `lint.ts`).
 - Strict grounding now also reads viewer-facing props text (stat values, quotes), so a numeric stat card needs a `claim_ref`.
+- Style motion: `transition`/`transition_ms` are recorded but not drawn, because assembly still hard-cuts between scenes. Crossfades between scenes arrive with Phase 6's footage crossfades.
+- A style change is classified as creative in lock diffs (`tools.style`).
+- **Unverified in the sandbox** (goes to `docs/USER_CHECKLIST.md`):
+  - HyperFrames renders of the new kinds and styles; the stat count-up relies on CSS animation seeking.
+  - Whether HyperFrames' own font fitting also keeps long words whole.
 
 **Open decisions from step 3** (defaults chosen; revisit if needed):
 - "Key claims" means claims restated by the brief's `key_messages`.
