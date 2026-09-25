@@ -137,9 +137,12 @@ describe("repoExtractor", () => {
   });
 });
 
+/** A token-shaped fake, built at runtime so repository secret scanners do not flag this test file. */
+const FAKE_GITHUB_TOKEN = ["ghp", "Zx8Kq2Lm9Pw4Rt7Yv1Bn6Cd3Fg5Hj0Ks2Lq8"].join("_");
+
 describe("scanFileForSecrets", () => {
   it("reports rule ids only", async () => {
-    const f = await scanFileForSecrets("x.env", "token = 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\n");
+    const f = await scanFileForSecrets("x.env", `token = ${FAKE_GITHUB_TOKEN}\n`);
     expect(f.map((x) => x.rule)).toContain("@secretlint/secretlint-rule-github");
     expect(JSON.stringify(f)).not.toContain("ghp_");
     expect(await scanFileForSecrets("a.md", "# Hello\n\nNothing to see.\n")).toEqual([]);
