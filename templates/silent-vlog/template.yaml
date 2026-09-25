@@ -1,0 +1,51 @@
+# Archetype: daily-life footage with its own sound and minimal text (no voiceover, no music).
+schema_version: "1.0"
+id: silent-vlog
+name: Silent vlog
+description: A day or a process told with the user's own clips and their natural sound - footsteps, kettle, keyboard - and a few words of on-screen text. No narration, no music by default.
+goals: [promote, announce, educate]
+platforms: [instagram_reels, tiktok, youtube_shorts]
+default_aspect_ratio: "9:16"
+default_duration_sec: 30
+duration_range: { min_sec: 15, max_sec: 60 }
+pacing: { avg_shot_sec: 3.5, max_words_per_sec: 3.0 }
+caption_preset: minimal
+voice_mode: none
+default_style: minimal
+beats:
+  - purpose: hook
+    share: 0.12
+    guidance: An inviting first moment with a short line of kinetic_text (time or place, e.g. "6:40 am, studio").
+    suggested_visual_strategy: user_asset
+    suggested_deterministic_kind: kinetic_text
+  - purpose: story
+    share: 0.22
+    guidance: The routine begins; one or two clips with their own sound.
+    suggested_visual_strategy: user_asset
+  - purpose: step
+    share: 0.22
+    guidance: The work or the main activity, close and tactile.
+    suggested_visual_strategy: user_asset
+  - purpose: story
+    share: 0.2
+    guidance: A small moment (a pause, a view, a detail) that gives the day texture.
+    suggested_visual_strategy: user_asset
+    optional: true
+  - purpose: result
+    share: 0.12
+    guidance: What the day produced, with a 2–4 word typography label.
+    suggested_visual_strategy: user_asset
+    suggested_deterministic_kind: typography
+  - purpose: cta
+    share: 0.12
+    guidance: A closing clip with a soft ask as kinetic_text (follow, see more).
+    suggested_visual_strategy: user_asset
+    suggested_deterministic_kind: kinetic_text
+hook_mechanisms: [story, curiosity_gap, pattern_interrupt]
+rules:
+  - "voice.mode is none: voiceover stays empty; the clips' own sound carries the reel (audio.mode native on every footage scene)."
+  - "Short crossfades between clips (audio.crossfade_ms 150–300) so room tone doesn't jump."
+  - "At most 5 words on screen per scene, and text on only a few scenes."
+  - "No music by default; for a soft bed add audio.music and set the scenes to mix."
+  - "Only real footage: no generated or stock shots."
+  - CTA must be an allowed brand CTA if a brand profile is present.

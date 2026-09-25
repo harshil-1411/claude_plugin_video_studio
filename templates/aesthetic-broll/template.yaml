@@ -1,0 +1,51 @@
+# Archetype: mood b-roll cut to a music bed (no speech).
+schema_version: "1.0"
+id: aesthetic-broll
+name: Aesthetic b-roll
+description: Short, beautiful clips from the user's own footage cut on the beat of a music bed. No voice, almost no text - the mood carries it. Cuts snap to beats (audio.beat_sync).
+goals: [promote, announce, launch]
+platforms: [instagram_reels, tiktok, youtube_shorts]
+default_aspect_ratio: "9:16"
+default_duration_sec: 15
+duration_range: { min_sec: 8, max_sec: 30 }
+pacing: { avg_shot_sec: 2.2, max_words_per_sec: 3.0 }
+caption_preset: minimal
+voice_mode: none
+default_style: minimal
+default_music: bundled:lofi
+beats:
+  - purpose: hook
+    share: 0.14
+    guidance: The most striking clip first, with at most 4 words of typography (or none).
+    suggested_visual_strategy: user_asset
+    suggested_deterministic_kind: typography
+  - purpose: story
+    share: 0.18
+    guidance: A mood clip that sets the place or subject.
+    suggested_visual_strategy: user_asset
+  - purpose: story
+    share: 0.18
+    guidance: A detail or motion clip (hands, texture, movement).
+    suggested_visual_strategy: user_asset
+  - purpose: reveal
+    share: 0.18
+    guidance: The payoff shot (the product, the view, the finished thing).
+    suggested_visual_strategy: user_asset
+  - purpose: payoff
+    share: 0.16
+    guidance: A wide or slow clip that lets the music breathe.
+    suggested_visual_strategy: user_asset
+  - purpose: end_card
+    share: 0.16
+    guidance: A calm last clip with a handle or product name as small typography.
+    suggested_visual_strategy: user_asset
+    suggested_deterministic_kind: typography
+hook_mechanisms: [pattern_interrupt, curiosity_gap, before_after, promise]
+rules:
+  - "voice.mode is none: voiceover stays empty; captions are off (burn_in false)."
+  - "Clips run 1.5–3 s: split a beat into several scenes rather than holding one clip longer."
+  - "Every scene is footage with fit cover (focus on the subject) and audio.mode music; set audio.beat_sync {enabled: true} so cuts land on beats."
+  - "Pick spans with motion; set loop only for seamless loops, speed 0.5–0.8 for slow motion."
+  - The music bed is bundled (CC0) or a user file with audio.music.license recorded.
+  - "At most two text cards in the whole reel, 4 words each."
+  - CTA (the end card) must be an allowed brand CTA if a brand profile is present.

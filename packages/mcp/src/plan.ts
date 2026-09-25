@@ -142,6 +142,9 @@ export function formatIssues(title: string, r: { ok: boolean; errors: PlanIssue[
 
 // ---------------------------------------------------------------- spec_scaffold
 
+/** Visual strategies that show real footage (a `footage` block per scene). */
+const FOOTAGE_STRATEGIES = new Set<string>(["user_asset", "screen_capture"]);
+
 export interface ScaffoldOptions {
   template_id: string;
   target_duration_sec?: number;
@@ -154,8 +157,8 @@ export interface ScaffoldOptions {
   style?: string;
   /** Music bed, e.g. `bundled:lofi`; default: the template's default_music. */
   music?: string;
-  /** Default: the template's voice_mode (narrated unless the archetype has no speech). */
-  voice_mode?: "narrated" | "none";
+  /** Default: the template's voice_mode (narrated unless the archetype has no speech, or its speech is in the footage). */
+  voice_mode?: "narrated" | "none" | "native";
 }
 
 export interface SceneGuidance {
@@ -169,6 +172,8 @@ export interface SceneGuidance {
   suggested_deterministic_kind?: string;
   /** Minimal valid props for the suggested deterministic kind. */
   props_example?: Record<string, unknown>;
+  /** Footage scenes (user_asset / screen_capture): a `footage` block to fill from the ContentIR's video assets. */
+  footage_example?: Record<string, unknown>;
 }
 
 export interface ScaffoldResult {
@@ -244,9 +249,26 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
   const mode = opts.voice_mode ?? tpl.voice_mode ?? "narrated";
   const style = opts.style ?? tpl.default_style;
   const music = opts.music ?? tpl.default_music;
+  const footageBeats = beats.some((b) => FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy));
   if (mode === "none") {
     notes.push('voice.mode "none": leave voiceover "" in every scene; put the words on screen (on_screen_text or the props) and keep them short enough to read');
-    if (!music) notes.push('no music bed: add audio.music {file: "bundled:<id>"} or the video is silent');
+    if (!music && !footageBeats) notes.push('no music bed: add audio.music {file: "bundled:<id>"} or the video is silent');
+  }
+  if (mode === "native") {
+    notes.push('voice.mode "native": leave voiceover "" in every scene; the speech is in the footage and captions come from the asset transcripts (transcribe the video first)');
+  }
+  // Footage archetypes: each user_asset scene needs footage {asset, in_sec, out_sec?} from the ingested clips.
+  const clips = ir?.assets.filter((a) => a.kind === "video" || a.kind === "image") ?? [];
+  const sceneAudioMode = mode === "narrated" ? "music" : mode === "none" && music ? "music" : "native";
+  if (footageBeats) {
+    notes.push(
+      clips.length
+        ? `footage scenes: fill footage {asset, in_sec, out_sec} for each user_asset scene from the ingested clips (${clips
+            .slice(0, 8)
+            .map((a) => `${a.id}${a.media?.duration_sec ? ` ${a.media.duration_sec}s` : ""}`)
+            .join(", ")})`
+        : "footage scenes need ingested video: ingest the clips (video files or a folder of clips) first, then fill footage {asset, in_sec, out_sec} in each user_asset scene",
+    );
   }
 
   const scenes: Scene[] = beats.map((b, i) => {
@@ -262,6 +284,7 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
     };
     if (b.suggested_deterministic_kind) scene.deterministic = { kind: b.suggested_deterministic_kind, props: {} };
     if (b.suggested_visual_strategy === "generated_video") scene.visual_requirements = { continuity_refs: [], modality: "video" };
+    if (FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy)) scene.audio = { mode: sceneAudioMode };
     return scene;
   });
 
@@ -278,8 +301,8 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
     target_duration_sec: target,
     language: brief?.language ?? "en-US",
     grounding: "strict",
-    voice: { ...(mode === "none" ? { mode } : {}), ...(brief?.tone.length ? { style: brief.tone.join(", ") } : {}) },
-    // Without narration there are no speech captions to burn in.
+    voice: { ...(mode !== "narrated" ? { mode } : {}), ...(brief?.tone.length ? { style: brief.tone.join(", ") } : {}) },
+    // Without speech there are no captions to burn in (native speech is captioned from the transcript).
     captions: { preset: tpl.caption_preset, burn_in: mode !== "none" },
     ...(style ? { style } : {}),
     ...(music ? { audio: { music: { file: music } } } : {}),
@@ -295,10 +318,22 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
       duration_sec: durations[i]!,
       guidance: b.guidance,
       // Without narration the budget is on-screen words: ~3 words/s after a 1 s settle (lint's rule).
-      word_budget: mode === "none" ? Math.max(3, Math.floor((durations[i]! - 1) * 3)) : Math.floor(durations[i]! * tpl.pacing.max_words_per_sec),
+      // Native speech: the budget is on-screen words too (the spoken words come from the footage).
+      word_budget: mode !== "narrated" ? Math.max(3, Math.floor((durations[i]! - 1) * 3)) : Math.floor(durations[i]! * tpl.pacing.max_words_per_sec),
       suggested_visual_strategy: b.suggested_visual_strategy,
       ...(b.suggested_deterministic_kind
         ? { suggested_deterministic_kind: b.suggested_deterministic_kind, props_example: DETERMINISTIC_PROPS_EXAMPLES[b.suggested_deterministic_kind] }
+        : {}),
+      ...(FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy)
+        ? {
+            footage_example: {
+              asset: clips.find((a) => a.kind === "video")?.id ?? clips[0]?.id ?? "<video asset id from source/content-ir.json>",
+              in_sec: 0,
+              out_sec: durations[i]!,
+              fit: "cover",
+              ...(b.purpose === "hook" && mode === "native" ? { focus: { x: 0.5, y: 0.35 } } : {}),
+            },
+          }
         : {}),
     })),
     rules: tpl.rules,

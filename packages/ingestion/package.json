@@ -18,6 +18,7 @@
     "@secretlint/core": "^13.0.5",
     "@secretlint/secretlint-rule-preset-recommend": "^13.0.5",
     "@video-studio/core": "workspace:*",
+    "@video-studio/media": "workspace:*",
     "@video-studio/schema": "workspace:*",
     "@xmldom/xmldom": "^0.9.12",
     "defuddle": "^0.19.4",

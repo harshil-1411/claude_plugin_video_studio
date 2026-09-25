@@ -75,9 +75,9 @@ Top level:
 | `brand_profile` | no | e.g. `acme@3` |
 | `policy_profile` | no | string |
 | `grounding` | yes | `strict` by default |
-| `voice` | yes | `{mode?, provider_preference?, voice_id?, style?}`; `mode`: `narrated` (default) or `none` (no speech: every `voiceover` is `""`); leave `provider_preference` out unless the user asked; `style` in plain words ("calm, precise") |
+| `voice` | yes | `{mode?, provider_preference?, voice_id?, style?}`; `mode`: `narrated` (default), `none` (no speech: every `voiceover` is `""`) or `native` (the speech is in the footage: every `voiceover` is `""`, captions come from the asset transcripts); leave `provider_preference` out unless the user asked; `style` in plain words ("calm, precise") |
 | `style` | no | style pack id: `minimal`, `editorial`, `technical`, `energetic` (look and motion; brand colours and fonts override it). `spec_scaffold` sets the template's `default_style` |
-| `audio` | no | `{music?: {file, volume_db?, duck_db?, fade_in_ms?, fade_out_ms?, loop?, start_sec?, license?}}`. `file`: `bundled:ambient` / `bundled:lofi` / `bundled:upbeat` / `bundled:minimal` (CC0, bundled) or a path relative to the project; a user file needs `license {id, source?, attribution?}` (e.g. `CC0-1.0`, `CC-BY-4.0`, `user-owned`) and only a track the user has the rights to |
+| `audio` | no | `{music?: {file, volume_db?, duck_db?, fade_in_ms?, fade_out_ms?, loop?, start_sec?, license?}, beat_sync?: {enabled, tolerance_ms?}}`. `beat_sync` snaps cuts to beats of the bed at render time (default ±250 ms), reported as timing adjustments. `file`: `bundled:ambient` / `bundled:lofi` / `bundled:upbeat` / `bundled:minimal` (CC0, bundled) or a path relative to the project; a user file needs `license {id, source?, attribution?}` (e.g. `CC0-1.0`, `CC-BY-4.0`, `user-owned`) and only a track the user has the rights to |
 | `captions` | yes | `{preset, burn_in, position?}`; preset from brand `video.caption_preset` or the template, else `minimal`; `burn_in: true` for short-form narrated videos, `false` with `voice.mode: none` (no speech to caption) |
 | `cover` | no (write it) | `{headline, focal_time_sec}`: thumbnail text ≤ 6 words, different from the hook voiceover; `focal_time_sec` inside the hook scene |
 | `publish` | no (write it) | map target id → `{post_caption, hashtags?, ai_disclosure?}`; one entry per target; hashtags look like `#devtools`; the post caption is not the voiceover |
@@ -97,6 +97,9 @@ Scene:
 | `visual_requirements` | yes | object; `continuity_refs` required (may be `[]`); optional `subject`, `camera`, `style`, `modality` (`video`/`image`/`none`), `realism` (`low`/`medium`/`high`), `character_reference` & `audio_generation` (`required`/`optional`/`none`), `max_cost_usd` (≥ 0), `data_policy` (`external-ok`/`local-only`), `preference` (list of `continuity`/`quality`/`speed`/`cost`) |
 | `claim_refs` | yes (may be `[]`) | ContentIR `evidence[].ref` or `claims[].id`, copied exactly |
 | `transition` | no | `cut`, `crossfade`, `fade_black`, `slide`, `zoom`, `whip` |
+| `footage` | if `user_asset` / `screen_capture` | `{asset, in_sec, out_sec?, fit?, focus?, speed?, loop?}`: `asset` is a ContentIR video (or image) asset id; `out_sec` defaults to `in_sec` + duration × speed; `fit` `cover` (default) / `contain` / `blur_pad`; `focus {x, y}` 0–1 crop centre; `speed` 0.25–4; `loop` repeats a short clip (default: hold the last frame). A `deterministic` block of kind `lower_third`, `kinetic_text`, `typography`, `quote` or `stat` is drawn over it |
+| `audio` | no (footage scenes) | `{mode, native_db?, crossfade_ms?}`; `mode`: `native` (clip sound, default for footage), `mix` (clip sound under the bed), `music` (bed only), `mute`; `native_db` −60…12; `crossfade_ms` ≤ 3000 into this scene |
+| `sfx` | no | up to 8 `{file, at_sec, volume_db?, license?}`: project-relative one-shots played `at_sec` into the scene; record `license` |
 
 ## Ref formats (as the extractors write them)
 

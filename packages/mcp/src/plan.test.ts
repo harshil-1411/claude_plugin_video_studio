@@ -17,6 +17,8 @@ import { findTemplatesDir, getTemplate, loadTemplates } from "./templates.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const examples = resolve(here, "../../schema/examples");
 const EXPECTED_TEMPLATES = [
+  "aesthetic-broll",
+  "ambient-slice-of-life",
   "animated-explainer",
   "before-after",
   "carousel-story",
@@ -26,9 +28,12 @@ const EXPECTED_TEMPLATES = [
   "explain",
   "faceless-listicle",
   "listicle",
+  "oddly-satisfying",
   "product-demo",
   "product-launch",
   "product-ui",
+  "silent-vlog",
+  "talking-head",
   "text-over-music",
 ];
 
@@ -84,7 +89,7 @@ describe("templates", () => {
   });
 
   it("getTemplate rejects unknown and path-like ids with the available list", async () => {
-    await expect(getTemplate(templatesDir, "nope")).rejects.toThrow(/available: animated-explainer, before-after/);
+    await expect(getTemplate(templatesDir, "nope")).rejects.toThrow(/available: aesthetic-broll, ambient-slice-of-life, animated-explainer, before-after/);
     await expect(getTemplate(templatesDir, "../schemas")).rejects.toThrow(/unknown template/);
   });
 });
@@ -107,9 +112,11 @@ describe("spec_scaffold", () => {
 
         // Fill placeholders the way Claude would, then the spec must pass semantics too.
         const filled = structuredClone(r.spec);
-        const silent = filled.voice.mode === "none";
+        const silent = filled.voice.mode === "none" || filled.voice.mode === "native";
         for (const s of filled.scenes) {
           s.voiceover = silent ? "" : "A short line of narration for this scene.";
+          // Footage scenes get a clip (no IR here, so the asset id isn't cross-checked).
+          if (s.visual_strategy === "user_asset" || s.visual_strategy === "screen_capture") s.footage = { asset: "v1", in_sec: 0 };
           s.on_screen_text = "Key idea";
           if (s.deterministic) s.deterministic.props = structuredClone(DETERMINISTIC_PROPS_EXAMPLES[s.deterministic.kind]);
           // Example props carry numbers (e.g. a 40% stat), which strict grounding requires a ref for.
@@ -233,7 +240,7 @@ assumptions: []
     await writeFile(join(root, "project/creative-brief.yaml"), yaml.replace('"Something else"', '"One"').replace("product-launch", "no-such-template"));
     const unknown = await validateBrief(root, templatesDir);
     expect(unknown.errors.map((e) => e.path)).toEqual(["template"]);
-    expect(unknown.errors[0]!.message).toContain("available: animated-explainer");
+    expect(unknown.errors[0]!.message).toContain("available: aesthetic-broll, ambient-slice-of-life, animated-explainer");
   });
 
   it("returns schema errors with fixes and throws when no brief exists", async () => {
@@ -384,5 +391,32 @@ describe("examples/readme-plan end to end", () => {
     expect(board.errors).toEqual([]);
     expect(board.markdown).toContain("`markdown:README.md#L3-L6`: \"");
     expect(board.pacing.filter((p) => p.flag)).toEqual([]);
+  });
+});
+
+describe("footage archetypes", () => {
+  it("talking-head scaffolds native voice, native scene audio and footage hints", async () => {
+    const root = await exampleProject("scaffold-th", { brief: null });
+    const r = await scaffoldSpec(root, templatesDir, { template_id: "talking-head" });
+    expect(r.spec.voice.mode).toBe("native");
+    expect(r.spec.captions.burn_in).toBe(true);
+    expect(r.spec.scenes.every((s) => s.visual_strategy === "user_asset" && s.audio?.mode === "native" && s.voiceover === "")).toBe(true);
+    expect(r.spec.scenes[0]!.deterministic?.kind).toBe("lower_third");
+    for (const g of r.scene_guidance) expect(g.footage_example, g.scene_id).toMatchObject({ in_sec: 0, fit: "cover" });
+    expect(r.notes.join(" ")).toMatch(/voice\.mode "native"/);
+    expect(r.notes.join(" ")).toMatch(/footage scenes/);
+  });
+
+  it("aesthetic-broll uses the bed per scene; silent-vlog keeps native sound", async () => {
+    const root = await exampleProject("scaffold-broll", { brief: null });
+    const b = await scaffoldSpec(root, templatesDir, { template_id: "aesthetic-broll" });
+    expect(b.spec.voice.mode).toBe("none");
+    expect(b.spec.audio?.music?.file).toBe("bundled:lofi");
+    expect(b.spec.scenes.every((s) => s.audio?.mode === "music")).toBe(true);
+    expect(b.rules.join(" ")).toMatch(/beat_sync/);
+    const v = await scaffoldSpec(root, templatesDir, { template_id: "silent-vlog" });
+    expect(v.spec.audio).toBeUndefined();
+    expect(v.spec.scenes.every((s) => s.audio?.mode === "native")).toBe(true);
+    expect(v.notes.join(" ")).not.toMatch(/no music bed/);
   });
 });

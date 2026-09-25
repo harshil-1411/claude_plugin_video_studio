@@ -1,6 +1,7 @@
 import type { SourceKind } from "@video-studio/schema";
 import { docxExtractor } from "./docx.js";
 import { markdownExtractor } from "./markdown.js";
+import { mediaExtractor } from "./media.js";
 import { pdfExtractor } from "./pdf.js";
 import { pptxExtractor } from "./pptx.js";
 import { type FetchRepo, createRepoExtractor, repoExtractor } from "./repo.js";
@@ -10,7 +11,7 @@ import type { Extractor } from "./types.js";
 
 export type ExtractorRegistry = Partial<Record<SourceKind, Extractor>>;
 
-/** Default registry, keyed by SourceKind. `video` has no extractor yet. */
+/** Default registry, keyed by SourceKind. */
 export const extractors = {
   text: textExtractor,
   markdown: markdownExtractor,
@@ -19,6 +20,8 @@ export const extractors = {
   docx: docxExtractor,
   pptx: pptxExtractor,
   repo: repoExtractor,
+  video: mediaExtractor,
+  audio: mediaExtractor,
 } as const satisfies ExtractorRegistry;
 
 export interface ExtractorRegistryOptions {

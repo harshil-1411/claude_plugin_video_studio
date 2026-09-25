@@ -1,0 +1,46 @@
+# Archetype: long, calm takes with natural sound (optionally a soft bed under it).
+schema_version: "1.0"
+id: ambient-slice-of-life
+name: Ambient slice of life
+description: A few long, quiet takes - a street, a window, a workshop - with their natural sound, and at most a line of text. An optional soft music bed plays under the native sound (audio.mode mix).
+goals: [promote, announce, educate]
+platforms: [instagram_reels, tiktok, youtube_shorts, linkedin]
+default_aspect_ratio: "9:16"
+default_duration_sec: 30
+duration_range: { min_sec: 15, max_sec: 60 }
+pacing: { avg_shot_sec: 7, max_words_per_sec: 2.5 }
+caption_preset: minimal
+voice_mode: none
+default_style: minimal
+beats:
+  - purpose: hook
+    share: 0.2
+    guidance: A calm establishing take with one short line of typography (a place or a feeling).
+    suggested_visual_strategy: user_asset
+    suggested_deterministic_kind: typography
+  - purpose: story
+    share: 0.25
+    guidance: A long take where something small happens; let it play.
+    suggested_visual_strategy: user_asset
+  - purpose: story
+    share: 0.2
+    guidance: A second long take, closer or from another angle.
+    suggested_visual_strategy: user_asset
+  - purpose: payoff
+    share: 0.15
+    guidance: The quietest moment - light changing, steam rising - held without text.
+    suggested_visual_strategy: user_asset
+    optional: true
+  - purpose: end_card
+    share: 0.2
+    guidance: A still, wide last take with a quiet handle or name as typography.
+    suggested_visual_strategy: user_asset
+    suggested_deterministic_kind: typography
+hook_mechanisms: [story, curiosity_gap, pattern_interrupt]
+rules:
+  - "voice.mode is none: voiceover stays empty; captions off."
+  - "Takes run 5–10 s (up to 15 s); no fast cuts. Use speed 1."
+  - "audio.mode native for natural sound, or mix with a soft bed (audio.music bundled:ambient, volume_db about -24) - the bed never covers the ambience."
+  - "Long crossfades between takes (audio.crossfade_ms 400–800)."
+  - "At most one line of text per scene, on two or three scenes."
+  - CTA (the end card) must be an allowed brand CTA if a brand profile is present.

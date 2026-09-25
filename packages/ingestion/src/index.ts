@@ -8,6 +8,7 @@ export * from "./text.js";
 export * from "./markdown.js";
 export * from "./url.js";
 export * from "./repo.js";
+export * from "./media.js";
 export * from "./classify.js";
 export * from "./builder.js";
 export * from "./detect.js";

@@ -79,7 +79,7 @@ export function splitSentences(text: string): string[] {
   return out;
 }
 
-function deriveClaims(evidence: readonly EvidenceSpan[], max: number): Claim[] {
+export function deriveClaims(evidence: readonly EvidenceSpan[], max: number): Claim[] {
   const claims: Claim[] = [];
   const byText = new Map<string, Claim>();
   for (const span of evidence) {
@@ -198,6 +198,11 @@ export function buildContentIR(parts: readonly ExtractedSource[], opts: BuildOpt
       if (!remap.has(span.ref)) remap.set(span.ref, ref);
       ir.evidence.push({ ref, source_id: sourceId, text: span.text, locator: span.locator });
     }
+    const firstAsset = ir.assets.length;
+    const localIds = new Map<string, string>();
+    part.assets.forEach((a, k) => {
+      if (a.local_id) localIds.set(a.local_id, `asset-${firstAsset + k + 1}`);
+    });
     for (const a of part.assets) {
       ir.assets.push({
         id: `asset-${ir.assets.length + 1}`,
@@ -205,6 +210,22 @@ export function buildContentIR(parts: readonly ExtractedSource[], opts: BuildOpt
         path: a.path,
         sha256: a.sha256,
         ...(a.source_ref ? { source_ref: remap.get(a.source_ref) ?? a.source_ref } : {}),
+        ...(a.media
+          ? {
+              media: {
+                ...a.media,
+                ...(a.media.shots
+                  ? {
+                      shots: a.media.shots.map((s) => {
+                        const { keyframe, ...rest } = s;
+                        const id = keyframe ? localIds.get(keyframe) : undefined;
+                        return id ? { ...rest, keyframe: id } : rest;
+                      }),
+                    }
+                  : {}),
+              },
+            }
+          : {}),
       });
     }
     for (const w of part.warnings) ir.warnings.push({ ...w, source_id: sourceId });
@@ -219,6 +240,7 @@ export function buildContentIR(parts: readonly ExtractedSource[], opts: BuildOpt
     const hints = part.classificationHints;
     classifications.push({
       ...classification,
+      contains_likeness: classification.contains_likeness || hints?.contains_likeness === true,
       contains_secrets: classification.contains_secrets || hints?.contains_secrets === true,
       contains_pii: classification.contains_pii || hints?.contains_pii === true,
       data_class: maxDataClass(

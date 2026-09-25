@@ -135,7 +135,7 @@
             "type": "string"
           },
           "source_ref": {
-            "pattern": "^(?:text|markdown|url|pdf|docx|pptx|repo|video):\\S+$",
+            "pattern": "^(?:text|markdown|url|pdf|docx|pptx|repo|video|audio):\\S+$",
             "type": "string"
           }
         },
@@ -156,7 +156,7 @@
           "evidence_refs": {
             "description": "Evidence spans supporting this claim.",
             "items": {
-              "pattern": "^(?:text|markdown|url|pdf|docx|pptx|repo|video):\\S+$",
+              "pattern": "^(?:text|markdown|url|pdf|docx|pptx|repo|video|audio):\\S+$",
               "type": "string"
             },
             "type": "array"
@@ -242,7 +242,7 @@
           },
           "evidence_refs": {
             "items": {
-              "pattern": "^(?:text|markdown|url|pdf|docx|pptx|repo|video):\\S+$",
+              "pattern": "^(?:text|markdown|url|pdf|docx|pptx|repo|video|audio):\\S+$",
               "type": "string"
             },
             "type": "array"
@@ -333,7 +333,7 @@
           },
           "ref": {
             "description": "Stable source_ref, unique within the ContentIR.",
-            "pattern": "^(?:text|markdown|url|pdf|docx|pptx|repo|video):\\S+$",
+            "pattern": "^(?:text|markdown|url|pdf|docx|pptx|repo|video|audio):\\S+$",
             "type": "string"
           },
           "source_id": {

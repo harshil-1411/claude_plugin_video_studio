@@ -1,0 +1,44 @@
+# Archetype: close-up loops with crisp native sound, no text.
+schema_version: "1.0"
+id: oddly-satisfying
+name: Oddly satisfying
+description: Close-up, repetitive, tactile clips (cutting, pouring, sorting, machines) with their own crisp sound and no text at all. Short seamless loops; the last shot leads back into the first so the reel replays.
+goals: [promote, announce, launch]
+platforms: [instagram_reels, tiktok, youtube_shorts]
+default_aspect_ratio: "9:16"
+default_duration_sec: 12
+duration_range: { min_sec: 6, max_sec: 30 }
+pacing: { avg_shot_sec: 2.5, max_words_per_sec: 3.0 }
+caption_preset: minimal
+voice_mode: none
+default_style: minimal
+beats:
+  - purpose: hook
+    share: 0.2
+    guidance: The most satisfying motion starts on the first frame - no build-up, no text.
+    suggested_visual_strategy: user_asset
+  - purpose: demo
+    share: 0.25
+    guidance: A second close-up of the same process from another angle.
+    suggested_visual_strategy: user_asset
+  - purpose: reveal
+    share: 0.2
+    guidance: The payoff - the cut, the fill, the perfect fit - at normal speed or slightly slowed.
+    suggested_visual_strategy: user_asset
+  - purpose: payoff
+    share: 0.15
+    guidance: The finished result held for a moment, still close up; optional for very short cuts.
+    suggested_visual_strategy: user_asset
+    optional: true
+  - purpose: end_card
+    share: 0.2
+    guidance: A clip that ends where the hook begins, so the loop is seamless.
+    suggested_visual_strategy: user_asset
+hook_mechanisms: [pattern_interrupt, curiosity_gap, demo]
+rules:
+  - "voice.mode is none and there is no on-screen text; captions off."
+  - "Every scene is footage with fit cover, tight on the action, and audio.mode native (crisp sound; raise native_db a few dB if it's quiet)."
+  - "Use loop: true on clips that repeat cleanly; keep speed 1 (sound pitch shifts at other speeds)."
+  - "Crossfades are very short (≤ 80 ms) or none: hard cuts on the motion feel best."
+  - "The last scene leads back into the first (purpose end_card here works as the loop point)."
+  - CTA lives in the post copy, not on screen; if a brand profile exists, use an allowed brand CTA there.

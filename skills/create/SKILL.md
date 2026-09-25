@@ -18,6 +18,11 @@ Split what the user wrote into **inputs** and **creative direction**:
 - **Inputs**: absolute or relative file paths, directories (a repo), and
   http(s) URLs. Resolve paths to absolute. For a GitHub URL, ask the user to
   clone it locally (`git clone --depth 1 <url>`) and use the folder.
+  **Video files and folders of clips** are inputs too: ingest them (each
+  clip becomes a ContentIR video asset), then plan with a footage archetype
+  (`talking-head` for someone speaking to camera, `aesthetic-broll` for
+  mood clips on music, `silent-vlog`, `oddly-satisfying`,
+  `ambient-slice-of-life`). A music file the user gives becomes the bed.
 - **Pasted text**: if there is no path or URL but there is substantial
   content (notes, an article), that text itself is the input.
 - **Creative direction**: everything else, e.g. "30-second reel",

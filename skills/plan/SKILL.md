@@ -83,9 +83,15 @@ share of duration, guidance), pacing and rules. Beats come before scenes.
 | Customer/project results with a quote | `case-study` |
 | A transformation (old way vs new way) | `before-after` |
 | No narration: text cards on music, incl. a music-only product demo | `text-over-music` |
+| Someone speaking to camera (interview, founder clip); speech is in the footage | `talking-head` |
+| The user's mood clips cut on the beat of a music bed | `aesthetic-broll` |
+| Daily-life clips with their own sound, a few words of text | `silent-vlog` |
+| Close-up, tactile loops, crisp sound, no text | `oddly-satisfying` |
+| A few long, calm takes with natural sound (optional soft bed) | `ambient-slice-of-life` |
 
-A presenter/talking-head video needs footage and is not available yet.
-Pick `text-over-music` when the user asks for no voice, music only, or
+The five footage archetypes need ingested video (ContentIR assets of kind
+`video`, or `image` for stills); `talking-head` also needs the clip's
+transcript (captions come from it). Pick `text-over-music` when the user asks for no voice, music only, or
 "text on screen"; any other template can also run without voice by passing
 `voice_mode: "none"` to `spec_scaffold`.
 
@@ -128,6 +134,25 @@ points). Call `brief_validate {project_dir}` and fix every error before going on
    - With `voice.mode: "none"`: every `voiceover` stays `""`, words go on
      screen within each scene's `word_budget`, numbers still need
      `claim_refs` (`references/script-writing.md`, "No voiceover").
+   - **Footage scenes** (`user_asset`, or `screen_capture` for recordings):
+     fill `footage {asset, in_sec, out_sec?, fit?, focus?, speed?, loop?}`
+     from the ContentIR's video assets (start from the scene guidance's
+     `footage_example`); spans stay inside the asset's `media.duration_sec`.
+     `fit`: `cover` (crop, default; `focus` picks the crop centre),
+     `contain` (letterbox), `blur_pad` (blurred copy behind a landscape
+     clip). A clip shorter than its scene holds its last frame, or loops with
+     `loop: true`. Only `lower_third`, `kinetic_text`, `typography`, `quote`
+     and `stat` are drawn over footage.
+   - **Scene sound** (`audio {mode, native_db?, crossfade_ms?}`): `native`
+     (the clip's own sound), `mix` (clip sound under the music bed),
+     `music` (bed only), `mute`. `sfx: [{file, at_sec, volume_db?, license?}]`
+     adds one-shot sound effects from project files the user supplied.
+   - With `voice.mode: "native"` (talking head): every `voiceover` stays
+     `""`; pick spans on sentence boundaries from the asset transcript;
+     captions come from it automatically.
+   - `audio.beat_sync {enabled: true, tolerance_ms?}` (music-led footage
+     reels): the render moves cuts onto beats of the bed (±250 ms by
+     default) and reports it as timing adjustments; the spec is unchanged.
    - `voiceover` written for the ear: short sentences, contractions, no
      parentheses, spell out symbols. Duration ≈ words ÷ 2.3-2.8 (+0.3 s
      breath). Scene 1 is the chosen hook, verbatim or nearly.

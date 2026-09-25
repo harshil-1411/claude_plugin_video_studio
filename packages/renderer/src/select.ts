@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { canonicalJson, ensureDir, readJson, sha256Hex, writeJsonAtomic } from "@video-studio/core";
 import type { LayoutZones } from "@video-studio/platforms";
 import type { DeterministicKind, Scene, TextBox, VideoSpec } from "@video-studio/schema";
-import type { Availability, RenderTarget, SceneRenderer, VisualTokens } from "./types.js";
+import type { Availability, RenderTarget, SceneRenderRequest, SceneRenderer, VisualTokens } from "./types.js";
+import { createFootageRenderer } from "./footage.js";
 import { LAYOUT_VERSION } from "./text-layout.js";
 
 export type RendererPreference = "auto" | "hyperframes" | "ffmpeg";
@@ -118,7 +119,16 @@ export interface RenderScenesOptions {
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   onScene?: (entry: SceneRenderEntry) => void;
+  /**
+   * Resolved footage per scene id, for scenes with `footage`: the asset file, its hash and probe,
+   * or why it could not be resolved (such scenes become placeholders with that reason).
+   */
+  footage?: ReadonlyMap<string, ResolvedFootage | { error: string }>;
+  /** Renderer for footage scenes. Default: a new {@link createFootageRenderer}. */
+  footageRenderer?: SceneRenderer;
 }
+
+export type ResolvedFootage = NonNullable<SceneRenderRequest["footage"]>;
 
 export interface RenderScenesResult {
   scenes: SceneRenderEntry[];
@@ -137,7 +147,7 @@ export interface SceneSidecar {
   text_boxes?: TextBox[];
 }
 
-export const PENDING_REASON = "provider rendering arrives in Phase 4";
+export const PENDING_REASON = "video providers (generated video, avatars) arrive in Phase 7; until then this is a placeholder card";
 
 /** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version. */
 export function sceneCacheKey(
@@ -147,9 +157,21 @@ export function sceneCacheKey(
   renderer: Pick<SceneRenderer, "id" | "version">,
   placeholder = false,
   zones?: LayoutZones,
+  footage?: { sha256: string; duration_sec?: number },
 ): string {
   return sha256Hex(
-    canonicalJson({ v: 1, layout: LAYOUT_VERSION, scene, tokens, target, ...(zones ? { zones } : {}), renderer: { id: renderer.id, version: renderer.version }, placeholder }),
+    canonicalJson({
+      v: 1,
+      layout: LAYOUT_VERSION,
+      scene,
+      tokens,
+      target,
+      ...(zones ? { zones } : {}),
+      renderer: { id: renderer.id, version: renderer.version },
+      placeholder,
+      // The footage params (in/out, fit, focus, speed, loop) are in `scene.footage`; the file is keyed by its hash.
+      ...(footage ? { footage } : {}),
+    }),
   );
 }
 
@@ -195,25 +217,38 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
   const scenes = o.only ? spec.scenes.filter((s) => o.only!.includes(s.id)) : spec.scenes;
   const results: SceneRenderEntry[] = new Array(scenes.length);
 
+  let footageRenderer: SceneRenderer | undefined = o.footageRenderer;
   const renderOne = async (orig: Scene): Promise<SceneRenderEntry> => {
-    const deterministic = orig.visual_strategy === "motion_graphic" && orig.deterministic !== undefined;
-    if (!deterministic && !o.placeholder) {
-      const reason =
-        orig.visual_strategy === "motion_graphic" ? "motion_graphic scene has no deterministic {kind, props}" : `${orig.visual_strategy}: ${PENDING_REASON}`;
+    // Footage scenes render from the asset (any strategy); unresolved footage becomes a placeholder.
+    const fr = orig.footage ? o.footage?.get(orig.id) : undefined;
+    const footage = fr && !("error" in fr) ? fr : undefined;
+    const footageError = orig.footage && !footage ? `footage asset "${orig.footage.asset}": ${fr && "error" in fr ? fr.error : "not resolved"}` : undefined;
+    const deterministic = !orig.footage && orig.visual_strategy === "motion_graphic" && orig.deterministic !== undefined;
+    const pendingReason = footageError ?? `${orig.visual_strategy}: ${PENDING_REASON}`;
+    if (!footage && !deterministic && !o.placeholder) {
+      const reason = footageError ?? (orig.visual_strategy === "motion_graphic" ? "motion_graphic scene has no deterministic {kind, props}" : pendingReason);
       return { scene_id: orig.id, status: "pending", reason, warnings: [] };
     }
-    const placeholder = !deterministic;
+    const placeholder = !footage && !deterministic;
     const scene = placeholder ? placeholderScene(orig) : orig;
-    const kind = scene.deterministic!.kind;
-    const sel = await selectRenderer(kind, o.renderers, env, placeholder ? "ffmpeg" : (o.preference ?? "auto"), cache);
-    if (!sel.renderer) {
-      return { scene_id: orig.id, status: placeholder ? "pending" : "failed", reason: sel.reason, warnings: [] };
+    let r: SceneRenderer;
+    let selReason: string;
+    if (footage) {
+      footageRenderer ??= createFootageRenderer();
+      r = footageRenderer;
+      selReason = `footage: ${r.id}`;
+    } else {
+      const sel = await selectRenderer(scene.deterministic!.kind, o.renderers, env, placeholder ? "ffmpeg" : (o.preference ?? "auto"), cache);
+      if (!sel.renderer) {
+        return { scene_id: orig.id, status: placeholder ? "pending" : "failed", reason: placeholder && footageError ? `${footageError}; ${sel.reason}` : sel.reason, warnings: [] };
+      }
+      r = sel.renderer;
+      selReason = sel.reason;
     }
-    const r = sel.renderer;
-    const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones);
+    const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? { sha256: footage.sha256, duration_sec: footage.media.duration_sec } : undefined);
     const out = join(dir, `${orig.id}.mp4`);
     const sidecarPath = join(dir, `${orig.id}.json`);
-    const base = { scene_id: orig.id, renderer: r.id, renderer_version: r.version, cache_key: key, ...(placeholder ? { placeholder: true, reason: `${orig.visual_strategy}: ${PENDING_REASON}` } : {}) };
+    const base = { scene_id: orig.id, renderer: r.id, renderer_version: r.version, cache_key: key, ...(placeholder ? { placeholder: true, reason: pendingReason } : {}) };
     if (!o.force) {
       const sc = await readSidecar(sidecarPath);
       if (sc && sc.cache_key === key && (await fileExists(out))) {
@@ -231,7 +266,7 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
     const tmp = join(dir, `.${orig.id}.${process.pid}.tmp.mp4`);
     try {
       const res = await r.render(
-        { scene, target: o.target, tokens: o.tokens, out_path: tmp, project_dir: o.project_dir, ...(o.zones ? { zones: o.zones } : {}) },
+        { scene, target: o.target, tokens: o.tokens, out_path: tmp, project_dir: o.project_dir, ...(o.zones ? { zones: o.zones } : {}), ...(footage ? { footage } : {}) },
         { signal: o.signal },
       );
       await rename(tmp, out);
@@ -257,7 +292,7 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
     } catch (err) {
       await rm(tmp, { force: true });
       if (o.signal?.aborted) throw err;
-      return { ...base, status: "failed", reason: `${sel.reason}; render failed: ${err instanceof Error ? err.message : String(err)}`, warnings: [] };
+      return { ...base, status: "failed", reason: `${selReason}; render failed: ${err instanceof Error ? err.message : String(err)}`, warnings: [] };
     }
   };
 

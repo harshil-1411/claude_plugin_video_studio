@@ -19,6 +19,12 @@ const EXTENSION_KINDS: Record<string, SourceKind> = {
   ".webm": "video",
   ".mkv": "video",
   ".m4v": "video",
+  ".mp3": "audio",
+  ".wav": "audio",
+  ".m4a": "audio",
+  ".aac": "audio",
+  ".flac": "audio",
+  ".ogg": "audio",
 };
 
 /** `https://github.com/<owner>/<repo>` optionally followed by `.git`, `/`, `/tree/<ref>…`. */

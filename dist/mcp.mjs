@@ -7,7 +7,7 @@ import path, { basename, delimiter, dirname, extname, isAbsolute, join, normaliz
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import os, { homedir, platform, tmpdir } from "node:os";
 import { pipeline } from "node:stream/promises";
-import { Transform } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { DatabaseSync } from "node:sqlite";
 import perf_hooks from "node:perf_hooks";
 import tty from "node:tty";
@@ -229077,6 +229077,2561 @@ function createRepoExtractor(options = {}) {
 }
 /** Default repo extractor: local directories only. */
 const repoExtractor = createRepoExtractor();
+//#endregion
+//#region ../media/dist/ffmpeg.js
+async function isExecutableFile(path) {
+	try {
+		await access(path, constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+function defaultLocatorDeps(env = process.env) {
+	return {
+		env,
+		platform: process.platform,
+		isExecutable: isExecutableFile
+	};
+}
+/** A value substituted from an unset `${user_config.X}` may arrive empty or as the literal placeholder. */
+function hasEnvValue(v) {
+	if (!v) return false;
+	const t = v.trim();
+	return t.length > 0 && !/^\$\{[^}]*\}$/.test(t);
+}
+/** Look `name` up on PATH. */
+async function which$1(name, deps) {
+	const pathVar = deps.env.PATH ?? deps.env.Path ?? "";
+	const sep = deps.platform === "win32" ? ";" : delimiter;
+	const exts = deps.platform === "win32" ? [
+		"",
+		".exe",
+		".cmd"
+	] : [""];
+	for (const dir of pathVar.split(sep)) {
+		if (!dir) continue;
+		for (const ext of exts) {
+			const candidate = join(dir, name + ext);
+			if (await deps.isExecutable(candidate)) return candidate;
+		}
+	}
+	return null;
+}
+const FF_ENV_VAR = {
+	ffmpeg: "FFMPEG_PATH",
+	ffprobe: "FFPROBE_PATH"
+};
+/** Find ffmpeg/ffprobe: the env override first (it must be executable), then PATH. Never ffmpeg-static. */
+async function locateFfTool(tool, deps) {
+	const envVar = FF_ENV_VAR[tool];
+	const override = deps.env[envVar];
+	if (hasEnvValue(override)) return await deps.isExecutable(override) ? {
+		ok: true,
+		path: override,
+		source: envVar
+	} : {
+		ok: false,
+		reason: "bad_override",
+		envVar,
+		override
+	};
+	const path = await which$1(tool, deps);
+	return path ? {
+		ok: true,
+		path,
+		source: "PATH"
+	} : {
+		ok: false,
+		reason: "not_found",
+		envVar
+	};
+}
+var MediaToolError = class extends Error {
+	fix;
+	constructor(message, fix) {
+		super(message);
+		this.fix = fix;
+		this.name = "MediaToolError";
+	}
+};
+/**
+* Resolve both binaries (FFMPEG_PATH/FFPROBE_PATH, then PATH). Throws `MediaToolError`
+* with a fix when either is missing. Does not run them; `doctor` does the deeper checks.
+*/
+async function resolveFfmpeg(env = process.env, deps) {
+	const d = {
+		...defaultLocatorDeps(env),
+		...deps,
+		env
+	};
+	const out = {};
+	for (const tool of ["ffmpeg", "ffprobe"]) {
+		const r = await locateFfTool(tool, d);
+		if (!r.ok) throw r.reason === "bad_override" ? new MediaToolError(`${r.envVar} is set to ${r.override}, which is not an executable file`, `Point ${r.envVar} at a working ${tool} binary or unset it.`) : new MediaToolError(`${tool} not found on PATH`, `Install FFmpeg (macOS: \`brew install ffmpeg\`; Debian/Ubuntu: \`sudo apt install ffmpeg\`) or set ${r.envVar}.`);
+		out[tool] = r.path;
+	}
+	return out;
+}
+let defaultTools;
+/** Tools from `opts.tools`, else resolved once from process.env (re-resolved if the relevant env changes). */
+function getTools(tools) {
+	if (tools) return Promise.resolve(tools);
+	const e = process.env;
+	const key = `${e.FFMPEG_PATH ?? ""}\0${e.FFPROBE_PATH ?? ""}\0${e.PATH ?? ""}`;
+	if (!defaultTools || defaultTools.key !== key) {
+		const p = resolveFfmpeg(e);
+		p.catch(() => {
+			if (defaultTools?.tools === p) defaultTools = void 0;
+		});
+		defaultTools = {
+			key,
+			tools: p
+		};
+	}
+	return defaultTools.tools;
+}
+var FfmpegError = class extends Error {
+	bin;
+	args;
+	exitCode;
+	stderrTail;
+	constructor(message, bin, args, exitCode, stderrTail) {
+		super(message);
+		this.bin = bin;
+		this.args = args;
+		this.exitCode = exitCode;
+		this.stderrTail = stderrTail;
+		this.name = "FfmpegError";
+	}
+};
+const TAIL_BYTES = 16384;
+const MAX_KEEP = 67108864;
+const DEFAULT_TIMEOUT = 18e5;
+/** Spawn a binary with an argv array (never a shell) and collect output. */
+function runProcess(bin, args, opts = {}) {
+	return new Promise((resolve, reject) => {
+		if (opts.signal?.aborted) {
+			reject(new FfmpegError(`${bin} aborted before start`, bin, args, null, ""));
+			return;
+		}
+		const child = spawn(bin, args, {
+			stdio: [
+				"ignore",
+				"pipe",
+				"pipe"
+			],
+			windowsHide: true,
+			cwd: opts.cwd
+		});
+		let stderr = "";
+		let stdout = "";
+		let lineBuf = "";
+		let killedFor = null;
+		const keep = opts.keepStderr ? MAX_KEEP : TAIL_BYTES * 4;
+		child.stderr.setEncoding("utf8");
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk;
+			if (stderr.length > keep) stderr = stderr.slice(stderr.length - (opts.keepStderr ? MAX_KEEP : TAIL_BYTES));
+		});
+		child.stdout.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => {
+			if (opts.captureStdout) stdout += chunk;
+			if (opts.onStdoutLine) {
+				lineBuf += chunk;
+				let i;
+				while ((i = lineBuf.indexOf("\n")) >= 0) {
+					opts.onStdoutLine(lineBuf.slice(0, i).trim());
+					lineBuf = lineBuf.slice(i + 1);
+				}
+			}
+		});
+		const kill = (why) => {
+			if (killedFor) return;
+			killedFor = why;
+			child.kill("SIGTERM");
+			setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 2e3).unref();
+		};
+		const timer = setTimeout(() => kill(`timed out after ${opts.timeoutMs ?? DEFAULT_TIMEOUT} ms`), opts.timeoutMs ?? DEFAULT_TIMEOUT);
+		timer.unref();
+		const onAbort = () => kill("aborted");
+		opts.signal?.addEventListener("abort", onAbort, { once: true });
+		const done = () => {
+			clearTimeout(timer);
+			opts.signal?.removeEventListener("abort", onAbort);
+		};
+		child.on("error", (err) => {
+			done();
+			reject(new FfmpegError(`could not start ${bin}: ${err.message}`, bin, args, null, ""));
+		});
+		child.on("close", (code) => {
+			done();
+			if (code === 0 && !killedFor) {
+				resolve({
+					stdout,
+					stderr
+				});
+				return;
+			}
+			const tail = stderr.slice(-16384).trim();
+			const lastLines = tail.split("\n").slice(-6).join("\n");
+			const why = killedFor ?? `exited with code ${code}`;
+			reject(new FfmpegError(`${bin.split(/[\\/]/).pop()} ${why}${lastLines ? `:\n${lastLines}` : ""}`, bin, args, code, tail));
+		});
+	});
+}
+/** Run ffmpeg with `args` (no shell). Always adds `-hide_banner -nostdin -nostats`. */
+async function runFfmpeg(args, opts = {}) {
+	const { ffmpeg } = await getTools(opts.tools);
+	const pre = [
+		"-hide_banner",
+		"-nostdin",
+		"-nostats"
+	];
+	if (!opts.onProgress) return runProcess(ffmpeg, [...pre, ...args], opts);
+	const onProgress = opts.onProgress;
+	let block = {};
+	return runProcess(ffmpeg, [
+		...pre,
+		"-progress",
+		"pipe:1",
+		...args
+	], {
+		...opts,
+		onStdoutLine: (line) => {
+			const eq = line.indexOf("=");
+			if (eq <= 0) return;
+			const k = line.slice(0, eq);
+			const v = line.slice(eq + 1);
+			block[k] = v;
+			if (k === "progress") {
+				onProgress(parseProgressBlock(block));
+				block = {};
+			}
+		}
+	});
+}
+/** Parse one `-progress` key=value block. (`out_time_ms` is in microseconds despite its name.) */
+function parseProgressBlock(b) {
+	const us = Number(b.out_time_us ?? b.out_time_ms);
+	const p = {
+		out_time_ms: Number.isFinite(us) ? Math.max(0, Math.round(us / 1e3)) : 0,
+		done: b.progress === "end"
+	};
+	if (b.frame !== void 0 && Number.isFinite(Number(b.frame))) p.frame = Number(b.frame);
+	if (b.fps !== void 0 && Number.isFinite(Number(b.fps))) p.fps = Number(b.fps);
+	if (b.speed) p.speed = b.speed.trim();
+	return p;
+}
+function parseRate(r) {
+	if (!r) return null;
+	const [n, d] = r.split("/").map(Number);
+	if (!n || !Number.isFinite(n)) return null;
+	const v = d ? n / d : n;
+	return Number.isFinite(v) && v > 0 ? Math.round(v * 1e3) / 1e3 : null;
+}
+function parseProbeJson(json) {
+	const data = JSON.parse(json);
+	const streams = data.streams ?? [];
+	const v = streams.find((s) => s.codec_type === "video" && !s.disposition?.attached_pic);
+	const a = streams.find((s) => s.codec_type === "audio");
+	const dur = Number(data.format?.duration ?? v?.duration ?? a?.duration ?? 0);
+	return {
+		duration_s: Number.isFinite(dur) ? dur : 0,
+		width: v?.width ?? null,
+		height: v?.height ?? null,
+		fps: v ? parseRate(v.avg_frame_rate) ?? parseRate(v.r_frame_rate) : null,
+		video_codec: v?.codec_name ?? null,
+		audio_codec: a?.codec_name ?? null,
+		sample_rate: a?.sample_rate ? Number(a.sample_rate) : null,
+		channels: a?.channels ?? null,
+		has_audio: Boolean(a),
+		has_video: Boolean(v),
+		pix_fmt: v?.pix_fmt ?? null,
+		format_name: data.format?.format_name ?? null
+	};
+}
+/** ffprobe a media file. */
+async function ffprobe(path, opts = {}) {
+	const { ffprobe: bin } = await getTools(opts.tools);
+	const { stdout } = await runProcess(bin, [
+		"-v",
+		"error",
+		"-print_format",
+		"json",
+		"-show_streams",
+		"-show_format",
+		"--",
+		path
+	], {
+		...opts,
+		timeoutMs: opts.timeoutMs ?? 6e4,
+		captureStdout: true
+	});
+	return parseProbeJson(stdout);
+}
+/** `ffmpeg -buildconf` feature flags. */
+function parseBuildconf(text) {
+	return {
+		libass: /--enable-libass\b/.test(text),
+		libx264: /--enable-libx264\b/.test(text)
+	};
+}
+async function ffmpegFeatures(opts = {}) {
+	const { ffmpeg } = await getTools(opts.tools);
+	const [conf, ver] = await Promise.all([runProcess(ffmpeg, ["-hide_banner", "-buildconf"], {
+		timeoutMs: 1e4,
+		captureStdout: true
+	}), runProcess(ffmpeg, ["-hide_banner", "-version"], {
+		timeoutMs: 1e4,
+		captureStdout: true
+	})]);
+	const first = ver.stdout.split("\n")[0] ?? "";
+	return {
+		...parseBuildconf(`${conf.stdout}\n${conf.stderr}`),
+		version: /version\s+(\S+)/.exec(first)?.[1] ?? "unknown"
+	};
+}
+/** First level: a value inside `key=value:key=value` filter options (escapes `\ ' :`). */
+function escapeFilterOption(value) {
+	return value.replace(/[\\':]/g, (m) => `\\${m}`);
+}
+/** Second level: a filter description inside a filtergraph (escapes `\ ' [ ] , ;`). */
+function escapeFiltergraph(value) {
+	return value.replace(/[\\'[\],;]/g, (m) => `\\${m}`);
+}
+/**
+* Escape a file path for a filter option such as `subtitles=filename=<here>` when the
+* filter is passed via `-vf`/`-filter_complex` as one argv element (no shell). Both escaping
+* levels apply. On Windows, backslash separators become forward slashes first.
+*/
+function escapeFilterPath(path, platform = process.platform) {
+	return escapeFiltergraph(escapeFilterOption(platform === "win32" ? path.replace(/\\/g, "/") : path));
+}
+/** Join filter chains (each an array of filters, optionally with pads) into a `-filter_complex` string. */
+function filterGraph(chains) {
+	return chains.map((c) => c.join(",")).join(";");
+}
+/** Seconds with millisecond precision, for ffmpeg time options. */
+function secs$1(ms) {
+	return (Math.round(ms) / 1e3).toFixed(3);
+}
+//#endregion
+//#region ../media/dist/audio.js
+const AUDIO_SAMPLE_RATE = 48e3;
+/** Output audio codec args by extension: WAV → 16-bit PCM, anything else → AAC 192k. */
+function audioCodecArgs(out, sampleRate = AUDIO_SAMPLE_RATE) {
+	const ext = extname(out).toLowerCase();
+	if (ext === ".wav") return [
+		"-c:a",
+		"pcm_s16le",
+		"-ar",
+		String(sampleRate)
+	];
+	if (ext === ".flac") return [
+		"-c:a",
+		"flac",
+		"-ar",
+		String(sampleRate)
+	];
+	return [
+		"-c:a",
+		"aac",
+		"-b:a",
+		"192k",
+		"-ar",
+		String(sampleRate)
+	];
+}
+/**
+* Concatenate per-scene audio into one track, sample-exact: each slot is resampled, padded with
+* silence or trimmed to exactly `duration_ms`, and slots without audio become `anullsrc` silence.
+* Output format follows the extension (`.wav` PCM, `.m4a`/`.aac` AAC).
+*/
+async function concatAudio(slots, out, opts = {}) {
+	const sr = opts.sampleRate ?? 48e3;
+	const layout = (opts.channels ?? 2) === 1 ? "mono" : "stereo";
+	const inputs = [];
+	const chains = [];
+	const labels = [];
+	let totalSamples = 0;
+	let nIn = 0;
+	for (const [i, s] of slots.entries()) {
+		if (!Number.isFinite(s.duration_ms) || s.duration_ms < 0) throw new Error(`slot ${i}: invalid duration_ms ${s.duration_ms}`);
+		const samples = Math.round(s.duration_ms * sr / 1e3);
+		if (samples === 0) continue;
+		totalSamples += samples;
+		const label = `[a${i}]`;
+		const fmt = `aformat=sample_fmts=fltp:sample_rates=${sr}:channel_layouts=${layout}`;
+		if (s.path) {
+			inputs.push("-i", s.path);
+			chains.push([
+				`[${nIn}:a:0]aresample=${sr}`,
+				fmt,
+				`apad=whole_len=${samples}`,
+				`atrim=end_sample=${samples}`,
+				`asetpts=N/SR/TB${label}`
+			]);
+			nIn++;
+		} else chains.push([
+			`anullsrc=r=${sr}:cl=${layout}`,
+			fmt,
+			`atrim=end_sample=${samples}`,
+			`asetpts=N/SR/TB${label}`
+		]);
+		labels.push(label);
+	}
+	if (labels.length === 0) throw new Error("concatAudio: total duration is zero");
+	chains.push([`${labels.join("")}concat=n=${labels.length}:v=0:a=1[aout]`]);
+	await runFfmpeg([
+		"-y",
+		...inputs,
+		"-filter_complex",
+		filterGraph(chains),
+		"-map",
+		"[aout]",
+		...audioCodecArgs(out, sr),
+		out
+	], opts);
+	return {
+		path: out,
+		samples: totalSamples,
+		duration_ms: Math.round(totalSamples / sr * 1e3)
+	};
+}
+/** `atempo` filters for a rate in 0.25–4 (each atempo takes 0.5–2). */
+function atempoChain(rate) {
+	if (!(rate > 0) || Math.abs(rate - 1) < 1e-6) return [];
+	const out = [];
+	let r = rate;
+	while (r > 2) {
+		out.push("atempo=2");
+		r /= 2;
+	}
+	while (r < .5) {
+		out.push("atempo=0.5");
+		r /= .5;
+	}
+	out.push(`atempo=${Math.round(r * 1e6) / 1e6}`);
+	return out;
+}
+/**
+* Mix per-scene audio into one track, sample-exact: each slot's layers (voice, native clip sound)
+* are trimmed, re-timed (atempo), gained and mixed, then placed at the slot's start with `adelay`.
+* Crossfades overlap neighbouring slots; one-shots are mixed at their times. The result is exactly
+* the sum of the slot lengths.
+*/
+async function mixSceneAudio(slots, out, opts = {}) {
+	const sr = opts.sampleRate ?? 48e3;
+	const layout = (opts.channels ?? 2) === 1 ? "mono" : "stereo";
+	const fmt = `aformat=sample_fmts=fltp:sample_rates=${sr}:channel_layouts=${layout}`;
+	const toS = (ms) => Math.round(ms * sr / 1e3);
+	const starts = [];
+	let total = 0;
+	for (const [i, s] of slots.entries()) {
+		if (!Number.isFinite(s.duration_ms) || s.duration_ms < 0) throw new Error(`slot ${i}: invalid duration_ms ${s.duration_ms}`);
+		starts.push(total);
+		total += toS(s.duration_ms);
+	}
+	if (total === 0) throw new Error("mixSceneAudio: total duration is zero");
+	const inputs = [];
+	const chains = [];
+	const mixLabels = [];
+	let nIn = 0;
+	const f6 = (n) => String(Math.round(n * 1e6) / 1e6);
+	slots.forEach((s, i) => {
+		const len = toS(s.duration_ms);
+		if (len === 0 || s.layers.length === 0) return;
+		const next = slots[i + 1];
+		const cap = (a, b, x) => Math.min(toS(x), Math.floor(a / 2), Math.floor(b / 2));
+		const fadeIn = i > 0 && s.crossfade_ms ? cap(len, toS(slots[i - 1].duration_ms), s.crossfade_ms) : 0;
+		const tail = next?.crossfade_ms ? cap(len, toS(next.duration_ms), next.crossfade_ms) : 0;
+		const need = len + tail;
+		const layerLabels = [];
+		s.layers.forEach((l, j) => {
+			inputs.push(...l.offset_sec ? ["-ss", f6(l.offset_sec)] : [], "-i", l.path);
+			const lab = `[l${i}_${j}]`;
+			const span = l.span_sec !== void 0 ? Math.max(1, Math.round(l.span_sec * sr)) : void 0;
+			chains.push([
+				`[${nIn}:a:0]aresample=${sr}`,
+				fmt,
+				...span !== void 0 ? [`atrim=end_sample=${span}`, "asetpts=N/SR/TB"] : [],
+				...l.loop && span !== void 0 ? [`aloop=loop=-1:size=${span}`] : [],
+				...atempoChain(l.tempo ?? 1),
+				...l.gain_db ? [`volume=${l.gain_db}dB`] : [],
+				fmt,
+				`apad=whole_len=${need}`,
+				`atrim=end_sample=${need}`,
+				`asetpts=N/SR/TB${lab}`
+			]);
+			layerLabels.push(lab);
+			nIn++;
+		});
+		const lab = `[s${i}]`;
+		const mixed = layerLabels.length > 1 ? [`${layerLabels.join("")}amix=inputs=${layerLabels.length}:duration=longest:normalize=0`] : [`${layerLabels[0]}anull`];
+		chains.push([
+			...mixed,
+			...fadeIn > 0 ? [`afade=t=in:ss=0:ns=${fadeIn}`] : [],
+			...tail > 0 ? [`afade=t=out:ss=${len}:ns=${tail}`] : [],
+			...starts[i] > 0 ? [`adelay=delays=${starts[i]}S:all=1`] : [],
+			`anull${lab}`
+		]);
+		mixLabels.push(lab);
+	});
+	for (const [k, fx] of (opts.sfx ?? []).entries()) {
+		const at = toS(fx.at_ms);
+		if (at >= total) continue;
+		inputs.push("-i", fx.path);
+		const lab = `[fx${k}]`;
+		chains.push([
+			`[${nIn}:a:0]aresample=${sr}`,
+			fmt,
+			...fx.volume_db ? [`volume=${fx.volume_db}dB`] : [],
+			`atrim=end_sample=${total - at}`,
+			"asetpts=N/SR/TB",
+			...at > 0 ? [`adelay=delays=${at}S:all=1`] : [],
+			`anull${lab}`
+		]);
+		mixLabels.push(lab);
+		nIn++;
+	}
+	const bed = "[bed]";
+	chains.push([
+		`anullsrc=r=${sr}:cl=${layout}`,
+		fmt,
+		`atrim=end_sample=${total}`,
+		`asetpts=N/SR/TB${bed}`
+	]);
+	chains.push([
+		`${bed}${mixLabels.join("")}amix=inputs=${mixLabels.length + 1}:duration=first:normalize=0`,
+		`atrim=end_sample=${total}`,
+		"asetpts=N/SR/TB[aout]"
+	]);
+	await runFfmpeg([
+		"-y",
+		...inputs,
+		"-filter_complex",
+		filterGraph(chains),
+		"-map",
+		"[aout]",
+		...audioCodecArgs(out, sr),
+		out
+	], opts);
+	return {
+		path: out,
+		samples: total,
+		duration_ms: Math.round(total / sr * 1e3)
+	};
+}
+/** Defaults for a music bed under narration (spec.audio.music). */
+const MUSIC_DEFAULTS = {
+	volume_db: -18,
+	duck_db: -10,
+	fade_in_ms: 500,
+	fade_out_ms: 1500,
+	ramp_ms: 150
+};
+/** Merge intervals that overlap or sit closer than `gapMs`, sorted by start. */
+function mergeIntervals(intervals, gapMs) {
+	const sorted = intervals.filter((i) => i.end_ms > i.start_ms).map((i) => ({ ...i })).sort((a, b) => a.start_ms - b.start_ms);
+	const out = [];
+	for (const i of sorted) {
+		const last = out[out.length - 1];
+		if (last && i.start_ms - last.end_ms <= gapMs) last.end_ms = Math.max(last.end_ms, i.end_ms);
+		else out.push(i);
+	}
+	return out;
+}
+/**
+* ffmpeg `volume` expression (eval=frame) that is 1 outside speech and `duckGain` inside it, with
+* linear ramps of `rampMs` before and after each interval. Intervals must not overlap (merge first).
+*/
+function duckExpression(speech, duckGain, rampMs = MUSIC_DEFAULTS.ramp_ms) {
+	if (speech.length === 0) return "1";
+	const r = Math.max(1, rampMs) / 1e3;
+	const f = (n) => String(Math.round(n * 1e3) / 1e3);
+	const terms = speech.map((i) => {
+		const a = i.start_ms / 1e3;
+		const b = i.end_ms / 1e3;
+		return `clip(min((t-${f(a - r)})/${f(r)},(${f(b + r)}-t)/${f(r)}),0,1)`;
+	});
+	return `1-${f(1 - duckGain)}*min(1,${terms.join("+")})`;
+}
+/**
+* Mix a looping, faded music bed under the voice (or alone), ducking it over the speech intervals.
+* The result is exactly `duration_ms` long; loudness normalization happens afterwards on the mix.
+*/
+async function mixMusic(input, opts = {}) {
+	const sr = opts.sampleRate ?? 48e3;
+	const m = input.music;
+	const samples = Math.round(input.duration_ms * sr / 1e3);
+	if (samples <= 0) throw new Error("mixMusic: duration is zero");
+	const dur = samples / sr;
+	const fadeIn = Math.min((m.fade_in_ms ?? MUSIC_DEFAULTS.fade_in_ms) / 1e3, dur / 2);
+	const fadeOut = Math.min((m.fade_out_ms ?? MUSIC_DEFAULTS.fade_out_ms) / 1e3, dur / 2);
+	const fmt = `aformat=sample_fmts=fltp:sample_rates=${sr}:channel_layouts=stereo`;
+	const speech = input.voice ? mergeIntervals(input.speech ?? [], 2 * MUSIC_DEFAULTS.ramp_ms) : [];
+	const duckGain = 10 ** ((m.duck_db ?? MUSIC_DEFAULTS.duck_db) / 20);
+	const mute = mergeIntervals(input.mute ?? [], 0);
+	const musicChain = [
+		`[0:a:0]aresample=${sr}`,
+		fmt,
+		`atrim=end_sample=${samples}`,
+		`apad=whole_len=${samples}`,
+		"asetpts=N/SR/TB",
+		`volume=${m.volume_db ?? MUSIC_DEFAULTS.volume_db}dB`,
+		...speech.length ? [`volume='${duckExpression(speech, duckGain)}':eval=frame`] : [],
+		...mute.length ? [`volume='${duckExpression(mute, 0)}':eval=frame`] : [],
+		...fadeIn > 0 ? [`afade=t=in:st=0:d=${fadeIn}`] : [],
+		...fadeOut > 0 ? [`afade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}`] : []
+	];
+	const inputs = [
+		...m.loop ?? true ? ["-stream_loop", "-1"] : [],
+		...m.start_sec ? ["-ss", String(m.start_sec)] : [],
+		"-i",
+		m.path
+	];
+	const chains = [];
+	if (input.voice) {
+		inputs.push("-i", input.voice);
+		chains.push([...musicChain, "anull[m]"]);
+		chains.push([
+			`[1:a:0]aresample=${sr}`,
+			fmt,
+			`apad=whole_len=${samples}`,
+			`atrim=end_sample=${samples}`,
+			"asetpts=N/SR/TB[v]"
+		]);
+		chains.push(["[v][m]amix=inputs=2:duration=first:normalize=0", `atrim=end_sample=${samples}[aout]`]);
+	} else chains.push([...musicChain, "anull[aout]"]);
+	await runFfmpeg([
+		"-y",
+		...inputs,
+		"-filter_complex",
+		filterGraph(chains),
+		"-map",
+		"[aout]",
+		...audioCodecArgs(input.out, sr),
+		input.out
+	], opts);
+	return {
+		path: input.out,
+		duration_ms: Math.round(samples / sr * 1e3)
+	};
+}
+/** Extract the JSON block `loudnorm=print_format=json` writes to stderr. Returns null if absent or non-finite (e.g. digital silence). */
+function parseLoudnormJson(stderr) {
+	const at = stderr.lastIndexOf("[Parsed_loudnorm");
+	const from = at >= 0 ? stderr.indexOf("{", at) : stderr.lastIndexOf("{");
+	if (from < 0) return null;
+	const to = stderr.indexOf("}", from);
+	if (to < 0) return null;
+	try {
+		const raw = JSON.parse(stderr.slice(from, to + 1));
+		const m = {
+			input_i: Number(raw.input_i),
+			input_tp: Number(raw.input_tp),
+			input_lra: Number(raw.input_lra),
+			input_thresh: Number(raw.input_thresh),
+			target_offset: Number(raw.target_offset)
+		};
+		return Object.values(m).every(Number.isFinite) ? m : null;
+	} catch {
+		return null;
+	}
+}
+/**
+* EBU R128 loudness normalization in two passes: measure with `print_format=json`, then apply
+* with the measured values (`linear=true`). Falls back to a single dynamic pass when the
+* measurement cannot be parsed. Video, if any, is stream-copied (unless the output is audio-only).
+*/
+async function loudnorm2pass(input, out, target = {}, opts = {}) {
+	const I = target.I ?? -14;
+	const TP = target.TP ?? -1;
+	const LRA = target.LRA ?? 11;
+	const sr = opts.sampleRate ?? 48e3;
+	const base = `loudnorm=I=${I}:TP=${TP}:LRA=${LRA}`;
+	let measured = null;
+	try {
+		measured = parseLoudnormJson((await runFfmpeg([
+			"-i",
+			input,
+			"-map",
+			"0:a:0",
+			"-af",
+			`${base}:print_format=json`,
+			"-f",
+			"null",
+			"-"
+		], {
+			...opts,
+			onProgress: void 0,
+			keepStderr: true
+		})).stderr);
+	} catch (err) {
+		if (opts.signal?.aborted) throw err;
+		measured = null;
+	}
+	const af = measured ? `${base}:measured_I=${measured.input_i}:measured_TP=${measured.input_tp}:measured_LRA=${measured.input_lra}:measured_thresh=${measured.input_thresh}:offset=${measured.target_offset}:linear=true:print_format=summary` : base;
+	const audioOnly = [
+		".wav",
+		".m4a",
+		".aac",
+		".flac",
+		".mp3"
+	].includes(extname(out).toLowerCase());
+	const maps = audioOnly ? ["-map", "0:a:0"] : [
+		"-map",
+		"0:v?",
+		"-map",
+		"0:a:0",
+		"-c:v",
+		"copy"
+	];
+	const codec = audioOnly ? audioCodecArgs(out, sr) : [
+		"-c:a",
+		"aac",
+		"-b:a",
+		"192k",
+		"-ar",
+		String(sr)
+	];
+	const extra = !audioOnly && extname(out).toLowerCase() === ".mp4" ? ["-movflags", "+faststart"] : [];
+	await runFfmpeg([
+		"-y",
+		"-i",
+		input,
+		...maps,
+		"-af",
+		af,
+		...codec,
+		...extra,
+		out
+	], opts);
+	return {
+		path: out,
+		mode: measured ? "two-pass" : "single-pass",
+		measured
+	};
+}
+/** Parse the `ebur128` summary from stderr. */
+function parseEbur128Summary(stderr) {
+	const at = stderr.lastIndexOf("Summary:");
+	const s = at >= 0 ? stderr.slice(at) : "";
+	const num = (re) => {
+		const m = re.exec(s);
+		if (!m?.[1]) return null;
+		const v = Number(m[1]);
+		return Number.isFinite(v) ? v : null;
+	};
+	return {
+		integrated_lufs: num(/I:\s+(-?[\d.]+|-?inf)\s+LUFS/),
+		lra: num(/LRA:\s+(-?[\d.]+)\s+LU\b/),
+		true_peak_dbtp: num(/Peak:\s+(-?[\d.]+|-?inf)\s+dBFS/)
+	};
+}
+/** Measure integrated loudness / LRA / true peak with `ebur128`. */
+async function measureLoudness(input, opts = {}) {
+	return parseEbur128Summary((await runFfmpeg([
+		"-i",
+		input,
+		"-map",
+		"0:a:0",
+		"-af",
+		"ebur128=peak=true:framelog=quiet",
+		"-f",
+		"null",
+		"-"
+	], {
+		...opts,
+		keepStderr: true
+	})).stderr);
+}
+//#endregion
+//#region ../media/dist/captions.js
+/**
+* Build the global word timeline: offset each scene's words by its start, clamp them to the
+* scene's track duration, sort, drop empty words and remove overlaps (a word ends no later
+* than the next one starts), so karaoke durations are never negative.
+*/
+function buildWordTimeline(scenes) {
+	const out = [];
+	for (const { scene_start_ms, track } of scenes) {
+		const sceneEnd = track.duration_ms > 0 ? scene_start_ms + track.duration_ms : Number.POSITIVE_INFINITY;
+		for (const w of track.words) {
+			const word = w.word.trim();
+			if (!word) continue;
+			const start = Math.min(Math.round(scene_start_ms + w.start_ms), sceneEnd);
+			const end = Math.min(Math.max(Math.round(scene_start_ms + w.end_ms), start), sceneEnd);
+			out.push({
+				word,
+				start_ms: start,
+				end_ms: end,
+				scene_id: track.scene_id
+			});
+		}
+	}
+	out.sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms);
+	for (let i = 0; i + 1 < out.length; i++) {
+		const cur = out[i];
+		const next = out[i + 1];
+		if (cur.end_ms > next.start_ms) cur.end_ms = Math.max(cur.start_ms, next.start_ms);
+	}
+	return out;
+}
+const SENTENCE_END$1 = /[.!?…]["'”’)\]]*$/;
+const CLAUSE_END$1 = /[,;:—–-]["'”’)\]]*$/;
+/** A caption or row may start with these (a clause boundary). */
+const CONJUNCTIONS = new Set("and but or nor so yet because since although though while whereas when whenever where which who whom whose that then unless until if instead".split(" "));
+/** Never end a caption or row on these: they belong to the next word. */
+const DANGLING = new Set("a an the of to in on at by for from with into onto as than my your our their its his her this these those".split(" "));
+const STOPWORDS$1 = new Set("a an and are as at be been being but by can could did do does for from had has have how i if in into is it its just like me more most my no not of on one only or our out over so some such than that the their them then there these they this those to too up us very was we were what when where which while who why will with would you your also about after all any because before both each few here her him his she he own same should through under until again further once off down new get got make made use used way really thing things lot".split(" "));
+const core$1 = (word) => word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+const charsOf = (ws, from, to) => {
+	let n = 0;
+	for (let i = from; i < to; i++) n += Array.from(ws[i].word).length + (i > from ? 1 : 0);
+	return n;
+};
+/** Cost of a break between `ws[i-1]` and `ws[i]` (0 = natural). */
+function breakCost(ws, i) {
+	const prev = ws[i - 1].word;
+	const next = core$1(ws[i].word).toLowerCase();
+	if (SENTENCE_END$1.test(prev) || CLAUSE_END$1.test(prev)) return 0;
+	let c = CONJUNCTIONS.has(next) ? 1 : 4;
+	if (DANGLING.has(core$1(prev).toLowerCase())) c += 3;
+	return c;
+}
+/**
+* Best split of `ws[from..to)` into ≤ maxLines rows of ≤ maxChars (a lone over-long word is
+* allowed): balanced rows, natural breaks, no 1-word orphan row when the caption has 3+ words.
+* Null when the words cannot fit.
+*/
+function planRows(ws, from, to, maxChars, maxLines) {
+	const n = to - from;
+	const rowOk = (a, b) => b - a === 1 || charsOf(ws, a, b) <= maxChars;
+	if (rowOk(from, to)) return {
+		sizes: [n],
+		cost: 0
+	};
+	let best = null;
+	const walk = (start, sizes, cost) => {
+		if (sizes.length === maxLines) return;
+		for (let end = start + 1; end <= to; end++) {
+			if (!rowOk(start, end)) break;
+			const next = [...sizes, end - start];
+			if (end === to) {
+				if (next.length < 2) continue;
+				const lens = next.map((_, k) => {
+					const a = from + next.slice(0, k).reduce((s, x) => s + x, 0);
+					return charsOf(ws, a, a + next[k]);
+				});
+				const imbalance = (Math.max(...lens) - Math.min(...lens)) / maxChars * 3;
+				const orphans = n >= 3 ? next.filter((x) => x === 1).length * 5 : 0;
+				const total = cost + imbalance + orphans + (next.length - 1);
+				if (!best || total < best.cost) best = {
+					sizes: next,
+					cost: total
+				};
+			} else walk(end, next, cost + breakCost(ws, end) * .5);
+		}
+	};
+	walk(from, [], 0);
+	return best;
+}
+/** 1–2 salient words: numbers, acronyms and capitalised terms first, else the longest non-stopword. */
+function pickEmphasis(words, prevWord) {
+	const scored = [];
+	words.forEach((w, i) => {
+		const c = core$1(w.word);
+		if (!c) return;
+		const lower = c.toLowerCase();
+		const sentenceStart = i === 0 ? !prevWord || SENTENCE_END$1.test(prevWord) : SENTENCE_END$1.test(words[i - 1].word);
+		const len = Array.from(c).length;
+		let score = 0;
+		if (/\p{N}/u.test(c)) score = 100 + len;
+		else if (STOPWORDS$1.has(lower)) score = 0;
+		else if (/^\p{Lu}{2,}s?$/u.test(c)) score = 60 + len;
+		else if (/^\p{Lu}/u.test(c) && !sentenceStart) score = 50 + len;
+		else if (len >= 4) score = len;
+		if (score > 0) scored.push({
+			i,
+			score
+		});
+	});
+	scored.sort((a, b) => b.score - a.score || a.i - b.i);
+	const out = scored.slice(0, 1).map((s) => s.i);
+	const second = scored[1];
+	if (second && words.length >= 5 && second.score >= 50) out.push(second.i);
+	return out.sort((a, b) => a - b);
+}
+/**
+* Group words into captions. Hard breaks: scene changes, pauses over `maxGapMs`, sentence ends.
+* Inside a phrase, captions of `minWords`–`maxWords` words that fit `maxLines` rows are chosen
+* to minimise a cost that prefers ~5 words, breaks after punctuation or before a conjunction,
+* and never ends on an article or preposition. Then timing is smoothed: short gaps are held
+* over and each caption stays up at least `minDisplayMs` unless the next one starts sooner.
+*/
+function groupCaptionLines(words, opts = {}) {
+	const minWords = Math.max(1, opts.minWords ?? 3);
+	const maxWords = Math.max(minWords, opts.maxWords ?? 7);
+	const maxChars = Math.max(1, opts.maxChars ?? 32);
+	const maxLines = Math.min(3, Math.max(1, opts.maxLines ?? 2));
+	const maxGap = opts.maxGapMs ?? 600;
+	const sentence = opts.breakOnSentence ?? true;
+	const emphasis = opts.emphasis ?? true;
+	const runs = [];
+	let run = [];
+	for (const w of words) {
+		const prev = run[run.length - 1];
+		if (prev && (w.start_ms - prev.end_ms > maxGap || sentence && SENTENCE_END$1.test(prev.word) || prev.scene_id !== w.scene_id)) {
+			runs.push(run);
+			run = [];
+		}
+		run.push(w);
+	}
+	if (run.length) runs.push(run);
+	const lines = [];
+	for (const ws of runs) {
+		const n = ws.length;
+		const best = [{
+			cost: 0,
+			from: -1,
+			rows: []
+		}];
+		for (let i = 1; i <= n; i++) {
+			let pick;
+			for (let j = i - 1; j >= 0 && i - j <= maxWords; j--) {
+				const prior = best[j];
+				if (!prior || !Number.isFinite(prior.cost)) continue;
+				const rows = planRows(ws, j, i, maxChars, maxLines);
+				if (!rows) continue;
+				const k = i - j;
+				const size = (k < minWords ? 6 * (minWords - k) : 0) + .3 * (k - 5) ** 2;
+				const cost = prior.cost + 3 + size + rows.cost + (i < n ? breakCost(ws, i) : 0);
+				if (!pick || cost < pick.cost) pick = {
+					cost,
+					from: j,
+					rows: rows.sizes
+				};
+			}
+			best[i] = pick ?? {
+				cost: best[i - 1].cost + 100,
+				from: i - 1,
+				rows: [1]
+			};
+		}
+		const cues = [];
+		for (let i = n; i > 0; i = best[i].from) {
+			const { from, rows } = best[i];
+			const cw = ws.slice(from, i);
+			cues.unshift({
+				start_ms: cw[0].start_ms,
+				end_ms: cw[cw.length - 1].end_ms,
+				text: cw.map((w) => w.word).join(" "),
+				words: cw,
+				...rows.length > 1 ? { row_sizes: rows } : {}
+			});
+		}
+		lines.push(...cues);
+	}
+	const minDisplay = opts.minDisplayMs ?? 800;
+	const holdGap = opts.holdGapMs ?? 250;
+	lines.forEach((l, i) => {
+		if (emphasis) {
+			const prev = lines[i - 1]?.words.at(-1)?.word;
+			const e = pickEmphasis(l.words, prev);
+			if (e.length) l.emphasis = e;
+		}
+		const next = lines[i + 1];
+		const limit = Math.min(next ? next.start_ms : Number.POSITIVE_INFINITY, opts.endMs ?? Number.POSITIVE_INFINITY);
+		let end = Math.max(l.end_ms, l.start_ms + minDisplay);
+		if (next && next.start_ms - l.end_ms < holdGap) end = Math.max(end, next.start_ms);
+		l.end_ms = Math.max(l.end_ms, Math.min(end, limit));
+	});
+	return lines;
+}
+/** The caption's display rows (words joined per row). */
+function captionRows(line) {
+	const sizes = line.row_sizes ?? [line.words.length];
+	const rows = [];
+	let at = 0;
+	for (const n of sizes) {
+		rows.push(line.words.slice(at, at + n).map((w) => w.word).join(" "));
+		at += n;
+	}
+	return line.words.length ? rows : [line.text];
+}
+function pad(n, w = 2) {
+	return String(n).padStart(w, "0");
+}
+function hmsParts(ms) {
+	const t = Math.max(0, Math.round(ms));
+	return [
+		Math.floor(t / 36e5),
+		Math.floor(t / 6e4) % 60,
+		Math.floor(t / 1e3) % 60,
+		t % 1e3
+	];
+}
+/** `HH:MM:SS,mmm` */
+function srtTime(ms) {
+	const [h, m, s, f] = hmsParts(ms);
+	return `${pad(h)}:${pad(m)}:${pad(s)},${pad(f, 3)}`;
+}
+/** `HH:MM:SS.mmm` */
+function vttTime(ms) {
+	const [h, m, s, f] = hmsParts(ms);
+	return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(f, 3)}`;
+}
+/** ASS `H:MM:SS.cc` from centiseconds. */
+function assTimeCs(cs) {
+	const t = Math.max(0, Math.round(cs));
+	return `${Math.floor(t / 36e4)}:${pad(Math.floor(t / 6e3) % 60)}:${pad(Math.floor(t / 100) % 60)}.${pad(t % 100)}`;
+}
+const cs = (ms) => Math.round(ms / 10);
+function toSrt(lines) {
+	return lines.map((l, i) => `${i + 1}\n${srtTime(l.start_ms)} --> ${srtTime(l.end_ms)}\n${captionRows(l).join("\n")}\n`).join("\n");
+}
+function vttEscape(t) {
+	return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function toVtt(lines) {
+	return `WEBVTT\n\n${lines.map((l) => `${vttTime(l.start_ms)} --> ${vttTime(l.end_ms)}\n${vttEscape(captionRows(l).join("\n"))}\n`).join("\n")}`;
+}
+/** Plain-text transcript: words joined with spaces, one paragraph per scene. */
+function toTranscript(words) {
+	const paras = [];
+	let scene = null;
+	for (const w of words) {
+		if (scene === null || w.scene_id !== scene) paras.push([]);
+		scene = w.scene_id;
+		paras[paras.length - 1].push(w.word);
+	}
+	return paras.map((p) => p.join(" ")).join("\n\n") + (paras.length ? "\n" : "");
+}
+/** Canonical word timeline plus caption grouping, for the HTML (HyperFrames) captions. */
+function toCaptionJson(words, lines = groupCaptionLines(words)) {
+	const index = new Map(words.map((w, i) => [w, i]));
+	return {
+		version: 1,
+		words: words.map((w) => ({ ...w })),
+		lines: lines.map((l) => {
+			const first = l.words[0] ? index.get(l.words[0]) ?? -1 : -1;
+			return {
+				start_ms: l.start_ms,
+				end_ms: l.end_ms,
+				text: l.text,
+				first_word: first,
+				word_count: l.words.length,
+				rows: captionRows(l),
+				emphasis: first >= 0 ? (l.emphasis ?? []).map((i) => first + i) : []
+			};
+		})
+	};
+}
+/** `#RRGGBB` (or `#RRGGBBAA`, AA = opacity) → ASS `&HAABBGGRR` (ASS alpha: 00 = opaque). */
+function assColor(hex) {
+	const m = /^#?([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(hex.trim());
+	if (!m) throw new Error(`invalid colour ${hex}; expected #RRGGBB or #RRGGBBAA`);
+	const rgb = m[1].toUpperCase();
+	return `&H${m[2] ? (255 - Number.parseInt(m[2], 16)).toString(16).padStart(2, "0").toUpperCase() : "00"}${rgb.slice(4, 6)}${rgb.slice(2, 4)}${rgb.slice(0, 2)}`;
+}
+/** `#RRGGBB` → an override-tag colour `&HBBGGRR&` (for `\c`). */
+function assTagColor(hex) {
+	return `${assColor(hex.slice(0, 7)).replace(/^&H00/, "&H")}&`;
+}
+/** Make a word safe inside an ASS Dialogue: braces start override blocks and `\` starts escapes. */
+function assEscape(text) {
+	return text.replace(/\\/g, "/").replace(/\{/g, "(").replace(/\}/g, ")").replace(/[\r\n]+/g, " ");
+}
+function defaultMarginV(width, height) {
+	return Math.round(height * (height / width >= 1.5 ? .18 : .12));
+}
+/** libass line advance per px of font size (ascent + descent of typical sans fonts). */
+const LINE_ADVANCE = 1.22;
+/** Average glyph advance per px of font size, for row width estimates. */
+const GLYPH_EM = {
+	regular: .54,
+	bold: .58
+};
+/** Style values for a preset at a given output size. */
+function assStyle(o) {
+	const preset = o.preset ?? "minimal";
+	const short = Math.min(o.width, o.height);
+	const bold = o.bold ?? preset === "bold";
+	return {
+		fontSize: o.fontSize ?? Math.max(8, Math.round(short * (preset === "bold" ? .08 : .06))),
+		bold,
+		outline: Math.max(1, Math.round(short * (preset === "bold" ? .006 : .003))),
+		shadow: preset === "bold" ? Math.max(1, Math.round(short * .003)) : 0,
+		marginV: o.marginV ?? defaultMarginV(o.width, o.height),
+		marginLR: Math.round(o.width * .06)
+	};
+}
+function captionLayout(o) {
+	const st = assStyle(o);
+	const maxLines = Math.min(3, Math.max(1, o.maxLines ?? 2));
+	const plate = Math.min(1, Math.max(0, o.plateOpacity ?? .55)) > 0;
+	const padFor = (size) => plate ? Math.max(2, Math.round(size * .22)) : st.outline;
+	const blockH = (size) => maxLines * size * LINE_ADVANCE + 2 * padFor(size);
+	let fontSize = st.fontSize;
+	let region;
+	if (o.box) {
+		region = {
+			x: Math.round(o.box.x),
+			y: Math.round(o.box.y),
+			w: Math.round(o.box.w),
+			h: Math.round(o.box.h)
+		};
+		while (fontSize > 8 && blockH(fontSize) > region.h) fontSize--;
+	} else {
+		const h = Math.round(blockH(fontSize));
+		const bottom = o.height - st.marginV;
+		region = {
+			x: st.marginLR,
+			y: bottom - h,
+			w: o.width - 2 * st.marginLR,
+			h
+		};
+	}
+	const pad = padFor(fontSize);
+	const em = st.bold ? GLYPH_EM.bold : GLYPH_EM.regular;
+	const maxChars = Math.max(4, Math.floor((region.w - 2 * pad) / (fontSize * em)));
+	const anchor = o.positionY !== void 0 ? {
+		kind: "center",
+		y: Math.round(Math.min(1, Math.max(0, o.positionY)) * o.height)
+	} : { kind: "bottom" };
+	return {
+		fontSize,
+		bold: st.bold,
+		pad,
+		plate,
+		lineAdvance: fontSize * LINE_ADVANCE,
+		maxChars,
+		maxLines,
+		region,
+		anchor
+	};
+}
+/**
+* Box the burned-in captions actually occupy (union over all captions, plate included), in
+* output pixels, clamped to the frame. With no captions, the space reserved for `maxLines` rows.
+*/
+function captionBlockBox(lines, layout, frame) {
+	const em = layout.bold ? GLYPH_EM.bold : GLYPH_EM.regular;
+	let w = 0;
+	let rows = 0;
+	for (const l of lines) {
+		const r = captionRows(l);
+		rows = Math.max(rows, r.length);
+		for (const row of r) w = Math.max(w, Array.from(row).length * layout.fontSize * em);
+	}
+	if (!lines.length) {
+		rows = layout.maxLines;
+		w = layout.region.w - 2 * layout.pad;
+	}
+	const bw = Math.min(frame.width, Math.ceil(w + 2 * layout.pad));
+	const bh = Math.ceil(rows * layout.lineAdvance + 2 * layout.pad);
+	const cx = layout.region.x + layout.region.w / 2;
+	const top = layout.anchor.kind === "center" ? layout.anchor.y - bh / 2 : layout.region.y + layout.region.h - bh;
+	const x = Math.max(0, Math.round(cx - bw / 2));
+	const y = Math.max(0, Math.min(frame.height - bh, Math.round(top)));
+	return {
+		x,
+		y,
+		w: Math.min(bw, frame.width - x),
+		h: Math.min(bh, frame.height - y)
+	};
+}
+/** Karaoke text for one caption: `{\kf<cs>}word` per word, `{\k<cs>}` for pauses, rows joined with `\N`. */
+function assKaraokeText(line, emphasis) {
+	let cursor = cs(line.start_ms);
+	const parts = [];
+	const breaks = rowBreaks(line);
+	const em = new Set(typeof emphasis === "object" ? line.emphasis ?? [] : []);
+	line.words.forEach((w, i) => {
+		const s = Math.max(cs(w.start_ms), cursor);
+		const e = Math.max(cs(w.end_ms), s);
+		if (s > cursor) parts.push(`{\\k${s - cursor}}`);
+		const word = em.has(i) ? emphasize(w.word, emphasis) : assEscape(w.word);
+		parts.push(`{\\kf${e - s}}${word}${i < line.words.length - 1 ? breaks.has(i + 1) ? "\\N" : " " : ""}`);
+		cursor = e;
+	});
+	return parts.join("");
+}
+/** Wrap a word's letters/digits (not its surrounding punctuation) in emphasis overrides. */
+function emphasize(word, e) {
+	const m = /^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/u.exec(word);
+	if (!m || !m[2]) return assEscape(word);
+	return `${assEscape(m[1])}{${e.on}}${assEscape(m[2])}{${e.off}}${assEscape(m[3])}`;
+}
+/** Word indices that start a new row. */
+function rowBreaks(line) {
+	const out = /* @__PURE__ */ new Set();
+	let at = 0;
+	for (const n of (line.row_sizes ?? []).slice(0, -1)) out.add(at += n);
+	return out;
+}
+/** Static caption text: rows joined with `\N`, emphasised words wrapped in `on`/`off` overrides. */
+function assStaticText(line, emphasis) {
+	const breaks = rowBreaks(line);
+	const em = new Set(emphasis ? line.emphasis ?? [] : []);
+	return line.words.map((w, i) => {
+		const word = em.has(i) ? emphasize(w.word, emphasis) : assEscape(w.word);
+		return `${i > 0 ? breaks.has(i) ? "\\N" : " " : ""}${word}`;
+	}).join("");
+}
+/**
+* ASS captions: a plate (BorderStyle 3, opaque box per row) unless `plateOpacity` is 0,
+* keyword emphasis in the highlight colour (bold too when the text is not already bold), and
+* the karaoke sweep only with `activeWord`. Rows are pre-broken (`WrapStyle: 2`, no libass
+* wrapping) and the block is bottom-aligned in `box` (or the legacy bottom margin), or centred
+* on `positionY`. See `captionLayout`/`captionBlockBox` for the geometry.
+*/
+function toAss(lines, o) {
+	if (!(o.width > 0 && o.height > 0)) throw new Error("toAss: width and height are required");
+	const st = assStyle(o);
+	const layout = captionLayout(o);
+	const font = (o.font ?? "Arial").replace(/,/g, " ");
+	const baseHex = o.primary ?? "#FFFFFF";
+	const hiHex = o.highlight ?? "#FFD60A";
+	const karaoke = o.activeWord ?? false;
+	const opacity = Math.min(1, Math.max(0, o.plateOpacity ?? .55));
+	const plateAlpha = Math.round(opacity * 255).toString(16).padStart(2, "0");
+	const border = layout.plate ? assColor(`${o.plateColor ?? "#000000"}${plateAlpha}`) : assColor(o.outline ?? "#000000");
+	const { region } = layout;
+	const style = [
+		"Default",
+		font,
+		layout.fontSize,
+		assColor(karaoke ? hiHex : baseHex),
+		assColor(baseHex),
+		border,
+		layout.plate ? border : assColor("#00000080"),
+		layout.bold ? -1 : 0,
+		0,
+		0,
+		0,
+		100,
+		100,
+		0,
+		0,
+		layout.plate ? 3 : 1,
+		layout.pad,
+		layout.plate ? 0 : st.shadow,
+		2,
+		region.x,
+		Math.max(0, o.width - region.x - region.w),
+		Math.max(0, o.height - region.y - region.h + layout.pad),
+		1
+	].join(",");
+	const header = [
+		"[Script Info]",
+		"; Generated by video-studio",
+		"ScriptType: v4.00+",
+		`PlayResX: ${o.width}`,
+		`PlayResY: ${o.height}`,
+		"WrapStyle: 2",
+		"ScaledBorderAndShadow: yes",
+		"YCbCr Matrix: TV.709",
+		"",
+		"[V4+ Styles]",
+		"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+		`Style: ${style}`,
+		"",
+		"[Events]",
+		"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+	];
+	const em = !(o.emphasis ?? true) || karaoke && layout.bold ? void 0 : karaoke ? {
+		on: "\\b1",
+		off: "\\b0"
+	} : {
+		on: `\\c${assTagColor(hiHex)}${layout.bold ? "" : "\\b1"}`,
+		off: `\\c${assTagColor(baseHex)}${layout.bold ? "" : "\\b0"}`
+	};
+	const pos = layout.anchor.kind === "center" ? `{\\an5\\pos(${Math.round(region.x + region.w / 2)},${layout.anchor.y})}` : "";
+	const events = lines.map((l) => `Dialogue: 0,${assTimeCs(cs(l.start_ms))},${assTimeCs(cs(l.end_ms))},Default,,0,0,0,,${pos}${karaoke ? assKaraokeText(l, em) : assStaticText(l, em)}`);
+	return `${[...header, ...events].join("\n")}\n`;
+}
+/** Write `<base>.json|.srt|.vtt|.txt` (and `.ass` when `ass` options are given) into `dir`. */
+async function writeCaptionSet(dir, base, words, opts = {}) {
+	await mkdir(dir, { recursive: true });
+	const { ass, ...group } = opts;
+	const maxLines = Math.min(3, Math.max(1, opts.maxLines ?? ass?.maxLines ?? 2));
+	const layout = ass ? captionLayout({
+		...ass,
+		maxLines
+	}) : void 0;
+	const lines = groupCaptionLines(words, {
+		...group,
+		maxLines,
+		...layout && opts.maxChars === void 0 ? { maxChars: layout.maxChars } : {}
+	});
+	const files = {
+		json: join(dir, `${base}.json`),
+		srt: join(dir, `${base}.srt`),
+		vtt: join(dir, `${base}.vtt`),
+		txt: join(dir, `${base}.txt`)
+	};
+	await writeFile(files.json, `${JSON.stringify(toCaptionJson(words, lines), null, 2)}\n`);
+	await writeFile(files.srt, toSrt(lines));
+	await writeFile(files.vtt, toVtt(lines));
+	await writeFile(files.txt, toTranscript(words));
+	if (!ass || !layout) return {
+		files,
+		lines
+	};
+	files.ass = join(dir, `${base}.ass`);
+	await writeFile(files.ass, toAss(lines, {
+		...ass,
+		maxLines
+	}));
+	return {
+		files,
+		lines,
+		placement: {
+			box: captionBlockBox(lines, layout, ass),
+			max_lines: maxLines,
+			font_size: layout.fontSize
+		}
+	};
+}
+//#endregion
+//#region ../media/dist/compose.js
+const FINAL_ENCODE = {
+	crf: 20,
+	preset: "medium",
+	profile: "high",
+	audioBitrate: "192k",
+	sampleRate: AUDIO_SAMPLE_RATE
+};
+function h264Args(e = {}) {
+	return [
+		"-c:v",
+		"libx264",
+		"-profile:v",
+		FINAL_ENCODE.profile,
+		"-preset",
+		e.preset ?? FINAL_ENCODE.preset,
+		"-crf",
+		String(e.crf ?? FINAL_ENCODE.crf),
+		"-pix_fmt",
+		"yuv420p"
+	];
+}
+function aacArgs() {
+	return [
+		"-c:a",
+		"aac",
+		"-b:a",
+		FINAL_ENCODE.audioBitrate,
+		"-ar",
+		String(FINAL_ENCODE.sampleRate)
+	];
+}
+const FASTSTART = ["-movflags", "+faststart"];
+const IMAGE_EXT$2 = /* @__PURE__ */ new Set([
+	".png",
+	".jpg",
+	".jpeg",
+	".webp",
+	".bmp"
+]);
+function assertEven(width, height) {
+	if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || width % 2 || height % 2) throw new Error(`target size must be positive even integers for yuv420p H.264, got ${width}x${height}`);
+}
+/** Filters that normalise one segment to the target: scale + pad/crop, square pixels, fps, yuv420p, exact frame count. */
+function normalizeFilters(t, durationMs) {
+	const { width: W, height: H, fps } = t;
+	const frames = Math.max(1, Math.round(durationMs * fps / 1e3));
+	return [
+		...(t.fit ?? "pad") === "crop" ? [`scale=${W}:${H}:force_original_aspect_ratio=increase`, `crop=${W}:${H}`] : [`scale=${W}:${H}:force_original_aspect_ratio=decrease`, `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${t.padColor ?? "black"}`],
+		"setsar=1",
+		`fps=${fps}`,
+		"format=yuv420p",
+		`tpad=stop_mode=clone:stop_duration=${secs$1(durationMs)}`,
+		`trim=end_frame=${frames}`,
+		"setpts=PTS-STARTPTS"
+	];
+}
+/**
+* Concatenate video segments with the concat *filter* (tolerates mixed codecs, sizes and
+* frame rates): every segment is normalised to the target size/aspect/fps first. Video only;
+* audio is handled by `concatAudio` + `muxAudio`. Output uses the final H.264 settings.
+*/
+async function concatVideos(segments, out, target, opts = {}) {
+	assertEven(target.width, target.height);
+	if (!segments.length) throw new Error("concatVideos: no segments");
+	const inputs = [];
+	const chains = [];
+	let frames = 0;
+	segments.forEach((s, i) => {
+		if (!(s.duration_ms > 0)) throw new Error(`segment ${i}: duration_ms must be > 0`);
+		if (IMAGE_EXT$2.has(extname(s.path).toLowerCase())) inputs.push("-loop", "1", "-framerate", String(target.fps), "-t", secs$1(s.duration_ms), "-i", s.path);
+		else inputs.push("-i", s.path);
+		chains.push([`[${i}:v:0]${normalizeFilters(target, s.duration_ms).join(",")}[v${i}]`]);
+		frames += Math.max(1, Math.round(s.duration_ms * target.fps / 1e3));
+	});
+	chains.push([`${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0[vout]`]);
+	await runFfmpeg([
+		"-y",
+		...inputs,
+		"-filter_complex",
+		filterGraph(chains),
+		"-map",
+		"[vout]",
+		"-r",
+		String(target.fps),
+		...h264Args(opts.encode),
+		"-an",
+		...FASTSTART,
+		out
+	], opts);
+	return {
+		path: out,
+		frames,
+		duration_ms: Math.round(frames * 1e3 / target.fps)
+	};
+}
+/**
+* Mux an audio track onto a video: video is stream-copied, audio encoded to AAC 192k/48 kHz
+* and padded or trimmed to exactly the video's duration.
+*/
+async function muxAudio(video, audio, out, opts = {}) {
+	const d = (await ffprobe(video, opts)).duration_s.toFixed(3);
+	await runFfmpeg([
+		"-y",
+		"-i",
+		video,
+		"-i",
+		audio,
+		"-map",
+		"0:v:0",
+		"-map",
+		"1:a:0",
+		"-c:v",
+		"copy",
+		"-af",
+		`apad=whole_dur=${d},atrim=duration=${d}`,
+		...aacArgs(),
+		...FASTSTART,
+		out
+	], opts);
+	return { path: out };
+}
+/** The `subtitles=` filter for an ASS/SRT file with correctly escaped paths. */
+function subtitlesFilter(subsPath, fontsDir) {
+	return `subtitles=filename=${escapeFilterPath(subsPath)}${fontsDir ? `:fontsdir=${escapeFilterPath(fontsDir)}` : ""}`;
+}
+/** Burn ASS (karaoke) captions into the video with libass; audio is stream-copied. */
+async function burnCaptions(video, subsPath, out, opts = {}) {
+	await runFfmpeg([
+		"-y",
+		"-i",
+		video,
+		"-map",
+		"0:v:0",
+		"-map",
+		"0:a?",
+		"-vf",
+		subtitlesFilter(subsPath, opts.fontsDir),
+		...h264Args(opts.encode),
+		"-c:a",
+		"copy",
+		...FASTSTART,
+		out
+	], opts);
+	return { path: out };
+}
+/** Full-resolution PNG of the frame at `atMs` (clamped into the video). */
+async function makeThumbnail(video, out, o = {}) {
+	const probe = await ffprobe(video, o);
+	const maxMs = Math.max(0, Math.floor(probe.duration_s * 1e3) - 100);
+	const at = Math.min(Math.max(0, o.atMs ?? 0), maxMs);
+	await runFfmpeg([
+		"-y",
+		"-ss",
+		secs$1(at),
+		"-i",
+		video,
+		"-frames:v",
+		"1",
+		"-update",
+		"1",
+		"-c:v",
+		"png",
+		out
+	], o);
+	return {
+		path: out,
+		at_ms: at
+	};
+}
+/**
+* concat → (voice concat) → loudnorm → mux = clean master; master + ASS burn-in = captioned reel.
+* The reel is only one generation away from the master (video re-encoded once for the burn-in).
+*/
+async function assemble(input, opts = {}) {
+	const work = input.workDir ?? await mkdtemp(join(tmpdir(), "vs-media-"));
+	await mkdir(work, { recursive: true });
+	try {
+		const silentVideo = join(work, "video.mp4");
+		const v = await concatVideos(input.segments, silentVideo, input, opts);
+		if (input.audio === void 0 && !input.music && !input.sceneAudio) {
+			await concatAudio([{ duration_ms: v.duration_ms }], join(work, "silence.wav"), opts);
+			await muxAudio(silentVideo, join(work, "silence.wav"), input.master, opts);
+		} else {
+			let track = input.sceneAudio ? (await mixSceneAudio(input.sceneAudio.slots, join(work, "scenes.wav"), {
+				...opts,
+				...input.sceneAudio.sfx ? { sfx: input.sceneAudio.sfx } : {}
+			})).path : input.audio === void 0 ? void 0 : typeof input.audio === "string" ? input.audio : (await concatAudio(input.audio, join(work, "voice.wav"), opts)).path;
+			if (input.music) track = (await mixMusic({
+				...track ? { voice: track } : {},
+				music: input.music.bed,
+				duration_ms: v.duration_ms,
+				...input.music.speech ? { speech: input.music.speech } : {},
+				...input.music.mute ? { mute: input.music.mute } : {},
+				out: join(work, "mix.wav")
+			}, opts)).path;
+			if (input.loudness !== false) track = (await loudnorm2pass(track, join(work, "mix.norm.wav"), input.loudness ?? {}, opts)).path;
+			await muxAudio(silentVideo, track, input.master, opts);
+		}
+		let reel;
+		if (input.reel) {
+			if (!input.assPath) throw new Error("assemble: `reel` requires `assPath`");
+			reel = (await burnCaptions(input.master, input.assPath, input.reel, {
+				...opts,
+				fontsDir: input.fontsDir
+			})).path;
+		}
+		return {
+			master: input.master,
+			...reel ? { reel } : {},
+			duration_ms: v.duration_ms
+		};
+	} finally {
+		if (!input.workDir) await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+//#endregion
+//#region ../media/dist/qa.js
+/** Default blackdetect pixel threshold (fraction of the luma range). */
+const BLACK_PIX_TH = .1;
+/** Normalised limited-range luma (0–1) of a #RRGGBB colour, BT.709. */
+function lumaOf(hex) {
+	const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+	if (!m) return null;
+	const n = parseInt(m[1], 16);
+	const [r, g, b] = [
+		n >> 16 & 255,
+		n >> 8 & 255,
+		n & 255
+	];
+	return (.2126 * r + .7152 * g + .0722 * b) / 255;
+}
+/**
+* blackdetect pix_th for a background: half its luma (so the background itself is not "black"),
+* capped at the default. `nearBlack` means the background is too dark to tell a sparse scene from
+* a blank one, so black intervals can only be a warning.
+*/
+function blackThreshold(background) {
+	const l = background ? lumaOf(background) : null;
+	if (l === null) return {
+		pix_th: BLACK_PIX_TH,
+		nearBlack: false
+	};
+	const pix_th = Math.min(BLACK_PIX_TH, Math.round(l / 2 * 1e3) / 1e3);
+	return {
+		pix_th: Math.max(.005, pix_th),
+		nearBlack: l < .02
+	};
+}
+const r3 = (n) => Math.round(n * 1e3) / 1e3;
+function ranges(stderr, startRe, endRe, totalS) {
+	const events = [];
+	for (const m of stderr.matchAll(startRe)) events.push({
+		t: Number(m[1]),
+		kind: "s",
+		at: m.index
+	});
+	for (const m of stderr.matchAll(endRe)) events.push({
+		t: Number(m[1]),
+		kind: "e",
+		at: m.index
+	});
+	events.sort((a, b) => a.at - b.at);
+	const out = [];
+	let open = null;
+	for (const e of events) if (e.kind === "s") open = e.t;
+	else if (open !== null) {
+		out.push({
+			start_s: r3(open),
+			end_s: r3(e.t),
+			duration_s: r3(e.t - open)
+		});
+		open = null;
+	}
+	if (open !== null && totalS > open) out.push({
+		start_s: r3(open),
+		end_s: r3(totalS),
+		duration_s: r3(totalS - open)
+	});
+	return out;
+}
+/** Parse blackdetect / freezedetect / silencedetect / ebur128 output from one decode pass. */
+function parseDetections(stderr, totalS) {
+	const black = [];
+	for (const m of stderr.matchAll(/black_start:\s*(-?[\d.]+)\s+black_end:\s*(-?[\d.]+)\s+black_duration:\s*(-?[\d.]+)/g)) black.push({
+		start_s: r3(Number(m[1])),
+		end_s: r3(Number(m[2])),
+		duration_s: r3(Number(m[3]))
+	});
+	return {
+		black,
+		freeze: ranges(stderr, /freeze_start:\s*(-?[\d.]+)/g, /freeze_end:\s*(-?[\d.]+)/g, totalS),
+		silence: ranges(stderr, /silence_start:\s*(-?[\d.]+)/g, /silence_end:\s*(-?[\d.]+)/g, totalS),
+		...parseEbur128Summary(stderr)
+	};
+}
+const fmtRanges = (rs) => rs.map((r) => `${r.start_s.toFixed(2)}–${r.end_s.toFixed(2)}s`).join(", ");
+/**
+* Technical QA in one ffprobe plus one decode pass (blackdetect, freezedetect, silencedetect,
+* ebur128). Freeze and silence are warnings: static motion-graphic scenes legitimately freeze.
+*/
+async function technicalQa(videoPath, expect, opts = {}) {
+	const tol = expect.tolerance_s ?? .5;
+	const target = expect.loudness_target ?? -14;
+	const ltol = expect.loudness_tolerance ?? 1.5;
+	const requireAudio = expect.require_audio ?? true;
+	const probe = await ffprobe(videoPath, opts);
+	const checks = [];
+	if (!probe.has_video) checks.push({
+		id: "video_stream",
+		status: "fail",
+		detail: "no video stream",
+		fix: "Re-run the render; the output has no video."
+	});
+	else {
+		const sizeOk = probe.width === expect.width && probe.height === expect.height;
+		checks.push({
+			id: "resolution",
+			status: sizeOk ? "ok" : "fail",
+			detail: `${probe.width}x${probe.height} (expected ${expect.width}x${expect.height})`,
+			...sizeOk ? {} : { fix: "Re-assemble with the target width/height (concatVideos normalises every segment)." }
+		});
+		const ar = probe.width / probe.height;
+		const want = expect.width / expect.height;
+		const arOk = Math.abs(ar - want) / want < .01;
+		checks.push({
+			id: "aspect",
+			status: arOk ? "ok" : "fail",
+			detail: `aspect ${ar.toFixed(4)} (expected ${want.toFixed(4)})`,
+			...arOk ? {} : { fix: "Scale and pad/crop to the target aspect ratio." }
+		});
+		const h264 = probe.video_codec === "h264";
+		checks.push({
+			id: "video_codec",
+			status: h264 ? "ok" : "warn",
+			detail: `${probe.video_codec} ${probe.pix_fmt ?? ""}`.trim(),
+			...h264 ? {} : { fix: "Encode with libx264 (encodeFinal) for platform compatibility." }
+		});
+		if (probe.pix_fmt && probe.pix_fmt !== "yuv420p") checks.push({
+			id: "pix_fmt",
+			status: "warn",
+			detail: `${probe.pix_fmt}; most platforms expect yuv420p`,
+			fix: "Add `format=yuv420p` / `-pix_fmt yuv420p`."
+		});
+	}
+	const dd = Math.abs(probe.duration_s - expect.duration_s);
+	checks.push({
+		id: "duration",
+		status: dd <= tol ? "ok" : "fail",
+		detail: `${probe.duration_s.toFixed(3)}s (expected ${expect.duration_s.toFixed(3)}s ± ${tol}s)`,
+		...dd <= tol ? {} : { fix: "Check scene durations and the voice track length; the concat enforces exact slots." }
+	});
+	if (!probe.has_audio) checks.push({
+		id: "audio_stream",
+		status: requireAudio ? "fail" : "ok",
+		detail: "no audio stream",
+		...requireAudio ? { fix: "Mux the voice track (muxAudio), or a silent track for a silent video." } : {}
+	});
+	else {
+		const aacOk = probe.audio_codec === "aac" && probe.sample_rate === 48e3;
+		checks.push({
+			id: "audio_stream",
+			status: aacOk ? "ok" : "warn",
+			detail: `${probe.audio_codec} ${probe.sample_rate} Hz, ${probe.channels} ch`,
+			...aacOk ? {} : { fix: "Encode audio as AAC 48 kHz." }
+		});
+	}
+	const args = ["-i", videoPath];
+	const black = blackThreshold(expect.background);
+	if (probe.has_video) args.push("-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=${black.pix_th},freezedetect=n=-60dB:d=1.0`);
+	if (probe.has_audio) args.push("-map", "0:a:0", "-af", "silencedetect=n=-50dB:d=1.0,ebur128=peak=true:framelog=quiet");
+	args.push("-f", "null", "-");
+	const { stderr } = await runFfmpeg(args, {
+		...opts,
+		keepStderr: true
+	});
+	const det = parseDetections(stderr, probe.duration_s);
+	if (probe.has_video) {
+		const longest = Math.max(0, ...det.black.map((b) => b.duration_s));
+		checks.push(det.black.length === 0 ? {
+			id: "black_frames",
+			status: "ok",
+			detail: "no black intervals ≥ 0.5s"
+		} : {
+			id: "black_frames",
+			status: longest >= 2 && !black.nearBlack ? "fail" : "warn",
+			detail: `black at ${fmtRanges(det.black)}${black.nearBlack ? " (the background is near black, so sparse scenes can read as black)" : ""}`,
+			fix: "Check the scene(s) at those times rendered correctly; re-render them if blank."
+		});
+		checks.push(det.freeze.length === 0 ? {
+			id: "frozen_frames",
+			status: "ok",
+			detail: "no frozen intervals ≥ 1s"
+		} : {
+			id: "frozen_frames",
+			status: "warn",
+			detail: `frozen at ${fmtRanges(det.freeze)} (expected for static motion-graphic scenes)`,
+			fix: "If those scenes should move, check their animation timelines or generated clips."
+		});
+	}
+	if (probe.has_audio && expect.intended_silence) {
+		checks.push({
+			id: "silence",
+			status: "ok",
+			detail: "silent on purpose (no narration, no music)"
+		});
+		checks.push({
+			id: "loudness",
+			status: "ok",
+			detail: "not measured: silent on purpose"
+		});
+	} else if (probe.has_audio) {
+		checks.push(det.silence.length === 0 ? {
+			id: "silence",
+			status: "ok",
+			detail: "no silence ≥ 1s below -50 dB"
+		} : {
+			id: "silence",
+			status: "warn",
+			detail: `silent at ${fmtRanges(det.silence)}`,
+			fix: "Check the voice track covers those scenes, or accept intentional pauses."
+		});
+		const I = det.integrated_lufs;
+		if (I === null) checks.push({
+			id: "loudness",
+			status: "warn",
+			detail: "integrated loudness not measurable (silent audio?)"
+		});
+		else {
+			const off = Math.abs(I - target);
+			checks.push({
+				id: "loudness",
+				status: off <= ltol ? "ok" : "warn",
+				detail: `${I.toFixed(1)} LUFS (target ${target} ± ${ltol})`,
+				...off <= ltol ? {} : { fix: "Run two-pass loudnorm (loudnorm2pass) on the voice track before muxing." }
+			});
+		}
+		if (det.true_peak_dbtp !== null && det.true_peak_dbtp > -1) checks.push({
+			id: "true_peak",
+			status: "warn",
+			detail: `true peak ${det.true_peak_dbtp.toFixed(1)} dBTP > -1 dBTP`,
+			fix: "Normalise with TP=-1 (loudnorm2pass)."
+		});
+	}
+	return {
+		status: checks.some((c) => c.status === "fail") ? "fail" : checks.some((c) => c.status === "warn") ? "warn" : "ok",
+		video: videoPath,
+		checks,
+		metrics: {
+			probe,
+			black: det.black,
+			freeze: det.freeze,
+			silence: det.silence,
+			integrated_lufs: det.integrated_lufs,
+			lra: det.lra,
+			true_peak_dbtp: det.true_peak_dbtp
+		}
+	};
+}
+function formatQaMarkdown(r) {
+	const icon = {
+		ok: "ok",
+		warn: "WARN",
+		fail: "FAIL"
+	};
+	const p = r.metrics.probe;
+	return [
+		`# Technical QA: ${r.status.toUpperCase()}`,
+		"",
+		`Video: \`${r.video}\``,
+		"",
+		"| Check | Status | Detail | Fix |",
+		"| --- | --- | --- | --- |",
+		...r.checks.map((c) => `| ${c.id} | ${icon[c.status]} | ${c.detail.replace(/\|/g, "\\|")} | ${(c.status !== "ok" && c.fix ? c.fix : "").replace(/\|/g, "\\|")} |`),
+		"",
+		"## Metrics",
+		"",
+		`- Size: ${p.width}x${p.height} @ ${p.fps ?? "?"} fps, ${p.duration_s.toFixed(3)} s, ${p.video_codec ?? "no video"} / ${p.audio_codec ?? "no audio"}`,
+		`- Loudness: ${r.metrics.integrated_lufs ?? "n/a"} LUFS integrated, LRA ${r.metrics.lra ?? "n/a"} LU, true peak ${r.metrics.true_peak_dbtp ?? "n/a"} dBTP`,
+		`- Black: ${r.metrics.black.length ? fmtRanges(r.metrics.black) : "none"}`,
+		`- Frozen: ${r.metrics.freeze.length ? fmtRanges(r.metrics.freeze) : "none"}`,
+		`- Silence: ${r.metrics.silence.length ? fmtRanges(r.metrics.silence) : "none"}`,
+		""
+	].join("\n");
+}
+/** Write `<dir>/qa/report.json` and `<dir>/qa/report.md`. */
+async function writeQaReport(dir, report) {
+	const qaDir = join(dir, "qa");
+	await mkdir(qaDir, { recursive: true });
+	const json = join(qaDir, "report.json");
+	const md = join(qaDir, "report.md");
+	await writeFile(json, `${JSON.stringify(report, null, 2)}\n`);
+	await writeFile(md, formatQaMarkdown(report));
+	return {
+		json,
+		md
+	};
+}
+//#endregion
+//#region ../media/dist/frames.js
+/**
+* Frame sampling and perceptual comparison for golden-frame tests and render diffs. ffmpeg only
+* (ssim filter), no image libraries.
+*/
+/** Write the frame at `atSec` of `video` to `out` (PNG), scaled to `width` px wide (keeps aspect) when given. */
+async function extractFrame(video, atSec, out, opts = {}) {
+	if (!Number.isFinite(atSec) || atSec < 0) throw new Error(`extractFrame: invalid time ${atSec}`);
+	const vf = opts.width ? ["-vf", `scale=${Math.round(opts.width)}:-2:flags=bicubic`] : [];
+	await runFfmpeg([
+		"-y",
+		"-i",
+		video,
+		"-ss",
+		atSec.toFixed(3),
+		"-frames:v",
+		"1",
+		...vf,
+		"-pix_fmt",
+		"rgb24",
+		"-f",
+		"image2",
+		"-c:v",
+		"png",
+		out
+	], {
+		...opts.tools ? { tools: opts.tools } : {},
+		timeoutMs: 12e4
+	});
+	const s = await stat(out).catch(() => void 0);
+	if (!s || s.size === 0) throw new Error(`no frame at ${atSec.toFixed(3)}s in ${video} (past the end?)`);
+}
+/** SSIM (0–1, 1 = identical) of two same-size images. */
+async function frameSsim(a, b, opts = {}) {
+	const [sa, sb] = await Promise.all([pngSize(a), pngSize(b)]);
+	if (sa && sb && (sa.width !== sb.width || sa.height !== sb.height)) throw new Error(`frameSsim: size mismatch ${sa.width}x${sa.height} vs ${sb.width}x${sb.height}`);
+	const { stderr } = await runFfmpeg([
+		"-i",
+		a,
+		"-i",
+		b,
+		"-lavfi",
+		"[0:v][1:v]ssim",
+		"-f",
+		"null",
+		"-"
+	], {
+		...opts.tools ? { tools: opts.tools } : {},
+		timeoutMs: 6e4
+	});
+	return parseSsim(stderr);
+}
+/** The `All:` value of ffmpeg's ssim filter summary line. */
+function parseSsim(stderr) {
+	const m = /SSIM [^\n]*All:\s*([0-9.]+|inf)/.exec(stderr);
+	if (!m) throw new Error(`could not read SSIM from ffmpeg output:\n${stderr.slice(-400)}`);
+	const v = m[1] === "inf" ? 1 : Number(m[1]);
+	if (!Number.isFinite(v)) throw new Error(`bad SSIM value ${m[1]}`);
+	return Math.min(1, Math.max(0, v));
+}
+/**
+* Write a side-by-side comparison PNG to `out`: `a` | `b` | their absolute difference (brightened),
+* for a human to look at. The two images must be the same size.
+*/
+async function frameDiffImage(a, b, out, opts = {}) {
+	await runFfmpeg([
+		"-y",
+		"-i",
+		a,
+		"-i",
+		b,
+		"-filter_complex",
+		"[0:v]format=rgb24,split[a1][a2];[1:v]format=rgb24,split[b1][b2];[a2][b2]blend=all_mode=difference,lutrgb=r='min(val*4,255)':g='min(val*4,255)':b='min(val*4,255)'[d];[a1][b1][d]hstack=inputs=3",
+		"-frames:v",
+		"1",
+		"-c:v",
+		"png",
+		out
+	], {
+		...opts.tools ? { tools: opts.tools } : {},
+		timeoutMs: 6e4
+	});
+}
+/** Width and height from a PNG's IHDR chunk; undefined when the file is not a PNG. */
+async function pngSize(path) {
+	const fh = await open(path, "r");
+	try {
+		const buf = Buffer.alloc(24);
+		const { bytesRead } = await fh.read(buf, 0, 24, 0);
+		if (bytesRead < 24 || buf.readUInt32BE(0) !== 2303741511 || buf.toString("ascii", 12, 16) !== "IHDR") return void 0;
+		return {
+			width: buf.readUInt32BE(16),
+			height: buf.readUInt32BE(20)
+		};
+	} finally {
+		await fh.close();
+	}
+}
+//#endregion
+//#region ../media/dist/asr.js
+/** Language passed to whisper-cli: explicit, else `en` for English-only (`*.en`) models, else auto-detect. */
+function whisperLanguage(model, language) {
+	if (language) return language;
+	return /\.en(?:[.-]|$)/i.test(basename(model).replace(/\.bin$/i, "")) ? "en" : "auto";
+}
+/**
+* Transcribe a video or audio file into timed words: ffmpeg extracts 16 kHz mono PCM, then
+* `whisper-cli -ml 1 -sow -oj` emits one segment per word with millisecond offsets.
+*/
+async function whisperTranscribe(mediaPath, opts) {
+	const work = await mkdtemp(join(tmpdir(), "vs-asr-"));
+	try {
+		const wav = join(work, "audio.wav");
+		await runFfmpeg([
+			"-y",
+			"-i",
+			mediaPath,
+			"-vn",
+			"-map",
+			"0:a:0",
+			"-ac",
+			"1",
+			"-ar",
+			"16000",
+			"-c:a",
+			"pcm_s16le",
+			wav
+		], {
+			...opts.signal ? { signal: opts.signal } : {},
+			timeoutMs: 18e5
+		});
+		const outBase = join(work, "out");
+		const bin = opts.bin ?? "whisper-cli";
+		const args = (cpu) => [
+			"-m",
+			opts.model,
+			"-f",
+			wav,
+			"-l",
+			whisperLanguage(opts.model, opts.language),
+			"-ml",
+			"1",
+			"-sow",
+			"-oj",
+			"-of",
+			outBase,
+			"-np",
+			...cpu ? ["-ng"] : []
+		];
+		const run = (cpu) => runProcess(bin, args(cpu), {
+			...opts.signal ? { signal: opts.signal } : {},
+			timeoutMs: opts.timeoutMs ?? 36e5
+		});
+		try {
+			await run(opts.gpu === false);
+		} catch (err) {
+			if (!(opts.gpu === void 0 && err instanceof FfmpegError && err.exitCode !== 0 && !opts.signal?.aborted && !/could not start/.test(err.message))) throw whisperError(err, bin);
+			try {
+				await run(true);
+			} catch (err2) {
+				throw whisperError(err2, bin);
+			}
+		}
+		return parseWhisperJson(await readFile(`${outBase}.json`, "utf8"));
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+function whisperError(err, bin) {
+	const msg = err instanceof Error ? err.message : String(err);
+	if (/could not start/.test(msg)) return /* @__PURE__ */ new Error(`${bin} not found: install whisper.cpp (macOS: \`brew install whisper-cpp\`) or import a caption file (captions_file: .srt/.vtt) instead`);
+	return /* @__PURE__ */ new Error(`whisper-cli failed: ${msg}`);
+}
+/** Non-speech annotations whisper emits as text: `[BLANK_AUDIO]`, `[Music]`, `(laughs)`, `*sigh*`. */
+const NON_SPEECH = /^(?:\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|♪+)$/;
+/**
+* whisper-cli `-oj` output (with `-ml 1 -sow`: one segment per word) → timed words. Segments
+* without leading whitespace continue the previous word (`don` + `'t`, a lone `,`).
+*/
+function parseWhisperJson(json) {
+	const data = JSON.parse(json);
+	const words = [];
+	let prevNonSpeech = false;
+	for (const seg of data.transcription ?? []) {
+		const raw = seg.text ?? "";
+		const text = raw.trim();
+		const from = Number(seg.offsets?.from);
+		const to = Number(seg.offsets?.to);
+		if (!text || !Number.isFinite(from) || !Number.isFinite(to)) continue;
+		if (NON_SPEECH.test(text)) {
+			prevNonSpeech = true;
+			continue;
+		}
+		const last = words[words.length - 1];
+		if (last && !/^\s/.test(raw) && !prevNonSpeech) {
+			last.word += text;
+			last.end_ms = Math.max(last.end_ms, to);
+		} else words.push({
+			word: text,
+			start_ms: Math.max(0, from),
+			end_ms: Math.max(from, to)
+		});
+		prevNonSpeech = false;
+	}
+	return monotonic(words);
+}
+/** Force non-decreasing, non-overlapping times. */
+function monotonic(words) {
+	let t = 0;
+	for (const w of words) {
+		w.start_ms = Math.max(Math.round(w.start_ms), t);
+		w.end_ms = Math.max(Math.round(w.end_ms), w.start_ms);
+		t = w.end_ms;
+	}
+	return words;
+}
+const CUE_TIME = /^\s*((?:\d+:)?\d{1,2}:\d{2}[.,]\d{1,3})\s*-->\s*((?:\d+:)?\d{1,2}:\d{2}[.,]\d{1,3})/;
+function parseTimestamp(t) {
+	const [hms, frac = "0"] = t.split(/[.,]/);
+	const parts = hms.split(":").map(Number);
+	while (parts.length < 3) parts.unshift(0);
+	const [h, m, s] = parts;
+	return ((h * 60 + m) * 60 + s) * 1e3 + Number(frac.padEnd(3, "0").slice(0, 3));
+}
+/** Strip VTT/SRT markup: `<v Name>`, `<i>`, `<00:00:01.000>`, `{\an8}`, HTML entities. */
+function cleanCueText(text) {
+	return text.replace(/<[^>]*>/g, "").replace(/\{\\[^}]*\}/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
+}
+/** True when the text is a WebVTT file (else SRT is assumed). */
+function isVtt(text) {
+	return /^﻿?WEBVTT/.test(text);
+}
+/** Parse an SRT or VTT file into timed words (cue time spread evenly over its words). */
+function parseCaptionFile(text) {
+	const lines = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n").split("\n");
+	const words = [];
+	for (let i = 0; i < lines.length; i++) {
+		const m = CUE_TIME.exec(lines[i]);
+		if (!m) continue;
+		const start = parseTimestamp(m[1]);
+		const end = Math.max(start, parseTimestamp(m[2]));
+		const body = [];
+		while (i + 1 < lines.length && lines[i + 1].trim() !== "") body.push(lines[++i]);
+		const cueWords = cleanCueText(body.join(" ")).split(" ").filter((w) => w && !NON_SPEECH.test(w));
+		const n = cueWords.length;
+		cueWords.forEach((word, k) => {
+			words.push({
+				word,
+				start_ms: Math.round(start + (end - start) * k / n),
+				end_ms: Math.round(start + (end - start) * (k + 1) / n)
+			});
+		});
+	}
+	return monotonic(words);
+}
+/** Group timed words into sentences: terminal punctuation (. ? ! …), a long pause, or the word cap. */
+function groupSentences(words, opts = {}) {
+	const pause = opts.pauseMs ?? 700;
+	const maxWords = opts.maxWords ?? 60;
+	const out = [];
+	let first = 0;
+	for (let i = 0; i < words.length; i++) {
+		const w = words[i];
+		const next = words[i + 1];
+		const terminal = /[.?!…]["'”’)\]]*$/.test(w.word) && !/^(?:[A-Z]\.|Mr\.|Mrs\.|Ms\.|Dr\.|St\.|vs\.|e\.g\.|i\.e\.)$/.test(w.word);
+		const gap = next ? next.start_ms - w.end_ms : Infinity;
+		if (!next || terminal || gap >= pause || i - first + 1 >= maxWords) {
+			const slice = words.slice(first, i + 1);
+			out.push({
+				text: slice.map((x) => x.word).join(" "),
+				start_ms: slice[0].start_ms,
+				end_ms: w.end_ms,
+				first,
+				last: i
+			});
+			first = i + 1;
+		}
+	}
+	return out;
+}
+//#endregion
+//#region ../media/dist/beats.js
+const MIN_CONFIDENCE = .6;
+/** Strength-weighted share of onsets within 40 ms of a beat. */
+function gridConfidence(times, strengths, beats) {
+	let hit = 0;
+	let all = 0;
+	times.forEach((t, i) => {
+		all += strengths[i];
+		if (beats.some((b) => Math.abs(b - t) <= .04)) hit += strengths[i];
+	});
+	return all > 0 ? Math.round(hit / all * 1e3) / 1e3 : 0;
+}
+/** Analysis sample rate and hop (10 ms frames). */
+const SR = 11025;
+const HOP = 110;
+const WIN = 441;
+const FRAME_S = HOP / SR;
+/** Frame index → onset time: a rise shows first in the frame whose window just reaches the attack. */
+const ONSET_OFFSET_S = 331 / SR;
+/** Onset strength per 10 ms frame: positive rise of log energy over the previous two frames. */
+function onsetEnvelope(pcm) {
+	const n = Math.max(0, Math.floor((pcm.length - WIN) / HOP) + 1);
+	const logE = new Float32Array(n);
+	let max = -Infinity;
+	for (let i = 0; i < n; i++) {
+		let e = 0;
+		const o = i * HOP;
+		for (let k = 0; k < WIN; k++) {
+			const v = pcm[o + k];
+			e += v * v;
+		}
+		logE[i] = 10 * Math.log10(e / WIN + 1e-12);
+		if (logE[i] > max) max = logE[i];
+	}
+	const floor = max - 60;
+	for (let i = 0; i < n; i++) logE[i] = Math.max(floor, logE[i]);
+	const env = new Float32Array(n);
+	for (let i = 2; i < n; i++) env[i] = Math.max(0, logE[i] - logE[i - 2]);
+	return env;
+}
+/** Local maxima of the envelope above a moving mean + 1.5 std (±0.5 s), at least 100 ms apart. Frame indices. */
+function pickOnsets(env) {
+	const n = env.length;
+	const half = 50;
+	const out = [];
+	let globalMax = 0;
+	for (const v of env) globalMax = Math.max(globalMax, v);
+	if (globalMax <= 0) return out;
+	for (let i = 1; i < n - 1; i++) {
+		const v = env[i];
+		if (v <= 0 || v < globalMax * .1) continue;
+		let isMax = true;
+		for (let k = Math.max(0, i - 5); k <= Math.min(n - 1, i + 5); k++) if (env[k] > v || env[k] === v && k < i) {
+			isMax = false;
+			break;
+		}
+		if (!isMax) continue;
+		let s = 0;
+		let s2 = 0;
+		let c = 0;
+		for (let k = Math.max(0, i - half); k <= Math.min(n - 1, i + half); k++) {
+			s += env[k];
+			s2 += env[k] * env[k];
+			c++;
+		}
+		const mean = s / c;
+		if (v < mean + 1.5 * Math.sqrt(Math.max(0, s2 / c - mean * mean))) continue;
+		const last = out[out.length - 1];
+		if (last !== void 0 && i - last < 10) {
+			if (env[last] < v) out[out.length - 1] = i;
+			continue;
+		}
+		out.push(i);
+	}
+	return out;
+}
+/**
+* Beat period (s) from inter-onset intervals: every onset pair up to 2 s apart votes (weighted by
+* both strengths) into 10 ms bins; each candidate period in 0.3–1.0 s (60–200 bpm) scores the
+* votes at its first four multiples. Null with fewer than 4 onsets.
+*/
+function tempoFromOnsets(times, strengths) {
+	if (times.length < 4) return null;
+	const bins = /* @__PURE__ */ new Float64Array(201);
+	const pairs = [];
+	for (let i = 0; i < times.length; i++) for (let j = i + 1; j < times.length; j++) {
+		const d = times[j] - times[i];
+		if (d > 2.005) break;
+		if (d < .1) continue;
+		const w = strengths[i] * strengths[j];
+		bins[Math.round(d * 100)] += w;
+		pairs.push({
+			d,
+			w
+		});
+	}
+	const at = (sec) => {
+		const c = Math.round(sec * 100);
+		let s = 0;
+		for (let k = c - 2; k <= c + 2; k++) if (k >= 0 && k < bins.length) s += bins[k];
+		return s;
+	};
+	let best = 0;
+	let bestP = 0;
+	for (let c = 30; c <= 100; c++) {
+		const p = c / 100;
+		let score = 0;
+		for (let m = 1; m <= 4 && m * p <= 2.02; m++) score += at(m * p);
+		const fits = Math.min(4, Math.floor(2.02 / p));
+		score /= Math.sqrt(fits);
+		if (score > best * 1.0001) {
+			best = score;
+			bestP = p;
+		}
+	}
+	if (!bestP) return null;
+	let num = 0;
+	let den = 0;
+	for (const { d, w } of pairs) {
+		const m = Math.round(d / bestP);
+		if (m < 1 || m > 4) continue;
+		if (Math.abs(d - m * bestP) <= .025 * m) {
+			num += d / m * w;
+			den += w;
+		}
+	}
+	return den > 0 ? num / den : bestP;
+}
+/** Beat grid with period `p` (s) aligned to the onsets, each beat nudged to an onset within 60 ms. Seconds. */
+function beatGrid(times, strengths, p, durationS) {
+	const sigma = .03;
+	let bestPhase = 0;
+	let bestScore = -1;
+	for (const t0 of times) {
+		const phase = (t0 % p + p) % p;
+		let score = 0;
+		for (let i = 0; i < times.length; i++) {
+			const r = ((times[i] - phase) % p + p) % p;
+			const d = Math.min(r, p - r);
+			score += strengths[i] * Math.exp(-(d * d) / (2 * sigma * sigma));
+		}
+		if (score > bestScore) {
+			bestScore = score;
+			bestPhase = phase;
+		}
+	}
+	const beats = [];
+	for (let t = bestPhase; t < durationS; t += p) {
+		let near = t;
+		let nd = .06;
+		for (const o of times) {
+			const d = Math.abs(o - t);
+			if (d <= nd) {
+				nd = d;
+				near = o;
+			}
+		}
+		beats.push(near);
+	}
+	return beats;
+}
+/** Analyse a mono PCM buffer (at {@link SR} Hz). Exported for tests. */
+function analyzePcm(pcm) {
+	const env = onsetEnvelope(pcm);
+	const idx = pickOnsets(env);
+	const times = idx.map((i) => i * FRAME_S + ONSET_OFFSET_S);
+	const strengths = idx.map((i) => env[i]);
+	const onsets_ms = times.map((t) => Math.max(0, Math.round(t * 1e3)));
+	const p = tempoFromOnsets(times, strengths);
+	if (!p) return {
+		bpm: null,
+		beats_ms: [],
+		onsets_ms,
+		confidence: 0
+	};
+	const beats = beatGrid(times, strengths, p, pcm.length / SR);
+	const confidence = gridConfidence(times, strengths, beats);
+	if (confidence < MIN_CONFIDENCE) return {
+		bpm: null,
+		beats_ms: [],
+		onsets_ms,
+		confidence
+	};
+	return {
+		bpm: Math.round(60 / p * 10) / 10,
+		beats_ms: beats.map((t) => Math.max(0, Math.round(t * 1e3))),
+		onsets_ms,
+		confidence
+	};
+}
+async function detectBeats(audioPath, opts = {}) {
+	const work = await mkdtemp(join(tmpdir(), "vs-beats-"));
+	try {
+		const out = join(work, "mono.f32");
+		await runFfmpeg([
+			"-y",
+			"-i",
+			audioPath,
+			"-map",
+			"0:a:0",
+			"-ac",
+			"1",
+			"-ar",
+			String(SR),
+			"-f",
+			"f32le",
+			"-c:a",
+			"pcm_f32le",
+			out
+		], {
+			...opts.signal ? { signal: opts.signal } : {},
+			...opts.tools ? { tools: opts.tools } : {}
+		});
+		const buf = await readFile(out);
+		return analyzePcm(new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4)));
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+/**
+* Move each cut to the nearest beat within `toleranceMs`, keeping order and a minimum scene length
+* (against the previous snapped cut, starting at 0, and the next original cut). Cuts are internal
+* scene boundaries in ms; a cut with no acceptable beat stays where it was.
+*/
+function snapCuts(cutsMs, beatsMs, toleranceMs, minSceneMs = 500) {
+	const out = [];
+	let prev = 0;
+	cutsMs.forEach((c, i) => {
+		const next = cutsMs[i + 1];
+		const x = beatsMs.filter((b) => Math.abs(b - c) <= toleranceMs).sort((a, b) => Math.abs(a - c) - Math.abs(b - c) || a - b).find((b) => b > prev && b - prev >= minSceneMs && (next === void 0 || b < next && next - b >= minSceneMs)) ?? c;
+		out.push(x);
+		prev = x;
+	});
+	return out;
+}
+//#endregion
+//#region ../ingestion/dist/media.js
+/**
+* Video and audio files → a project copy of the file plus probe facts (duration, size, fps,
+* streams), shot boundaries from ffmpeg scene detection, one small keyframe JPEG per shot
+* (capped) and integrated loudness. Evidence comes later from the transcript (`transcribe`).
+* The file is only decoded by ffmpeg; nothing in it is executed.
+*/
+const MEDIA_MAX_BYTES = 8589934592;
+/** Shots shorter than this are merged into the previous one (flashes, dissolves). */
+const MIN_SHOT_SEC = .4;
+const KEYFRAME_WIDTH = 320;
+/** Parse `showinfo` frame times from ffmpeg stderr. */
+function parseShowinfoTimes(stderr) {
+	const out = [];
+	for (const m of stderr.matchAll(/Parsed_showinfo[^\n]*?pts_time:\s*(-?[\d.]+)/g)) {
+		const t = Number(m[1]);
+		if (Number.isFinite(t)) out.push(t);
+	}
+	return out;
+}
+/** Cut times → shots covering [0, duration], merging shots shorter than `minShotSec`. */
+function shotsFromCuts(cuts, duration, minShotSec = MIN_SHOT_SEC) {
+	const r3 = (x) => Math.round(x * 1e3) / 1e3;
+	const bounds = [0];
+	for (const c of [...cuts].sort((a, b) => a - b)) if (c - bounds[bounds.length - 1] >= minShotSec && duration - c >= minShotSec) bounds.push(c);
+	const shots = [];
+	for (let i = 0; i < bounds.length; i++) {
+		const end = bounds[i + 1] ?? duration;
+		if (end > bounds[i]) shots.push({
+			start_sec: r3(bounds[i]),
+			end_sec: r3(end)
+		});
+	}
+	if (shots.length === 0 && duration > 0) shots.push({
+		start_sec: 0,
+		end_sec: r3(duration)
+	});
+	return shots;
+}
+/** Shot boundaries of a video: `select='gt(scene,T)',showinfo` on a downscaled decode. */
+async function detectShots(path, duration, opts = {}) {
+	return shotsFromCuts(parseShowinfoTimes((await runFfmpeg([
+		"-i",
+		path,
+		"-map",
+		"0:v:0",
+		"-an",
+		"-sn",
+		"-vf",
+		`scale=160:-2,select='gt(scene,${opts.threshold ?? .3})',showinfo`,
+		"-f",
+		"null",
+		"-"
+	], {
+		keepStderr: true,
+		timeoutMs: 36e5,
+		...opts.signal ? { signal: opts.signal } : {}
+	})).stderr), duration, opts.minShotSec);
+}
+/** Evenly pick at most `max` indices out of `n`. */
+function spreadIndices(n, max) {
+	if (n <= max) return Array.from({ length: n }, (_, i) => i);
+	return Array.from({ length: max }, (_, i) => Math.floor((i + .5) * n / max));
+}
+async function copyIntoProject(projectDir, src, sha256) {
+	const root = resolve(projectDir);
+	const ext = extname(src).toLowerCase().replace(/[^a-z0-9.]/g, "") || ".bin";
+	const abs = join(root, "source", "assets", `${sha256}${ext}`);
+	const rel = relative(root, abs);
+	if (isAbsolute(rel) || rel.startsWith("..")) throw new Error("asset path escaped project dir");
+	if (!await stat(abs).then((s) => s.isFile(), () => false) && resolve(src) !== abs) {
+		await ensureDir(join(root, "source", "assets"));
+		const tmp = `${abs}.part-${process.pid}-${Date.now()}`;
+		try {
+			await copyFile(src, tmp);
+			await rename(tmp, abs);
+		} finally {
+			await rm(tmp, { force: true });
+		}
+	}
+	return rel.split(sep).join("/");
+}
+function describe(kind, p, shots, loudness) {
+	const parts = [`${kind === "video" ? "Video" : "Audio"} file, ${p.duration_s.toFixed(1)} s`];
+	if (p.has_video && p.width && p.height) parts.push(`${p.width}x${p.height}${p.fps ? ` at ${p.fps} fps` : ""}`);
+	parts.push(p.has_audio ? `audio track (${p.audio_codec ?? "unknown codec"})` : "no audio track");
+	if (p.has_video) parts.push(`${shots} shot${shots === 1 ? "" : "s"} detected`);
+	if (loudness !== void 0) parts.push(`integrated loudness ${loudness.toFixed(1)} LUFS`);
+	return `${parts.join(", ")}. No transcript yet: run transcribe to add what is said as evidence.`;
+}
+const mediaExtractor = {
+	version: "media-1",
+	kinds: ["video", "audio"],
+	async extract(input) {
+		const st = await stat(input.uri);
+		if (!st.isFile()) throw new Error(`not a regular file: ${input.uri}`);
+		if (st.size > 8589934592) throw new Error(`${basename(input.uri)} is ${st.size} bytes (limit ${MEDIA_MAX_BYTES})`);
+		const sha256 = await hashFile(input.uri);
+		const probe = await ffprobe(input.uri);
+		if (!probe.has_video && !probe.has_audio) throw new Error(`${basename(input.uri)} has no video or audio stream ffprobe can read`);
+		const kind = probe.has_video ? "video" : "audio";
+		const refBase = fileRef(kind, displayPath(input.uri, input.projectDir));
+		const warnings = [];
+		const shots = [];
+		const keyframeAssets = [];
+		if (probe.has_video && probe.duration_s > 0) {
+			const detected = await detectShots(input.uri, probe.duration_s);
+			shots.push(...detected);
+			if (input.projectDir) {
+				const work = await mkdtemp(join(tmpdir(), "vs-keyframes-"));
+				try {
+					for (const i of spreadIndices(detected.length, 24)) {
+						const s = detected[i];
+						const at = (s.start_sec + s.end_sec) / 2;
+						const out = join(work, `k${i}.jpg`);
+						try {
+							await runFfmpeg([
+								"-y",
+								"-ss",
+								at.toFixed(3),
+								"-i",
+								input.uri,
+								"-map",
+								"0:v:0",
+								"-frames:v",
+								"1",
+								"-vf",
+								`scale=${KEYFRAME_WIDTH}:-2`,
+								"-q:v",
+								"6",
+								out
+							], { timeoutMs: 12e4 });
+							const asset = await writeProjectAsset(input.projectDir, new Uint8Array(await readFile(out)), "jpg", "image", `${refBase}#t=${at.toFixed(1)}`);
+							asset.local_id = `keyframe-${i + 1}`;
+							keyframeAssets.push(asset);
+							shots[i] = {
+								...s,
+								keyframe: asset.local_id
+							};
+						} catch {}
+					}
+				} finally {
+					await rm(work, {
+						recursive: true,
+						force: true
+					});
+				}
+				if (detected.length > 24) warnings.push({
+					code: "keyframes_capped",
+					message: `${detected.length} shots; keyframes kept for 24 evenly spread shots`
+				});
+			}
+		}
+		let loudness;
+		if (probe.has_audio) {
+			try {
+				const l = await measureLoudness(input.uri);
+				if (l.integrated_lufs !== null && Number.isFinite(l.integrated_lufs)) loudness = l.integrated_lufs;
+			} catch {}
+			warnings.push({
+				code: "needs_transcript",
+				message: `${basename(input.uri)} has audio but no transcript; run transcribe (local whisper.cpp, or a .srt/.vtt the user supplies)`
+			});
+		}
+		const media = {
+			duration_sec: Math.round(probe.duration_s * 1e3) / 1e3,
+			...probe.width ? { width: probe.width } : {},
+			...probe.height ? { height: probe.height } : {},
+			...probe.fps ? { fps: probe.fps } : {},
+			has_video: probe.has_video,
+			has_audio: probe.has_audio,
+			...shots.length ? { shots } : {},
+			...loudness !== void 0 ? { loudness_lufs: Math.round(loudness * 10) / 10 } : {}
+		};
+		const assets = [];
+		if (input.projectDir) {
+			const path = await copyIntoProject(input.projectDir, input.uri, sha256);
+			assets.push({
+				kind,
+				path,
+				sha256,
+				source_ref: refBase,
+				media
+			}, ...keyframeAssets);
+		} else warnings.push({
+			code: "media_not_copied",
+			message: "no project folder: the media file was probed but not copied"
+		});
+		const title = basename(input.uri, extname(input.uri));
+		return {
+			source: {
+				kind,
+				uri: input.uri,
+				sha256,
+				title
+			},
+			sections: [{
+				heading: basename(input.uri),
+				text: describe(kind, probe, shots.length, loudness)
+			}],
+			evidence: [],
+			assets,
+			warnings,
+			classificationHints: kind === "video" ? {
+				contains_likeness: true,
+				notes: ["likeness: video frames are not checked for faces; assume the footage shows real people until the user confirms otherwise"]
+			} : { notes: ["likeness: audio may carry identifiable voices; get consent before reusing a person's voice"] }
+		};
+	}
+};
 const SchemaVersion = literal("1.0").describe("Schema version of this document.");
 /** ISO-8601 date-time string (UTC `Z` or explicit offset). Never a Date object. */
 const IsoDateTime = datetime({ offset: true });
@@ -229102,7 +231657,7 @@ const SourceKind = _enum([
 * Stable provenance reference into a source, e.g. `repo:src/a.ts#L10-L20`,
 * `url:https://example.com/docs#install`, `pdf:report.pdf#p3`.
 */
-const SourceRef = string().regex(/^(?:text|markdown|url|pdf|docx|pptx|repo|video):\S+$/, "expected a source_ref like repo:path#L10-L20, url:<u>#<sel> or pdf:<file>#p3");
+const SourceRef = string().regex(/^(?:text|markdown|url|pdf|docx|pptx|repo|video|audio):\S+$/, "expected a source_ref like repo:path#L10-L20, url:<u>#<sel> or pdf:<file>#p3");
 const Goal = _enum([
 	"explain",
 	"launch",
@@ -230732,7 +233287,7 @@ const DemoStep = discriminatedUnion("action", [
 		ms: int().min(0).max(3e4)
 	})
 ]);
-strictObject({
+const DemoScript = strictObject({
 	schema_version: SchemaVersion,
 	id: Id,
 	url: url$1().describe("The app the USER started, e.g. http://localhost:3000. The plugin never starts it."),
@@ -230748,7 +233303,7 @@ strictObject({
 	title: "DemoScript",
 	description: "project/demo.json: a scripted walk through the user's running app, recorded by the demo tool."
 });
-strictObject({
+const FormatGrammar = strictObject({
 	schema_version: SchemaVersion,
 	duration_sec: number().nonnegative(),
 	aspect_ratio: string(),
@@ -230787,7 +233342,7 @@ const ShortCandidate = strictObject({
 	transcript: string().describe("The words spoken in the span."),
 	hook: string().describe("The first sentence of the span.")
 });
-strictObject({
+const ShortCandidates = strictObject({
 	schema_version: SchemaVersion,
 	asset: Id,
 	target_sec: strictObject({
@@ -231458,12 +234013,28 @@ function buildContentIR(parts, opts = {}) {
 				locator: span.locator
 			});
 		}
+		const firstAsset = ir.assets.length;
+		const localIds = /* @__PURE__ */ new Map();
+		part.assets.forEach((a, k) => {
+			if (a.local_id) localIds.set(a.local_id, `asset-${firstAsset + k + 1}`);
+		});
 		for (const a of part.assets) ir.assets.push({
 			id: `asset-${ir.assets.length + 1}`,
 			kind: a.kind,
 			path: a.path,
 			sha256: a.sha256,
-			...a.source_ref ? { source_ref: remap.get(a.source_ref) ?? a.source_ref } : {}
+			...a.source_ref ? { source_ref: remap.get(a.source_ref) ?? a.source_ref } : {},
+			...a.media ? { media: {
+				...a.media,
+				...a.media.shots ? { shots: a.media.shots.map((s) => {
+					const { keyframe, ...rest } = s;
+					const id = keyframe ? localIds.get(keyframe) : void 0;
+					return id ? {
+						...rest,
+						keyframe: id
+					} : rest;
+				}) } : {}
+			} } : {}
 		});
 		for (const w of part.warnings) ir.warnings.push({
 			...w,
@@ -231481,6 +234052,7 @@ function buildContentIR(parts, opts = {}) {
 		const hints = part.classificationHints;
 		classifications.push({
 			...classification,
+			contains_likeness: classification.contains_likeness || hints?.contains_likeness === true,
 			contains_secrets: classification.contains_secrets || hints?.contains_secrets === true,
 			contains_pii: classification.contains_pii || hints?.contains_pii === true,
 			data_class: maxDataClass(classification.data_class, hints?.contains_secrets ? "restricted" : hints?.contains_pii ? "confidential" : classification.data_class),
@@ -231511,7 +234083,13 @@ const EXTENSION_KINDS = {
 	".mov": "video",
 	".webm": "video",
 	".mkv": "video",
-	".m4v": "video"
+	".m4v": "video",
+	".mp3": "audio",
+	".wav": "audio",
+	".m4a": "audio",
+	".aac": "audio",
+	".flac": "audio",
+	".ogg": "audio"
 };
 /** `https://github.com/<owner>/<repo>` optionally followed by `.git`, `/`, `/tree/<ref>…`. */
 const GITHUB_REPO = /^https?:\/\/(?:www\.)?github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?(?:\.git)?(?:\/(?:tree\/[^?#]*)?)?(?:[?#].*)?$/i;
@@ -231562,7 +234140,7 @@ function detectKind(input) {
 }
 //#endregion
 //#region ../ingestion/dist/extractors.js
-/** Default registry, keyed by SourceKind. `video` has no extractor yet. */
+/** Default registry, keyed by SourceKind. */
 const extractors = {
 	text: textExtractor,
 	markdown: markdownExtractor,
@@ -231570,7 +234148,9 @@ const extractors = {
 	pdf: pdfExtractor,
 	docx: docxExtractor,
 	pptx: pptxExtractor,
-	repo: repoExtractor
+	repo: repoExtractor,
+	video: mediaExtractor,
+	audio: mediaExtractor
 };
 /** Registry with injectable transports; returns the defaults when nothing is overridden. */
 function createExtractors(options = {}) {
@@ -231826,1779 +234406,6 @@ function formatIngestSummary(s) {
 		for (const w of s.warnings) lines.push(`  ${w.code}${w.source_id ? ` (${w.source_id})` : ""}: ${w.message}`);
 	}
 	return lines.join("\n");
-}
-//#endregion
-//#region ../media/dist/ffmpeg.js
-async function isExecutableFile(path) {
-	try {
-		await access(path, constants.X_OK);
-		return true;
-	} catch {
-		return false;
-	}
-}
-function defaultLocatorDeps(env = process.env) {
-	return {
-		env,
-		platform: process.platform,
-		isExecutable: isExecutableFile
-	};
-}
-/** A value substituted from an unset `${user_config.X}` may arrive empty or as the literal placeholder. */
-function hasEnvValue(v) {
-	if (!v) return false;
-	const t = v.trim();
-	return t.length > 0 && !/^\$\{[^}]*\}$/.test(t);
-}
-/** Look `name` up on PATH. */
-async function which$1(name, deps) {
-	const pathVar = deps.env.PATH ?? deps.env.Path ?? "";
-	const sep = deps.platform === "win32" ? ";" : delimiter;
-	const exts = deps.platform === "win32" ? [
-		"",
-		".exe",
-		".cmd"
-	] : [""];
-	for (const dir of pathVar.split(sep)) {
-		if (!dir) continue;
-		for (const ext of exts) {
-			const candidate = join(dir, name + ext);
-			if (await deps.isExecutable(candidate)) return candidate;
-		}
-	}
-	return null;
-}
-const FF_ENV_VAR = {
-	ffmpeg: "FFMPEG_PATH",
-	ffprobe: "FFPROBE_PATH"
-};
-/** Find ffmpeg/ffprobe: the env override first (it must be executable), then PATH. Never ffmpeg-static. */
-async function locateFfTool(tool, deps) {
-	const envVar = FF_ENV_VAR[tool];
-	const override = deps.env[envVar];
-	if (hasEnvValue(override)) return await deps.isExecutable(override) ? {
-		ok: true,
-		path: override,
-		source: envVar
-	} : {
-		ok: false,
-		reason: "bad_override",
-		envVar,
-		override
-	};
-	const path = await which$1(tool, deps);
-	return path ? {
-		ok: true,
-		path,
-		source: "PATH"
-	} : {
-		ok: false,
-		reason: "not_found",
-		envVar
-	};
-}
-var MediaToolError = class extends Error {
-	fix;
-	constructor(message, fix) {
-		super(message);
-		this.fix = fix;
-		this.name = "MediaToolError";
-	}
-};
-/**
-* Resolve both binaries (FFMPEG_PATH/FFPROBE_PATH, then PATH). Throws `MediaToolError`
-* with a fix when either is missing. Does not run them; `doctor` does the deeper checks.
-*/
-async function resolveFfmpeg(env = process.env, deps) {
-	const d = {
-		...defaultLocatorDeps(env),
-		...deps,
-		env
-	};
-	const out = {};
-	for (const tool of ["ffmpeg", "ffprobe"]) {
-		const r = await locateFfTool(tool, d);
-		if (!r.ok) throw r.reason === "bad_override" ? new MediaToolError(`${r.envVar} is set to ${r.override}, which is not an executable file`, `Point ${r.envVar} at a working ${tool} binary or unset it.`) : new MediaToolError(`${tool} not found on PATH`, `Install FFmpeg (macOS: \`brew install ffmpeg\`; Debian/Ubuntu: \`sudo apt install ffmpeg\`) or set ${r.envVar}.`);
-		out[tool] = r.path;
-	}
-	return out;
-}
-let defaultTools;
-/** Tools from `opts.tools`, else resolved once from process.env (re-resolved if the relevant env changes). */
-function getTools(tools) {
-	if (tools) return Promise.resolve(tools);
-	const e = process.env;
-	const key = `${e.FFMPEG_PATH ?? ""}\0${e.FFPROBE_PATH ?? ""}\0${e.PATH ?? ""}`;
-	if (!defaultTools || defaultTools.key !== key) {
-		const p = resolveFfmpeg(e);
-		p.catch(() => {
-			if (defaultTools?.tools === p) defaultTools = void 0;
-		});
-		defaultTools = {
-			key,
-			tools: p
-		};
-	}
-	return defaultTools.tools;
-}
-var FfmpegError = class extends Error {
-	bin;
-	args;
-	exitCode;
-	stderrTail;
-	constructor(message, bin, args, exitCode, stderrTail) {
-		super(message);
-		this.bin = bin;
-		this.args = args;
-		this.exitCode = exitCode;
-		this.stderrTail = stderrTail;
-		this.name = "FfmpegError";
-	}
-};
-const TAIL_BYTES = 16384;
-const MAX_KEEP = 67108864;
-const DEFAULT_TIMEOUT = 18e5;
-/** Spawn a binary with an argv array (never a shell) and collect output. */
-function runProcess(bin, args, opts = {}) {
-	return new Promise((resolve, reject) => {
-		if (opts.signal?.aborted) {
-			reject(new FfmpegError(`${bin} aborted before start`, bin, args, null, ""));
-			return;
-		}
-		const child = spawn(bin, args, {
-			stdio: [
-				"ignore",
-				"pipe",
-				"pipe"
-			],
-			windowsHide: true,
-			cwd: opts.cwd
-		});
-		let stderr = "";
-		let stdout = "";
-		let lineBuf = "";
-		let killedFor = null;
-		const keep = opts.keepStderr ? MAX_KEEP : TAIL_BYTES * 4;
-		child.stderr.setEncoding("utf8");
-		child.stderr.on("data", (chunk) => {
-			stderr += chunk;
-			if (stderr.length > keep) stderr = stderr.slice(stderr.length - (opts.keepStderr ? MAX_KEEP : TAIL_BYTES));
-		});
-		child.stdout.setEncoding("utf8");
-		child.stdout.on("data", (chunk) => {
-			if (opts.captureStdout) stdout += chunk;
-			if (opts.onStdoutLine) {
-				lineBuf += chunk;
-				let i;
-				while ((i = lineBuf.indexOf("\n")) >= 0) {
-					opts.onStdoutLine(lineBuf.slice(0, i).trim());
-					lineBuf = lineBuf.slice(i + 1);
-				}
-			}
-		});
-		const kill = (why) => {
-			if (killedFor) return;
-			killedFor = why;
-			child.kill("SIGTERM");
-			setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 2e3).unref();
-		};
-		const timer = setTimeout(() => kill(`timed out after ${opts.timeoutMs ?? DEFAULT_TIMEOUT} ms`), opts.timeoutMs ?? DEFAULT_TIMEOUT);
-		timer.unref();
-		const onAbort = () => kill("aborted");
-		opts.signal?.addEventListener("abort", onAbort, { once: true });
-		const done = () => {
-			clearTimeout(timer);
-			opts.signal?.removeEventListener("abort", onAbort);
-		};
-		child.on("error", (err) => {
-			done();
-			reject(new FfmpegError(`could not start ${bin}: ${err.message}`, bin, args, null, ""));
-		});
-		child.on("close", (code) => {
-			done();
-			if (code === 0 && !killedFor) {
-				resolve({
-					stdout,
-					stderr
-				});
-				return;
-			}
-			const tail = stderr.slice(-16384).trim();
-			const lastLines = tail.split("\n").slice(-6).join("\n");
-			const why = killedFor ?? `exited with code ${code}`;
-			reject(new FfmpegError(`${bin.split(/[\\/]/).pop()} ${why}${lastLines ? `:\n${lastLines}` : ""}`, bin, args, code, tail));
-		});
-	});
-}
-/** Run ffmpeg with `args` (no shell). Always adds `-hide_banner -nostdin -nostats`. */
-async function runFfmpeg(args, opts = {}) {
-	const { ffmpeg } = await getTools(opts.tools);
-	const pre = [
-		"-hide_banner",
-		"-nostdin",
-		"-nostats"
-	];
-	if (!opts.onProgress) return runProcess(ffmpeg, [...pre, ...args], opts);
-	const onProgress = opts.onProgress;
-	let block = {};
-	return runProcess(ffmpeg, [
-		...pre,
-		"-progress",
-		"pipe:1",
-		...args
-	], {
-		...opts,
-		onStdoutLine: (line) => {
-			const eq = line.indexOf("=");
-			if (eq <= 0) return;
-			const k = line.slice(0, eq);
-			const v = line.slice(eq + 1);
-			block[k] = v;
-			if (k === "progress") {
-				onProgress(parseProgressBlock(block));
-				block = {};
-			}
-		}
-	});
-}
-/** Parse one `-progress` key=value block. (`out_time_ms` is in microseconds despite its name.) */
-function parseProgressBlock(b) {
-	const us = Number(b.out_time_us ?? b.out_time_ms);
-	const p = {
-		out_time_ms: Number.isFinite(us) ? Math.max(0, Math.round(us / 1e3)) : 0,
-		done: b.progress === "end"
-	};
-	if (b.frame !== void 0 && Number.isFinite(Number(b.frame))) p.frame = Number(b.frame);
-	if (b.fps !== void 0 && Number.isFinite(Number(b.fps))) p.fps = Number(b.fps);
-	if (b.speed) p.speed = b.speed.trim();
-	return p;
-}
-function parseRate(r) {
-	if (!r) return null;
-	const [n, d] = r.split("/").map(Number);
-	if (!n || !Number.isFinite(n)) return null;
-	const v = d ? n / d : n;
-	return Number.isFinite(v) && v > 0 ? Math.round(v * 1e3) / 1e3 : null;
-}
-function parseProbeJson(json) {
-	const data = JSON.parse(json);
-	const streams = data.streams ?? [];
-	const v = streams.find((s) => s.codec_type === "video" && !s.disposition?.attached_pic);
-	const a = streams.find((s) => s.codec_type === "audio");
-	const dur = Number(data.format?.duration ?? v?.duration ?? a?.duration ?? 0);
-	return {
-		duration_s: Number.isFinite(dur) ? dur : 0,
-		width: v?.width ?? null,
-		height: v?.height ?? null,
-		fps: v ? parseRate(v.avg_frame_rate) ?? parseRate(v.r_frame_rate) : null,
-		video_codec: v?.codec_name ?? null,
-		audio_codec: a?.codec_name ?? null,
-		sample_rate: a?.sample_rate ? Number(a.sample_rate) : null,
-		channels: a?.channels ?? null,
-		has_audio: Boolean(a),
-		has_video: Boolean(v),
-		pix_fmt: v?.pix_fmt ?? null,
-		format_name: data.format?.format_name ?? null
-	};
-}
-/** ffprobe a media file. */
-async function ffprobe(path, opts = {}) {
-	const { ffprobe: bin } = await getTools(opts.tools);
-	const { stdout } = await runProcess(bin, [
-		"-v",
-		"error",
-		"-print_format",
-		"json",
-		"-show_streams",
-		"-show_format",
-		"--",
-		path
-	], {
-		...opts,
-		timeoutMs: opts.timeoutMs ?? 6e4,
-		captureStdout: true
-	});
-	return parseProbeJson(stdout);
-}
-/** `ffmpeg -buildconf` feature flags. */
-function parseBuildconf(text) {
-	return {
-		libass: /--enable-libass\b/.test(text),
-		libx264: /--enable-libx264\b/.test(text)
-	};
-}
-async function ffmpegFeatures(opts = {}) {
-	const { ffmpeg } = await getTools(opts.tools);
-	const [conf, ver] = await Promise.all([runProcess(ffmpeg, ["-hide_banner", "-buildconf"], {
-		timeoutMs: 1e4,
-		captureStdout: true
-	}), runProcess(ffmpeg, ["-hide_banner", "-version"], {
-		timeoutMs: 1e4,
-		captureStdout: true
-	})]);
-	const first = ver.stdout.split("\n")[0] ?? "";
-	return {
-		...parseBuildconf(`${conf.stdout}\n${conf.stderr}`),
-		version: /version\s+(\S+)/.exec(first)?.[1] ?? "unknown"
-	};
-}
-/** First level: a value inside `key=value:key=value` filter options (escapes `\ ' :`). */
-function escapeFilterOption(value) {
-	return value.replace(/[\\':]/g, (m) => `\\${m}`);
-}
-/** Second level: a filter description inside a filtergraph (escapes `\ ' [ ] , ;`). */
-function escapeFiltergraph(value) {
-	return value.replace(/[\\'[\],;]/g, (m) => `\\${m}`);
-}
-/**
-* Escape a file path for a filter option such as `subtitles=filename=<here>` when the
-* filter is passed via `-vf`/`-filter_complex` as one argv element (no shell). Both escaping
-* levels apply. On Windows, backslash separators become forward slashes first.
-*/
-function escapeFilterPath(path, platform = process.platform) {
-	return escapeFiltergraph(escapeFilterOption(platform === "win32" ? path.replace(/\\/g, "/") : path));
-}
-/** Join filter chains (each an array of filters, optionally with pads) into a `-filter_complex` string. */
-function filterGraph(chains) {
-	return chains.map((c) => c.join(",")).join(";");
-}
-/** Seconds with millisecond precision, for ffmpeg time options. */
-function secs(ms) {
-	return (Math.round(ms) / 1e3).toFixed(3);
-}
-//#endregion
-//#region ../media/dist/audio.js
-const AUDIO_SAMPLE_RATE = 48e3;
-/** Output audio codec args by extension: WAV → 16-bit PCM, anything else → AAC 192k. */
-function audioCodecArgs(out, sampleRate = AUDIO_SAMPLE_RATE) {
-	const ext = extname(out).toLowerCase();
-	if (ext === ".wav") return [
-		"-c:a",
-		"pcm_s16le",
-		"-ar",
-		String(sampleRate)
-	];
-	if (ext === ".flac") return [
-		"-c:a",
-		"flac",
-		"-ar",
-		String(sampleRate)
-	];
-	return [
-		"-c:a",
-		"aac",
-		"-b:a",
-		"192k",
-		"-ar",
-		String(sampleRate)
-	];
-}
-/**
-* Concatenate per-scene audio into one track, sample-exact: each slot is resampled, padded with
-* silence or trimmed to exactly `duration_ms`, and slots without audio become `anullsrc` silence.
-* Output format follows the extension (`.wav` PCM, `.m4a`/`.aac` AAC).
-*/
-async function concatAudio(slots, out, opts = {}) {
-	const sr = opts.sampleRate ?? 48e3;
-	const layout = (opts.channels ?? 2) === 1 ? "mono" : "stereo";
-	const inputs = [];
-	const chains = [];
-	const labels = [];
-	let totalSamples = 0;
-	let nIn = 0;
-	for (const [i, s] of slots.entries()) {
-		if (!Number.isFinite(s.duration_ms) || s.duration_ms < 0) throw new Error(`slot ${i}: invalid duration_ms ${s.duration_ms}`);
-		const samples = Math.round(s.duration_ms * sr / 1e3);
-		if (samples === 0) continue;
-		totalSamples += samples;
-		const label = `[a${i}]`;
-		const fmt = `aformat=sample_fmts=fltp:sample_rates=${sr}:channel_layouts=${layout}`;
-		if (s.path) {
-			inputs.push("-i", s.path);
-			chains.push([
-				`[${nIn}:a:0]aresample=${sr}`,
-				fmt,
-				`apad=whole_len=${samples}`,
-				`atrim=end_sample=${samples}`,
-				`asetpts=N/SR/TB${label}`
-			]);
-			nIn++;
-		} else chains.push([
-			`anullsrc=r=${sr}:cl=${layout}`,
-			fmt,
-			`atrim=end_sample=${samples}`,
-			`asetpts=N/SR/TB${label}`
-		]);
-		labels.push(label);
-	}
-	if (labels.length === 0) throw new Error("concatAudio: total duration is zero");
-	chains.push([`${labels.join("")}concat=n=${labels.length}:v=0:a=1[aout]`]);
-	await runFfmpeg([
-		"-y",
-		...inputs,
-		"-filter_complex",
-		filterGraph(chains),
-		"-map",
-		"[aout]",
-		...audioCodecArgs(out, sr),
-		out
-	], opts);
-	return {
-		path: out,
-		samples: totalSamples,
-		duration_ms: Math.round(totalSamples / sr * 1e3)
-	};
-}
-/** Defaults for a music bed under narration (spec.audio.music). */
-const MUSIC_DEFAULTS = {
-	volume_db: -18,
-	duck_db: -10,
-	fade_in_ms: 500,
-	fade_out_ms: 1500,
-	ramp_ms: 150
-};
-/** Merge intervals that overlap or sit closer than `gapMs`, sorted by start. */
-function mergeIntervals(intervals, gapMs) {
-	const sorted = intervals.filter((i) => i.end_ms > i.start_ms).map((i) => ({ ...i })).sort((a, b) => a.start_ms - b.start_ms);
-	const out = [];
-	for (const i of sorted) {
-		const last = out[out.length - 1];
-		if (last && i.start_ms - last.end_ms <= gapMs) last.end_ms = Math.max(last.end_ms, i.end_ms);
-		else out.push(i);
-	}
-	return out;
-}
-/**
-* ffmpeg `volume` expression (eval=frame) that is 1 outside speech and `duckGain` inside it, with
-* linear ramps of `rampMs` before and after each interval. Intervals must not overlap (merge first).
-*/
-function duckExpression(speech, duckGain, rampMs = MUSIC_DEFAULTS.ramp_ms) {
-	if (speech.length === 0) return "1";
-	const r = Math.max(1, rampMs) / 1e3;
-	const f = (n) => String(Math.round(n * 1e3) / 1e3);
-	const terms = speech.map((i) => {
-		const a = i.start_ms / 1e3;
-		const b = i.end_ms / 1e3;
-		return `clip(min((t-${f(a - r)})/${f(r)},(${f(b + r)}-t)/${f(r)}),0,1)`;
-	});
-	return `1-${f(1 - duckGain)}*min(1,${terms.join("+")})`;
-}
-/**
-* Mix a looping, faded music bed under the voice (or alone), ducking it over the speech intervals.
-* The result is exactly `duration_ms` long; loudness normalization happens afterwards on the mix.
-*/
-async function mixMusic(input, opts = {}) {
-	const sr = opts.sampleRate ?? 48e3;
-	const m = input.music;
-	const samples = Math.round(input.duration_ms * sr / 1e3);
-	if (samples <= 0) throw new Error("mixMusic: duration is zero");
-	const dur = samples / sr;
-	const fadeIn = Math.min((m.fade_in_ms ?? MUSIC_DEFAULTS.fade_in_ms) / 1e3, dur / 2);
-	const fadeOut = Math.min((m.fade_out_ms ?? MUSIC_DEFAULTS.fade_out_ms) / 1e3, dur / 2);
-	const fmt = `aformat=sample_fmts=fltp:sample_rates=${sr}:channel_layouts=stereo`;
-	const speech = input.voice ? mergeIntervals(input.speech ?? [], 2 * MUSIC_DEFAULTS.ramp_ms) : [];
-	const duckGain = 10 ** ((m.duck_db ?? MUSIC_DEFAULTS.duck_db) / 20);
-	const musicChain = [
-		`[0:a:0]aresample=${sr}`,
-		fmt,
-		`atrim=end_sample=${samples}`,
-		`apad=whole_len=${samples}`,
-		"asetpts=N/SR/TB",
-		`volume=${m.volume_db ?? MUSIC_DEFAULTS.volume_db}dB`,
-		...speech.length ? [`volume='${duckExpression(speech, duckGain)}':eval=frame`] : [],
-		...fadeIn > 0 ? [`afade=t=in:st=0:d=${fadeIn}`] : [],
-		...fadeOut > 0 ? [`afade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}`] : []
-	];
-	const inputs = [
-		...m.loop ?? true ? ["-stream_loop", "-1"] : [],
-		...m.start_sec ? ["-ss", String(m.start_sec)] : [],
-		"-i",
-		m.path
-	];
-	const chains = [];
-	if (input.voice) {
-		inputs.push("-i", input.voice);
-		chains.push([...musicChain, "anull[m]"]);
-		chains.push([
-			`[1:a:0]aresample=${sr}`,
-			fmt,
-			`apad=whole_len=${samples}`,
-			`atrim=end_sample=${samples}`,
-			"asetpts=N/SR/TB[v]"
-		]);
-		chains.push(["[v][m]amix=inputs=2:duration=first:normalize=0", `atrim=end_sample=${samples}[aout]`]);
-	} else chains.push([...musicChain, "anull[aout]"]);
-	await runFfmpeg([
-		"-y",
-		...inputs,
-		"-filter_complex",
-		filterGraph(chains),
-		"-map",
-		"[aout]",
-		...audioCodecArgs(input.out, sr),
-		input.out
-	], opts);
-	return {
-		path: input.out,
-		duration_ms: Math.round(samples / sr * 1e3)
-	};
-}
-/** Extract the JSON block `loudnorm=print_format=json` writes to stderr. Returns null if absent or non-finite (e.g. digital silence). */
-function parseLoudnormJson(stderr) {
-	const at = stderr.lastIndexOf("[Parsed_loudnorm");
-	const from = at >= 0 ? stderr.indexOf("{", at) : stderr.lastIndexOf("{");
-	if (from < 0) return null;
-	const to = stderr.indexOf("}", from);
-	if (to < 0) return null;
-	try {
-		const raw = JSON.parse(stderr.slice(from, to + 1));
-		const m = {
-			input_i: Number(raw.input_i),
-			input_tp: Number(raw.input_tp),
-			input_lra: Number(raw.input_lra),
-			input_thresh: Number(raw.input_thresh),
-			target_offset: Number(raw.target_offset)
-		};
-		return Object.values(m).every(Number.isFinite) ? m : null;
-	} catch {
-		return null;
-	}
-}
-/**
-* EBU R128 loudness normalization in two passes: measure with `print_format=json`, then apply
-* with the measured values (`linear=true`). Falls back to a single dynamic pass when the
-* measurement cannot be parsed. Video, if any, is stream-copied (unless the output is audio-only).
-*/
-async function loudnorm2pass(input, out, target = {}, opts = {}) {
-	const I = target.I ?? -14;
-	const TP = target.TP ?? -1;
-	const LRA = target.LRA ?? 11;
-	const sr = opts.sampleRate ?? 48e3;
-	const base = `loudnorm=I=${I}:TP=${TP}:LRA=${LRA}`;
-	let measured = null;
-	try {
-		measured = parseLoudnormJson((await runFfmpeg([
-			"-i",
-			input,
-			"-map",
-			"0:a:0",
-			"-af",
-			`${base}:print_format=json`,
-			"-f",
-			"null",
-			"-"
-		], {
-			...opts,
-			onProgress: void 0,
-			keepStderr: true
-		})).stderr);
-	} catch (err) {
-		if (opts.signal?.aborted) throw err;
-		measured = null;
-	}
-	const af = measured ? `${base}:measured_I=${measured.input_i}:measured_TP=${measured.input_tp}:measured_LRA=${measured.input_lra}:measured_thresh=${measured.input_thresh}:offset=${measured.target_offset}:linear=true:print_format=summary` : base;
-	const audioOnly = [
-		".wav",
-		".m4a",
-		".aac",
-		".flac",
-		".mp3"
-	].includes(extname(out).toLowerCase());
-	const maps = audioOnly ? ["-map", "0:a:0"] : [
-		"-map",
-		"0:v?",
-		"-map",
-		"0:a:0",
-		"-c:v",
-		"copy"
-	];
-	const codec = audioOnly ? audioCodecArgs(out, sr) : [
-		"-c:a",
-		"aac",
-		"-b:a",
-		"192k",
-		"-ar",
-		String(sr)
-	];
-	const extra = !audioOnly && extname(out).toLowerCase() === ".mp4" ? ["-movflags", "+faststart"] : [];
-	await runFfmpeg([
-		"-y",
-		"-i",
-		input,
-		...maps,
-		"-af",
-		af,
-		...codec,
-		...extra,
-		out
-	], opts);
-	return {
-		path: out,
-		mode: measured ? "two-pass" : "single-pass",
-		measured
-	};
-}
-/** Parse the `ebur128` summary from stderr. */
-function parseEbur128Summary(stderr) {
-	const at = stderr.lastIndexOf("Summary:");
-	const s = at >= 0 ? stderr.slice(at) : "";
-	const num = (re) => {
-		const m = re.exec(s);
-		if (!m?.[1]) return null;
-		const v = Number(m[1]);
-		return Number.isFinite(v) ? v : null;
-	};
-	return {
-		integrated_lufs: num(/I:\s+(-?[\d.]+|-?inf)\s+LUFS/),
-		lra: num(/LRA:\s+(-?[\d.]+)\s+LU\b/),
-		true_peak_dbtp: num(/Peak:\s+(-?[\d.]+|-?inf)\s+dBFS/)
-	};
-}
-//#endregion
-//#region ../media/dist/captions.js
-/**
-* Build the global word timeline: offset each scene's words by its start, clamp them to the
-* scene's track duration, sort, drop empty words and remove overlaps (a word ends no later
-* than the next one starts), so karaoke durations are never negative.
-*/
-function buildWordTimeline(scenes) {
-	const out = [];
-	for (const { scene_start_ms, track } of scenes) {
-		const sceneEnd = track.duration_ms > 0 ? scene_start_ms + track.duration_ms : Number.POSITIVE_INFINITY;
-		for (const w of track.words) {
-			const word = w.word.trim();
-			if (!word) continue;
-			const start = Math.min(Math.round(scene_start_ms + w.start_ms), sceneEnd);
-			const end = Math.min(Math.max(Math.round(scene_start_ms + w.end_ms), start), sceneEnd);
-			out.push({
-				word,
-				start_ms: start,
-				end_ms: end,
-				scene_id: track.scene_id
-			});
-		}
-	}
-	out.sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms);
-	for (let i = 0; i + 1 < out.length; i++) {
-		const cur = out[i];
-		const next = out[i + 1];
-		if (cur.end_ms > next.start_ms) cur.end_ms = Math.max(cur.start_ms, next.start_ms);
-	}
-	return out;
-}
-const SENTENCE_END$1 = /[.!?…]["'”’)\]]*$/;
-const CLAUSE_END$1 = /[,;:—–-]["'”’)\]]*$/;
-/** A caption or row may start with these (a clause boundary). */
-const CONJUNCTIONS = new Set("and but or nor so yet because since although though while whereas when whenever where which who whom whose that then unless until if instead".split(" "));
-/** Never end a caption or row on these: they belong to the next word. */
-const DANGLING = new Set("a an the of to in on at by for from with into onto as than my your our their its his her this these those".split(" "));
-const STOPWORDS$1 = new Set("a an and are as at be been being but by can could did do does for from had has have how i if in into is it its just like me more most my no not of on one only or our out over so some such than that the their them then there these they this those to too up us very was we were what when where which while who why will with would you your also about after all any because before both each few here her him his she he own same should through under until again further once off down new get got make made use used way really thing things lot".split(" "));
-const core$1 = (word) => word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
-const charsOf = (ws, from, to) => {
-	let n = 0;
-	for (let i = from; i < to; i++) n += Array.from(ws[i].word).length + (i > from ? 1 : 0);
-	return n;
-};
-/** Cost of a break between `ws[i-1]` and `ws[i]` (0 = natural). */
-function breakCost(ws, i) {
-	const prev = ws[i - 1].word;
-	const next = core$1(ws[i].word).toLowerCase();
-	if (SENTENCE_END$1.test(prev) || CLAUSE_END$1.test(prev)) return 0;
-	let c = CONJUNCTIONS.has(next) ? 1 : 4;
-	if (DANGLING.has(core$1(prev).toLowerCase())) c += 3;
-	return c;
-}
-/**
-* Best split of `ws[from..to)` into ≤ maxLines rows of ≤ maxChars (a lone over-long word is
-* allowed): balanced rows, natural breaks, no 1-word orphan row when the caption has 3+ words.
-* Null when the words cannot fit.
-*/
-function planRows(ws, from, to, maxChars, maxLines) {
-	const n = to - from;
-	const rowOk = (a, b) => b - a === 1 || charsOf(ws, a, b) <= maxChars;
-	if (rowOk(from, to)) return {
-		sizes: [n],
-		cost: 0
-	};
-	let best = null;
-	const walk = (start, sizes, cost) => {
-		if (sizes.length === maxLines) return;
-		for (let end = start + 1; end <= to; end++) {
-			if (!rowOk(start, end)) break;
-			const next = [...sizes, end - start];
-			if (end === to) {
-				if (next.length < 2) continue;
-				const lens = next.map((_, k) => {
-					const a = from + next.slice(0, k).reduce((s, x) => s + x, 0);
-					return charsOf(ws, a, a + next[k]);
-				});
-				const imbalance = (Math.max(...lens) - Math.min(...lens)) / maxChars * 3;
-				const orphans = n >= 3 ? next.filter((x) => x === 1).length * 5 : 0;
-				const total = cost + imbalance + orphans + (next.length - 1);
-				if (!best || total < best.cost) best = {
-					sizes: next,
-					cost: total
-				};
-			} else walk(end, next, cost + breakCost(ws, end) * .5);
-		}
-	};
-	walk(from, [], 0);
-	return best;
-}
-/** 1–2 salient words: numbers, acronyms and capitalised terms first, else the longest non-stopword. */
-function pickEmphasis(words, prevWord) {
-	const scored = [];
-	words.forEach((w, i) => {
-		const c = core$1(w.word);
-		if (!c) return;
-		const lower = c.toLowerCase();
-		const sentenceStart = i === 0 ? !prevWord || SENTENCE_END$1.test(prevWord) : SENTENCE_END$1.test(words[i - 1].word);
-		const len = Array.from(c).length;
-		let score = 0;
-		if (/\p{N}/u.test(c)) score = 100 + len;
-		else if (STOPWORDS$1.has(lower)) score = 0;
-		else if (/^\p{Lu}{2,}s?$/u.test(c)) score = 60 + len;
-		else if (/^\p{Lu}/u.test(c) && !sentenceStart) score = 50 + len;
-		else if (len >= 4) score = len;
-		if (score > 0) scored.push({
-			i,
-			score
-		});
-	});
-	scored.sort((a, b) => b.score - a.score || a.i - b.i);
-	const out = scored.slice(0, 1).map((s) => s.i);
-	const second = scored[1];
-	if (second && words.length >= 5 && second.score >= 50) out.push(second.i);
-	return out.sort((a, b) => a - b);
-}
-/**
-* Group words into captions. Hard breaks: scene changes, pauses over `maxGapMs`, sentence ends.
-* Inside a phrase, captions of `minWords`–`maxWords` words that fit `maxLines` rows are chosen
-* to minimise a cost that prefers ~5 words, breaks after punctuation or before a conjunction,
-* and never ends on an article or preposition. Then timing is smoothed: short gaps are held
-* over and each caption stays up at least `minDisplayMs` unless the next one starts sooner.
-*/
-function groupCaptionLines(words, opts = {}) {
-	const minWords = Math.max(1, opts.minWords ?? 3);
-	const maxWords = Math.max(minWords, opts.maxWords ?? 7);
-	const maxChars = Math.max(1, opts.maxChars ?? 32);
-	const maxLines = Math.min(3, Math.max(1, opts.maxLines ?? 2));
-	const maxGap = opts.maxGapMs ?? 600;
-	const sentence = opts.breakOnSentence ?? true;
-	const emphasis = opts.emphasis ?? true;
-	const runs = [];
-	let run = [];
-	for (const w of words) {
-		const prev = run[run.length - 1];
-		if (prev && (w.start_ms - prev.end_ms > maxGap || sentence && SENTENCE_END$1.test(prev.word) || prev.scene_id !== w.scene_id)) {
-			runs.push(run);
-			run = [];
-		}
-		run.push(w);
-	}
-	if (run.length) runs.push(run);
-	const lines = [];
-	for (const ws of runs) {
-		const n = ws.length;
-		const best = [{
-			cost: 0,
-			from: -1,
-			rows: []
-		}];
-		for (let i = 1; i <= n; i++) {
-			let pick;
-			for (let j = i - 1; j >= 0 && i - j <= maxWords; j--) {
-				const prior = best[j];
-				if (!prior || !Number.isFinite(prior.cost)) continue;
-				const rows = planRows(ws, j, i, maxChars, maxLines);
-				if (!rows) continue;
-				const k = i - j;
-				const size = (k < minWords ? 6 * (minWords - k) : 0) + .3 * (k - 5) ** 2;
-				const cost = prior.cost + 3 + size + rows.cost + (i < n ? breakCost(ws, i) : 0);
-				if (!pick || cost < pick.cost) pick = {
-					cost,
-					from: j,
-					rows: rows.sizes
-				};
-			}
-			best[i] = pick ?? {
-				cost: best[i - 1].cost + 100,
-				from: i - 1,
-				rows: [1]
-			};
-		}
-		const cues = [];
-		for (let i = n; i > 0; i = best[i].from) {
-			const { from, rows } = best[i];
-			const cw = ws.slice(from, i);
-			cues.unshift({
-				start_ms: cw[0].start_ms,
-				end_ms: cw[cw.length - 1].end_ms,
-				text: cw.map((w) => w.word).join(" "),
-				words: cw,
-				...rows.length > 1 ? { row_sizes: rows } : {}
-			});
-		}
-		lines.push(...cues);
-	}
-	const minDisplay = opts.minDisplayMs ?? 800;
-	const holdGap = opts.holdGapMs ?? 250;
-	lines.forEach((l, i) => {
-		if (emphasis) {
-			const prev = lines[i - 1]?.words.at(-1)?.word;
-			const e = pickEmphasis(l.words, prev);
-			if (e.length) l.emphasis = e;
-		}
-		const next = lines[i + 1];
-		const limit = Math.min(next ? next.start_ms : Number.POSITIVE_INFINITY, opts.endMs ?? Number.POSITIVE_INFINITY);
-		let end = Math.max(l.end_ms, l.start_ms + minDisplay);
-		if (next && next.start_ms - l.end_ms < holdGap) end = Math.max(end, next.start_ms);
-		l.end_ms = Math.max(l.end_ms, Math.min(end, limit));
-	});
-	return lines;
-}
-/** The caption's display rows (words joined per row). */
-function captionRows(line) {
-	const sizes = line.row_sizes ?? [line.words.length];
-	const rows = [];
-	let at = 0;
-	for (const n of sizes) {
-		rows.push(line.words.slice(at, at + n).map((w) => w.word).join(" "));
-		at += n;
-	}
-	return line.words.length ? rows : [line.text];
-}
-function pad(n, w = 2) {
-	return String(n).padStart(w, "0");
-}
-function hmsParts(ms) {
-	const t = Math.max(0, Math.round(ms));
-	return [
-		Math.floor(t / 36e5),
-		Math.floor(t / 6e4) % 60,
-		Math.floor(t / 1e3) % 60,
-		t % 1e3
-	];
-}
-/** `HH:MM:SS,mmm` */
-function srtTime(ms) {
-	const [h, m, s, f] = hmsParts(ms);
-	return `${pad(h)}:${pad(m)}:${pad(s)},${pad(f, 3)}`;
-}
-/** `HH:MM:SS.mmm` */
-function vttTime(ms) {
-	const [h, m, s, f] = hmsParts(ms);
-	return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(f, 3)}`;
-}
-/** ASS `H:MM:SS.cc` from centiseconds. */
-function assTimeCs(cs) {
-	const t = Math.max(0, Math.round(cs));
-	return `${Math.floor(t / 36e4)}:${pad(Math.floor(t / 6e3) % 60)}:${pad(Math.floor(t / 100) % 60)}.${pad(t % 100)}`;
-}
-const cs = (ms) => Math.round(ms / 10);
-function toSrt(lines) {
-	return lines.map((l, i) => `${i + 1}\n${srtTime(l.start_ms)} --> ${srtTime(l.end_ms)}\n${captionRows(l).join("\n")}\n`).join("\n");
-}
-function vttEscape(t) {
-	return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-function toVtt(lines) {
-	return `WEBVTT\n\n${lines.map((l) => `${vttTime(l.start_ms)} --> ${vttTime(l.end_ms)}\n${vttEscape(captionRows(l).join("\n"))}\n`).join("\n")}`;
-}
-/** Plain-text transcript: words joined with spaces, one paragraph per scene. */
-function toTranscript(words) {
-	const paras = [];
-	let scene = null;
-	for (const w of words) {
-		if (scene === null || w.scene_id !== scene) paras.push([]);
-		scene = w.scene_id;
-		paras[paras.length - 1].push(w.word);
-	}
-	return paras.map((p) => p.join(" ")).join("\n\n") + (paras.length ? "\n" : "");
-}
-/** Canonical word timeline plus caption grouping, for the HTML (HyperFrames) captions. */
-function toCaptionJson(words, lines = groupCaptionLines(words)) {
-	const index = new Map(words.map((w, i) => [w, i]));
-	return {
-		version: 1,
-		words: words.map((w) => ({ ...w })),
-		lines: lines.map((l) => {
-			const first = l.words[0] ? index.get(l.words[0]) ?? -1 : -1;
-			return {
-				start_ms: l.start_ms,
-				end_ms: l.end_ms,
-				text: l.text,
-				first_word: first,
-				word_count: l.words.length,
-				rows: captionRows(l),
-				emphasis: first >= 0 ? (l.emphasis ?? []).map((i) => first + i) : []
-			};
-		})
-	};
-}
-/** `#RRGGBB` (or `#RRGGBBAA`, AA = opacity) → ASS `&HAABBGGRR` (ASS alpha: 00 = opaque). */
-function assColor(hex) {
-	const m = /^#?([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(hex.trim());
-	if (!m) throw new Error(`invalid colour ${hex}; expected #RRGGBB or #RRGGBBAA`);
-	const rgb = m[1].toUpperCase();
-	return `&H${m[2] ? (255 - Number.parseInt(m[2], 16)).toString(16).padStart(2, "0").toUpperCase() : "00"}${rgb.slice(4, 6)}${rgb.slice(2, 4)}${rgb.slice(0, 2)}`;
-}
-/** `#RRGGBB` → an override-tag colour `&HBBGGRR&` (for `\c`). */
-function assTagColor(hex) {
-	return `${assColor(hex.slice(0, 7)).replace(/^&H00/, "&H")}&`;
-}
-/** Make a word safe inside an ASS Dialogue: braces start override blocks and `\` starts escapes. */
-function assEscape(text) {
-	return text.replace(/\\/g, "/").replace(/\{/g, "(").replace(/\}/g, ")").replace(/[\r\n]+/g, " ");
-}
-function defaultMarginV(width, height) {
-	return Math.round(height * (height / width >= 1.5 ? .18 : .12));
-}
-/** libass line advance per px of font size (ascent + descent of typical sans fonts). */
-const LINE_ADVANCE = 1.22;
-/** Average glyph advance per px of font size, for row width estimates. */
-const GLYPH_EM = {
-	regular: .54,
-	bold: .58
-};
-/** Style values for a preset at a given output size. */
-function assStyle(o) {
-	const preset = o.preset ?? "minimal";
-	const short = Math.min(o.width, o.height);
-	const bold = o.bold ?? preset === "bold";
-	return {
-		fontSize: o.fontSize ?? Math.max(8, Math.round(short * (preset === "bold" ? .08 : .06))),
-		bold,
-		outline: Math.max(1, Math.round(short * (preset === "bold" ? .006 : .003))),
-		shadow: preset === "bold" ? Math.max(1, Math.round(short * .003)) : 0,
-		marginV: o.marginV ?? defaultMarginV(o.width, o.height),
-		marginLR: Math.round(o.width * .06)
-	};
-}
-function captionLayout(o) {
-	const st = assStyle(o);
-	const maxLines = Math.min(3, Math.max(1, o.maxLines ?? 2));
-	const plate = Math.min(1, Math.max(0, o.plateOpacity ?? .55)) > 0;
-	const padFor = (size) => plate ? Math.max(2, Math.round(size * .22)) : st.outline;
-	const blockH = (size) => maxLines * size * LINE_ADVANCE + 2 * padFor(size);
-	let fontSize = st.fontSize;
-	let region;
-	if (o.box) {
-		region = {
-			x: Math.round(o.box.x),
-			y: Math.round(o.box.y),
-			w: Math.round(o.box.w),
-			h: Math.round(o.box.h)
-		};
-		while (fontSize > 8 && blockH(fontSize) > region.h) fontSize--;
-	} else {
-		const h = Math.round(blockH(fontSize));
-		const bottom = o.height - st.marginV;
-		region = {
-			x: st.marginLR,
-			y: bottom - h,
-			w: o.width - 2 * st.marginLR,
-			h
-		};
-	}
-	const pad = padFor(fontSize);
-	const em = st.bold ? GLYPH_EM.bold : GLYPH_EM.regular;
-	const maxChars = Math.max(4, Math.floor((region.w - 2 * pad) / (fontSize * em)));
-	const anchor = o.positionY !== void 0 ? {
-		kind: "center",
-		y: Math.round(Math.min(1, Math.max(0, o.positionY)) * o.height)
-	} : { kind: "bottom" };
-	return {
-		fontSize,
-		bold: st.bold,
-		pad,
-		plate,
-		lineAdvance: fontSize * LINE_ADVANCE,
-		maxChars,
-		maxLines,
-		region,
-		anchor
-	};
-}
-/**
-* Box the burned-in captions actually occupy (union over all captions, plate included), in
-* output pixels, clamped to the frame. With no captions, the space reserved for `maxLines` rows.
-*/
-function captionBlockBox(lines, layout, frame) {
-	const em = layout.bold ? GLYPH_EM.bold : GLYPH_EM.regular;
-	let w = 0;
-	let rows = 0;
-	for (const l of lines) {
-		const r = captionRows(l);
-		rows = Math.max(rows, r.length);
-		for (const row of r) w = Math.max(w, Array.from(row).length * layout.fontSize * em);
-	}
-	if (!lines.length) {
-		rows = layout.maxLines;
-		w = layout.region.w - 2 * layout.pad;
-	}
-	const bw = Math.min(frame.width, Math.ceil(w + 2 * layout.pad));
-	const bh = Math.ceil(rows * layout.lineAdvance + 2 * layout.pad);
-	const cx = layout.region.x + layout.region.w / 2;
-	const top = layout.anchor.kind === "center" ? layout.anchor.y - bh / 2 : layout.region.y + layout.region.h - bh;
-	const x = Math.max(0, Math.round(cx - bw / 2));
-	const y = Math.max(0, Math.min(frame.height - bh, Math.round(top)));
-	return {
-		x,
-		y,
-		w: Math.min(bw, frame.width - x),
-		h: Math.min(bh, frame.height - y)
-	};
-}
-/** Karaoke text for one caption: `{\kf<cs>}word` per word, `{\k<cs>}` for pauses, rows joined with `\N`. */
-function assKaraokeText(line, emphasis) {
-	let cursor = cs(line.start_ms);
-	const parts = [];
-	const breaks = rowBreaks(line);
-	const em = new Set(typeof emphasis === "object" ? line.emphasis ?? [] : []);
-	line.words.forEach((w, i) => {
-		const s = Math.max(cs(w.start_ms), cursor);
-		const e = Math.max(cs(w.end_ms), s);
-		if (s > cursor) parts.push(`{\\k${s - cursor}}`);
-		const word = em.has(i) ? emphasize(w.word, emphasis) : assEscape(w.word);
-		parts.push(`{\\kf${e - s}}${word}${i < line.words.length - 1 ? breaks.has(i + 1) ? "\\N" : " " : ""}`);
-		cursor = e;
-	});
-	return parts.join("");
-}
-/** Wrap a word's letters/digits (not its surrounding punctuation) in emphasis overrides. */
-function emphasize(word, e) {
-	const m = /^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/u.exec(word);
-	if (!m || !m[2]) return assEscape(word);
-	return `${assEscape(m[1])}{${e.on}}${assEscape(m[2])}{${e.off}}${assEscape(m[3])}`;
-}
-/** Word indices that start a new row. */
-function rowBreaks(line) {
-	const out = /* @__PURE__ */ new Set();
-	let at = 0;
-	for (const n of (line.row_sizes ?? []).slice(0, -1)) out.add(at += n);
-	return out;
-}
-/** Static caption text: rows joined with `\N`, emphasised words wrapped in `on`/`off` overrides. */
-function assStaticText(line, emphasis) {
-	const breaks = rowBreaks(line);
-	const em = new Set(emphasis ? line.emphasis ?? [] : []);
-	return line.words.map((w, i) => {
-		const word = em.has(i) ? emphasize(w.word, emphasis) : assEscape(w.word);
-		return `${i > 0 ? breaks.has(i) ? "\\N" : " " : ""}${word}`;
-	}).join("");
-}
-/**
-* ASS captions: a plate (BorderStyle 3, opaque box per row) unless `plateOpacity` is 0,
-* keyword emphasis in the highlight colour (bold too when the text is not already bold), and
-* the karaoke sweep only with `activeWord`. Rows are pre-broken (`WrapStyle: 2`, no libass
-* wrapping) and the block is bottom-aligned in `box` (or the legacy bottom margin), or centred
-* on `positionY`. See `captionLayout`/`captionBlockBox` for the geometry.
-*/
-function toAss(lines, o) {
-	if (!(o.width > 0 && o.height > 0)) throw new Error("toAss: width and height are required");
-	const st = assStyle(o);
-	const layout = captionLayout(o);
-	const font = (o.font ?? "Arial").replace(/,/g, " ");
-	const baseHex = o.primary ?? "#FFFFFF";
-	const hiHex = o.highlight ?? "#FFD60A";
-	const karaoke = o.activeWord ?? false;
-	const opacity = Math.min(1, Math.max(0, o.plateOpacity ?? .55));
-	const plateAlpha = Math.round(opacity * 255).toString(16).padStart(2, "0");
-	const border = layout.plate ? assColor(`${o.plateColor ?? "#000000"}${plateAlpha}`) : assColor(o.outline ?? "#000000");
-	const { region } = layout;
-	const style = [
-		"Default",
-		font,
-		layout.fontSize,
-		assColor(karaoke ? hiHex : baseHex),
-		assColor(baseHex),
-		border,
-		layout.plate ? border : assColor("#00000080"),
-		layout.bold ? -1 : 0,
-		0,
-		0,
-		0,
-		100,
-		100,
-		0,
-		0,
-		layout.plate ? 3 : 1,
-		layout.pad,
-		layout.plate ? 0 : st.shadow,
-		2,
-		region.x,
-		Math.max(0, o.width - region.x - region.w),
-		Math.max(0, o.height - region.y - region.h + layout.pad),
-		1
-	].join(",");
-	const header = [
-		"[Script Info]",
-		"; Generated by video-studio",
-		"ScriptType: v4.00+",
-		`PlayResX: ${o.width}`,
-		`PlayResY: ${o.height}`,
-		"WrapStyle: 2",
-		"ScaledBorderAndShadow: yes",
-		"YCbCr Matrix: TV.709",
-		"",
-		"[V4+ Styles]",
-		"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-		`Style: ${style}`,
-		"",
-		"[Events]",
-		"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
-	];
-	const em = !(o.emphasis ?? true) || karaoke && layout.bold ? void 0 : karaoke ? {
-		on: "\\b1",
-		off: "\\b0"
-	} : {
-		on: `\\c${assTagColor(hiHex)}${layout.bold ? "" : "\\b1"}`,
-		off: `\\c${assTagColor(baseHex)}${layout.bold ? "" : "\\b0"}`
-	};
-	const pos = layout.anchor.kind === "center" ? `{\\an5\\pos(${Math.round(region.x + region.w / 2)},${layout.anchor.y})}` : "";
-	const events = lines.map((l) => `Dialogue: 0,${assTimeCs(cs(l.start_ms))},${assTimeCs(cs(l.end_ms))},Default,,0,0,0,,${pos}${karaoke ? assKaraokeText(l, em) : assStaticText(l, em)}`);
-	return `${[...header, ...events].join("\n")}\n`;
-}
-/** Write `<base>.json|.srt|.vtt|.txt` (and `.ass` when `ass` options are given) into `dir`. */
-async function writeCaptionSet(dir, base, words, opts = {}) {
-	await mkdir(dir, { recursive: true });
-	const { ass, ...group } = opts;
-	const maxLines = Math.min(3, Math.max(1, opts.maxLines ?? ass?.maxLines ?? 2));
-	const layout = ass ? captionLayout({
-		...ass,
-		maxLines
-	}) : void 0;
-	const lines = groupCaptionLines(words, {
-		...group,
-		maxLines,
-		...layout && opts.maxChars === void 0 ? { maxChars: layout.maxChars } : {}
-	});
-	const files = {
-		json: join(dir, `${base}.json`),
-		srt: join(dir, `${base}.srt`),
-		vtt: join(dir, `${base}.vtt`),
-		txt: join(dir, `${base}.txt`)
-	};
-	await writeFile(files.json, `${JSON.stringify(toCaptionJson(words, lines), null, 2)}\n`);
-	await writeFile(files.srt, toSrt(lines));
-	await writeFile(files.vtt, toVtt(lines));
-	await writeFile(files.txt, toTranscript(words));
-	if (!ass || !layout) return {
-		files,
-		lines
-	};
-	files.ass = join(dir, `${base}.ass`);
-	await writeFile(files.ass, toAss(lines, {
-		...ass,
-		maxLines
-	}));
-	return {
-		files,
-		lines,
-		placement: {
-			box: captionBlockBox(lines, layout, ass),
-			max_lines: maxLines,
-			font_size: layout.fontSize
-		}
-	};
-}
-//#endregion
-//#region ../media/dist/compose.js
-const FINAL_ENCODE = {
-	crf: 20,
-	preset: "medium",
-	profile: "high",
-	audioBitrate: "192k",
-	sampleRate: AUDIO_SAMPLE_RATE
-};
-function h264Args(e = {}) {
-	return [
-		"-c:v",
-		"libx264",
-		"-profile:v",
-		FINAL_ENCODE.profile,
-		"-preset",
-		e.preset ?? FINAL_ENCODE.preset,
-		"-crf",
-		String(e.crf ?? FINAL_ENCODE.crf),
-		"-pix_fmt",
-		"yuv420p"
-	];
-}
-function aacArgs() {
-	return [
-		"-c:a",
-		"aac",
-		"-b:a",
-		FINAL_ENCODE.audioBitrate,
-		"-ar",
-		String(FINAL_ENCODE.sampleRate)
-	];
-}
-const FASTSTART = ["-movflags", "+faststart"];
-const IMAGE_EXT$1 = /* @__PURE__ */ new Set([
-	".png",
-	".jpg",
-	".jpeg",
-	".webp",
-	".bmp"
-]);
-function assertEven(width, height) {
-	if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || width % 2 || height % 2) throw new Error(`target size must be positive even integers for yuv420p H.264, got ${width}x${height}`);
-}
-/** Filters that normalise one segment to the target: scale + pad/crop, square pixels, fps, yuv420p, exact frame count. */
-function normalizeFilters(t, durationMs) {
-	const { width: W, height: H, fps } = t;
-	const frames = Math.max(1, Math.round(durationMs * fps / 1e3));
-	return [
-		...(t.fit ?? "pad") === "crop" ? [`scale=${W}:${H}:force_original_aspect_ratio=increase`, `crop=${W}:${H}`] : [`scale=${W}:${H}:force_original_aspect_ratio=decrease`, `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${t.padColor ?? "black"}`],
-		"setsar=1",
-		`fps=${fps}`,
-		"format=yuv420p",
-		`tpad=stop_mode=clone:stop_duration=${secs(durationMs)}`,
-		`trim=end_frame=${frames}`,
-		"setpts=PTS-STARTPTS"
-	];
-}
-/**
-* Concatenate video segments with the concat *filter* (tolerates mixed codecs, sizes and
-* frame rates): every segment is normalised to the target size/aspect/fps first. Video only;
-* audio is handled by `concatAudio` + `muxAudio`. Output uses the final H.264 settings.
-*/
-async function concatVideos(segments, out, target, opts = {}) {
-	assertEven(target.width, target.height);
-	if (!segments.length) throw new Error("concatVideos: no segments");
-	const inputs = [];
-	const chains = [];
-	let frames = 0;
-	segments.forEach((s, i) => {
-		if (!(s.duration_ms > 0)) throw new Error(`segment ${i}: duration_ms must be > 0`);
-		if (IMAGE_EXT$1.has(extname(s.path).toLowerCase())) inputs.push("-loop", "1", "-framerate", String(target.fps), "-t", secs(s.duration_ms), "-i", s.path);
-		else inputs.push("-i", s.path);
-		chains.push([`[${i}:v:0]${normalizeFilters(target, s.duration_ms).join(",")}[v${i}]`]);
-		frames += Math.max(1, Math.round(s.duration_ms * target.fps / 1e3));
-	});
-	chains.push([`${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0[vout]`]);
-	await runFfmpeg([
-		"-y",
-		...inputs,
-		"-filter_complex",
-		filterGraph(chains),
-		"-map",
-		"[vout]",
-		"-r",
-		String(target.fps),
-		...h264Args(opts.encode),
-		"-an",
-		...FASTSTART,
-		out
-	], opts);
-	return {
-		path: out,
-		frames,
-		duration_ms: Math.round(frames * 1e3 / target.fps)
-	};
-}
-/**
-* Mux an audio track onto a video: video is stream-copied, audio encoded to AAC 192k/48 kHz
-* and padded or trimmed to exactly the video's duration.
-*/
-async function muxAudio(video, audio, out, opts = {}) {
-	const d = (await ffprobe(video, opts)).duration_s.toFixed(3);
-	await runFfmpeg([
-		"-y",
-		"-i",
-		video,
-		"-i",
-		audio,
-		"-map",
-		"0:v:0",
-		"-map",
-		"1:a:0",
-		"-c:v",
-		"copy",
-		"-af",
-		`apad=whole_dur=${d},atrim=duration=${d}`,
-		...aacArgs(),
-		...FASTSTART,
-		out
-	], opts);
-	return { path: out };
-}
-/** The `subtitles=` filter for an ASS/SRT file with correctly escaped paths. */
-function subtitlesFilter(subsPath, fontsDir) {
-	return `subtitles=filename=${escapeFilterPath(subsPath)}${fontsDir ? `:fontsdir=${escapeFilterPath(fontsDir)}` : ""}`;
-}
-/** Burn ASS (karaoke) captions into the video with libass; audio is stream-copied. */
-async function burnCaptions(video, subsPath, out, opts = {}) {
-	await runFfmpeg([
-		"-y",
-		"-i",
-		video,
-		"-map",
-		"0:v:0",
-		"-map",
-		"0:a?",
-		"-vf",
-		subtitlesFilter(subsPath, opts.fontsDir),
-		...h264Args(opts.encode),
-		"-c:a",
-		"copy",
-		...FASTSTART,
-		out
-	], opts);
-	return { path: out };
-}
-/** Full-resolution PNG of the frame at `atMs` (clamped into the video). */
-async function makeThumbnail(video, out, o = {}) {
-	const probe = await ffprobe(video, o);
-	const maxMs = Math.max(0, Math.floor(probe.duration_s * 1e3) - 100);
-	const at = Math.min(Math.max(0, o.atMs ?? 0), maxMs);
-	await runFfmpeg([
-		"-y",
-		"-ss",
-		secs(at),
-		"-i",
-		video,
-		"-frames:v",
-		"1",
-		"-update",
-		"1",
-		"-c:v",
-		"png",
-		out
-	], o);
-	return {
-		path: out,
-		at_ms: at
-	};
-}
-/**
-* concat → (voice concat) → loudnorm → mux = clean master; master + ASS burn-in = captioned reel.
-* The reel is only one generation away from the master (video re-encoded once for the burn-in).
-*/
-async function assemble(input, opts = {}) {
-	const work = input.workDir ?? await mkdtemp(join(tmpdir(), "vs-media-"));
-	await mkdir(work, { recursive: true });
-	try {
-		const silentVideo = join(work, "video.mp4");
-		const v = await concatVideos(input.segments, silentVideo, input, opts);
-		if (input.audio === void 0 && !input.music) {
-			await concatAudio([{ duration_ms: v.duration_ms }], join(work, "silence.wav"), opts);
-			await muxAudio(silentVideo, join(work, "silence.wav"), input.master, opts);
-		} else {
-			let track = input.audio === void 0 ? void 0 : typeof input.audio === "string" ? input.audio : (await concatAudio(input.audio, join(work, "voice.wav"), opts)).path;
-			if (input.music) track = (await mixMusic({
-				...track ? { voice: track } : {},
-				music: input.music.bed,
-				duration_ms: v.duration_ms,
-				...input.music.speech ? { speech: input.music.speech } : {},
-				out: join(work, "mix.wav")
-			}, opts)).path;
-			if (input.loudness !== false) track = (await loudnorm2pass(track, join(work, "mix.norm.wav"), input.loudness ?? {}, opts)).path;
-			await muxAudio(silentVideo, track, input.master, opts);
-		}
-		let reel;
-		if (input.reel) {
-			if (!input.assPath) throw new Error("assemble: `reel` requires `assPath`");
-			reel = (await burnCaptions(input.master, input.assPath, input.reel, {
-				...opts,
-				fontsDir: input.fontsDir
-			})).path;
-		}
-		return {
-			master: input.master,
-			...reel ? { reel } : {},
-			duration_ms: v.duration_ms
-		};
-	} finally {
-		if (!input.workDir) await rm(work, {
-			recursive: true,
-			force: true
-		});
-	}
-}
-//#endregion
-//#region ../media/dist/qa.js
-/** Default blackdetect pixel threshold (fraction of the luma range). */
-const BLACK_PIX_TH = .1;
-/** Normalised limited-range luma (0–1) of a #RRGGBB colour, BT.709. */
-function lumaOf(hex) {
-	const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-	if (!m) return null;
-	const n = parseInt(m[1], 16);
-	const [r, g, b] = [
-		n >> 16 & 255,
-		n >> 8 & 255,
-		n & 255
-	];
-	return (.2126 * r + .7152 * g + .0722 * b) / 255;
-}
-/**
-* blackdetect pix_th for a background: half its luma (so the background itself is not "black"),
-* capped at the default. `nearBlack` means the background is too dark to tell a sparse scene from
-* a blank one, so black intervals can only be a warning.
-*/
-function blackThreshold(background) {
-	const l = background ? lumaOf(background) : null;
-	if (l === null) return {
-		pix_th: BLACK_PIX_TH,
-		nearBlack: false
-	};
-	const pix_th = Math.min(BLACK_PIX_TH, Math.round(l / 2 * 1e3) / 1e3);
-	return {
-		pix_th: Math.max(.005, pix_th),
-		nearBlack: l < .02
-	};
-}
-const r3 = (n) => Math.round(n * 1e3) / 1e3;
-function ranges(stderr, startRe, endRe, totalS) {
-	const events = [];
-	for (const m of stderr.matchAll(startRe)) events.push({
-		t: Number(m[1]),
-		kind: "s",
-		at: m.index
-	});
-	for (const m of stderr.matchAll(endRe)) events.push({
-		t: Number(m[1]),
-		kind: "e",
-		at: m.index
-	});
-	events.sort((a, b) => a.at - b.at);
-	const out = [];
-	let open = null;
-	for (const e of events) if (e.kind === "s") open = e.t;
-	else if (open !== null) {
-		out.push({
-			start_s: r3(open),
-			end_s: r3(e.t),
-			duration_s: r3(e.t - open)
-		});
-		open = null;
-	}
-	if (open !== null && totalS > open) out.push({
-		start_s: r3(open),
-		end_s: r3(totalS),
-		duration_s: r3(totalS - open)
-	});
-	return out;
-}
-/** Parse blackdetect / freezedetect / silencedetect / ebur128 output from one decode pass. */
-function parseDetections(stderr, totalS) {
-	const black = [];
-	for (const m of stderr.matchAll(/black_start:\s*(-?[\d.]+)\s+black_end:\s*(-?[\d.]+)\s+black_duration:\s*(-?[\d.]+)/g)) black.push({
-		start_s: r3(Number(m[1])),
-		end_s: r3(Number(m[2])),
-		duration_s: r3(Number(m[3]))
-	});
-	return {
-		black,
-		freeze: ranges(stderr, /freeze_start:\s*(-?[\d.]+)/g, /freeze_end:\s*(-?[\d.]+)/g, totalS),
-		silence: ranges(stderr, /silence_start:\s*(-?[\d.]+)/g, /silence_end:\s*(-?[\d.]+)/g, totalS),
-		...parseEbur128Summary(stderr)
-	};
-}
-const fmtRanges = (rs) => rs.map((r) => `${r.start_s.toFixed(2)}–${r.end_s.toFixed(2)}s`).join(", ");
-/**
-* Technical QA in one ffprobe plus one decode pass (blackdetect, freezedetect, silencedetect,
-* ebur128). Freeze and silence are warnings: static motion-graphic scenes legitimately freeze.
-*/
-async function technicalQa(videoPath, expect, opts = {}) {
-	const tol = expect.tolerance_s ?? .5;
-	const target = expect.loudness_target ?? -14;
-	const ltol = expect.loudness_tolerance ?? 1.5;
-	const requireAudio = expect.require_audio ?? true;
-	const probe = await ffprobe(videoPath, opts);
-	const checks = [];
-	if (!probe.has_video) checks.push({
-		id: "video_stream",
-		status: "fail",
-		detail: "no video stream",
-		fix: "Re-run the render; the output has no video."
-	});
-	else {
-		const sizeOk = probe.width === expect.width && probe.height === expect.height;
-		checks.push({
-			id: "resolution",
-			status: sizeOk ? "ok" : "fail",
-			detail: `${probe.width}x${probe.height} (expected ${expect.width}x${expect.height})`,
-			...sizeOk ? {} : { fix: "Re-assemble with the target width/height (concatVideos normalises every segment)." }
-		});
-		const ar = probe.width / probe.height;
-		const want = expect.width / expect.height;
-		const arOk = Math.abs(ar - want) / want < .01;
-		checks.push({
-			id: "aspect",
-			status: arOk ? "ok" : "fail",
-			detail: `aspect ${ar.toFixed(4)} (expected ${want.toFixed(4)})`,
-			...arOk ? {} : { fix: "Scale and pad/crop to the target aspect ratio." }
-		});
-		const h264 = probe.video_codec === "h264";
-		checks.push({
-			id: "video_codec",
-			status: h264 ? "ok" : "warn",
-			detail: `${probe.video_codec} ${probe.pix_fmt ?? ""}`.trim(),
-			...h264 ? {} : { fix: "Encode with libx264 (encodeFinal) for platform compatibility." }
-		});
-		if (probe.pix_fmt && probe.pix_fmt !== "yuv420p") checks.push({
-			id: "pix_fmt",
-			status: "warn",
-			detail: `${probe.pix_fmt}; most platforms expect yuv420p`,
-			fix: "Add `format=yuv420p` / `-pix_fmt yuv420p`."
-		});
-	}
-	const dd = Math.abs(probe.duration_s - expect.duration_s);
-	checks.push({
-		id: "duration",
-		status: dd <= tol ? "ok" : "fail",
-		detail: `${probe.duration_s.toFixed(3)}s (expected ${expect.duration_s.toFixed(3)}s ± ${tol}s)`,
-		...dd <= tol ? {} : { fix: "Check scene durations and the voice track length; the concat enforces exact slots." }
-	});
-	if (!probe.has_audio) checks.push({
-		id: "audio_stream",
-		status: requireAudio ? "fail" : "ok",
-		detail: "no audio stream",
-		...requireAudio ? { fix: "Mux the voice track (muxAudio), or a silent track for a silent video." } : {}
-	});
-	else {
-		const aacOk = probe.audio_codec === "aac" && probe.sample_rate === 48e3;
-		checks.push({
-			id: "audio_stream",
-			status: aacOk ? "ok" : "warn",
-			detail: `${probe.audio_codec} ${probe.sample_rate} Hz, ${probe.channels} ch`,
-			...aacOk ? {} : { fix: "Encode audio as AAC 48 kHz." }
-		});
-	}
-	const args = ["-i", videoPath];
-	const black = blackThreshold(expect.background);
-	if (probe.has_video) args.push("-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=${black.pix_th},freezedetect=n=-60dB:d=1.0`);
-	if (probe.has_audio) args.push("-map", "0:a:0", "-af", "silencedetect=n=-50dB:d=1.0,ebur128=peak=true:framelog=quiet");
-	args.push("-f", "null", "-");
-	const { stderr } = await runFfmpeg(args, {
-		...opts,
-		keepStderr: true
-	});
-	const det = parseDetections(stderr, probe.duration_s);
-	if (probe.has_video) {
-		const longest = Math.max(0, ...det.black.map((b) => b.duration_s));
-		checks.push(det.black.length === 0 ? {
-			id: "black_frames",
-			status: "ok",
-			detail: "no black intervals ≥ 0.5s"
-		} : {
-			id: "black_frames",
-			status: longest >= 2 && !black.nearBlack ? "fail" : "warn",
-			detail: `black at ${fmtRanges(det.black)}${black.nearBlack ? " (the background is near black, so sparse scenes can read as black)" : ""}`,
-			fix: "Check the scene(s) at those times rendered correctly; re-render them if blank."
-		});
-		checks.push(det.freeze.length === 0 ? {
-			id: "frozen_frames",
-			status: "ok",
-			detail: "no frozen intervals ≥ 1s"
-		} : {
-			id: "frozen_frames",
-			status: "warn",
-			detail: `frozen at ${fmtRanges(det.freeze)} (expected for static motion-graphic scenes)`,
-			fix: "If those scenes should move, check their animation timelines or generated clips."
-		});
-	}
-	if (probe.has_audio && expect.intended_silence) {
-		checks.push({
-			id: "silence",
-			status: "ok",
-			detail: "silent on purpose (no narration, no music)"
-		});
-		checks.push({
-			id: "loudness",
-			status: "ok",
-			detail: "not measured: silent on purpose"
-		});
-	} else if (probe.has_audio) {
-		checks.push(det.silence.length === 0 ? {
-			id: "silence",
-			status: "ok",
-			detail: "no silence ≥ 1s below -50 dB"
-		} : {
-			id: "silence",
-			status: "warn",
-			detail: `silent at ${fmtRanges(det.silence)}`,
-			fix: "Check the voice track covers those scenes, or accept intentional pauses."
-		});
-		const I = det.integrated_lufs;
-		if (I === null) checks.push({
-			id: "loudness",
-			status: "warn",
-			detail: "integrated loudness not measurable (silent audio?)"
-		});
-		else {
-			const off = Math.abs(I - target);
-			checks.push({
-				id: "loudness",
-				status: off <= ltol ? "ok" : "warn",
-				detail: `${I.toFixed(1)} LUFS (target ${target} ± ${ltol})`,
-				...off <= ltol ? {} : { fix: "Run two-pass loudnorm (loudnorm2pass) on the voice track before muxing." }
-			});
-		}
-		if (det.true_peak_dbtp !== null && det.true_peak_dbtp > -1) checks.push({
-			id: "true_peak",
-			status: "warn",
-			detail: `true peak ${det.true_peak_dbtp.toFixed(1)} dBTP > -1 dBTP`,
-			fix: "Normalise with TP=-1 (loudnorm2pass)."
-		});
-	}
-	return {
-		status: checks.some((c) => c.status === "fail") ? "fail" : checks.some((c) => c.status === "warn") ? "warn" : "ok",
-		video: videoPath,
-		checks,
-		metrics: {
-			probe,
-			black: det.black,
-			freeze: det.freeze,
-			silence: det.silence,
-			integrated_lufs: det.integrated_lufs,
-			lra: det.lra,
-			true_peak_dbtp: det.true_peak_dbtp
-		}
-	};
-}
-function formatQaMarkdown(r) {
-	const icon = {
-		ok: "ok",
-		warn: "WARN",
-		fail: "FAIL"
-	};
-	const p = r.metrics.probe;
-	return [
-		`# Technical QA: ${r.status.toUpperCase()}`,
-		"",
-		`Video: \`${r.video}\``,
-		"",
-		"| Check | Status | Detail | Fix |",
-		"| --- | --- | --- | --- |",
-		...r.checks.map((c) => `| ${c.id} | ${icon[c.status]} | ${c.detail.replace(/\|/g, "\\|")} | ${(c.status !== "ok" && c.fix ? c.fix : "").replace(/\|/g, "\\|")} |`),
-		"",
-		"## Metrics",
-		"",
-		`- Size: ${p.width}x${p.height} @ ${p.fps ?? "?"} fps, ${p.duration_s.toFixed(3)} s, ${p.video_codec ?? "no video"} / ${p.audio_codec ?? "no audio"}`,
-		`- Loudness: ${r.metrics.integrated_lufs ?? "n/a"} LUFS integrated, LRA ${r.metrics.lra ?? "n/a"} LU, true peak ${r.metrics.true_peak_dbtp ?? "n/a"} dBTP`,
-		`- Black: ${r.metrics.black.length ? fmtRanges(r.metrics.black) : "none"}`,
-		`- Frozen: ${r.metrics.freeze.length ? fmtRanges(r.metrics.freeze) : "none"}`,
-		`- Silence: ${r.metrics.silence.length ? fmtRanges(r.metrics.silence) : "none"}`,
-		""
-	].join("\n");
-}
-/** Write `<dir>/qa/report.json` and `<dir>/qa/report.md`. */
-async function writeQaReport(dir, report) {
-	const qaDir = join(dir, "qa");
-	await mkdir(qaDir, { recursive: true });
-	const json = join(qaDir, "report.json");
-	const md = join(qaDir, "report.md");
-	await writeFile(json, `${JSON.stringify(report, null, 2)}\n`);
-	await writeFile(md, formatQaMarkdown(report));
-	return {
-		json,
-		md
-	};
-}
-//#endregion
-//#region ../media/dist/frames.js
-/**
-* Frame sampling and perceptual comparison for golden-frame tests and render diffs. ffmpeg only
-* (ssim filter), no image libraries.
-*/
-/** Write the frame at `atSec` of `video` to `out` (PNG), scaled to `width` px wide (keeps aspect) when given. */
-async function extractFrame(video, atSec, out, opts = {}) {
-	if (!Number.isFinite(atSec) || atSec < 0) throw new Error(`extractFrame: invalid time ${atSec}`);
-	const vf = opts.width ? ["-vf", `scale=${Math.round(opts.width)}:-2:flags=bicubic`] : [];
-	await runFfmpeg([
-		"-y",
-		"-i",
-		video,
-		"-ss",
-		atSec.toFixed(3),
-		"-frames:v",
-		"1",
-		...vf,
-		"-pix_fmt",
-		"rgb24",
-		"-f",
-		"image2",
-		"-c:v",
-		"png",
-		out
-	], {
-		...opts.tools ? { tools: opts.tools } : {},
-		timeoutMs: 12e4
-	});
-	const s = await stat(out).catch(() => void 0);
-	if (!s || s.size === 0) throw new Error(`no frame at ${atSec.toFixed(3)}s in ${video} (past the end?)`);
-}
-/** SSIM (0–1, 1 = identical) of two same-size images. */
-async function frameSsim(a, b, opts = {}) {
-	const [sa, sb] = await Promise.all([pngSize(a), pngSize(b)]);
-	if (sa && sb && (sa.width !== sb.width || sa.height !== sb.height)) throw new Error(`frameSsim: size mismatch ${sa.width}x${sa.height} vs ${sb.width}x${sb.height}`);
-	const { stderr } = await runFfmpeg([
-		"-i",
-		a,
-		"-i",
-		b,
-		"-lavfi",
-		"[0:v][1:v]ssim",
-		"-f",
-		"null",
-		"-"
-	], {
-		...opts.tools ? { tools: opts.tools } : {},
-		timeoutMs: 6e4
-	});
-	return parseSsim(stderr);
-}
-/** The `All:` value of ffmpeg's ssim filter summary line. */
-function parseSsim(stderr) {
-	const m = /SSIM [^\n]*All:\s*([0-9.]+|inf)/.exec(stderr);
-	if (!m) throw new Error(`could not read SSIM from ffmpeg output:\n${stderr.slice(-400)}`);
-	const v = m[1] === "inf" ? 1 : Number(m[1]);
-	if (!Number.isFinite(v)) throw new Error(`bad SSIM value ${m[1]}`);
-	return Math.min(1, Math.max(0, v));
-}
-/**
-* Write a side-by-side comparison PNG to `out`: `a` | `b` | their absolute difference (brightened),
-* for a human to look at. The two images must be the same size.
-*/
-async function frameDiffImage(a, b, out, opts = {}) {
-	await runFfmpeg([
-		"-y",
-		"-i",
-		a,
-		"-i",
-		b,
-		"-filter_complex",
-		"[0:v]format=rgb24,split[a1][a2];[1:v]format=rgb24,split[b1][b2];[a2][b2]blend=all_mode=difference,lutrgb=r='min(val*4,255)':g='min(val*4,255)':b='min(val*4,255)'[d];[a1][b1][d]hstack=inputs=3",
-		"-frames:v",
-		"1",
-		"-c:v",
-		"png",
-		out
-	], {
-		...opts.tools ? { tools: opts.tools } : {},
-		timeoutMs: 6e4
-	});
-}
-/** Width and height from a PNG's IHDR chunk; undefined when the file is not a PNG. */
-async function pngSize(path) {
-	const fh = await open(path, "r");
-	try {
-		const buf = Buffer.alloc(24);
-		const { bytesRead } = await fh.read(buf, 0, 24, 0);
-		if (bytesRead < 24 || buf.readUInt32BE(0) !== 2303741511 || buf.toString("ascii", 12, 16) !== "IHDR") return void 0;
-		return {
-			width: buf.readUInt32BE(16),
-			height: buf.readUInt32BE(20)
-		};
-	} finally {
-		await fh.close();
-	}
 }
 //#endregion
 //#region ../renderer/dist/tokens.js
@@ -236879,7 +237686,7 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 	const textFiles = /* @__PURE__ */ new Map();
 	const chains = [];
 	let chain = [];
-	let cur = "[0:v]";
+	let cur = gm.base ?? "[0:v]";
 	let label = 0;
 	const flush = () => {
 		if (!chain.length) return;
@@ -236955,7 +237762,7 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 			cur = out;
 		}
 	}
-	const exit = motion ? round3$1(Math.min(motion.exit_ms / 1e3, durationS * .2)) : 0;
+	const exit = motion && !gm.noExit ? round3$1(Math.min(motion.exit_ms / 1e3, durationS * .2)) : 0;
 	if (exit >= .02) chain.push(f$1("fade", {
 		t: "out",
 		st: round3$1(Math.max(0, durationS - 1 / target.fps - exit)),
@@ -237167,6 +237974,298 @@ function createFfmpegRenderer(opts = {}) {
 	};
 }
 //#endregion
+//#region ../renderer/dist/footage.js
+/**
+* Footage renderer: turns a span of a real video (or a still) into an exact-length, silent clip
+* at the target size and fps. The span is trimmed (`in_sec..out_sec`), re-timed (`speed`), fitted
+* (`cover` crops around `focus`, `contain` letterboxes on the background colour, `blur_pad` puts a
+* blurred, dimmed copy behind), and a clip shorter than the scene holds its last frame or loops.
+* Stills get a gentle Ken Burns push-in. Text kinds (lower third, kinetic text, typography,
+* quote, stat) are drawn over the footage with the FFmpeg renderer's layout and drawtext code, so
+* text boxes reach lint exactly as for motion graphics. Audio is not touched: the pipeline mixes
+* the clip's own sound separately.
+*/
+const FOOTAGE_RENDERER_ID = "ffmpeg-footage";
+const FOOTAGE_RENDERER_VERSION = "0.1.0";
+/** Deterministic kinds drawn over footage. Others are ignored with a warning. */
+const FOOTAGE_OVERLAY_KINDS = [
+	"lower_third",
+	"kinetic_text",
+	"typography",
+	"quote",
+	"stat"
+];
+/** Kinds whose text sits straight on the picture get a scrim (the lower third has its own panel). */
+const SCRIM_KINDS = /* @__PURE__ */ new Set([
+	"kinetic_text",
+	"typography",
+	"quote",
+	"stat"
+]);
+const SCRIM_ALPHA = .45;
+/** Ken Burns push-in over the scene. */
+const KEN_BURNS_ZOOM = .08;
+const IMAGE_EXT$1 = /* @__PURE__ */ new Set([
+	".png",
+	".jpg",
+	".jpeg",
+	".webp",
+	".bmp"
+]);
+function isStillPath(path) {
+	return IMAGE_EXT$1.has(extname(path).toLowerCase());
+}
+const even$1 = (n) => Math.max(2, Math.round(n / 2) * 2);
+const n3 = (n) => String(Math.round(n * 1e3) / 1e3);
+/** Filter chains fitting `inLabel` into W×H as `outLabel`. */
+function fitChains(fit, W, H, focus, bg, inLabel, outLabel, tag) {
+	const cover = `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bicubic,crop=${W}:${H}:(iw-${W})*${n3(focus.x)}:(ih-${H})*${n3(focus.y)}`;
+	const contain = `scale=${W}:${H}:force_original_aspect_ratio=decrease:flags=bicubic`;
+	if (fit === "cover") return [`${inLabel}${cover},setsar=1${outLabel}`];
+	if (fit === "contain") return [`${inLabel}${contain},pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${ffColor(bg)},setsar=1${outLabel}`];
+	const bw = even$1(W / 8);
+	const bh = even$1(H / 8);
+	return [
+		`${inLabel}split=2[${tag}a][${tag}b]`,
+		`[${tag}a]scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},gblur=sigma=${n3(Math.max(1, bw / 12))},scale=${W}:${H}:flags=bicubic,eq=brightness=-0.08:saturation=0.9,setsar=1[${tag}bg]`,
+		`[${tag}b]${contain},setsar=1[${tag}fg]`,
+		`[${tag}bg][${tag}fg]overlay=(W-w)/2:(H-h)/2:format=auto${outLabel}`
+	];
+}
+/**
+* Pure plan of the footage part of the graph (exported for tests): input args and the chains that
+* end in `[fg]` with exactly `frames` frames at the target size and fps.
+*/
+function planFootage(clip, media, path, target, durationSec, background) {
+	const { width: W, height: H, fps } = target;
+	const frames = frameCount(durationSec, fps);
+	const D = frames / fps;
+	const fit = clip.fit ?? "cover";
+	const focus = clip.focus ?? {
+		x: .5,
+		y: .5
+	};
+	const warnings = [];
+	const tail = [
+		`format=yuv420p`,
+		`trim=end_frame=${frames}`,
+		"setpts=PTS-STARTPTS"
+	];
+	if (isStillPath(path)) {
+		const W2 = even$1(W * 2);
+		const H2 = even$1(H * 2);
+		const z = `1+${KEN_BURNS_ZOOM}*on/${Math.max(1, frames - 1)}`;
+		return {
+			kind: "still",
+			input: ["-i", path],
+			chains: [...fitChains(fit, W2, H2, focus, background, "[0:v]", "[kb]", "k"), `[kb]zoompan=z='${z}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=${frames}:s=${W}x${H}:fps=${fps},setsar=1,${tail.join(",")}[fg]`],
+			frames,
+			fill: "exact",
+			warnings
+		};
+	}
+	const speed = clip.speed ?? 1;
+	const srcDur = media.duration_sec > 0 ? media.duration_sec : Number.POSITIVE_INFINITY;
+	const end = Math.min(clip.out_sec ?? clip.in_sec + D * speed, srcDur);
+	const span = Math.max(1 / fps, end - clip.in_sec);
+	const play = span / speed;
+	const short = play < D - .5 / fps;
+	const fill = short ? clip.loop ? "loop" : "hold" : play > D + .5 / fps ? "trim" : "exact";
+	if (short) warnings.push(`footage: the clip gives ${n3(play)}s${speed !== 1 ? ` at speed ${speed}` : ""}, shorter than the ${n3(D)}s scene; ${clip.loop ? "looped" : "last frame held"}`);
+	const clipFrames = Math.max(1, Math.floor(play * fps + 1e-6));
+	const fillFilter = fill === "loop" ? [`loop=loop=-1:size=${clipFrames}:start=0`, "setpts=N/FRAME_RATE/TB"] : fill === "hold" ? [`tpad=stop_mode=clone:stop_duration=${n3(D)}`] : [];
+	return {
+		kind: "video",
+		input: [
+			"-ss",
+			n3(clip.in_sec),
+			"-t",
+			n3(span),
+			"-i",
+			path
+		],
+		chains: [
+			`[0:v]setpts=PTS-STARTPTS${speed !== 1 ? `,setpts=PTS/${speed}` : ""},fps=${fps}[src]`,
+			...fitChains(fit, W, H, focus, background, "[src]", "[fit]", "b"),
+			`[fit]${[...fillFilter, ...tail].join(",")}[fg]`
+		],
+		frames,
+		span_sec: Math.round(span * 1e3) / 1e3,
+		play_sec: Math.round(play * 1e3) / 1e3,
+		fill,
+		warnings
+	};
+}
+/** The overlay composition for a footage scene (null when the scene draws no text over it). */
+function footageOverlay(req) {
+	const det = req.scene.deterministic;
+	if (!det) return {
+		comp: null,
+		warnings: []
+	};
+	if (!FOOTAGE_OVERLAY_KINDS.includes(det.kind)) return {
+		comp: null,
+		warnings: [`footage: "${det.kind}" is not drawn over footage (supported: ${FOOTAGE_OVERLAY_KINDS.join(", ")}); skipped`]
+	};
+	const comp = composeScene(req.scene, req.target, req.tokens, req.zones ? { zones: req.zones } : {});
+	if (SCRIM_KINDS.has(det.kind)) {
+		const scrim = {
+			type: "box",
+			x: 0,
+			y: 0,
+			w: req.target.width,
+			h: req.target.height,
+			color: ffColor(req.tokens.color_background, SCRIM_ALPHA),
+			beat: 0
+		};
+		comp.elements.unshift(scrim);
+	}
+	return {
+		comp,
+		warnings: comp.warnings
+	};
+}
+/** Full ffmpeg argv for a footage clip (exported for tests). */
+function footageRenderArgs(plan, overlay, target, encode, out) {
+	const graph = [...plan.chains, overlay ? overlay.filtergraph : "[fg]null[vout]"].join(";");
+	return [
+		"-y",
+		...plan.input,
+		...overlay ? overlay.inputs.flat() : [],
+		"-filter_complex",
+		graph,
+		"-map",
+		"[vout]",
+		"-frames:v",
+		String(plan.frames),
+		"-r",
+		String(target.fps),
+		...h264Args({
+			preset: encode.preset ?? "veryfast",
+			crf: encode.crf ?? 18
+		}),
+		"-threads",
+		String(encode.threads ?? 1),
+		"-an",
+		"-sn",
+		"-dn",
+		"-map_metadata",
+		"-1",
+		"-fflags",
+		"+bitexact",
+		"-flags:v",
+		"+bitexact",
+		...FASTSTART,
+		out
+	];
+}
+function createFootageRenderer(opts = {}) {
+	const fontResolver = opts.fontResolver ?? createFontResolver();
+	const encode = {
+		...opts.encode,
+		...opts.encodePreset ? { preset: opts.encodePreset } : {}
+	};
+	const availability = /* @__PURE__ */ new Map();
+	const checkAvailable = async (env) => {
+		try {
+			const tools = opts.tools ?? await resolveFfmpeg(env);
+			const { stdout } = await runProcess(tools.ffmpeg, ["-hide_banner", "-filters"], {
+				captureStdout: true,
+				timeoutMs: 15e3
+			});
+			const missing = [
+				"scale",
+				"crop",
+				"pad",
+				"gblur",
+				"overlay",
+				"zoompan",
+				"tpad",
+				"loop",
+				"drawtext",
+				"drawbox"
+			].filter((name) => !new RegExp(`\\s${name}\\s`).test(stdout));
+			if (missing.length) return {
+				ok: false,
+				reason: `ffmpeg lacks filter(s) ${missing.join(", ")}`
+			};
+			if (!(await ffmpegFeatures({ tools })).libx264) return {
+				ok: false,
+				reason: "ffmpeg was built without libx264"
+			};
+			return { ok: true };
+		} catch (err) {
+			return {
+				ok: false,
+				reason: err instanceof Error ? err.message : String(err)
+			};
+		}
+	};
+	return {
+		id: FOOTAGE_RENDERER_ID,
+		version: FOOTAGE_RENDERER_VERSION,
+		kinds: [],
+		available(env) {
+			const key = `${env.FFMPEG_PATH ?? ""}\0${env.PATH ?? ""}`;
+			let p = availability.get(key);
+			if (!p) {
+				p = checkAvailable(env);
+				availability.set(key, p);
+			}
+			return p;
+		},
+		async render(req, ropts = {}) {
+			const { scene, target } = req;
+			const tokens = req.tokens;
+			if (!scene.footage) throw new Error(`scene ${scene.id} has no footage`);
+			if (!req.footage) throw new Error(`scene ${scene.id}: footage asset "${scene.footage.asset}" was not resolved`);
+			const tools = await getTools(opts.tools);
+			const plan = planFootage(scene.footage, req.footage.media, req.footage.path, target, scene.duration_sec, tokens.color_background);
+			const warnings = [...plan.warnings];
+			const { comp, warnings: ow } = footageOverlay(req);
+			warnings.push(...ow);
+			const tmp = await mkdtemp(join(tmpdir(), "vs-footage-"));
+			try {
+				let overlay = null;
+				if (comp) {
+					const fonts = {
+						heading: await fontResolver(tokens.font_heading, tokens.weight_heading ?? 700),
+						body: await fontResolver(tokens.font_body, tokens.weight_body),
+						mono: await fontResolver(tokens.font_mono)
+					};
+					overlay = buildFilterGraph(comp, target, plan.frames / target.fps, fonts, tmp, {
+						...tokens.motion ? { motion: tokens.motion } : {},
+						background: tokens.color_background,
+						base: "[fg]",
+						noExit: true
+					});
+					for (const [name, text] of overlay.textFiles) await writeFile(join(tmp, name), text, "utf8");
+				}
+				await mkdir(dirname(req.out_path), { recursive: true });
+				await runFfmpeg(footageRenderArgs(plan, overlay, target, encode, req.out_path), {
+					tools,
+					signal: ropts.signal,
+					timeoutMs: 6e5
+				});
+			} finally {
+				if (!opts.keepTemp) await rm(tmp, {
+					recursive: true,
+					force: true
+				});
+			}
+			return {
+				scene_id: scene.id,
+				out_path: req.out_path,
+				duration_ms: Math.round(plan.frames * 1e3 / target.fps),
+				renderer: FOOTAGE_RENDERER_ID,
+				renderer_version: FOOTAGE_RENDERER_VERSION,
+				warnings,
+				...comp ? { text_boxes: comp.text_boxes } : {}
+			};
+		}
+	};
+}
+//#endregion
 //#region ../renderer/dist/select.js
 function rendererFamily(r) {
 	if (r.id.startsWith("hyperframes")) return "hyperframes";
@@ -237224,9 +238323,8 @@ async function selectRenderer(kind, renderers, env = process.env, preference = "
 		reason: renderers.length === 0 ? "no renderers registered" : `no available renderer draws "${kind}": ${skipped.join("; ")}`
 	};
 }
-const PENDING_REASON = "provider rendering arrives in Phase 4";
 /** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version. */
-function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones) {
+function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage) {
 	return sha256Hex(canonicalJson({
 		v: 1,
 		layout: 5,
@@ -237238,7 +238336,8 @@ function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zon
 			id: renderer.id,
 			version: renderer.version
 		},
-		placeholder
+		placeholder,
+		...footage ? { footage } : {}
 	}));
 }
 /** The motion-graphic stand-in drawn for a scene that a provider must render. */
@@ -237285,10 +238384,15 @@ async function renderScenes(spec, o) {
 	const cache = /* @__PURE__ */ new Map();
 	const scenes = o.only ? spec.scenes.filter((s) => o.only.includes(s.id)) : spec.scenes;
 	const results = new Array(scenes.length);
+	let footageRenderer = o.footageRenderer;
 	const renderOne = async (orig) => {
-		const deterministic = orig.visual_strategy === "motion_graphic" && orig.deterministic !== void 0;
-		if (!deterministic && !o.placeholder) {
-			const reason = orig.visual_strategy === "motion_graphic" ? "motion_graphic scene has no deterministic {kind, props}" : `${orig.visual_strategy}: ${PENDING_REASON}`;
+		const fr = orig.footage ? o.footage?.get(orig.id) : void 0;
+		const footage = fr && !("error" in fr) ? fr : void 0;
+		const footageError = orig.footage && !footage ? `footage asset "${orig.footage.asset}": ${fr && "error" in fr ? fr.error : "not resolved"}` : void 0;
+		const deterministic = !orig.footage && orig.visual_strategy === "motion_graphic" && orig.deterministic !== void 0;
+		const pendingReason = footageError ?? `${orig.visual_strategy}: video providers (generated video, avatars) arrive in Phase 7; until then this is a placeholder card`;
+		if (!footage && !deterministic && !o.placeholder) {
+			const reason = footageError ?? (orig.visual_strategy === "motion_graphic" ? "motion_graphic scene has no deterministic {kind, props}" : pendingReason);
 			return {
 				scene_id: orig.id,
 				status: "pending",
@@ -237296,18 +238400,29 @@ async function renderScenes(spec, o) {
 				warnings: []
 			};
 		}
-		const placeholder = !deterministic;
+		const placeholder = !footage && !deterministic;
 		const scene = placeholder ? placeholderScene(orig) : orig;
-		const kind = scene.deterministic.kind;
-		const sel = await selectRenderer(kind, o.renderers, env, placeholder ? "ffmpeg" : o.preference ?? "auto", cache);
-		if (!sel.renderer) return {
-			scene_id: orig.id,
-			status: placeholder ? "pending" : "failed",
-			reason: sel.reason,
-			warnings: []
-		};
-		const r = sel.renderer;
-		const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones);
+		let r;
+		let selReason;
+		if (footage) {
+			footageRenderer ??= createFootageRenderer();
+			r = footageRenderer;
+			selReason = `footage: ${r.id}`;
+		} else {
+			const sel = await selectRenderer(scene.deterministic.kind, o.renderers, env, placeholder ? "ffmpeg" : o.preference ?? "auto", cache);
+			if (!sel.renderer) return {
+				scene_id: orig.id,
+				status: placeholder ? "pending" : "failed",
+				reason: placeholder && footageError ? `${footageError}; ${sel.reason}` : sel.reason,
+				warnings: []
+			};
+			r = sel.renderer;
+			selReason = sel.reason;
+		}
+		const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? {
+			sha256: footage.sha256,
+			duration_sec: footage.media.duration_sec
+		} : void 0);
 		const out = join(dir, `${orig.id}.mp4`);
 		const sidecarPath = join(dir, `${orig.id}.json`);
 		const base = {
@@ -237317,7 +238432,7 @@ async function renderScenes(spec, o) {
 			cache_key: key,
 			...placeholder ? {
 				placeholder: true,
-				reason: `${orig.visual_strategy}: ${PENDING_REASON}`
+				reason: pendingReason
 			} : {}
 		};
 		if (!o.force) {
@@ -237340,7 +238455,8 @@ async function renderScenes(spec, o) {
 				tokens: o.tokens,
 				out_path: tmp,
 				project_dir: o.project_dir,
-				...o.zones ? { zones: o.zones } : {}
+				...o.zones ? { zones: o.zones } : {},
+				...footage ? { footage } : {}
 			}, { signal: o.signal });
 			await rename(tmp, out);
 			await writeJsonAtomic(sidecarPath, {
@@ -237367,7 +238483,7 @@ async function renderScenes(spec, o) {
 			return {
 				...base,
 				status: "failed",
-				reason: `${sel.reason}; render failed: ${err instanceof Error ? err.message : String(err)}`,
+				reason: `${selReason}; render failed: ${err instanceof Error ? err.message : String(err)}`,
 				warnings: []
 			};
 		}
@@ -240383,29 +241499,976 @@ function formatAdapt(r) {
 	].join("\n");
 }
 //#endregion
-//#region src/analyze.ts
+//#region src/transcribe.ts
 /**
-* analyze: a reference video → its format grammar (structure only: shots, pacing, caption band,
-* speech share). shorts: a long recording's transcript × shots → scored standalone spans.
-*
-* STUB (coordinator): the footage agent implements these.
+* transcribe: local ASR (whisper.cpp) for a project's video/audio asset, or import of a user
+* SRT/VTT, written as a timed-word transcript and recorded on the asset's `media.transcript`.
+* Each sentence becomes an evidence span with a time locator (`video:talk.mp4#t=12.3-18.9`) so
+* specs can cite what was said. The whisper model is never downloaded without explicit consent
+* (`download_model: true`).
 */
-async function analyzeVideo(_path, _opts = {}) {
-	throw new Error("not implemented: analyzeVideo");
+const WHISPER_MODEL = {
+	name: "ggml-base.en",
+	file: "ggml-base.en.bin",
+	url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+	/** sha256 of the published file (147,964,211 bytes). */
+	sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+	approx_mb: 148
+};
+var TranscribeError = class extends Error {
+	fix;
+	constructor(message, fix) {
+		super(fix ? `${message}\nFix: ${fix}` : message);
+		this.fix = fix;
+		this.name = "TranscribeError";
+	}
+};
+/** `VS_WHISPER_MODEL`, else `<plugin data>/models/ggml-base.en.bin`. */
+function resolveWhisperModel(env = process.env) {
+	const override = env.VS_WHISPER_MODEL?.trim();
+	if (override && !/^\$\{[^}]*\}$/.test(override)) return {
+		path: resolve(override),
+		exists: existsSync(override),
+		from: "VS_WHISPER_MODEL"
+	};
+	const path = join(resolveDataDir(env).root, "models", WHISPER_MODEL.file);
+	return {
+		path,
+		exists: existsSync(path),
+		from: "data_dir"
+	};
 }
-function formatGrammar(_g) {
-	throw new Error("not implemented: formatGrammar");
+/** The error shown when no model is present and the user has not agreed to a download. */
+function missingModelError(path) {
+	return new TranscribeError(`no whisper model at ${path}. Local transcription needs ${WHISPER_MODEL.file} (~${WHISPER_MODEL.approx_mb} MB) from ${WHISPER_MODEL.url}.`, `ask the user whether to download it (about ${WHISPER_MODEL.approx_mb} MB, stored in the plugin data folder), then call transcribe again with download_model: true; or set VS_WHISPER_MODEL to a ggml model they already have; or pass captions_file with a .srt/.vtt they supply.`);
 }
-async function findShorts(_projectDir, _asset, _opts = {}) {
-	throw new Error("not implemented: findShorts");
+/**
+* Download the model: fetch → `<dest>.part-*` while hashing → verify sha256 → rename, and record
+* `{url, sha256, bytes, downloaded_at}` in `<dest>.json`. Only called after explicit consent.
+*/
+async function downloadWhisperModel(dest, opts = {}) {
+	const url = opts.url ?? WHISPER_MODEL.url;
+	const doFetch = opts.fetch ?? globalThis.fetch;
+	await mkdir(dirname(dest), { recursive: true });
+	const tmp = `${dest}.part-${process.pid}-${Date.now()}`;
+	try {
+		const res = await doFetch(url, opts.signal ? { signal: opts.signal } : void 0);
+		if (!res.ok || !res.body) throw new TranscribeError(`model download failed: HTTP ${res.status} from ${url}`, "check the network connection, or set VS_WHISPER_MODEL to a model file you already have");
+		const hash = createHash("sha256");
+		let bytes = 0;
+		const body = Readable.fromWeb(res.body);
+		body.on("data", (chunk) => {
+			hash.update(chunk);
+			bytes += chunk.length;
+		});
+		await pipeline(body, createWriteStream(tmp));
+		const sha256 = hash.digest("hex");
+		const expected = opts.expectedSha256 === void 0 ? WHISPER_MODEL.sha256 : opts.expectedSha256;
+		if (expected && sha256 !== expected) throw new TranscribeError(`model download is corrupt or changed: sha256 ${sha256}, expected ${expected}`, "retry the download; if it keeps failing, download the model yourself and set VS_WHISPER_MODEL");
+		await rename(tmp, dest);
+		await writeJsonAtomic(`${dest}.json`, {
+			url,
+			sha256,
+			bytes,
+			downloaded_at: (/* @__PURE__ */ new Date()).toISOString()
+		});
+		return {
+			path: dest,
+			sha256,
+			bytes
+		};
+	} finally {
+		await rm(tmp, { force: true });
+	}
 }
-function formatShorts(_s) {
-	throw new Error("not implemented: formatShorts");
+async function loadContentIr$1(projectDir) {
+	const path = join(projectDir, "source", "content-ir.json");
+	if (!existsSync(path)) throw new TranscribeError(`no source/content-ir.json in ${projectDir}`, "ingest the video or audio file first");
+	const r = ContentIR.safeParse(JSON.parse(await readFile(path, "utf8")));
+	if (!r.success) throw new TranscribeError(`source/content-ir.json is invalid: ${formatIssues$1(r.error).map((i) => `${i.path}: ${i.message}`).join("; ")}`);
+	return {
+		path,
+		ir: r.data
+	};
+}
+/** The video/audio asset `id`, with a helpful error listing the media assets. */
+function findMediaAsset(ir, id) {
+	const media = ir.assets.filter((a) => a.kind === "video" || a.kind === "audio");
+	const asset = ir.assets.find((a) => a.id === id);
+	if (!asset || asset.kind === "image") {
+		const list = media.map((a) => `${a.id} (${a.kind} ${basename(a.path)})`).join(", ");
+		throw new TranscribeError(`"${id}" is not a video or audio asset of this project`, list ? `use one of: ${list}` : "ingest a video or audio file first");
+	}
+	return asset;
+}
+/** `video:talk.mp4` from the asset's source_ref (or its file name). */
+function mediaRefBase(asset) {
+	const base = asset.source_ref?.split("#")[0];
+	return base && /^(?:video|audio):\S+$/.test(base) ? base : `${asset.kind}:${encodeURIComponent(basename(asset.path))}`;
+}
+const secs = (ms) => (ms / 1e3).toFixed(1);
+const transcriptHeading = (assetId) => `Transcript (${assetId})`;
+/**
+* Record a transcript in the IR (pure; returns a new, validated IR): the asset's
+* `media.transcript`, a section with the full text, one evidence span per sentence (replacing
+* a previous transcript of the same asset), quantitative claims from what was said, and PII or
+* secrets found in the speech OR-ed into the classification.
+*/
+function applyTranscript(input, assetId, words, meta) {
+	const ir = structuredClone(input);
+	const asset = findMediaAsset(ir, assetId);
+	const source = ir.sources.find((s) => s.sha256 === asset.sha256 && (s.kind === "video" || s.kind === "audio")) ?? ir.sources.find((s) => s.sha256 === asset.sha256);
+	if (!source) throw new TranscribeError(`no source in the ContentIR matches asset ${asset.id}`, "re-ingest the media file");
+	const base = mediaRefBase(asset);
+	const heading = transcriptHeading(asset.id);
+	const isOld = (e) => e.source_id === source.id && e.ref.startsWith(`${base}#t=`) && e.locator.time_start_sec !== void 0;
+	const oldRefs = new Set(ir.evidence.filter(isOld).map((e) => e.ref));
+	ir.evidence = ir.evidence.filter((e) => !isOld(e));
+	ir.sections = ir.sections.filter((s) => !(s.source_id === source.id && s.heading === heading));
+	ir.claims = ir.claims.filter((c) => !c.evidence_refs.some((r) => oldRefs.has(r)));
+	const used = new Set(ir.evidence.map((e) => e.ref));
+	const sentences = groupSentences(words);
+	const spans = sentences.map((s) => {
+		let ref = `${base}#t=${secs(s.start_ms)}-${secs(s.end_ms)}`;
+		for (let n = 2; used.has(ref); n++) ref = `${base}#t=${secs(s.start_ms)}-${secs(s.end_ms)}-${n}`;
+		used.add(ref);
+		return {
+			ref,
+			source_id: source.id,
+			text: s.text,
+			locator: {
+				time_start_sec: s.start_ms / 1e3,
+				time_end_sec: s.end_ms / 1e3
+			}
+		};
+	});
+	ir.evidence.push(...spans);
+	const text = sentences.map((s) => s.text).join(" ");
+	const usedSec = new Set(ir.sections.map((s) => s.id));
+	let n = ir.sections.length + 1;
+	while (usedSec.has(`sec-${n}`)) n++;
+	ir.sections.push({
+		id: `sec-${n}`,
+		source_id: source.id,
+		heading,
+		text
+	});
+	const known = new Set(ir.claims.map((c) => c.text.toLowerCase()));
+	const usedClaim = new Set(ir.claims.map((c) => c.id));
+	let k = ir.claims.length + 1;
+	for (const c of deriveClaims(spans, 100)) {
+		if (known.has(c.text.toLowerCase())) continue;
+		while (usedClaim.has(`claim-${k}`)) k++;
+		usedClaim.add(`claim-${k}`);
+		ir.claims.push({
+			...c,
+			id: `claim-${k}`
+		});
+	}
+	const { classification: c } = classifyText(spans.map((s) => s.text), { kind: source.kind });
+	ir.classification = {
+		contains_secrets: ir.classification.contains_secrets || c.contains_secrets,
+		contains_pii: ir.classification.contains_pii || c.contains_pii,
+		contains_likeness: ir.classification.contains_likeness,
+		data_class: maxDataClass(ir.classification.data_class, c.data_class),
+		notes: [.../* @__PURE__ */ new Set([...ir.classification.notes, ...c.notes.map((x) => `${source.id} (speech): ${x}`)])]
+	};
+	const target = ir.assets.find((a) => a.id === asset.id);
+	target.media = {
+		...target.media ?? {
+			duration_sec: words.length ? words[words.length - 1].end_ms / 1e3 : 0,
+			has_video: target.kind === "video",
+			has_audio: true
+		},
+		transcript: {
+			path: meta.path,
+			source: meta.source,
+			...meta.model ? { model: meta.model } : {},
+			...meta.language ? { language: meta.language } : {},
+			words: words.length
+		}
+	};
+	const r = ContentIR.safeParse(ir);
+	if (!r.success) throw new TranscribeError(`transcript would make the ContentIR invalid: ${formatIssues$1(r.error).map((i) => `${i.path}: ${i.message}`).join("; ")}`);
+	return {
+		ir: r.data,
+		refs: spans.map((s) => s.ref),
+		text,
+		sentences: sentences.length
+	};
+}
+/** Read `source/transcripts/<asset>.json` (timed words) for an asset. */
+async function loadTranscriptWords(projectDir, asset) {
+	const t = asset.media?.transcript;
+	if (!t) throw new TranscribeError(`asset ${asset.id} has no transcript`, `run transcribe for ${asset.id} first`);
+	const data = JSON.parse(await readFile(join(projectDir, t.path), "utf8"));
+	const words = Array.isArray(data) ? data : data.words;
+	if (!Array.isArray(words)) throw new TranscribeError(`${t.path} is not a timed-word list`, `run transcribe for ${asset.id} again`);
+	return words;
+}
+const MAX_TEXT = 2e4;
+async function transcribeAsset(projectDir, assetId, opts = {}) {
+	const root = resolve(projectDir);
+	const env = opts.env ?? process.env;
+	const { path: irPath, ir } = await loadContentIr$1(root);
+	const asset = findMediaAsset(ir, assetId);
+	let words;
+	let meta;
+	let downloaded;
+	if (opts.captions_file) {
+		const file = isAbsolute(opts.captions_file) ? opts.captions_file : join(root, opts.captions_file);
+		const ext = extname(file).toLowerCase();
+		if (ext !== ".srt" && ext !== ".vtt") throw new TranscribeError(`captions_file must be a .srt or .vtt file, got ${basename(file)}`);
+		if (!existsSync(file)) throw new TranscribeError(`captions file not found: ${file}`, "pass a path relative to the project folder");
+		const st = await stat(file);
+		if (st.size > 20971520) throw new TranscribeError(`captions file is too large (${st.size} bytes)`);
+		const text = await readFile(file, "utf8");
+		words = parseCaptionFile(text);
+		if (words.length === 0) throw new TranscribeError(`no cues found in ${basename(file)}`, "check that it is a valid SRT or WebVTT file");
+		meta = { source: isVtt(text) || ext === ".vtt" ? "vtt" : "srt" };
+	} else {
+		if (asset.media && !asset.media.has_audio) throw new TranscribeError(`asset ${asset.id} has no audio track to transcribe`, "pass captions_file with a .srt/.vtt instead");
+		let model = resolveWhisperModel(env);
+		if (!model.exists) {
+			if (model.from === "VS_WHISPER_MODEL") throw new TranscribeError(`VS_WHISPER_MODEL points at ${model.path}, which does not exist`, "fix the path or unset VS_WHISPER_MODEL");
+			if (opts.download_model !== true) throw missingModelError(model.path);
+			downloaded = await downloadWhisperModel(model.path, {
+				...opts.fetch ? { fetch: opts.fetch } : {},
+				...opts.modelSha256 !== void 0 ? { expectedSha256: opts.modelSha256 } : {}
+			});
+			model = {
+				...model,
+				exists: true
+			};
+		}
+		words = await whisperTranscribe(join(root, asset.path), {
+			model: model.path,
+			...opts.whisperBin ? { bin: opts.whisperBin } : {}
+		});
+		meta = {
+			source: "whisper",
+			model: basename(model.path).replace(/\.bin$/i, ""),
+			language: whisperLanguage(model.path)
+		};
+	}
+	const rel = `source/transcripts/${asset.id}.json`;
+	const abs = join(root, rel);
+	const relCheck = relative(root, abs);
+	if (relCheck.startsWith("..") || isAbsolute(relCheck)) throw new TranscribeError("transcript path escaped the project");
+	await writeJsonAtomic(abs, words);
+	const applied = applyTranscript(ir, asset.id, words, {
+		path: rel,
+		...meta
+	});
+	await writeJsonAtomic(irPath, applied.ir);
+	return {
+		asset: asset.id,
+		source: meta.source,
+		words: words.length,
+		path: rel,
+		text: applied.text.length > MAX_TEXT ? `${applied.text.slice(0, MAX_TEXT)}…` : applied.text,
+		sentences: applied.sentences,
+		evidence_refs: applied.refs,
+		...meta.model ? { model: meta.model } : {},
+		...downloaded ? { model_downloaded: downloaded } : {}
+	};
 }
 //#endregion
-//#region src/transcribe.ts
-async function transcribeAsset(_projectDir, _asset, _opts = {}) {
-	throw new Error("not implemented: transcribeAsset");
+//#region src/shorts.ts
+/** Max distance a boundary moves to meet a shot cut. */
+const SNAP_SEC = 1;
+/** Silence inside a span beyond this per gap counts as dead air. */
+const DEAD_GAP_MS = 700;
+/** Words per second that counts as fully dense speech. */
+const DENSE_WPS = 2.5;
+const CONJUNCTION_START = /^(?:and|but|so|or|because|which|then|also|plus|that|yeah|um|uh|like)\b/i;
+const STRONG_WORDS = /\b(?:never|always|most|best|worst|biggest|secret|mistake|mistakes|nobody|everyone|stop|don't|wrong|truth|actually|here's|the one|why|how|what if|imagine|you)\b/i;
+/** 0–1: how well a first sentence works as a hook, with the reason. */
+function hookScore(sentence) {
+	const s = sentence.trim();
+	const words = s.split(/\s+/).length;
+	if (CONJUNCTION_START.test(s)) return {
+		score: .2,
+		reason: "starts mid-thought"
+	};
+	let score = .4;
+	let reason = "plain opening";
+	if (/\?["'”’)]*$/.test(s)) {
+		score = 1;
+		reason = "opens with a question";
+	} else if (/\d/.test(s) || /\b(?:one|two|three|four|five|ten|hundred|thousand|million|billion|percent)\b/i.test(s)) {
+		score = .9;
+		reason = "opens with a number";
+	} else if (STRONG_WORDS.test(s)) {
+		score = .75;
+		reason = "opens with a strong claim";
+	}
+	if (words > 25) score -= .15;
+	return {
+		score: Math.max(0, Math.min(1, score)),
+		reason
+	};
+}
+function snap(t, cuts, lo, hi) {
+	let best;
+	for (const c of cuts) {
+		if (c < lo || c > hi) continue;
+		if (best === void 0 || Math.abs(c - t) < Math.abs(best - t)) best = c;
+	}
+	return best;
+}
+/**
+* Score every sentence-aligned span of min–max seconds, then greedily keep the best
+* non-overlapping ones. `cuts` are shot-boundary times in seconds (0 and the end excluded).
+*/
+function scoreShorts(words, cuts, opts) {
+	const sentences = groupSentences(words);
+	const total = opts.duration_sec ?? (words.length ? words[words.length - 1].end_ms / 1e3 : 0);
+	const spans = [];
+	for (let i = 0; i < sentences.length; i++) {
+		const hook = hookScore(sentences[i].text);
+		for (let j = i; j < sentences.length; j++) {
+			const a = sentences[i];
+			const b = sentences[j];
+			if ((b.end_ms - a.start_ms) / 1e3 > opts.max_sec) break;
+			const prevEnd = i > 0 ? sentences[i - 1].end_ms / 1e3 : 0;
+			const nextStart = j + 1 < sentences.length ? sentences[j + 1].start_ms / 1e3 : total;
+			const s0 = a.start_ms / 1e3;
+			const e0 = b.end_ms / 1e3;
+			const sCut = snap(s0, cuts, Math.max(prevEnd, s0 - SNAP_SEC), s0);
+			const eCut = snap(e0, cuts, e0, Math.min(nextStart, e0 + SNAP_SEC));
+			const start = sCut ?? Math.max(prevEnd, s0 - .15, 0);
+			const end = eCut ?? Math.min(nextStart, e0 + .3, total || e0 + .3);
+			const dur = end - start;
+			if (dur < opts.min_sec || dur > opts.max_sec) continue;
+			const spanWords = words.slice(a.first, b.last + 1);
+			const density = Math.min(1, spanWords.length / dur / DENSE_WPS);
+			let dead = 0;
+			for (let k = 1; k < spanWords.length; k++) dead += Math.max(0, spanWords[k].start_ms - spanWords[k - 1].end_ms - DEAD_GAP_MS);
+			const deadScore = Math.max(0, 1 - dead / 1e3 / (.1 * dur));
+			const endsClean = /[.?!…]["'”’)]*$/.test(b.text);
+			const pauseBefore = i === 0 || a.start_ms - sentences[i - 1].end_ms >= 400;
+			const completeness = (endsClean ? .7 : .35) + (pauseBefore ? .3 : .1);
+			const snapped = (sCut !== void 0 ? .5 : 0) + (eCut !== void 0 ? .5 : 0);
+			const score = Math.min(1, .35 * hook.score + .25 * density + .2 * completeness + .2 * deadScore + .05 * snapped);
+			const reasons = [
+				`hook: ${hook.reason}`,
+				`speech density ${(spanWords.length / dur).toFixed(1)} words/s`,
+				endsClean ? "ends on a complete sentence" : "ends without closing punctuation",
+				dead > 0 ? `${(dead / 1e3).toFixed(1)} s of dead air` : "no dead air"
+			];
+			if (sCut !== void 0 || eCut !== void 0) reasons.push(`snapped to shot cut${sCut !== void 0 && eCut !== void 0 ? "s" : ""}`);
+			spans.push({
+				first: i,
+				last: j,
+				start_sec: start,
+				end_sec: end,
+				score,
+				reasons
+			});
+		}
+	}
+	spans.sort((x, y) => y.score - x.score || x.start_sec - y.start_sec);
+	const picked = [];
+	for (const s of spans) {
+		if (picked.length >= opts.count) break;
+		if (picked.some((p) => s.start_sec < p.end_sec && p.start_sec < s.end_sec)) continue;
+		picked.push(s);
+	}
+	return picked.map((s) => ({
+		...s,
+		sentences: sentences.slice(s.first, s.last + 1)
+	}));
+}
+async function findShorts(projectDir, assetId, opts = {}) {
+	const root = resolve(projectDir);
+	const min = opts.min_sec ?? 20;
+	const max = opts.max_sec ?? 60;
+	if (max <= min) throw new Error(`max_sec (${max}) must be greater than min_sec (${min})`);
+	const count = Math.max(1, Math.min(10, Math.floor(opts.count ?? 3)));
+	const { ir } = await loadContentIr$1(root);
+	const asset = findMediaAsset(ir, assetId);
+	const words = await loadTranscriptWords(root, asset);
+	const duration = asset.media?.duration_sec;
+	const picked = scoreShorts(words, (asset.media?.shots ?? []).map((s) => s.start_sec).filter((t) => t > 0), {
+		min_sec: min,
+		max_sec: max,
+		count,
+		...duration ? { duration_sec: duration } : {}
+	});
+	const base = mediaRefBase(asset);
+	const spans = ir.evidence.filter((e) => e.ref.startsWith(`${base}#t=`) && e.locator.time_start_sec !== void 0);
+	const r3 = (x) => Math.round(x * 1e3) / 1e3;
+	const evidence_refs = {};
+	const candidates = picked.sort((a, b) => b.score - a.score).map((p, i) => {
+		const id = `short-${i + 1}`;
+		evidence_refs[id] = spans.filter((e) => e.locator.time_start_sec >= p.start_sec - .05 && (e.locator.time_end_sec ?? e.locator.time_start_sec) <= p.end_sec + .05).map((e) => e.ref);
+		return {
+			id,
+			asset: asset.id,
+			start_sec: r3(p.start_sec),
+			end_sec: r3(p.end_sec),
+			score: Math.round(p.score * 1e3) / 1e3,
+			reasons: p.reasons,
+			transcript: p.sentences.map((s) => s.text).join(" "),
+			hook: p.sentences[0].text
+		};
+	});
+	const doc = ShortCandidates.parse({
+		schema_version: "1.0",
+		asset: asset.id,
+		target_sec: {
+			min,
+			max
+		},
+		candidates
+	});
+	const rel = "qa/shorts.json";
+	await writeJsonAtomic(join(root, rel), doc);
+	return {
+		...doc,
+		evidence_refs,
+		path: rel
+	};
+}
+function formatShorts(s) {
+	if (s.candidates.length === 0) return `No ${s.target_sec.min}–${s.target_sec.max} s span of ${s.asset} starts and ends on sentence boundaries; try a wider min_sec/max_sec.`;
+	const lines = [`${s.candidates.length} short candidate(s) from ${s.asset}${s.path ? ` → ${s.path}` : ""}:`];
+	for (const c of s.candidates) {
+		lines.push(`- ${c.id} ${c.start_sec.toFixed(1)}–${c.end_sec.toFixed(1)} s (${(c.end_sec - c.start_sec).toFixed(1)} s), score ${c.score.toFixed(2)}`);
+		lines.push(`  hook: "${c.hook}"`);
+		lines.push(`  why: ${c.reasons.join("; ")}`);
+		const refs = s.evidence_refs?.[c.id];
+		if (refs?.length) lines.push(`  claim_refs: ${refs.join(", ")}`);
+	}
+	return lines.join("\n");
+}
+const SAMPLE_FRAMES = 6;
+const EDGE_WIDTH = 192;
+function pacingFor(avgShotSec) {
+	return avgShotSec < 2 ? "fast" : avgShotSec > 5 ? "slow" : "medium";
+}
+const COMMON_RATIOS = [
+	["9:16", 9 / 16],
+	["16:9", 16 / 9],
+	["1:1", 1],
+	["4:5", 4 / 5],
+	["4:3", 4 / 3],
+	["3:4", 3 / 4],
+	["21:9", 21 / 9]
+];
+function aspectRatioOf(w, h) {
+	if (!w || !h) return "unknown";
+	const r = w / h;
+	for (const [name, v] of COMMON_RATIOS) if (Math.abs(r - v) / v < .02) return name;
+	const gcd = (a, b) => b ? gcd(b, a % b) : a;
+	const g = gcd(w, h);
+	return `${w / g}:${h / g}`;
+}
+/**
+* Where burned-in text sits, from per-row edge density averaged over sampled frames (values
+* 0–1, index = row). Looks in the lower two-thirds for the densest band that clearly stands
+* out from the frame's median row; null when nothing does.
+*/
+function findCaptionBand(rowDensity) {
+	const H = rowDensity.length;
+	if (H < 12) return null;
+	const bh = Math.max(2, Math.round(H * .08));
+	const median = [...rowDensity].sort((a, b) => a - b)[Math.floor(H / 2)];
+	let best = -1;
+	let bestY = -1;
+	for (let y = Math.floor(H / 3); y + bh <= H; y++) {
+		let s = 0;
+		let peak = 0;
+		for (let k = 0; k < bh; k++) {
+			s += rowDensity[y + k];
+			peak = Math.max(peak, rowDensity[y + k]);
+		}
+		if (s > 0 && peak / s > .5) continue;
+		if (s / bh > best) {
+			best = s / bh;
+			bestY = y;
+		}
+	}
+	if (bestY < 0 || best < .05 || best < 2.5 * median + .02) return null;
+	const floor = best * .4;
+	let top = bestY;
+	let bottom = bestY + bh - 1;
+	const maxH = Math.round(H * .3);
+	while (top > Math.floor(H / 3) && rowDensity[top - 1] >= floor && bottom - top < maxH) top--;
+	while (bottom < H - 1 && rowDensity[bottom + 1] >= floor && bottom - top < maxH) bottom++;
+	const r3 = (x) => Math.round(x * 1e3) / 1e3;
+	return {
+		y_from: r3(top / H),
+		y_to: r3((bottom + 1) / H)
+	};
+}
+/** Per-row edge density (0–1) averaged over `frames` gray frames of width×height bytes. */
+function rowEdgeDensity(raw, width, height) {
+	const frameSize = width * height;
+	const frames = Math.floor(raw.length / frameSize);
+	const rows = new Array(height).fill(0);
+	if (frames === 0) return rows;
+	for (let f = 0; f < frames; f++) for (let y = 0; y < height; y++) {
+		let n = 0;
+		const off = f * frameSize + y * width;
+		for (let x = 0; x < width; x++) if (raw[off + x] > 127) n++;
+		rows[y] += n / width;
+	}
+	return rows.map((r) => r / frames);
+}
+async function sampleEdgeRows(path, duration, w, h) {
+	const W = EDGE_WIDTH;
+	const H = Math.max(16, Math.round(W * h / w / 2) * 2);
+	const work = await mkdtemp(join(tmpdir(), "vs-analyze-"));
+	try {
+		const out = join(work, "edges.gray");
+		await runFfmpeg([
+			"-y",
+			"-i",
+			path,
+			"-map",
+			"0:v:0",
+			"-an",
+			"-vf",
+			`fps=${Math.max(.001, SAMPLE_FRAMES / Math.max(duration, .1)).toFixed(6)},scale=${W}:${H},format=gray,edgedetect=low=0.1:high=0.3`,
+			"-frames:v",
+			String(SAMPLE_FRAMES),
+			"-f",
+			"rawvideo",
+			"-pix_fmt",
+			"gray",
+			out
+		], { timeoutMs: 6e5 });
+		return rowEdgeDensity(new Uint8Array(await readFile(out)), W, H);
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+/** Share of the file where the voice band (200–3500 Hz) is above -35 dBFS. */
+async function soundShare(path, duration) {
+	const r = await runFfmpeg([
+		"-i",
+		path,
+		"-map",
+		"0:a:0",
+		"-vn",
+		"-af",
+		"highpass=f=200,lowpass=f=3500,silencedetect=n=-35dB:d=0.3",
+		"-f",
+		"null",
+		"-"
+	], {
+		keepStderr: true,
+		timeoutMs: 18e5
+	});
+	const starts = [...r.stderr.matchAll(/silence_start:\s*(-?[\d.]+)/g)].map((m) => Math.max(0, Number(m[1])));
+	const ends = [...r.stderr.matchAll(/silence_end:\s*(-?[\d.]+)/g)].map((m) => Number(m[1]));
+	let silent = 0;
+	starts.forEach((s, i) => {
+		silent += Math.max(0, Math.min(ends[i] ?? duration, duration) - s);
+	});
+	return Math.max(0, Math.min(1, 1 - silent / Math.max(duration, .001)));
+}
+async function analyzeVideo(path, opts = {}) {
+	if (!existsSync(path)) throw new Error(`video not found: ${path}`);
+	const p = await ffprobe(path);
+	if (!p.has_video) throw new Error("analyze needs a video with a picture track (this file has none)");
+	const duration = p.duration_s;
+	const r3 = (x) => Math.round(x * 1e3) / 1e3;
+	const shots = await detectShots(path, duration);
+	const avg = shots.length ? duration / shots.length : duration;
+	const notes = ["Structure only: no words, frames or audio from the reference were kept."];
+	let caption_band = null;
+	if (p.width && p.height && duration > 0) try {
+		caption_band = findCaptionBand(await sampleEdgeRows(path, duration, p.width, p.height));
+	} catch (e) {
+		notes.push(`caption band not measured: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
+	}
+	if (caption_band) notes.push(`Burned-in text most likely sits at ${Math.round(caption_band.y_from * 100)}–${Math.round(caption_band.y_to * 100)}% of the frame height.`);
+	else notes.push("No consistent burned-in text band found in the lower two-thirds.");
+	let speech_ratio;
+	let loudness;
+	if (p.has_audio) {
+		try {
+			speech_ratio = r3(await soundShare(path, duration));
+			notes.push("speech_ratio is the share of time with voice-band sound (200–3500 Hz above -35 dBFS); music can count as speech.");
+		} catch {}
+		try {
+			const l = await measureLoudness(path);
+			if (l.integrated_lufs !== null && Number.isFinite(l.integrated_lufs)) loudness = Math.round(l.integrated_lufs * 10) / 10;
+		} catch {}
+	} else notes.push("No audio track.");
+	const g = {
+		schema_version: "1.0",
+		duration_sec: r3(duration),
+		aspect_ratio: aspectRatioOf(p.width, p.height),
+		shots,
+		avg_shot_sec: r3(avg),
+		cuts_per_10s: r3(duration > 0 ? (shots.length - 1) / duration * 10 : 0),
+		hook_shot_sec: r3(shots[0] ? shots[0].end_sec - shots[0].start_sec : duration),
+		has_speech: p.has_audio && (speech_ratio ?? 0) >= .2,
+		...speech_ratio !== void 0 ? { speech_ratio } : {},
+		...loudness !== void 0 ? { loudness_lufs: loudness } : {},
+		caption_band,
+		pacing: pacingFor(avg),
+		notes
+	};
+	const parsed = FormatGrammar.parse(g);
+	const report_md = formatGrammar(parsed);
+	if (opts.projectDir) {
+		await writeJsonAtomic(join(opts.projectDir, "qa", "analysis.json"), parsed);
+		await writeFileAtomic(join(opts.projectDir, "qa", "analysis.md"), `${report_md}\n`);
+	}
+	return {
+		...parsed,
+		report_md
+	};
+}
+function formatGrammar(g) {
+	const band = g.caption_band ? `${Math.round(g.caption_band.y_from * 100)}–${Math.round(g.caption_band.y_to * 100)}% of height` : "none found";
+	const lines = [
+		"# Format grammar",
+		"",
+		`- Duration: ${g.duration_sec.toFixed(1)} s, aspect ${g.aspect_ratio}`,
+		`- Shots: ${g.shots.length} (avg ${g.avg_shot_sec.toFixed(1)} s, ${g.cuts_per_10s.toFixed(1)} cuts per 10 s), pacing **${g.pacing}**`,
+		`- Hook shot: ${g.hook_shot_sec.toFixed(1)} s`,
+		`- Speech: ${g.has_speech === void 0 ? "n/a" : g.has_speech ? "yes" : "no"}${g.speech_ratio !== void 0 ? ` (${Math.round(g.speech_ratio * 100)}% voice-band sound)` : ""}`,
+		`- Loudness: ${g.loudness_lufs !== void 0 ? `${g.loudness_lufs} LUFS` : "n/a"}`,
+		`- Caption band: ${band}`,
+		"",
+		"Shot lengths (s): " + g.shots.map((s) => (s.end_sec - s.start_sec).toFixed(1)).join(", ")
+	];
+	if (g.notes.length) lines.push("", ...g.notes.map((n) => `- ${n}`));
+	return lines.join("\n");
+}
+/** Blur applied to masked elements (CSS). */
+const MASK_CSS_BLUR = "blur(8px)";
+/** Resolve puppeteer-core without bundling it: next to the HyperFrames producer, then the plugin root. */
+async function loadPuppeteer(env) {
+	const tried = [];
+	const attempt = async (from) => {
+		try {
+			const path = createRequire(from).resolve("puppeteer-core");
+			const mod = await import(pathToFileURL(path).href);
+			const launch = mod.launch ?? mod.default?.launch;
+			return launch ? { launch } : null;
+		} catch {
+			tried.push(from);
+			return null;
+		}
+	};
+	const producer = resolveHyperframesProducer(env);
+	if (producer.ok) {
+		const p = await attempt(producer.entry);
+		if (p) return p;
+	}
+	const root = findPluginRoot(env);
+	if (root) {
+		const p = await attempt(join(root, "package.json"));
+		if (p) return p;
+	}
+	throw new Error("demo capture needs puppeteer-core, which comes with the optional HyperFrames install (see the doctor / render skill): cd \"${CLAUDE_PLUGIN_DATA}\" && PUPPETEER_SKIP_DOWNLOAD=1 npm i @hyperframes/producer --prefix deps");
+}
+/** Default browser: the system Chrome through puppeteer-core, headless, fixed viewport. */
+const systemChrome = async ({ viewport, env }) => {
+	const chrome = await findChrome(env.CHROME_PATH, env);
+	if (!chrome.ok) throw new Error(`demo capture needs Google Chrome: ${chrome.reason}`);
+	return await (await loadPuppeteer(env)).launch({
+		executablePath: chrome.path,
+		headless: true,
+		defaultViewport: viewport,
+		args: [
+			"--hide-scrollbars",
+			"--mute-audio",
+			"--no-first-run",
+			"--no-default-browser-check",
+			"--use-mock-keychain"
+		]
+	});
+};
+/** CSS that blurs every input-like element and the extra selectors, and draws the demo cursor. */
+function maskCss(selectors = []) {
+	return `${[
+		"input",
+		"textarea",
+		"select",
+		"[contenteditable=\"true\"]",
+		"[contenteditable=\"\"]",
+		...selectors
+	].join(",\n")} { filter: ${MASK_CSS_BLUR} !important; }
+#vs-cursor { position: fixed; z-index: 2147483647; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%;
+  background: rgba(255,255,255,0.85); border: 3px solid rgba(20,20,20,0.85); pointer-events: none; transition: transform 120ms ease-out; }
+#vs-cursor.down { transform: scale(0.7); }`;
+}
+/** Script injected after each navigation: the mask stylesheet and the cursor element. */
+function setupScript(css) {
+	return `(() => {
+  if (!document.getElementById("vs-mask")) {
+    const s = document.createElement("style"); s.id = "vs-mask"; s.textContent = ${JSON.stringify(css)};
+    document.documentElement.appendChild(s);
+  }
+  if (!document.getElementById("vs-cursor")) {
+    const c = document.createElement("div"); c.id = "vs-cursor"; c.style.left = "-40px"; c.style.top = "-40px";
+    document.documentElement.appendChild(c);
+  }
+})()`;
+}
+const cursorTo = (x, y, down = false) => `(() => { const c = document.getElementById("vs-cursor"); if (c) { c.style.left = "${Math.round(x)}px"; c.style.top = "${Math.round(y)}px"; c.classList.toggle("down", ${down}); } })()`;
+async function center(page, selector) {
+	const el = await page.$(selector);
+	const box = el ? await el.boundingBox() : null;
+	if (!box) throw new Error(`demo step: selector "${selector}" was not found or is not visible`);
+	return {
+		x: box.x + box.width / 2,
+		y: box.y + box.height / 2,
+		box
+	};
+}
+function describeStep(s) {
+	switch (s.action) {
+		case "goto": return `opened ${s.url}`;
+		case "click": return `clicked ${s.selector}`;
+		case "type": return `typed ${s.text.length} characters into ${s.selector} (masked)`;
+		case "hover": return `hovered ${s.selector}`;
+		case "scroll": return `scrolled ${s.y > 0 ? "down" : "up"} ${Math.abs(s.y)} px`;
+		case "zoom": return `zoomed into ${s.selector}`;
+		case "wait": return `waited ${s.ms} ms`;
+	}
+}
+async function loadScript(root, rel) {
+	const path = join(root, rel ?? join("project", "demo.json"));
+	if (!existsSync(path)) throw new Error(`no ${rel ?? `project/demo.json`}; write a DemoScript first (schema_get demo-script): {schema_version, id, url, viewport, steps}`);
+	const r = parseYamlOrJson(DemoScript, await readFile(path, "utf8"));
+	if (!r.ok) throw new Error(`demo script is invalid: ${r.errors.slice(0, 5).map((e) => `${e.path}: ${e.message}`).join("; ")}`);
+	return r.data;
+}
+/** Add (or replace) the recording in source/content-ir.json: a source, a section, one evidence span per step, the video asset. */
+async function recordInIr(root, script, asset, steps, duration) {
+	const irPath = projectSpecPaths(root).contentIr;
+	const sourceId = `demo-${script.id}`;
+	const file = asset.path.split("/").pop();
+	const refs = steps.map((s) => `video:${file}#step-${s.index + 1}`);
+	const evidence = steps.map((s, i) => ({
+		ref: refs[i],
+		source_id: sourceId,
+		text: `${s.detail} (at ${s.at_sec.toFixed(1)} s of the recording)`,
+		locator: {
+			time_start_sec: s.at_sec,
+			time_end_sec: steps[i + 1]?.at_sec ?? duration
+		}
+	}));
+	const source = {
+		id: sourceId,
+		kind: "video",
+		uri: script.url,
+		sha256: asset.sha256,
+		title: `Demo recording of ${script.url}`
+	};
+	const section = {
+		id: `${sourceId}-steps`,
+		source_id: sourceId,
+		heading: "Demo steps",
+		text: steps.map((s) => `${s.index + 1}. ${s.detail}`).join("\n")
+	};
+	let ir;
+	if (existsSync(irPath)) {
+		ir = ContentIR.parse(await readJson(irPath));
+		ir.sources = [...ir.sources.filter((s) => s.id !== sourceId), source];
+		ir.sections = [...ir.sections.filter((s) => s.source_id !== sourceId), section];
+		ir.evidence = [...ir.evidence.filter((e) => e.source_id !== sourceId), ...evidence];
+		ir.assets = [...ir.assets.filter((a) => a.id !== asset.id), asset];
+	} else ir = {
+		schema_version: "1.0",
+		id: `ir-${sourceId}`,
+		created_at: (/* @__PURE__ */ new Date()).toISOString(),
+		sources: [source],
+		sections: [section],
+		evidence,
+		entities: [],
+		claims: [],
+		assets: [asset],
+		classification: {
+			contains_secrets: false,
+			contains_pii: false,
+			contains_likeness: false,
+			data_class: "internal",
+			notes: []
+		},
+		warnings: []
+	};
+	const note = `demo ${script.id}: screen recording of ${script.url}; inputs and ${script.mask_selectors?.length ?? 0} extra selector(s) were blurred`;
+	ir.classification.notes = [...ir.classification.notes.filter((n) => !n.startsWith(`demo ${script.id}:`)), note];
+	await writeJsonAtomic(irPath, ContentIR.parse(ir));
+	return refs;
+}
+async function recordDemo(projectDir, opts = {}) {
+	if (opts.confirm !== true) throw new Error("demo capture drives a browser against a URL: show the user the URL and steps, and call again with confirm: true once they approve");
+	const root = projectPaths(projectDir).root;
+	const env = opts.env ?? process.env;
+	const script = await loadScript(root, opts.script);
+	const now = opts.now ?? (() => Date.now());
+	const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+	const warnings = [];
+	const host = new URL(script.url).hostname;
+	if (![
+		"localhost",
+		"127.0.0.1",
+		"::1",
+		"[::1]"
+	].includes(host) && !host.endsWith(".localhost")) warnings.push(`${script.url} is not a local address; make sure you may record it and that no real customer data is on screen`);
+	const work = await mkdtemp(join(tmpdir(), "vs-demo-"));
+	const webm = join(work, "demo.webm");
+	const browser = await (opts.browser ?? systemChrome)({
+		viewport: script.viewport,
+		env
+	});
+	const steps = [];
+	const setup = setupScript(maskCss(script.mask_selectors));
+	let recorder;
+	try {
+		const page = await browser.newPage();
+		await page.goto(script.url, {
+			waitUntil: "networkidle2",
+			timeout: 3e4
+		});
+		await page.evaluate(setup);
+		recorder = await page.screencast({ path: webm });
+		const t0 = now();
+		const limit = (script.max_duration_sec ?? 120) * 1e3;
+		for (const [index, step] of script.steps.entries()) {
+			if (now() - t0 > limit) {
+				warnings.push(`stopped after ${index} step(s): max_duration_sec ${script.max_duration_sec ?? 120} reached`);
+				break;
+			}
+			steps.push({
+				index,
+				action: step.action,
+				detail: describeStep(step),
+				at_sec: Math.round((now() - t0) / 100) / 10
+			});
+			switch (step.action) {
+				case "goto":
+					await page.goto(step.url, {
+						waitUntil: "networkidle2",
+						timeout: 3e4
+					});
+					await page.evaluate(setup);
+					if (step.wait_ms) await sleep(step.wait_ms);
+					break;
+				case "click": {
+					const c = await center(page, step.selector);
+					await page.mouse.move(c.x, c.y, { steps: 20 });
+					await page.evaluate(cursorTo(c.x, c.y, true));
+					await page.click(step.selector);
+					await page.evaluate(cursorTo(c.x, c.y));
+					await page.evaluate(setup);
+					await sleep(step.wait_ms ?? 600);
+					break;
+				}
+				case "type": {
+					const c = await center(page, step.selector);
+					await page.mouse.move(c.x, c.y, { steps: 15 });
+					await page.evaluate(cursorTo(c.x, c.y));
+					await page.type(step.selector, step.text, { delay: step.delay_ms ?? 60 });
+					await sleep(300);
+					break;
+				}
+				case "hover": {
+					const c = await center(page, step.selector);
+					await page.mouse.move(c.x, c.y, { steps: 20 });
+					await page.evaluate(cursorTo(c.x, c.y));
+					await page.hover(step.selector);
+					await sleep(500);
+					break;
+				}
+				case "scroll":
+					await page.evaluate(`window.scrollBy({ top: ${step.y}, behavior: "${step.smooth === false ? "auto" : "smooth"}" })`);
+					await sleep(800);
+					break;
+				case "zoom": {
+					const c = await center(page, step.selector);
+					const s = step.scale ?? 1.8;
+					await page.evaluate(`(() => { const d = document.documentElement; d.style.transition = "transform 500ms ease-in-out"; d.style.transformOrigin = "${Math.round(c.x)}px ${Math.round(c.y)}px"; d.style.transform = "scale(${s})"; })()`);
+					await sleep(step.hold_ms ?? 1500);
+					await page.evaluate(`(() => { document.documentElement.style.transform = ""; })()`);
+					await sleep(500);
+					break;
+				}
+				case "wait": await sleep(step.ms);
+			}
+		}
+		await sleep(500);
+	} finally {
+		await recorder?.stop().catch(() => void 0);
+		await browser.close().catch(() => void 0);
+	}
+	try {
+		if (!existsSync(webm)) throw new Error("the browser produced no recording (screencast needs ffmpeg on PATH)");
+		const id = `demo-${script.id}`;
+		const rel = `source/assets/${id}.mp4`;
+		const out = join(root, rel);
+		await mkdir(join(root, "source", "assets"), { recursive: true });
+		await runFfmpeg([
+			"-y",
+			"-i",
+			webm,
+			"-vf",
+			"fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2",
+			"-c:v",
+			"libx264",
+			"-preset",
+			"veryfast",
+			"-crf",
+			"18",
+			"-pix_fmt",
+			"yuv420p",
+			"-an",
+			"-movflags",
+			"+faststart",
+			out
+		]);
+		const p = await ffprobe(out);
+		const refs = await recordInIr(root, script, {
+			id,
+			kind: "video",
+			path: rel,
+			sha256: await hashFile(out),
+			media: {
+				duration_sec: p.duration_s,
+				...p.width ? { width: p.width } : {},
+				...p.height ? { height: p.height } : {},
+				...p.fps ? { fps: p.fps } : {},
+				has_video: true,
+				has_audio: false
+			},
+			...steps.length ? { source_ref: `video:${id}.mp4#step-1` } : {}
+		}, steps, p.duration_s);
+		return {
+			asset: id,
+			path: rel,
+			duration_sec: p.duration_s,
+			steps,
+			evidence_refs: refs,
+			warnings
+		};
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+function formatDemo(r) {
+	return [
+		`recorded ${r.asset} (${r.duration_sec.toFixed(1)} s) → ${r.path}`,
+		...r.steps.map((s) => `- ${s.at_sec.toFixed(1)}s ${s.detail} [${r.evidence_refs[s.index]}]`),
+		...r.warnings.map((w) => `warning: ${w}`),
+		"use it in screen_capture scenes: footage {asset, in_sec, out_sec} with claim_refs of the steps shown"
+	].join("\n");
 }
 /**
 * A frame passes when its SSIM against the golden is at least this. Tolerant of encoder and
@@ -241968,6 +244031,8 @@ function formatIssues(title, r) {
 	for (const w of r.warnings) lines.push(`warning ${w.path || "(root)"}: ${w.message}\n        fix: ${w.fix}`);
 	return lines.join("\n");
 }
+/** Visual strategies that show real footage (a `footage` block per scene). */
+const FOOTAGE_STRATEGIES = /* @__PURE__ */ new Set(["user_asset", "screen_capture"]);
 /**
 * Split `total` into parts proportional to `weights`, rounded to 0.1 s, summing exactly to `total`
 * (largest-remainder rounding).
@@ -242022,10 +244087,15 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 	const mode = opts.voice_mode ?? tpl.voice_mode ?? "narrated";
 	const style = opts.style ?? tpl.default_style;
 	const music = opts.music ?? tpl.default_music;
+	const footageBeats = beats.some((b) => FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy));
 	if (mode === "none") {
 		notes.push("voice.mode \"none\": leave voiceover \"\" in every scene; put the words on screen (on_screen_text or the props) and keep them short enough to read");
-		if (!music) notes.push("no music bed: add audio.music {file: \"bundled:<id>\"} or the video is silent");
+		if (!music && !footageBeats) notes.push("no music bed: add audio.music {file: \"bundled:<id>\"} or the video is silent");
 	}
+	if (mode === "native") notes.push("voice.mode \"native\": leave voiceover \"\" in every scene; the speech is in the footage and captions come from the asset transcripts (transcribe the video first)");
+	const clips = ir?.assets.filter((a) => a.kind === "video" || a.kind === "image") ?? [];
+	const sceneAudioMode = mode === "narrated" ? "music" : mode === "none" && music ? "music" : "native";
+	if (footageBeats) notes.push(clips.length ? `footage scenes: fill footage {asset, in_sec, out_sec} for each user_asset scene from the ingested clips (${clips.slice(0, 8).map((a) => `${a.id}${a.media?.duration_sec ? ` ${a.media.duration_sec}s` : ""}`).join(", ")})` : "footage scenes need ingested video: ingest the clips (video files or a folder of clips) first, then fill footage {asset, in_sec, out_sec} in each user_asset scene");
 	const scenes = beats.map((b, i) => {
 		const scene = {
 			id: `s${String(i + 1).padStart(2, "0")}`,
@@ -242045,6 +244115,7 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 			continuity_refs: [],
 			modality: "video"
 		};
+		if (FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy)) scene.audio = { mode: sceneAudioMode };
 		return scene;
 	});
 	const spec = {
@@ -242061,7 +244132,7 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 		language: brief?.language ?? "en-US",
 		grounding: "strict",
 		voice: {
-			...mode === "none" ? { mode } : {},
+			...mode !== "narrated" ? { mode } : {},
 			...brief?.tone.length ? { style: brief.tone.join(", ") } : {}
 		},
 		captions: {
@@ -242080,12 +244151,22 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 			purpose: b.purpose,
 			duration_sec: durations[i],
 			guidance: b.guidance,
-			word_budget: mode === "none" ? Math.max(3, Math.floor((durations[i] - 1) * 3)) : Math.floor(durations[i] * tpl.pacing.max_words_per_sec),
+			word_budget: mode !== "narrated" ? Math.max(3, Math.floor((durations[i] - 1) * 3)) : Math.floor(durations[i] * tpl.pacing.max_words_per_sec),
 			suggested_visual_strategy: b.suggested_visual_strategy,
 			...b.suggested_deterministic_kind ? {
 				suggested_deterministic_kind: b.suggested_deterministic_kind,
 				props_example: DETERMINISTIC_PROPS_EXAMPLES[b.suggested_deterministic_kind]
-			} : {}
+			} : {},
+			...FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy) ? { footage_example: {
+				asset: clips.find((a) => a.kind === "video")?.id ?? clips[0]?.id ?? "<video asset id from source/content-ir.json>",
+				in_sec: 0,
+				out_sec: durations[i],
+				fit: "cover",
+				...b.purpose === "hook" && mode === "native" ? { focus: {
+					x: .5,
+					y: .35
+				} } : {}
+			} } : {}
 		})),
 		rules: tpl.rules,
 		hook_mechanisms: tpl.hook_mechanisms,
@@ -243370,7 +245451,7 @@ async function renderCover(o) {
 		await runFfmpeg([
 			"-y",
 			"-ss",
-			secs(at),
+			secs$1(at),
 			"-i",
 			o.master,
 			"-frames:v",
@@ -243894,10 +245975,11 @@ async function renderProject(projectDir, o = {}) {
 		...o.voiceBackends
 	};
 	const voiceCacheDir = o.voiceCacheDir ?? join(resolveDataDir(env).cache, "voice");
-	const narrated = voiceMode(spec) !== "none";
+	const mode = voiceMode(spec);
+	const narrated = mode === "narrated";
 	const sel = narrated ? await selectBackend(voiceChoice, env, backends) : await selectBackend("silent", env, backends);
 	let voice;
-	let voiceReason = narrated ? sel.reason : "voice.mode is \"none\": no narration";
+	let voiceReason = narrated ? sel.reason : mode === "native" ? "voice.mode is \"native\": the speech is in the footage (captions from the asset transcripts)" : "voice.mode is \"none\": no narration";
 	try {
 		voice = await synthesizeSpec(spec, {
 			projectDir: root,
@@ -243924,7 +246006,9 @@ async function renderProject(projectDir, o = {}) {
 	}
 	const trackById = new Map(voice.tracks.map((t) => [t.scene_id, t]));
 	const hasAudio = voice.tracks.some((t) => t.audio_path);
-	const timingSource = [...new Set(voice.tracks.filter((t) => t.words.length).map((t) => t.timing_source))].join("+") || "none";
+	let timingSource = [...new Set(voice.tracks.filter((t) => t.words.length).map((t) => t.timing_source))].join("+") || "none";
+	const footage = await resolveFootage(root, spec, irPath);
+	const music = spec.audio?.music ? await resolveMusic(spec.audio.music, root, env) : void 0;
 	const timing_adjustments = voice.overruns.map((ov) => ({
 		scene_id: ov.scene_id,
 		spec_duration_sec: ov.scene_duration_sec,
@@ -243932,11 +246016,31 @@ async function renderProject(projectDir, o = {}) {
 		reason: `voiceover lasts ${ov.audio_duration_sec.toFixed(2)}s, longer than the scene's ${ov.scene_duration_sec}s; extended in the render plan only (edit duration_sec in the spec, or shorten the line, to make it permanent)`
 	}));
 	const adjusted = new Map(timing_adjustments.map((a) => [a.scene_id, a.render_duration_sec]));
+	for (const a of timing_adjustments) warnings.push(`timing: ${a.scene_id} extended ${a.spec_duration_sec}s → ${a.render_duration_sec}s to fit the voiceover`);
+	let beatSync;
+	if (spec.audio?.beat_sync?.enabled) {
+		if (!music) warnings.push("beat_sync: no audio.music bed to detect beats in; cuts unchanged");
+		else {
+			signal?.throwIfAborted();
+			const r = await beatSyncDurations(spec.scenes, adjusted, music, spec.audio.beat_sync.tolerance_ms ?? 250, trackById, signal);
+			beatSync = r.summary;
+			if (r.warning) warnings.push(r.warning);
+			for (const a of r.adjustments) {
+				const prev = timing_adjustments.find((t) => t.scene_id === a.scene_id);
+				if (prev) {
+					prev.render_duration_sec = a.render_duration_sec;
+					prev.reason += `; ${a.reason}`;
+				} else timing_adjustments.push(a);
+				adjusted.set(a.scene_id, a.render_duration_sec);
+			}
+			if (r.adjustments.length) warnings.push(`timing: beat sync moved ${r.summary.moved_cuts} cut(s) onto beats (${r.summary.bpm ?? "?"} bpm)`);
+		}
+	}
+	timing_adjustments.sort((a, b) => spec.scenes.findIndex((s) => s.id === a.scene_id) - spec.scenes.findIndex((s) => s.id === b.scene_id));
 	const planScenes = spec.scenes.map((s) => adjusted.has(s.id) ? {
 		...s,
 		duration_sec: adjusted.get(s.id)
 	} : s);
-	for (const a of timing_adjustments) warnings.push(`timing: ${a.scene_id} extended ${a.spec_duration_sec}s → ${a.render_duration_sec}s to fit the voiceover`);
 	const rdir = renderDir(root, quality);
 	const scenesDir = join(rdir, "scenes");
 	const count = planScenes.length;
@@ -243972,7 +246076,9 @@ async function renderProject(projectDir, o = {}) {
 		zones,
 		placeholder,
 		env,
-		...signal ? { signal } : {}
+		...signal ? { signal } : {},
+		footage: footage.byScene,
+		footageRenderer: o.footageRenderer ?? createFootageRenderer({ encodePreset: o.encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") })
 	};
 	const first = await renderScenes({ scenes: planScenes }, {
 		...baseOpts,
@@ -244003,7 +246109,7 @@ async function renderProject(projectDir, o = {}) {
 	const used = [...new Set(ordered.map((e) => e.renderer).filter(Boolean))];
 	const placeholders = ordered.filter((e) => e.placeholder).map((e) => e.scene_id);
 	for (const e of ordered) for (const w of e.warnings) warnings.push(`${e.scene_id}: ${w}`);
-	if (placeholders.length) warnings.push(`placeholder cards for ${placeholders.join(", ")} (provider rendering arrives in Phase 4)`);
+	if (placeholders.length) warnings.push(`placeholder cards for ${placeholders.join(", ")} (video providers (generated video, avatars) arrive in Phase 7; until then this is a placeholder card)`);
 	signal?.throwIfAborted();
 	progress({
 		stage: "captions",
@@ -244017,9 +246123,27 @@ async function renderProject(projectDir, o = {}) {
 	}
 	const frameMs = (f) => f * 1e3 / target.fps;
 	const slotMs = planScenes.map((_, i) => frameMs(bounds[i + 1] - bounds[i]));
+	const nativeTracks = /* @__PURE__ */ new Map();
+	if (mode === "native") {
+		for (const [i, s] of planScenes.entries()) {
+			const f = footage.byScene.get(s.id);
+			if (!s.footage || !f || "error" in f) continue;
+			const amode = s.audio?.mode ?? "native";
+			if (amode !== "native" && amode !== "mix") continue;
+			const words = await transcriptWords(root, footage.assets.get(s.footage.asset), s.footage, slotMs[i], warnings);
+			if (words.length) nativeTracks.set(s.id, {
+				scene_id: s.id,
+				duration_ms: Math.round(slotMs[i]),
+				words,
+				timing_source: "aligned",
+				provider: "native"
+			});
+		}
+		if (nativeTracks.size) timingSource = "aligned";
+	}
 	const placements = planScenes.map((s, i) => {
 		const dur = slotMs[i];
-		const track = trackById.get(s.id) ?? {
+		const track = nativeTracks.get(s.id) ?? trackById.get(s.id) ?? {
 			scene_id: s.id,
 			duration_ms: Math.round(dur),
 			words: [],
@@ -244061,11 +246185,16 @@ async function renderProject(projectDir, o = {}) {
 	}) : void 0;
 	const captionFiles = captionSet?.files;
 	if (!words.length && narrated) warnings.push("no voiceover text: captions and transcript skipped");
-	const music = spec.audio?.music ? await resolveMusic(spec.audio.music, root, env) : void 0;
+	if (!words.length && mode === "native") warnings.push("voice.mode \"native\": no transcript words in the footage spans; captions and transcript skipped (transcribe the video assets first)");
 	const speech = placements.filter((p) => p.track.audio_path).map((p) => ({
 		start_ms: Math.round(p.scene_start_ms),
 		end_ms: Math.round(p.scene_start_ms + p.track.duration_ms)
 	}));
+	const useSceneAudio = mode === "native" || planScenes.some((s) => s.footage || s.sfx?.length);
+	const sceneAudio = useSceneAudio ? await buildSceneAudio(root, planScenes, placements, slotMs, footage, nativeTracks, warnings) : void 0;
+	const sceneAudioOn = !!sceneAudio && (sceneAudio.slots.some((sl) => sl.layers.length > 0) || sceneAudio.sfx.length > 0);
+	const musicSpeech = useSceneAudio ? [...hasAudio ? speech : [], ...sceneAudio.speech] : hasAudio ? speech : [];
+	const musicMute = sceneAudio?.mute ?? [];
 	const segments = await Promise.all(ordered.map(async (e, i) => ({
 		path: e.out_path,
 		duration_ms: slotMs[i],
@@ -244090,15 +246219,17 @@ async function renderProject(projectDir, o = {}) {
 			sha: s.sha256,
 			ms: s.duration_ms
 		})),
-		audio: hasAudio ? slots.map((s) => ({
+		audio: hasAudio && !useSceneAudio ? slots.map((s) => ({
 			sha: s.sha256,
 			ms: s.duration_ms
 		})) : null,
 		music: music ? {
 			sha: music.sha256,
 			bed: music.bed,
-			speech: hasAudio ? speech : []
+			speech: musicSpeech,
+			...musicMute.length ? { mute: musicMute } : {}
 		} : null,
+		...useSceneAudio ? { scene_audio: sceneAudioOn ? sceneAudio.key : null } : {},
 		burn,
 		ass: burn ? assSha : null,
 		captions: burn ? assOpts : null,
@@ -244116,7 +246247,7 @@ async function renderProject(projectDir, o = {}) {
 			stage: "assemble",
 			message: `assembling ${segments.length} clip(s) at ${target.width}x${target.height} ${target.fps} fps`
 		});
-		const audio = hasAudio ? slots.map((s) => ({
+		const audio = hasAudio && !useSceneAudio ? slots.map((s) => ({
 			...s.abs ? { path: s.abs } : {},
 			duration_ms: s.duration_ms
 		})) : void 0;
@@ -244131,7 +246262,11 @@ async function renderProject(projectDir, o = {}) {
 				duration_ms
 			})),
 			...audio ? { audio } : {},
-			...audio || music ? { loudness: {
+			...sceneAudioOn ? { sceneAudio: {
+				slots: sceneAudio.slots,
+				sfx: sceneAudio.sfx
+			} } : {},
+			...audio || music || sceneAudioOn ? { loudness: {
 				I: -14,
 				TP: -1
 			} } : {},
@@ -244145,7 +246280,8 @@ async function renderProject(projectDir, o = {}) {
 					...music.bed.loop !== void 0 ? { loop: music.bed.loop } : {},
 					...music.bed.start_sec !== void 0 ? { start_sec: music.bed.start_sec } : {}
 				},
-				...hasAudio ? { speech } : {}
+				...musicSpeech.length ? { speech: musicSpeech } : {},
+				...musicMute.length ? { mute: musicMute } : {}
 			} } : {},
 			master,
 			...burn ? {
@@ -244306,7 +246442,11 @@ async function renderProject(projectDir, o = {}) {
 		timing_adjustments,
 		warnings,
 		tool_versions,
-		voice_mode: narrated ? "narrated" : "none",
+		voice_mode: mode,
+		...sceneAudioOn ? { scene_audio: true } : {},
+		...footage.used.length ? { footage: footage.used } : {},
+		...sceneAudio?.sfxState.length ? { sfx: sceneAudio.sfxState } : {},
+		...beatSync ? { beat_sync: beatSync } : {},
 		background: tokens.color_background,
 		...music ? { music: {
 			ref: music.ref,
@@ -244378,6 +246518,303 @@ async function renderProject(projectDir, o = {}) {
 		}
 	};
 }
+async function probeMedia(abs, kind) {
+	const p = await ffprobe(abs);
+	return {
+		duration_sec: kind === "image" ? 0 : p.duration_s,
+		...p.width ? { width: p.width } : {},
+		...p.height ? { height: p.height } : {},
+		...p.fps && kind !== "image" ? { fps: p.fps } : {},
+		has_video: p.has_video,
+		has_audio: kind === "image" ? false : p.has_audio
+	};
+}
+async function loadFootageAsset(root, ir, irError, id) {
+	if (!ir) throw new Error(irError ?? "no ContentIR");
+	const a = ir.assets.find((x) => x.id === id);
+	if (!a) throw new Error("not a ContentIR asset id");
+	if (a.kind === "audio") throw new Error("is an audio asset; footage needs a video or an image");
+	const abs = await resolveInsideProject(projectPaths(root), a.path);
+	if (!await exists(abs)) throw new Error(`file ${a.path} is missing`);
+	const media = a.media ?? await probeMedia(abs, a.kind);
+	return {
+		id,
+		kind: a.kind,
+		rel: toPosix(a.path),
+		abs,
+		sha256: await hashFile(abs),
+		media,
+		...a.media?.transcript ? { transcript: a.media.transcript.path } : {}
+	};
+}
+/** Resolve every footage scene's asset through source/content-ir.json (project-relative paths only). */
+async function resolveFootage(root, spec, irPath) {
+	const out = {
+		byScene: /* @__PURE__ */ new Map(),
+		assets: /* @__PURE__ */ new Map(),
+		used: []
+	};
+	const scenes = spec.scenes.filter((s) => s.footage);
+	if (!scenes.length) return out;
+	let ir;
+	let irError;
+	try {
+		const parsed = parseYamlOrJson(ContentIR, await readFile(irPath, "utf8"));
+		if (parsed.ok) ir = parsed.data;
+		else irError = "source/content-ir.json is not a valid ContentIR";
+	} catch {
+		irError = "no source/content-ir.json (ingest the video first)";
+	}
+	const failed = /* @__PURE__ */ new Map();
+	for (const s of scenes) {
+		const id = s.footage.asset;
+		if (!out.assets.has(id) && !failed.has(id)) try {
+			out.assets.set(id, await loadFootageAsset(root, ir, irError, id));
+		} catch (e) {
+			failed.set(id, errMsg(e));
+		}
+		const a = out.assets.get(id);
+		if (!a) {
+			out.byScene.set(s.id, { error: failed.get(id) });
+			continue;
+		}
+		out.byScene.set(s.id, {
+			path: a.abs,
+			sha256: a.sha256,
+			media: a.media
+		});
+		const u = out.used.find((x) => x.asset === id);
+		if (u) u.scenes.push(s.id);
+		else out.used.push({
+			asset: id,
+			path: a.rel,
+			sha256: a.sha256,
+			scenes: [s.id]
+		});
+	}
+	return out;
+}
+/** Source seconds a footage clip plays: `in_sec` to `out_sec` (default: the scene at `speed`), clamped to the asset. */
+function footageSpanSec(clip, media, sceneMs) {
+	const speed = clip.speed ?? 1;
+	const dur = media.duration_sec > 0 ? media.duration_sec : Number.POSITIVE_INFINITY;
+	return Math.max(0, Math.min(clip.out_sec ?? clip.in_sec + sceneMs / 1e3 * speed, dur) - clip.in_sec);
+}
+/**
+* Words of an asset transcript inside a footage clip's span, on the scene's timeline: shifted by
+* `in_sec`, divided by `speed`, and cut at the scene end (a looped or held tail has no captions).
+*/
+async function transcriptWords(root, asset, clip, sceneMs, warnings) {
+	if (!asset?.transcript) return [];
+	let raw;
+	try {
+		raw = JSON.parse(await readFile(await resolveInsideProject(projectPaths(root), asset.transcript), "utf8"));
+	} catch (e) {
+		warnings.push(`captions: transcript ${asset.transcript} of "${asset.id}" could not be read (${errMsg(e)})`);
+		return [];
+	}
+	const list = Array.isArray(raw) ? raw : Array.isArray(raw?.words) ? raw.words : [];
+	const speed = clip.speed ?? 1;
+	const inMs = clip.in_sec * 1e3;
+	const endMs = inMs + footageSpanSec(clip, asset.media, sceneMs) * 1e3;
+	const out = [];
+	for (const w of list) {
+		const { word, start_ms, end_ms } = w ?? {};
+		if (typeof word !== "string" || !word.trim() || typeof start_ms !== "number" || typeof end_ms !== "number") continue;
+		if (start_ms < inMs || start_ms >= endMs) continue;
+		const a = Math.round((start_ms - inMs) / speed);
+		if (a >= sceneMs) continue;
+		const b = Math.round(Math.min((Math.min(end_ms, endMs) - inMs) / speed, sceneMs));
+		out.push({
+			word: word.trim(),
+			start_ms: a,
+			end_ms: Math.max(a, b)
+		});
+	}
+	return out;
+}
+/**
+* Per-scene audio: a narrated scene keeps its voice slot; a footage scene plays its own sound for
+* the same span (`native`, `mix`), the bed only (`music`) or nothing (`mute`); crossfades come from
+* `audio.crossfade_ms`; sound effects play at scene start + `at_sec`.
+*/
+async function buildSceneAudio(root, scenes, placements, slotMs, footage, nativeTracks, warnings) {
+	const paths = projectPaths(root);
+	const plan = {
+		slots: [],
+		sfx: [],
+		speech: [],
+		mute: [],
+		key: null,
+		sfxState: []
+	};
+	const keySlots = [];
+	const keySfx = [];
+	for (const [i, s] of scenes.entries()) {
+		const start = placements[i].scene_start_ms;
+		const dur = slotMs[i];
+		const layers = [];
+		const keyLayers = [];
+		const voicePath = placements[i].track.audio_path;
+		if (voicePath) {
+			const abs = join(root, voicePath);
+			layers.push({ path: abs });
+			keyLayers.push({ voice: await hashFile(abs) });
+		}
+		if (s.footage) {
+			const amode = s.audio?.mode ?? "native";
+			if (amode === "native" || amode === "mute") plan.mute.push({
+				start_ms: Math.round(start),
+				end_ms: Math.round(start + dur)
+			});
+			const f = footage.byScene.get(s.id);
+			const asset = footage.assets.get(s.footage.asset);
+			if ((amode === "native" || amode === "mix") && f && !("error" in f) && asset && asset.kind === "video" && f.media.has_audio) {
+				const clip = s.footage;
+				const span = footageSpanSec(clip, f.media, dur);
+				const layer = {
+					path: f.path,
+					offset_sec: clip.in_sec,
+					...clip.out_sec !== void 0 || clip.loop ? { span_sec: span } : {},
+					...clip.speed && clip.speed !== 1 ? { tempo: clip.speed } : {},
+					...s.audio?.native_db ? { gain_db: s.audio.native_db } : {},
+					...clip.loop ? { loop: true } : {}
+				};
+				layers.push(layer);
+				const { path: _path, ...params } = layer;
+				keyLayers.push({
+					native: f.sha256,
+					...params
+				});
+			}
+			for (const w of nativeTracks.get(s.id)?.words ?? []) plan.speech.push({
+				start_ms: Math.round(start + w.start_ms),
+				end_ms: Math.round(start + w.end_ms)
+			});
+		}
+		const xf = i > 0 ? s.audio?.crossfade_ms ?? 0 : 0;
+		plan.slots.push({
+			duration_ms: dur,
+			layers,
+			...xf ? { crossfade_ms: xf } : {}
+		});
+		keySlots.push({
+			ms: dur,
+			xf,
+			layers: keyLayers
+		});
+		for (const fx of s.sfx ?? []) {
+			let abs;
+			try {
+				abs = await resolveInsideProject(paths, fx.file);
+			} catch (e) {
+				throw new Error(`${s.id}: sfx file "${fx.file}" is not a project-relative path (${errMsg(e)})`);
+			}
+			if (!await exists(abs)) throw new Error(`${s.id}: sfx file "${fx.file}" not found in the project`);
+			if (fx.at_sec * 1e3 >= dur) warnings.push(`${s.id}: sfx ${fx.file} at ${fx.at_sec}s starts after the scene ends (${(dur / 1e3).toFixed(2)}s)`);
+			const sha = await hashFile(abs);
+			const at = Math.round(start + fx.at_sec * 1e3);
+			plan.sfx.push({
+				path: abs,
+				at_ms: at,
+				...fx.volume_db !== void 0 ? { volume_db: fx.volume_db } : {}
+			});
+			keySfx.push({
+				sha,
+				at,
+				db: fx.volume_db ?? 0
+			});
+			const rel = toPosix(fx.file.replace(/^\.\//, ""));
+			const prev = plan.sfxState.find((x) => x.file === rel);
+			if (prev) {
+				if (!prev.scenes.includes(s.id)) prev.scenes.push(s.id);
+				if (!prev.license && fx.license) prev.license = fx.license;
+			} else plan.sfxState.push({
+				file: rel,
+				sha256: sha,
+				scenes: [s.id],
+				...fx.license ? { license: fx.license } : {}
+			});
+		}
+	}
+	plan.key = {
+		slots: keySlots,
+		sfx: keySfx
+	};
+	return plan;
+}
+const BEAT_MIN_SCENE_MS = 500;
+/**
+* Snap scene cuts to beats of the music bed (on the video timeline: `start_sec` offset, looped
+* when the bed loops). A cut is kept where it was when no beat is within tolerance, or when moving
+* it would cut into a scene's voiceover. Returns timing adjustments for the scenes that changed.
+*/
+async function beatSyncDurations(scenes, adjusted, music, toleranceMs, trackById, signal) {
+	const durs = scenes.map((s) => Math.round((adjusted.get(s.id) ?? s.duration_sec) * 1e3));
+	const total = durs.reduce((a, b) => a + b, 0);
+	const analysis = await detectBeats(music.path, signal ? { signal } : {});
+	const summary = {
+		bpm: analysis.bpm,
+		beats: analysis.beats_ms.length,
+		moved_cuts: 0
+	};
+	if (!analysis.beats_ms.length) return {
+		adjustments: [],
+		summary,
+		warning: `beat_sync: no clear beat found in ${music.ref}; cuts unchanged`
+	};
+	const fileMs = Math.round((await ffprobe(music.path)).duration_s * 1e3);
+	const startMs = Math.round((music.bed.start_sec ?? 0) * 1e3);
+	const loop = music.bed.loop ?? true;
+	const beats = [];
+	for (let k = 0; k === 0 || loop && fileMs > 0 && k * fileMs - startMs <= total; k++) for (const b of analysis.beats_ms) {
+		const t = b + k * fileMs - startMs;
+		if (t >= 0 && t <= total) beats.push(t);
+	}
+	beats.sort((a, b) => a - b);
+	const cuts = [];
+	let acc = 0;
+	for (const d of durs.slice(0, -1)) cuts.push(acc += d);
+	const snapped = snapCuts(cuts, beats, toleranceMs, BEAT_MIN_SCENE_MS);
+	const voiceMs = (i) => {
+		const t = trackById.get(scenes[i].id);
+		return t?.audio_path ? t.duration_ms : 0;
+	};
+	const final = [];
+	let prev = 0;
+	cuts.forEach((c, j) => {
+		const next = j + 1 < cuts.length ? cuts[j + 1] : total;
+		const cand = snapped[j];
+		const x = cand !== c && cand - prev >= voiceMs(j) && next - cand >= voiceMs(j + 1) ? cand : c;
+		final.push(x);
+		prev = x;
+	});
+	const b = [
+		0,
+		...final,
+		total
+	];
+	const s3 = (ms) => (ms / 1e3).toFixed(3).replace(/\.?0+$/, "");
+	const adjustments = [];
+	summary.moved_cuts = final.filter((x, j) => x !== cuts[j]).length;
+	scenes.forEach((s, i) => {
+		const nd = b[i + 1] - b[i];
+		if (nd === durs[i]) return;
+		const moved = [];
+		if (i > 0 && final[i - 1] !== cuts[i - 1]) moved.push(`start ${s3(cuts[i - 1])}s → ${s3(final[i - 1])}s`);
+		if (i < cuts.length && final[i] !== cuts[i]) moved.push(`end ${s3(cuts[i])}s → ${s3(final[i])}s`);
+		adjustments.push({
+			scene_id: s.id,
+			spec_duration_sec: s.duration_sec,
+			render_duration_sec: Math.round(nd) / 1e3,
+			reason: `beat sync${analysis.bpm ? ` (${analysis.bpm} bpm)` : ""}: ${moved.join(", ")} onto the nearest beat within ${toleranceMs} ms; render plan only (the spec is unchanged)`
+		});
+	});
+	return {
+		adjustments,
+		summary
+	};
+}
 const QA_MAP = {
 	ok: "pass",
 	warn: "warn",
@@ -244390,7 +246827,7 @@ async function runQaOn(root, state, reelSha) {
 		height: state.target.height,
 		duration_s: state.duration_ms / 1e3,
 		require_audio: true,
-		intended_silence: state.voice_mode === "none" && !state.music,
+		intended_silence: state.voice_mode === "none" && !state.music && !state.scene_audio,
 		...state.background ? { background: state.background } : {}
 	});
 	report.video = state.reel;
@@ -244401,7 +246838,7 @@ async function runQaOn(root, state, reelSha) {
 		detail: c.detail,
 		...c.fix ? { fix: c.fix } : {}
 	}));
-	if (!state.voice.has_audio && !state.music) {
+	if (!state.voice.has_audio && !state.music && !state.scene_audio) {
 		for (const f of findings) if (f.id === "silence" || f.id === "loudness") f.detail += " (expected: rendered with the silent voice backend)";
 	}
 	const status = QA_MAP[report.status];
@@ -244647,6 +247084,19 @@ async function exportFromState(root, state, now) {
 				...state.music.title ? { title: state.music.title } : {},
 				license: state.music.license ?? null
 			} } : {},
+			...state.footage?.length ? { footage: state.footage.map((f) => ({
+				asset: f.asset,
+				file: f.path,
+				sha256: f.sha256,
+				scenes: f.scenes
+			})) } : {},
+			...state.sfx?.length ? { sfx: state.sfx.map((x) => ({
+				file: x.file,
+				sha256: x.sha256,
+				scenes: x.scenes,
+				license: x.license ?? null
+			})) } : {},
+			...state.timing_adjustments.length ? { timing_adjustments: state.timing_adjustments } : {},
 			scenes: state.scenes.map((s) => ({
 				scene_id: s.scene_id,
 				claim_refs: s.claim_refs,
@@ -244792,7 +247242,7 @@ async function exportFromState(root, state, now) {
 		renderer_version: s.renderer_version,
 		...s.placeholder ? {
 			placeholder: true,
-			error: `placeholder: ${s.reason ?? "provider rendering arrives in Phase 4"}`
+			error: `placeholder: ${s.reason ?? "video providers (generated video, avatars) arrive in Phase 7; until then this is a placeholder card"}`
 		} : {},
 		...s.warnings.length ? { warnings: s.warnings } : {},
 		...s.text_boxes?.length ? { text_boxes: s.text_boxes } : {}
@@ -244917,7 +247367,9 @@ async function lockFromState(root, state, projectId, outputs) {
 			"creative-brief.json",
 			"storyboard.md"
 		].map((n) => `project/${n}`),
-		...await listFiles(root, "assets", ["assets/voice"])
+		...await listFiles(root, "assets", ["assets/voice"]),
+		...(state.footage ?? []).map((f) => f.path),
+		...(state.sfx ?? []).map((x) => x.file)
 	];
 	let fonts = state.fonts;
 	if (!fonts) {
@@ -244964,7 +247416,7 @@ async function lockFromState(root, state, projectId, outputs) {
 			cache_key: s.cache_key,
 			clip_sha256: s.clip_sha256
 		})),
-		assets: [...await lockAssets(root, state.music && !state.music.ref.startsWith("bundled:") ? [...inputs, state.music.ref] : inputs), ...state.music?.ref.startsWith("bundled:") ? [{
+		assets: [...await lockAssets(root, [...new Set(state.music && !state.music.ref.startsWith("bundled:") ? [...inputs, state.music.ref] : inputs)]), ...state.music?.ref.startsWith("bundled:") ? [{
 			path: state.music.ref,
 			sha256: state.music.sha256
 		}] : []],
@@ -245691,7 +248143,7 @@ function createServer(options = {}) {
 	}));
 	server.registerTool("ingest", {
 		title: "Ingest sources into a ContentIR",
-		description: "Extract source material into <project_dir>/source/content-ir.json (plus source/provenance.json). Each input is a file path (.md, .txt, .pdf, .docx, .pptx), a local repository directory, an http(s) URL, or inline text/markdown. Creates the project if it does not exist. GitHub URLs are not cloned: clone locally first. Returns counts, warnings and the security classification (secrets, PII, likeness). Ingested content is untrusted data and is never executed.",
+		description: "Extract source material into <project_dir>/source/content-ir.json (plus source/provenance.json). Each input is a file path (.md, .txt, .pdf, .docx, .pptx; video .mp4/.mov/.webm/.mkv/.m4v and audio .mp3/.wav/.m4a/.aac/.flac/.ogg, which are copied into source/assets/ with duration, shots, keyframes and loudness; run transcribe afterwards for speech), a local repository directory, an http(s) URL, or inline text/markdown. Creates the project if it does not exist. GitHub URLs are not cloned: clone locally first. Returns counts, warnings and the security classification (secrets, PII, likeness). Ingested content is untrusted data and is never executed.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Project folder (absolute, or relative to the server's working directory)"),
 			inputs: array(string().min(1)).min(1).max(50).describe("Paths, URLs, repo directories or inline text; relative paths resolve against the server's working directory")
@@ -245812,7 +248264,11 @@ function createServer(options = {}) {
 			include_optional: boolean().optional().describe("Include optional beats (default: only when target >= the template's default duration)"),
 			style: string().optional().describe("Style pack id from styles/ (minimal, editorial, technical, energetic); default: the template's"),
 			music: string().optional().describe("Music bed, e.g. bundled:lofi (bundled: ambient, lofi, upbeat, minimal) or a project file; default: the template's"),
-			voice_mode: _enum(["narrated", "none"]).optional().describe("none = no speech (text over music); default: the template's")
+			voice_mode: _enum([
+				"narrated",
+				"none",
+				"native"
+			]).optional().describe("none = no speech (text over music); native = speech from the footage (talking head); default: the template's")
 		},
 		annotations: {
 			readOnlyHint: true,
@@ -246170,6 +248626,28 @@ function createServer(options = {}) {
 	}, safe(async (args) => {
 		const g = await analyzeVideo(resolveInputPath(args.path, cwd()), args.project_dir ? { projectDir: resolveInputPath(args.project_dir, cwd()) } : {});
 		return jsonResult(formatGrammar(g), g);
+	}));
+	server.registerTool("demo", {
+		title: "Record a demo of the user's running app",
+		description: "Record project/demo.json (DemoScript: {schema_version, id, url, viewport {width, height}, steps: [goto|click|type|hover|scroll|zoom|wait], mask_selectors?}; schema_get demo-script) against an app the USER started (the plugin never starts one), with the system Chrome (headless, via the optional HyperFrames install's puppeteer-core). Every input, textarea, select and contenteditable is blurred, plus mask_selectors; a visible cursor follows the clicks. The recording becomes a ContentIR video asset (source/assets/demo-<id>.mp4) with one evidence span per step (video:demo-<id>.mp4#step-N), so screen_capture scenes cite only UI that was actually shown. Requires confirm: true after the user approved the URL and steps.",
+		inputSchema: {
+			project_dir: string().min(1),
+			confirm: boolean().describe("true only after the user approved the URL and the steps"),
+			script: string().min(1).optional().describe("DemoScript path relative to the project (default project/demo.json)")
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: false,
+			openWorldHint: true
+		}
+	}, safe(async (args) => {
+		const r = await recordDemo(resolveInputPath(args.project_dir, cwd()), {
+			confirm: args.confirm,
+			...args.script ? { script: args.script } : {},
+			env
+		});
+		return jsonResult(formatDemo(r), r);
 	}));
 	return server;
 }

@@ -1,13 +1,19 @@
 import { copyFile, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
-import { canonicalJson, ensureDir, hashFile, projectPaths, readJson, resolveDataDir, sha256Hex, writeJsonAtomic } from "@video-studio/core";
+import { canonicalJson, ensureDir, hashFile, projectPaths, readJson, resolveDataDir, resolveInsideProject, sha256Hex, writeJsonAtomic } from "@video-studio/core";
 import {
   type AudioSlot,
   type CaptionPlacement,
+  type OneShot,
   type QaReport,
+  type SceneAudioSlot,
+  type SpeechInterval,
   assemble,
   buildWordTimeline,
+  detectBeats,
   ffmpegFeatures,
+  ffprobe,
+  snapCuts,
   makeThumbnail,
   technicalQa,
   writeCaptionSet,
@@ -16,6 +22,8 @@ import {
 import {
   type RendererPreference,
   type RenderTarget,
+  type ResolvedFootage,
+  createFootageRenderer,
   type SceneRenderEntry,
   type SceneRenderer,
   type VisualTokens,
@@ -36,7 +44,11 @@ import {
 } from "@video-studio/renderer";
 import {
   Brand,
+  ContentIR,
   CreativeBrief,
+  type FootageClip,
+  type MediaInfo,
+  type WordTiming,
   RenderManifest,
   type Scene,
   type SceneRender,
@@ -51,6 +63,7 @@ import {
   voiceMode,
   type AudioLicense,
   type Style,
+  type VoiceMode,
 } from "@video-studio/schema";
 import { ZONES_VERSION, findPlatformSpecsDir, layoutZones, loadContracts } from "@video-studio/platforms";
 import { type BackendChoice, type BackendSet, type SynthesizeSpecResult, defaultBackends, selectBackend, synthesizeSpec } from "@video-studio/voice";
@@ -103,6 +116,8 @@ export interface RenderProjectOptions {
   voiceBackends?: Partial<BackendSet>;
   /** Scene renderers, in preference order (default HyperFrames then ffmpeg). */
   renderers?: SceneRenderer[];
+  /** Renderer for footage scenes (default: the ffmpeg footage renderer). */
+  footageRenderer?: SceneRenderer;
   voiceCacheDir?: string;
   now?: () => Date;
 }
@@ -246,7 +261,15 @@ interface RenderState {
   /** Scene background colour, so QA's black-frame threshold matches the theme. */
   background?: string;
   /** spec.voice.mode at render time (absent in older states: narrated). */
-  voice_mode?: "narrated" | "none";
+  voice_mode?: VoiceMode;
+  /** The audio was mixed per scene (footage sound, crossfades, sfx) and is not silent. */
+  scene_audio?: boolean;
+  /** Footage assets the scenes showed (project-relative paths). */
+  footage?: Array<{ asset: string; path: string; sha256: string; scenes: string[] }>;
+  /** Sound effects mixed in, with their rights. */
+  sfx?: Array<{ file: string; sha256: string; scenes: string[]; license?: AudioLicense }>;
+  /** Beats detected in the music bed when beat_sync is on. */
+  beat_sync?: { bpm: number | null; beats: number; moved_cuts: number };
   /** The music bed mixed in, with its rights. */
   music?: { ref: string; sha256: string; title?: string; license?: AudioLicense };
   /** Brand file the render read, project-relative (`external/<name>` when outside the project). */
@@ -408,11 +431,16 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   progress({ stage: "voice", message: `synthesizing voice (${voiceChoice})` });
   const backends: BackendSet = { ...defaultBackends(), ...o.voiceBackends };
   const voiceCacheDir = o.voiceCacheDir ?? join(resolveDataDir(env).cache, "voice");
-  // voice.mode none: nothing is spoken, so no backend is asked (the silent one yields empty tracks).
-  const narrated = voiceMode(spec) !== "none";
+  // voice.mode none / native: nothing is synthesized, so no backend is asked (the silent one yields empty tracks).
+  const mode = voiceMode(spec);
+  const narrated = mode === "narrated";
   const sel = narrated ? await selectBackend(voiceChoice, env, backends) : await selectBackend("silent", env, backends);
   let voice: SynthesizeSpecResult;
-  let voiceReason = narrated ? sel.reason : 'voice.mode is "none": no narration';
+  let voiceReason = narrated
+    ? sel.reason
+    : mode === "native"
+      ? 'voice.mode is "native": the speech is in the footage (captions from the asset transcripts)'
+      : 'voice.mode is "none": no narration';
   try {
     voice = await synthesizeSpec(spec, {
       projectDir: root,
@@ -433,7 +461,11 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   }
   const trackById = new Map(voice.tracks.map((t) => [t.scene_id, t]));
   const hasAudio = voice.tracks.some((t) => t.audio_path);
-  const timingSource = [...new Set(voice.tracks.filter((t) => t.words.length).map((t) => t.timing_source))].join("+") || "none";
+  let timingSource = [...new Set(voice.tracks.filter((t) => t.words.length).map((t) => t.timing_source))].join("+") || "none";
+
+  // c0. footage assets (ContentIR → project files) and the music bed
+  const footage = await resolveFootage(root, spec, irPath);
+  const music: ResolvedMusic | undefined = spec.audio?.music ? await resolveMusic(spec.audio.music, root, env) : undefined;
 
   // c'. overruns: extend the scene in the render plan only (the spec is untouched)
   const timing_adjustments: TimingAdjustment[] = voice.overruns.map((ov) => ({
@@ -443,8 +475,33 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     reason: `voiceover lasts ${ov.audio_duration_sec.toFixed(2)}s, longer than the scene's ${ov.scene_duration_sec}s; extended in the render plan only (edit duration_sec in the spec, or shorten the line, to make it permanent)`,
   }));
   const adjusted = new Map(timing_adjustments.map((a) => [a.scene_id, a.render_duration_sec]));
-  const planScenes: Scene[] = spec.scenes.map((s) => (adjusted.has(s.id) ? { ...s, duration_sec: adjusted.get(s.id)! } : s));
   for (const a of timing_adjustments) warnings.push(`timing: ${a.scene_id} extended ${a.spec_duration_sec}s → ${a.render_duration_sec}s to fit the voiceover`);
+
+  // c''. beat sync: move cuts onto beats of the music bed (render plan only)
+  let beatSync: RenderState["beat_sync"];
+  if (spec.audio?.beat_sync?.enabled) {
+    if (!music) {
+      warnings.push("beat_sync: no audio.music bed to detect beats in; cuts unchanged");
+    } else {
+      signal?.throwIfAborted();
+      const r = await beatSyncDurations(spec.scenes, adjusted, music, spec.audio.beat_sync.tolerance_ms ?? 250, trackById, signal);
+      beatSync = r.summary;
+      if (r.warning) warnings.push(r.warning);
+      for (const a of r.adjustments) {
+        const prev = timing_adjustments.find((t) => t.scene_id === a.scene_id);
+        if (prev) {
+          prev.render_duration_sec = a.render_duration_sec;
+          prev.reason += `; ${a.reason}`;
+        } else {
+          timing_adjustments.push(a);
+        }
+        adjusted.set(a.scene_id, a.render_duration_sec);
+      }
+      if (r.adjustments.length) warnings.push(`timing: beat sync moved ${r.summary.moved_cuts} cut(s) onto beats (${r.summary.bpm ?? "?"} bpm)`);
+    }
+  }
+  timing_adjustments.sort((a, b) => spec.scenes.findIndex((s) => s.id === a.scene_id) - spec.scenes.findIndex((s) => s.id === b.scene_id));
+  const planScenes: Scene[] = spec.scenes.map((s) => (adjusted.has(s.id) ? { ...s, duration_sec: adjusted.get(s.id)! } : s));
 
   // d. scene clips
   const rdir = renderDir(root, quality);
@@ -472,6 +529,8 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     placeholder,
     env: env as NodeJS.ProcessEnv,
     ...(signal ? { signal } : {}),
+    footage: footage.byScene,
+    footageRenderer: o.footageRenderer ?? createFootageRenderer({ encodePreset: o.encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") }),
   };
   const first = await renderScenes({ scenes: planScenes }, { ...baseOpts, preference, onScene });
   const entries = new Map(first.scenes.map((e) => [e.scene_id, e]));
@@ -496,7 +555,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   const used = [...new Set(ordered.map((e) => e.renderer!).filter(Boolean))];
   const placeholders = ordered.filter((e) => e.placeholder).map((e) => e.scene_id);
   for (const e of ordered) for (const w of e.warnings) warnings.push(`${e.scene_id}: ${w}`);
-  if (placeholders.length) warnings.push(`placeholder cards for ${placeholders.join(", ")} (provider rendering arrives in Phase 4)`);
+  if (placeholders.length) warnings.push(`placeholder cards for ${placeholders.join(", ")} (video providers (generated video, avatars) arrive in Phase 7; until then this is a placeholder card)`);
 
   // e. captions from the word timeline
   signal?.throwIfAborted();
@@ -510,9 +569,22 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   }
   const frameMs = (f: number) => (f * 1000) / target.fps;
   const slotMs = planScenes.map((_, i) => frameMs(bounds[i + 1]! - bounds[i]!));
+  // voice.mode native: each footage scene's words come from its asset transcript, shifted onto the scene.
+  const nativeTracks = new Map<string, SceneVoiceTrack>();
+  if (mode === "native") {
+    for (const [i, s] of planScenes.entries()) {
+      const f = footage.byScene.get(s.id);
+      if (!s.footage || !f || "error" in f) continue;
+      const amode = s.audio?.mode ?? "native";
+      if (amode !== "native" && amode !== "mix") continue;
+      const words = await transcriptWords(root, footage.assets.get(s.footage.asset), s.footage, slotMs[i]!, warnings);
+      if (words.length) nativeTracks.set(s.id, { scene_id: s.id, duration_ms: Math.round(slotMs[i]!), words, timing_source: "aligned", provider: "native" });
+    }
+    if (nativeTracks.size) timingSource = "aligned";
+  }
   const placements = planScenes.map((s, i) => {
     const dur = slotMs[i]!;
-    const track: SceneVoiceTrack = trackById.get(s.id) ?? { scene_id: s.id, duration_ms: Math.round(dur), words: [], timing_source: "none", provider: "silent" };
+    const track: SceneVoiceTrack = nativeTracks.get(s.id) ?? trackById.get(s.id) ?? { scene_id: s.id, duration_ms: Math.round(dur), words: [], timing_source: "none", provider: "silent" };
     return { scene_start_ms: frameMs(bounds[i]!), track: { ...track, duration_ms: Math.min(track.duration_ms || Math.round(dur), Math.round(dur)) } };
   });
   const totalMs = Math.round(frameMs(bounds[bounds.length - 1]!));
@@ -536,10 +608,17 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   const captionSet = words.length ? await writeCaptionSet(captionsDir, "captions", words, { ass: assOpts, maxLines: assOpts.maxLines, endMs: totalMs }) : undefined;
   const captionFiles = captionSet?.files;
   if (!words.length && narrated) warnings.push("no voiceover text: captions and transcript skipped");
+  if (!words.length && mode === "native") warnings.push('voice.mode "native": no transcript words in the footage spans; captions and transcript skipped (transcribe the video assets first)');
 
   // e'. music bed (spec.audio.music), ducked where speech plays
-  const music: ResolvedMusic | undefined = spec.audio?.music ? await resolveMusic(spec.audio.music, root, env) : undefined;
   const speech = placements.filter((p) => p.track.audio_path).map((p) => ({ start_ms: Math.round(p.scene_start_ms), end_ms: Math.round(p.scene_start_ms + p.track.duration_ms) }));
+
+  // e''. per-scene audio: footage sound (native / mix), crossfades and one-shots
+  const useSceneAudio = mode === "native" || planScenes.some((s) => s.footage || s.sfx?.length);
+  const sceneAudio = useSceneAudio ? await buildSceneAudio(root, planScenes, placements, slotMs, footage, nativeTracks, warnings) : undefined;
+  const sceneAudioOn = !!sceneAudio && (sceneAudio.slots.some((sl) => sl.layers.length > 0) || sceneAudio.sfx.length > 0);
+  const musicSpeech: SpeechInterval[] = useSceneAudio ? [...(hasAudio ? speech : []), ...sceneAudio!.speech] : hasAudio ? speech : [];
+  const musicMute = sceneAudio?.mute ?? [];
 
   // f. assembly (skipped when the inputs are unchanged)
   const segments = await Promise.all(
@@ -560,8 +639,9 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
       encode: encodePreset ?? null,
       pad: tokens.color_background,
       segments: segments.map((s) => ({ sha: s.sha256, ms: s.duration_ms })),
-      audio: hasAudio ? slots.map((s) => ({ sha: s.sha256, ms: s.duration_ms })) : null,
-      music: music ? { sha: music.sha256, bed: music.bed, speech: hasAudio ? speech : [] } : null,
+      audio: hasAudio && !useSceneAudio ? slots.map((s) => ({ sha: s.sha256, ms: s.duration_ms })) : null,
+      music: music ? { sha: music.sha256, bed: music.bed, speech: musicSpeech, ...(musicMute.length ? { mute: musicMute } : {}) } : null,
+      ...(useSceneAudio ? { scene_audio: sceneAudioOn ? sceneAudio!.key : null } : {}),
       burn,
       ass: burn ? assSha : null,
       captions: burn ? assOpts : null,
@@ -577,7 +657,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   if (!reuse) {
     signal?.throwIfAborted();
     progress({ stage: "assemble", message: `assembling ${segments.length} clip(s) at ${target.width}x${target.height} ${target.fps} fps` });
-    const audio: AudioSlot[] | undefined = hasAudio ? slots.map((s) => ({ ...(s.abs ? { path: s.abs } : {}), duration_ms: s.duration_ms })) : undefined;
+    const audio: AudioSlot[] | undefined = hasAudio && !useSceneAudio ? slots.map((s) => ({ ...(s.abs ? { path: s.abs } : {}), duration_ms: s.duration_ms })) : undefined;
     await assemble(
       {
         width: target.width,
@@ -587,7 +667,8 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
         padColor: tokens.color_background,
         segments: segments.map(({ path, duration_ms }) => ({ path, duration_ms })),
         ...(audio ? { audio } : {}),
-        ...(audio || music ? { loudness: { I: -14, TP: -1 } } : {}),
+        ...(sceneAudioOn ? { sceneAudio: { slots: sceneAudio!.slots, sfx: sceneAudio!.sfx } } : {}),
+        ...(audio || music || sceneAudioOn ? { loudness: { I: -14, TP: -1 } } : {}),
         ...(music
           ? {
               music: {
@@ -600,7 +681,8 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
                   ...(music.bed.loop !== undefined ? { loop: music.bed.loop } : {}),
                   ...(music.bed.start_sec !== undefined ? { start_sec: music.bed.start_sec } : {}),
                 },
-                ...(hasAudio ? { speech } : {}),
+                ...(musicSpeech.length ? { speech: musicSpeech } : {}),
+                ...(musicMute.length ? { mute: musicMute } : {}),
               },
             }
           : {}),
@@ -719,7 +801,11 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     timing_adjustments,
     warnings,
     tool_versions,
-    voice_mode: narrated ? "narrated" : "none",
+    voice_mode: mode,
+    ...(sceneAudioOn ? { scene_audio: true } : {}),
+    ...(footage.used.length ? { footage: footage.used } : {}),
+    ...(sceneAudio?.sfxState.length ? { sfx: sceneAudio.sfxState } : {}),
+    ...(beatSync ? { beat_sync: beatSync } : {}),
     background: tokens.color_background,
     ...(music ? { music: { ref: music.ref, sha256: music.sha256, ...(music.title ? { title: music.title } : {}), ...(music.license ? { license: music.license } : {}) } } : {}),
     ...(brandFile ? { brand_path: brandRel(root, brandFile.path) } : {}),
@@ -769,6 +855,285 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   };
 }
 
+// ------------------------------------------------------------------------------------ footage, scene audio, beat sync
+
+interface FootageAsset {
+  id: string;
+  kind: "image" | "video" | "audio";
+  /** Project-relative path. */
+  rel: string;
+  abs: string;
+  sha256: string;
+  media: MediaInfo;
+  /** Project-relative transcript JSON ([{word, start_ms, end_ms}]). */
+  transcript?: string;
+}
+
+interface FootageResolution {
+  byScene: Map<string, ResolvedFootage | { error: string }>;
+  assets: Map<string, FootageAsset>;
+  used: NonNullable<RenderState["footage"]>;
+}
+
+async function probeMedia(abs: string, kind: FootageAsset["kind"]): Promise<MediaInfo> {
+  const p = await ffprobe(abs);
+  return {
+    duration_sec: kind === "image" ? 0 : p.duration_s,
+    ...(p.width ? { width: p.width } : {}),
+    ...(p.height ? { height: p.height } : {}),
+    ...(p.fps && kind !== "image" ? { fps: p.fps } : {}),
+    has_video: p.has_video,
+    has_audio: kind === "image" ? false : p.has_audio,
+  };
+}
+
+async function loadFootageAsset(root: string, ir: ContentIR | undefined, irError: string | undefined, id: string): Promise<FootageAsset> {
+  if (!ir) throw new Error(irError ?? "no ContentIR");
+  const a = ir.assets.find((x) => x.id === id);
+  if (!a) throw new Error("not a ContentIR asset id");
+  if (a.kind === "audio") throw new Error("is an audio asset; footage needs a video or an image");
+  const abs = await resolveInsideProject(projectPaths(root), a.path);
+  if (!(await exists(abs))) throw new Error(`file ${a.path} is missing`);
+  const media = a.media ?? (await probeMedia(abs, a.kind));
+  return { id, kind: a.kind, rel: toPosix(a.path), abs, sha256: await hashFile(abs), media, ...(a.media?.transcript ? { transcript: a.media.transcript.path } : {}) };
+}
+
+/** Resolve every footage scene's asset through source/content-ir.json (project-relative paths only). */
+async function resolveFootage(root: string, spec: VideoSpec, irPath: string): Promise<FootageResolution> {
+  const out: FootageResolution = { byScene: new Map(), assets: new Map(), used: [] };
+  const scenes = spec.scenes.filter((s) => s.footage);
+  if (!scenes.length) return out;
+  let ir: ContentIR | undefined;
+  let irError: string | undefined;
+  try {
+    const parsed = parseYamlOrJson(ContentIR, await readFile(irPath, "utf8"));
+    if (parsed.ok) ir = parsed.data;
+    else irError = "source/content-ir.json is not a valid ContentIR";
+  } catch {
+    irError = "no source/content-ir.json (ingest the video first)";
+  }
+  const failed = new Map<string, string>();
+  for (const s of scenes) {
+    const id = s.footage!.asset;
+    if (!out.assets.has(id) && !failed.has(id)) {
+      try {
+        out.assets.set(id, await loadFootageAsset(root, ir, irError, id));
+      } catch (e) {
+        failed.set(id, errMsg(e));
+      }
+    }
+    const a = out.assets.get(id);
+    if (!a) {
+      out.byScene.set(s.id, { error: failed.get(id)! });
+      continue;
+    }
+    out.byScene.set(s.id, { path: a.abs, sha256: a.sha256, media: a.media });
+    const u = out.used.find((x) => x.asset === id);
+    if (u) u.scenes.push(s.id);
+    else out.used.push({ asset: id, path: a.rel, sha256: a.sha256, scenes: [s.id] });
+  }
+  return out;
+}
+
+/** Source seconds a footage clip plays: `in_sec` to `out_sec` (default: the scene at `speed`), clamped to the asset. */
+function footageSpanSec(clip: FootageClip, media: MediaInfo, sceneMs: number): number {
+  const speed = clip.speed ?? 1;
+  const dur = media.duration_sec > 0 ? media.duration_sec : Number.POSITIVE_INFINITY;
+  return Math.max(0, Math.min(clip.out_sec ?? clip.in_sec + (sceneMs / 1000) * speed, dur) - clip.in_sec);
+}
+
+/**
+ * Words of an asset transcript inside a footage clip's span, on the scene's timeline: shifted by
+ * `in_sec`, divided by `speed`, and cut at the scene end (a looped or held tail has no captions).
+ */
+async function transcriptWords(root: string, asset: FootageAsset | undefined, clip: FootageClip, sceneMs: number, warnings: string[]): Promise<WordTiming[]> {
+  if (!asset?.transcript) return [];
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(await resolveInsideProject(projectPaths(root), asset.transcript), "utf8"));
+  } catch (e) {
+    warnings.push(`captions: transcript ${asset.transcript} of "${asset.id}" could not be read (${errMsg(e)})`);
+    return [];
+  }
+  const list: unknown[] = Array.isArray(raw) ? raw : Array.isArray((raw as { words?: unknown })?.words) ? (raw as { words: unknown[] }).words : [];
+  const speed = clip.speed ?? 1;
+  const inMs = clip.in_sec * 1000;
+  const endMs = inMs + footageSpanSec(clip, asset.media, sceneMs) * 1000;
+  const out: WordTiming[] = [];
+  for (const w of list) {
+    const { word, start_ms, end_ms } = (w ?? {}) as Partial<WordTiming>;
+    if (typeof word !== "string" || !word.trim() || typeof start_ms !== "number" || typeof end_ms !== "number") continue;
+    if (start_ms < inMs || start_ms >= endMs) continue;
+    const a = Math.round((start_ms - inMs) / speed);
+    if (a >= sceneMs) continue;
+    const b = Math.round(Math.min((Math.min(end_ms, endMs) - inMs) / speed, sceneMs));
+    out.push({ word: word.trim(), start_ms: a, end_ms: Math.max(a, b) });
+  }
+  return out;
+}
+
+interface SceneAudioPlan {
+  slots: SceneAudioSlot[];
+  sfx: OneShot[];
+  /** Native speech (transcript words) on the video timeline; the bed ducks there. */
+  speech: SpeechInterval[];
+  /** Footage scenes with native or muted sound: the bed is silent there. */
+  mute: SpeechInterval[];
+  /** Everything the mix depends on, by hash, for the assembly key. */
+  key: unknown;
+  sfxState: NonNullable<RenderState["sfx"]>;
+}
+
+/**
+ * Per-scene audio: a narrated scene keeps its voice slot; a footage scene plays its own sound for
+ * the same span (`native`, `mix`), the bed only (`music`) or nothing (`mute`); crossfades come from
+ * `audio.crossfade_ms`; sound effects play at scene start + `at_sec`.
+ */
+async function buildSceneAudio(
+  root: string,
+  scenes: readonly Scene[],
+  placements: ReadonlyArray<{ scene_start_ms: number; track: SceneVoiceTrack }>,
+  slotMs: readonly number[],
+  footage: FootageResolution,
+  nativeTracks: ReadonlyMap<string, SceneVoiceTrack>,
+  warnings: string[],
+): Promise<SceneAudioPlan> {
+  const paths = projectPaths(root);
+  const plan: SceneAudioPlan = { slots: [], sfx: [], speech: [], mute: [], key: null, sfxState: [] };
+  const keySlots: unknown[] = [];
+  const keySfx: unknown[] = [];
+  for (const [i, s] of scenes.entries()) {
+    const start = placements[i]!.scene_start_ms;
+    const dur = slotMs[i]!;
+    const layers: SceneAudioSlot["layers"][number][] = [];
+    const keyLayers: unknown[] = [];
+    const voicePath = placements[i]!.track.audio_path;
+    if (voicePath) {
+      const abs = join(root, voicePath);
+      layers.push({ path: abs });
+      keyLayers.push({ voice: await hashFile(abs) });
+    }
+    if (s.footage) {
+      const amode = s.audio?.mode ?? "native";
+      if (amode === "native" || amode === "mute") plan.mute.push({ start_ms: Math.round(start), end_ms: Math.round(start + dur) });
+      const f = footage.byScene.get(s.id);
+      const asset = footage.assets.get(s.footage.asset);
+      if ((amode === "native" || amode === "mix") && f && !("error" in f) && asset && asset.kind === "video" && f.media.has_audio) {
+        const clip = s.footage;
+        const span = footageSpanSec(clip, f.media, dur);
+        const layer = {
+          path: f.path,
+          offset_sec: clip.in_sec,
+          // Without out_sec the sound runs on past the span (for a crossfade tail) unless it loops.
+          ...(clip.out_sec !== undefined || clip.loop ? { span_sec: span } : {}),
+          ...(clip.speed && clip.speed !== 1 ? { tempo: clip.speed } : {}),
+          ...(s.audio?.native_db ? { gain_db: s.audio.native_db } : {}),
+          ...(clip.loop ? { loop: true } : {}),
+        };
+        layers.push(layer);
+        const { path: _path, ...params } = layer;
+        keyLayers.push({ native: f.sha256, ...params });
+      }
+      for (const w of nativeTracks.get(s.id)?.words ?? []) plan.speech.push({ start_ms: Math.round(start + w.start_ms), end_ms: Math.round(start + w.end_ms) });
+    }
+    const xf = i > 0 ? (s.audio?.crossfade_ms ?? 0) : 0;
+    plan.slots.push({ duration_ms: dur, layers, ...(xf ? { crossfade_ms: xf } : {}) });
+    keySlots.push({ ms: dur, xf, layers: keyLayers });
+    for (const fx of s.sfx ?? []) {
+      let abs: string;
+      try {
+        abs = await resolveInsideProject(paths, fx.file);
+      } catch (e) {
+        throw new Error(`${s.id}: sfx file "${fx.file}" is not a project-relative path (${errMsg(e)})`);
+      }
+      if (!(await exists(abs))) throw new Error(`${s.id}: sfx file "${fx.file}" not found in the project`);
+      if (fx.at_sec * 1000 >= dur) warnings.push(`${s.id}: sfx ${fx.file} at ${fx.at_sec}s starts after the scene ends (${(dur / 1000).toFixed(2)}s)`);
+      const sha = await hashFile(abs);
+      const at = Math.round(start + fx.at_sec * 1000);
+      plan.sfx.push({ path: abs, at_ms: at, ...(fx.volume_db !== undefined ? { volume_db: fx.volume_db } : {}) });
+      keySfx.push({ sha, at, db: fx.volume_db ?? 0 });
+      const rel = toPosix(fx.file.replace(/^\.\//, ""));
+      const prev = plan.sfxState.find((x) => x.file === rel);
+      if (prev) {
+        if (!prev.scenes.includes(s.id)) prev.scenes.push(s.id);
+        if (!prev.license && fx.license) prev.license = fx.license;
+      } else {
+        plan.sfxState.push({ file: rel, sha256: sha, scenes: [s.id], ...(fx.license ? { license: fx.license } : {}) });
+      }
+    }
+  }
+  plan.key = { slots: keySlots, sfx: keySfx };
+  return plan;
+}
+
+const BEAT_MIN_SCENE_MS = 500;
+
+/**
+ * Snap scene cuts to beats of the music bed (on the video timeline: `start_sec` offset, looped
+ * when the bed loops). A cut is kept where it was when no beat is within tolerance, or when moving
+ * it would cut into a scene's voiceover. Returns timing adjustments for the scenes that changed.
+ */
+async function beatSyncDurations(
+  scenes: readonly Scene[],
+  adjusted: ReadonlyMap<string, number>,
+  music: ResolvedMusic,
+  toleranceMs: number,
+  trackById: ReadonlyMap<string, SceneVoiceTrack>,
+  signal?: AbortSignal,
+): Promise<{ adjustments: TimingAdjustment[]; summary: NonNullable<RenderState["beat_sync"]>; warning?: string }> {
+  const durs = scenes.map((s) => Math.round((adjusted.get(s.id) ?? s.duration_sec) * 1000));
+  const total = durs.reduce((a, b) => a + b, 0);
+  const analysis = await detectBeats(music.path, signal ? { signal } : {});
+  const summary = { bpm: analysis.bpm, beats: analysis.beats_ms.length, moved_cuts: 0 };
+  if (!analysis.beats_ms.length) return { adjustments: [], summary, warning: `beat_sync: no clear beat found in ${music.ref}; cuts unchanged` };
+  const fileMs = Math.round((await ffprobe(music.path)).duration_s * 1000);
+  const startMs = Math.round((music.bed.start_sec ?? 0) * 1000);
+  const loop = music.bed.loop ?? true;
+  const beats: number[] = [];
+  for (let k = 0; k === 0 || (loop && fileMs > 0 && k * fileMs - startMs <= total); k++) {
+    for (const b of analysis.beats_ms) {
+      const t = b + k * fileMs - startMs;
+      if (t >= 0 && t <= total) beats.push(t);
+    }
+  }
+  beats.sort((a, b) => a - b);
+  const cuts: number[] = [];
+  let acc = 0;
+  for (const d of durs.slice(0, -1)) cuts.push((acc += d));
+  const snapped = snapCuts(cuts, beats, toleranceMs, BEAT_MIN_SCENE_MS);
+  const voiceMs = (i: number) => {
+    const t = trackById.get(scenes[i]!.id);
+    return t?.audio_path ? t.duration_ms : 0;
+  };
+  const final: number[] = [];
+  let prev = 0;
+  cuts.forEach((c, j) => {
+    const next = j + 1 < cuts.length ? cuts[j + 1]! : total;
+    const cand = snapped[j]!;
+    const x = cand !== c && cand - prev >= voiceMs(j) && next - cand >= voiceMs(j + 1) ? cand : c;
+    final.push(x);
+    prev = x;
+  });
+  const b = [0, ...final, total];
+  const s3 = (ms: number) => (ms / 1000).toFixed(3).replace(/\.?0+$/, "");
+  const adjustments: TimingAdjustment[] = [];
+  summary.moved_cuts = final.filter((x, j) => x !== cuts[j]).length;
+  scenes.forEach((s, i) => {
+    const nd = b[i + 1]! - b[i]!;
+    if (nd === durs[i]) return;
+    const moved: string[] = [];
+    if (i > 0 && final[i - 1] !== cuts[i - 1]) moved.push(`start ${s3(cuts[i - 1]!)}s → ${s3(final[i - 1]!)}s`);
+    if (i < cuts.length && final[i] !== cuts[i]) moved.push(`end ${s3(cuts[i]!)}s → ${s3(final[i]!)}s`);
+    adjustments.push({
+      scene_id: s.id,
+      spec_duration_sec: s.duration_sec,
+      render_duration_sec: Math.round(nd) / 1000,
+      reason: `beat sync${analysis.bpm ? ` (${analysis.bpm} bpm)` : ""}: ${moved.join(", ")} onto the nearest beat within ${toleranceMs} ms; render plan only (the spec is unchanged)`,
+    });
+  });
+  return { adjustments, summary };
+}
+
 // ------------------------------------------------------------------------------------ QA
 
 const QA_MAP = { ok: "pass", warn: "warn", fail: "fail" } as const;
@@ -780,7 +1145,7 @@ async function runQaOn(root: string, state: RenderState, reelSha?: string): Prom
     height: state.target.height,
     duration_s: state.duration_ms / 1000,
     require_audio: true,
-    intended_silence: state.voice_mode === "none" && !state.music,
+    intended_silence: state.voice_mode === "none" && !state.music && !state.scene_audio,
     ...(state.background ? { background: state.background } : {}),
   });
   // Relative path in the report so the project folder stays portable.
@@ -789,7 +1154,7 @@ async function runQaOn(root: string, state: RenderState, reelSha?: string): Prom
   const findings: QaFinding[] = report.checks
     .filter((c) => c.status !== "ok")
     .map((c) => ({ id: c.id, status: c.status as "warn" | "fail", detail: c.detail, ...(c.fix ? { fix: c.fix } : {}) }));
-  if (!state.voice.has_audio && !state.music) {
+  if (!state.voice.has_audio && !state.music && !state.scene_audio) {
     for (const f of findings) {
       if (f.id === "silence" || f.id === "loudness") f.detail += " (expected: rendered with the silent voice backend)";
     }
@@ -1019,6 +1384,9 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
       ...(state.content_ir_sha256 ? { content_ir_sha256: state.content_ir_sha256 } : {}),
       voice: { backend: state.voice.backend, timing_source: state.voice.timing_source, ...(state.voice_mode ? { mode: state.voice_mode } : {}) },
       ...(state.music ? { music: { file: state.music.ref, ...(state.music.title ? { title: state.music.title } : {}), license: state.music.license ?? null } } : {}),
+      ...(state.footage?.length ? { footage: state.footage.map((f) => ({ asset: f.asset, file: f.path, sha256: f.sha256, scenes: f.scenes })) } : {}),
+      ...(state.sfx?.length ? { sfx: state.sfx.map((x) => ({ file: x.file, sha256: x.sha256, scenes: x.scenes, license: x.license ?? null })) } : {}),
+      ...(state.timing_adjustments.length ? { timing_adjustments: state.timing_adjustments } : {}),
       scenes: state.scenes.map((s) => ({
         scene_id: s.scene_id,
         claim_refs: s.claim_refs,
@@ -1081,7 +1449,7 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
     attempts: 1,
     status: statusMap[s.status],
     renderer_version: s.renderer_version,
-    ...(s.placeholder ? { placeholder: true, error: `placeholder: ${s.reason ?? "provider rendering arrives in Phase 4"}` } : {}),
+    ...(s.placeholder ? { placeholder: true, error: `placeholder: ${s.reason ?? "video providers (generated video, avatars) arrive in Phase 7; until then this is a placeholder card"}` } : {}),
     ...(s.warnings.length ? { warnings: s.warnings } : {}),
     ...(s.text_boxes?.length ? { text_boxes: s.text_boxes } : {}),
   }));
@@ -1181,6 +1549,9 @@ async function lockFromState(root: string, state: RenderState, projectId: string
     ...brand,
     ...["creative-brief.yaml", "creative-brief.yml", "creative-brief.json", "storyboard.md"].map((n) => `project/${n}`),
     ...(await listFiles(root, "assets", ["assets/voice"])),
+    // Footage and sound effects may live outside assets/ (e.g. source/); they are inputs too.
+    ...(state.footage ?? []).map((f) => f.path),
+    ...(state.sfx ?? []).map((x) => x.file),
   ];
   // Fonts: recorded at render time; older render states are resolved now.
   let fonts = state.fonts;
@@ -1217,7 +1588,7 @@ async function lockFromState(root: string, state: RenderState, projectId: string
     scenes: state.scenes.map((s) => ({ scene_id: s.scene_id, renderer: s.renderer, renderer_version: s.renderer_version, cache_key: s.cache_key, clip_sha256: s.clip_sha256 })),
     // A user music file outside assets/ is an input too; a bundled bed is recorded by its ref.
     assets: [
-      ...(await lockAssets(root, state.music && !state.music.ref.startsWith("bundled:") ? [...inputs, state.music.ref] : inputs)),
+      ...(await lockAssets(root, [...new Set(state.music && !state.music.ref.startsWith("bundled:") ? [...inputs, state.music.ref] : inputs)])),
       ...(state.music?.ref.startsWith("bundled:") ? [{ path: state.music.ref, sha256: state.music.sha256 }] : []),
     ],
     outputs: outputs.map((o) => ({ path: o.path, sha256: o.sha256, ...(o.target ? { target: o.target } : {}) })),

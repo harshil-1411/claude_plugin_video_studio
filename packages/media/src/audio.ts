@@ -66,6 +66,152 @@ export async function concatAudio(slots: readonly AudioSlot[], out: string, opts
   return { path: out, samples: totalSamples, duration_ms: Math.round((totalSamples / sr) * 1000) };
 }
 
+// ---------------------------------------------------------------------------------- scene audio
+
+/** One sound source inside a scene slot (a voice file, or a footage clip's own audio). */
+export interface AudioLayer {
+  path: string;
+  /** Start inside the file, seconds. */
+  offset_sec?: number;
+  /** Source seconds to use from `offset_sec`; afterwards silence (or the span loops). Default: to the end of the file. */
+  span_sec?: number;
+  /** Playback rate (atempo), 0.25–4. Default 1. */
+  tempo?: number;
+  /** Gain in dB. Default 0. */
+  gain_db?: number;
+  /** Loop the span to fill the slot (needs `span_sec`). */
+  loop?: boolean;
+}
+
+export interface SceneAudioSlot {
+  /** Exact slot length. */
+  duration_ms: number;
+  /** Sources mixed in this slot; none = silence. */
+  layers: readonly AudioLayer[];
+  /**
+   * Crossfade into this slot: it fades in over this long from its start while the previous slot
+   * plays on for the same time (reading further into its sources) and fades out.
+   */
+  crossfade_ms?: number;
+}
+
+/** A one-shot sound effect at an absolute time. */
+export interface OneShot {
+  path: string;
+  at_ms: number;
+  volume_db?: number;
+}
+
+/** `atempo` filters for a rate in 0.25–4 (each atempo takes 0.5–2). */
+export function atempoChain(rate: number): string[] {
+  if (!(rate > 0) || Math.abs(rate - 1) < 1e-6) return [];
+  const out: string[] = [];
+  let r = rate;
+  while (r > 2) {
+    out.push("atempo=2");
+    r /= 2;
+  }
+  while (r < 0.5) {
+    out.push("atempo=0.5");
+    r /= 0.5;
+  }
+  out.push(`atempo=${Math.round(r * 1e6) / 1e6}`);
+  return out;
+}
+
+/**
+ * Mix per-scene audio into one track, sample-exact: each slot's layers (voice, native clip sound)
+ * are trimmed, re-timed (atempo), gained and mixed, then placed at the slot's start with `adelay`.
+ * Crossfades overlap neighbouring slots; one-shots are mixed at their times. The result is exactly
+ * the sum of the slot lengths.
+ */
+export async function mixSceneAudio(
+  slots: readonly SceneAudioSlot[],
+  out: string,
+  opts: ConcatAudioOptions & { sfx?: readonly OneShot[] } = {},
+): Promise<ConcatAudioResult> {
+  const sr = opts.sampleRate ?? AUDIO_SAMPLE_RATE;
+  const layout = (opts.channels ?? 2) === 1 ? "mono" : "stereo";
+  const fmt = `aformat=sample_fmts=fltp:sample_rates=${sr}:channel_layouts=${layout}`;
+  const toS = (ms: number) => Math.round((ms * sr) / 1000);
+  const starts: number[] = [];
+  let total = 0;
+  for (const [i, s] of slots.entries()) {
+    if (!Number.isFinite(s.duration_ms) || s.duration_ms < 0) throw new Error(`slot ${i}: invalid duration_ms ${s.duration_ms}`);
+    starts.push(total);
+    total += toS(s.duration_ms);
+  }
+  if (total === 0) throw new Error("mixSceneAudio: total duration is zero");
+  const inputs: string[] = [];
+  const chains: string[][] = [];
+  const mixLabels: string[] = [];
+  let nIn = 0;
+  const f6 = (n: number) => String(Math.round(n * 1e6) / 1e6);
+  slots.forEach((s, i) => {
+    const len = toS(s.duration_ms);
+    if (len === 0 || s.layers.length === 0) return;
+    const next = slots[i + 1];
+    // Crossfades are capped at half of either slot.
+    const cap = (a: number, b: number, x: number) => Math.min(toS(x), Math.floor(a / 2), Math.floor(b / 2));
+    const fadeIn = i > 0 && s.crossfade_ms ? cap(len, toS(slots[i - 1]!.duration_ms), s.crossfade_ms) : 0;
+    const tail = next?.crossfade_ms ? cap(len, toS(next.duration_ms), next.crossfade_ms) : 0;
+    const need = len + tail;
+    const layerLabels: string[] = [];
+    s.layers.forEach((l, j) => {
+      inputs.push(...(l.offset_sec ? ["-ss", f6(l.offset_sec)] : []), "-i", l.path);
+      const lab = `[l${i}_${j}]`;
+      const span = l.span_sec !== undefined ? Math.max(1, Math.round(l.span_sec * sr)) : undefined;
+      chains.push([
+        `[${nIn}:a:0]aresample=${sr}`,
+        fmt,
+        ...(span !== undefined ? [`atrim=end_sample=${span}`, "asetpts=N/SR/TB"] : []),
+        ...(l.loop && span !== undefined ? [`aloop=loop=-1:size=${span}`] : []),
+        ...atempoChain(l.tempo ?? 1),
+        ...(l.gain_db ? [`volume=${l.gain_db}dB`] : []),
+        // atempo may change the format; normalise again before padding.
+        fmt,
+        `apad=whole_len=${need}`,
+        `atrim=end_sample=${need}`,
+        `asetpts=N/SR/TB${lab}`,
+      ]);
+      layerLabels.push(lab);
+      nIn++;
+    });
+    const lab = `[s${i}]`;
+    const mixed = layerLabels.length > 1 ? [`${layerLabels.join("")}amix=inputs=${layerLabels.length}:duration=longest:normalize=0`] : [`${layerLabels[0]}anull`];
+    chains.push([
+      ...mixed,
+      ...(fadeIn > 0 ? [`afade=t=in:ss=0:ns=${fadeIn}`] : []),
+      ...(tail > 0 ? [`afade=t=out:ss=${len}:ns=${tail}`] : []),
+      ...(starts[i]! > 0 ? [`adelay=delays=${starts[i]}S:all=1`] : []),
+      `anull${lab}`,
+    ]);
+    mixLabels.push(lab);
+  });
+  for (const [k, fx] of (opts.sfx ?? []).entries()) {
+    const at = toS(fx.at_ms);
+    if (at >= total) continue;
+    inputs.push("-i", fx.path);
+    const lab = `[fx${k}]`;
+    chains.push([
+      `[${nIn}:a:0]aresample=${sr}`,
+      fmt,
+      ...(fx.volume_db ? [`volume=${fx.volume_db}dB`] : []),
+      `atrim=end_sample=${total - at}`,
+      "asetpts=N/SR/TB",
+      ...(at > 0 ? [`adelay=delays=${at}S:all=1`] : []),
+      `anull${lab}`,
+    ]);
+    mixLabels.push(lab);
+    nIn++;
+  }
+  const bed = "[bed]";
+  chains.push([`anullsrc=r=${sr}:cl=${layout}`, fmt, `atrim=end_sample=${total}`, `asetpts=N/SR/TB${bed}`]);
+  chains.push([`${bed}${mixLabels.join("")}amix=inputs=${mixLabels.length + 1}:duration=first:normalize=0`, `atrim=end_sample=${total}`, "asetpts=N/SR/TB[aout]"]);
+  await runFfmpeg(["-y", ...inputs, "-filter_complex", filterGraph(chains), "-map", "[aout]", ...audioCodecArgs(out, sr), out], opts);
+  return { path: out, samples: total, duration_ms: Math.round((total / sr) * 1000) };
+}
+
 // ---------------------------------------------------------------------------------- music bed
 
 /** Defaults for a music bed under narration (spec.audio.music). */
@@ -96,6 +242,8 @@ export interface MixMusicInput {
   duration_ms: number;
   /** Where speech plays; the bed ducks by `duck_db` there, with short ramps. */
   speech?: readonly SpeechInterval[];
+  /** Where the bed is silent (footage scenes with native or muted sound), with short ramps. */
+  mute?: readonly SpeechInterval[];
   out: string;
 }
 
@@ -143,6 +291,7 @@ export async function mixMusic(input: MixMusicInput, opts: ConcatAudioOptions = 
   const fmt = `aformat=sample_fmts=fltp:sample_rates=${sr}:channel_layouts=stereo`;
   const speech = input.voice ? mergeIntervals(input.speech ?? [], 2 * MUSIC_DEFAULTS.ramp_ms) : [];
   const duckGain = 10 ** ((m.duck_db ?? MUSIC_DEFAULTS.duck_db) / 20);
+  const mute = mergeIntervals(input.mute ?? [], 0);
   const musicChain = [
     `[0:a:0]aresample=${sr}`,
     fmt,
@@ -151,6 +300,7 @@ export async function mixMusic(input: MixMusicInput, opts: ConcatAudioOptions = 
     "asetpts=N/SR/TB",
     `volume=${m.volume_db ?? MUSIC_DEFAULTS.volume_db}dB`,
     ...(speech.length ? [`volume='${duckExpression(speech, duckGain)}':eval=frame`] : []),
+    ...(mute.length ? [`volume='${duckExpression(mute, 0)}':eval=frame`] : []),
     ...(fadeIn > 0 ? [`afade=t=in:st=0:d=${fadeIn}`] : []),
     ...(fadeOut > 0 ? [`afade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}`] : []),
   ];

@@ -32,7 +32,7 @@ export const SourceKind = z.enum(["text", "markdown", "url", "pdf", "docx", "ppt
 export const SourceRef = z
   .string()
   .regex(
-    /^(?:text|markdown|url|pdf|docx|pptx|repo|video):\S+$/,
+    /^(?:text|markdown|url|pdf|docx|pptx|repo|video|audio):\S+$/,
     "expected a source_ref like repo:path#L10-L20, url:<u>#<sel> or pdf:<file>#p3",
   );
 

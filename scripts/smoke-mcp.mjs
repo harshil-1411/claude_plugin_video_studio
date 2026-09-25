@@ -18,6 +18,7 @@ const expected = [
   "adapt",
   "analyze",
   "brief_validate",
+  "demo",
   "diff",
   "doctor",
   "export",
@@ -131,7 +132,7 @@ child.stdout.on("data", (chunk) => {
       const r = msg.result;
       if (!r || r.isError) fail(`template_list failed: ${JSON.stringify(r?.content ?? msg.error)}`);
       const ids = r.structuredContent.templates.map((t) => t.id).join(",");
-      if (ids !== "animated-explainer,before-after,carousel-story,case-study,devtool-launch,educational,explain,faceless-listicle,listicle,product-demo,product-launch,product-ui,text-over-music") fail(`unexpected templates: ${ids}`);
+      if (ids !== "aesthetic-broll,ambient-slice-of-life,animated-explainer,before-after,carousel-story,case-study,devtool-launch,educational,explain,faceless-listicle,listicle,oddly-satisfying,product-demo,product-launch,product-ui,silent-vlog,talking-head,text-over-music") fail(`unexpected templates: ${ids}`);
       console.log(`smoke-mcp: templates ok (${ids})`);
       writeTinyProject();
       renderStarted = Date.now();

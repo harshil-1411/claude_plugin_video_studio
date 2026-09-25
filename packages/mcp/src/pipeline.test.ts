@@ -594,3 +594,195 @@ describe("socialCopy (pure)", () => {
     expect(md).toMatch(/#Vector #Databases .*#Shorts/);
   });
 });
+
+describe("footage scenes, scene audio, native voice and beat sync", () => {
+  const TRANSCRIPT = [
+    { word: "Hello", start_ms: 600, end_ms: 900 },
+    { word: "world.", start_ms: 1000, end_ms: 1300 },
+    { word: "Second", start_ms: 2100, end_ms: 2400 },
+    { word: "clip.", start_ms: 2500, end_ms: 2800 },
+    { word: "Unused", start_ms: 3700, end_ms: 3900 },
+  ];
+
+  /** A project with a 4 s 320x240 lavfi clip (testsrc2 + 330 Hz tone), its transcript and a sfx file. */
+  async function footageProject(name: string, s: VideoSpec): Promise<string> {
+    const dir = await makeProject(name, s);
+    const clip = join(dir, "assets", "supplied", "clip.mp4");
+    await mkdir(join(dir, "assets", "supplied"), { recursive: true });
+    await runFfmpeg([
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=s=320x240:r=15:d=4",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=330:sample_rate=48000:duration=4",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-shortest",
+      clip,
+    ]);
+    await writeFile(join(dir, "source", "clip.words.json"), JSON.stringify(TRANSCRIPT));
+    await mkdir(join(dir, "assets", "sfx"), { recursive: true });
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", "sine=frequency=1500:sample_rate=48000:duration=0.08", join(dir, "assets", "sfx", "pop.wav")]);
+    const ir = {
+      schema_version: "1.0",
+      id: "ir-footage",
+      created_at: "2026-09-25T00:00:00.000Z",
+      sources: [{ id: "src-1", kind: "video", uri: "input/clip.mp4", sha256: "0".repeat(64), title: "clip" }],
+      sections: [],
+      evidence: [],
+      entities: [],
+      claims: [],
+      assets: [
+        {
+          id: "v1",
+          kind: "video",
+          path: "assets/supplied/clip.mp4",
+          sha256: "0".repeat(64),
+          media: { duration_sec: 4, width: 320, height: 240, fps: 15, has_video: true, has_audio: true, transcript: { path: "source/clip.words.json", source: "whisper", words: 5 } },
+        },
+      ],
+      classification: { contains_secrets: false, contains_pii: false, contains_likeness: false, data_class: "internal", notes: [] },
+      warnings: [],
+    };
+    await writeFile(join(dir, "source", "content-ir.json"), JSON.stringify(ir, null, 2));
+    return dir;
+  }
+
+  const footageScene = (id: string, extra: Partial<VideoSpec["scenes"][number]>): VideoSpec["scenes"][number] => ({
+    id,
+    duration_sec: 1.5,
+    purpose: "point",
+    voiceover: "",
+    visual_strategy: "user_asset",
+    visual_requirements: { continuity_refs: [] },
+    claim_refs: [],
+    ...extra,
+  });
+
+  const nativeSpec = (): VideoSpec => ({
+    ...structuredClone(spec),
+    id: "footage-native",
+    voice: { mode: "native" },
+    audio: { music: { file: "bundled:minimal", fade_in_ms: 100, fade_out_ms: 200 } },
+    scenes: [
+      footageScene("s01", {
+        purpose: "hook",
+        footage: { asset: "v1", in_sec: 0.5 },
+        audio: { mode: "native" },
+        deterministic: { kind: "lower_third", props: { name: "Ada Lovelace", title: "Engineer" } },
+        sfx: [{ file: "assets/sfx/pop.wav", at_sec: 0.2, volume_db: -6, license: { id: "CC0-1.0", source: "synthesized" } }],
+      }),
+      footageScene("s02", { purpose: "cta", footage: { asset: "v1", in_sec: 2, fit: "blur_pad" }, audio: { mode: "mix", crossfade_ms: 200 } }),
+    ],
+  });
+
+  it(
+    "renders footage with native sound under a bed, captions from the transcript, and records the assets",
+    async () => {
+      const s = nativeSpec();
+      const dir = await footageProject("footage-native", s);
+      const v = await validateSpecFile(join(dir, "project", "video-spec.json"), join(dir, "source", "content-ir.json"));
+      expect(v.errors).toEqual([]);
+      const r = await renderProject(dir, opts());
+      expect(r.voice.reason).toMatch(/voice\.mode is "native"/);
+      expect(r.voice.timing_source).toBe("aligned");
+      expect(r.duration_sec).toBe(3);
+      expect(r.renderer.used).toContain("ffmpeg-footage");
+      expect(r.placeholders).toEqual([]);
+      const probe = await ffprobe(r.dist.reel);
+      expect(probe.has_audio).toBe(true);
+      expect(Math.abs(probe.duration_s - 3)).toBeLessThan(0.1);
+      expect(r.qa.findings.map((f) => f.id)).not.toContain("silence");
+
+      // Captions: the transcript words inside each span, shifted onto the reel timeline.
+      const cj = JSON.parse(await readFile(join(dir, "renders", "preview", "captions", "captions.json"), "utf8"));
+      const flat = JSON.stringify(cj);
+      for (const w of ["Hello", "world", "Second", "clip"]) expect(flat).toContain(w);
+      expect(flat).not.toContain("Unused");
+      const srt = await readFile(r.dist.captions_srt!, "utf8");
+      // "Hello" is at 0.6 s in the asset, 0.1 s into s01 (in_sec 0.5); "Second" at 2.1 s → 0.1 s into s02,
+      // which starts at 1.533 s (1.5 s = 22.5 frames at 15 fps, rounded on the cumulative timeline).
+      expect(srt).toMatch(/00:00:00,100 -->/);
+      expect(srt).toMatch(/00:00:01,633 -->/);
+
+      const state = JSON.parse(await readFile(join(dir, "renders", "preview", "render-state.json"), "utf8"));
+      expect(state.voice_mode).toBe("native");
+      expect(state.scene_audio).toBe(true);
+      expect(state.scenes[0].renderer).toBe("ffmpeg-footage");
+      expect(state.scenes[0].text_boxes.map((b: { text: string }) => b.text)).toContain("Ada Lovelace");
+      const lock = JSON.parse(await readFile(join(dir, "dist", "video.lock"), "utf8"));
+      const paths = lock.assets.map((a: { path: string }) => a.path);
+      expect(paths).toContain("assets/supplied/clip.mp4");
+      expect(paths).toContain("assets/sfx/pop.wav");
+      expect(paths.filter((p: string) => p === "assets/supplied/clip.mp4").length).toBe(1);
+      const prov = JSON.parse(await readFile(join(dir, "dist", "provenance.json"), "utf8"));
+      expect(prov.render.footage).toEqual([expect.objectContaining({ asset: "v1", file: "assets/supplied/clip.mp4", scenes: ["s01", "s02"] })]);
+      expect(prov.render.sfx).toEqual([expect.objectContaining({ file: "assets/sfx/pop.wav", license: { id: "CC0-1.0", source: "synthesized" } })]);
+      expect(prov.render.voice.mode).toBe("native");
+
+      // Unchanged inputs reuse everything; a new in_sec re-renders that clip and the mix.
+      const again = await renderProject(dir, opts());
+      expect(again.cache.assembly).toBe("reused");
+      expect(again.cache.scenes_cached).toEqual(["s01", "s02"]);
+      s.scenes[1]!.footage!.in_sec = 2.2;
+      await writeFile(join(dir, "project", "video-spec.json"), JSON.stringify(s, null, 2));
+      const moved = await renderProject(dir, opts());
+      expect(moved.cache.scenes_rendered).toEqual(["s02"]);
+      expect(moved.cache.assembly).toBe("assembled");
+    },
+    T,
+  );
+
+  it(
+    "unresolvable footage renders as a placeholder with the reason",
+    async () => {
+      const s = nativeSpec();
+      const dir = await footageProject("footage-missing", s);
+      await rm(join(dir, "assets", "supplied", "clip.mp4"));
+      const r = await renderProject(dir, opts());
+      expect(r.placeholders).toEqual(["s01", "s02"]);
+      const state = JSON.parse(await readFile(join(dir, "renders", "preview", "render-state.json"), "utf8"));
+      expect(state.scenes[0].reason).toMatch(/footage asset "v1": file assets\/supplied\/clip\.mp4 is missing/);
+    },
+    T,
+  );
+
+  it(
+    "beat sync moves a cut onto the nearest beat and records a timing adjustment",
+    async () => {
+      const s: VideoSpec = structuredClone(spec);
+      s.voice = { mode: "none" };
+      s.scenes = [
+        { ...structuredClone(spec.scenes[0]!), voiceover: "", duration_sec: 1.4 },
+        { ...structuredClone(spec.scenes[2]!), voiceover: "", duration_sec: 1.6 },
+      ];
+      s.audio = { music: { file: "assets/click.wav", license: { id: "user-owned" } }, beat_sync: { enabled: true } };
+      const dir = await makeProject("beat-sync", s);
+      await mkdir(join(dir, "assets"), { recursive: true });
+      // 120 bpm clicks from 0.25 s: beats at 0.25, 0.75, 1.25, 1.75 … The 1.4 s cut is 150 ms from 1.25.
+      const expr = "if(gte(t\\,0.25)*lt(mod(t-0.25\\,0.5)\\,0.01)\\,0.8*sin(2*PI*1000*t)\\,0)";
+      await runFfmpeg(["-y", "-f", "lavfi", "-i", `aevalsrc=${expr}:s=48000:d=4`, "-c:a", "pcm_s16le", join(dir, "assets", "click.wav")]);
+      const r = await renderProject(dir, opts());
+      expect(r.duration_sec).toBe(3);
+      const a = r.timing_adjustments.find((t) => t.scene_id === "s01");
+      expect(a).toMatchObject({ spec_duration_sec: 1.4, reason: expect.stringMatching(/beat sync \((119|120|121)(\.\d)? bpm\): end 1\.4s → 1\.2[4-6]\d*s onto the nearest beat/) });
+      expect(Math.abs(a!.render_duration_sec - 1.25)).toBeLessThanOrEqual(0.03);
+      expect(r.timing_adjustments.find((t) => t.scene_id === "s03")?.render_duration_sec).toBeCloseTo(3 - a!.render_duration_sec, 3);
+      const manifest = RenderManifest.parse(JSON.parse(await readFile(join(dir, "dist", "render-manifest.json"), "utf8")));
+      expect(manifest.timing_adjustments?.length).toBe(2);
+      // The spec itself is unchanged.
+      expect(JSON.parse(await readFile(join(dir, "project", "video-spec.json"), "utf8")).scenes[0].duration_sec).toBe(1.4);
+    },
+    T,
+  );
+});

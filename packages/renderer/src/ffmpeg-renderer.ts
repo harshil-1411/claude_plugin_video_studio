@@ -1372,6 +1372,10 @@ export interface GraphMotion {
   motion?: MotionTokens;
   /** Colour the exit fades to (the scene background). */
   background?: string;
+  /** Stream label the elements are drawn over (default `[0:v]`, the colour source); footage passes its own. */
+  base?: string;
+  /** Skip the style's exit fade (footage keeps playing to the cut). */
+  noExit?: boolean;
 }
 
 /** Build the filtergraph for a composition. `textDir` is where text files will be written. */
@@ -1384,7 +1388,7 @@ export function buildFilterGraph(comp: Pick<Composition, "elements">, target: Re
   const textFiles = new Map<string, string>();
   const chains: string[] = [];
   let chain: string[] = [];
-  let cur = "[0:v]";
+  let cur = gm.base ?? "[0:v]";
   let label = 0;
   const flush = () => {
     if (!chain.length) return;
@@ -1440,7 +1444,7 @@ export function buildFilterGraph(comp: Pick<Composition, "elements">, target: Re
     }
   }
   // Exit: the whole frame fades back to the background over the style's exit_ms, ending on the last frame.
-  const exit = motion ? round3(Math.min(motion.exit_ms / 1000, durationS * 0.2)) : 0;
+  const exit = motion && !gm.noExit ? round3(Math.min(motion.exit_ms / 1000, durationS * 0.2)) : 0;
   if (exit >= 0.02) chain.push(f("fade", { t: "out", st: round3(Math.max(0, durationS - 1 / target.fps - exit)), d: exit, color: ffColor(gm.background ?? "#000000") }));
   chain.push("format=yuv420p");
   const out = "[vout]";

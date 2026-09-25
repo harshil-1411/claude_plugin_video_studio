@@ -1,4 +1,4 @@
-import type { EvidenceSpan, IrWarning, Section, Source, SourceKind } from "@video-studio/schema";
+import type { EvidenceSpan, IrWarning, MediaInfo, Section, Source, SourceKind } from "@video-studio/schema";
 
 /**
  * Contract shared by every extractor. An extractor turns one input into the
@@ -24,6 +24,10 @@ export interface ExtractedAsset {
   path: string;
   sha256: string;
   source_ref?: string;
+  /** Probe facts for video/audio assets. `shots[].keyframe` holds a `local_id` of this part's image assets. */
+  media?: MediaInfo;
+  /** Part-local handle, remapped to the assigned asset id (e.g. by `media.shots[].keyframe`). */
+  local_id?: string;
 }
 
 /** Everything one source contributes. ids are assigned by the builder. */
@@ -38,7 +42,7 @@ export interface ExtractedSource {
    * e.g. a repo file that was excluded because it contains a secret. OR-ed
    * into the source's classification. Notes must never contain secret values.
    */
-  classificationHints?: { contains_secrets?: boolean; contains_pii?: boolean; notes?: string[] };
+  classificationHints?: { contains_secrets?: boolean; contains_pii?: boolean; contains_likeness?: boolean; notes?: string[] };
 }
 
 export interface Extractor {

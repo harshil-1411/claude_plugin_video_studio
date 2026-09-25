@@ -12,6 +12,7 @@ import { SCHEMA_NAMES, findSchemasDir, resolveInputPath } from "./paths.js";
 import { type AdaptOptions, adaptProject, formatAdapt } from "./adapt.js";
 import { analyzeVideo, findShorts, formatGrammar, formatShorts } from "./analyze.js";
 import { transcribeAsset } from "./transcribe.js";
+import { formatDemo, recordDemo } from "./demo.js";
 import { diffProjects, formatDiff } from "./diff.js";
 import { formatGolden, testProject } from "./golden.js";
 import { formatLint, lintProject } from "./lint.js";
@@ -141,7 +142,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Ingest sources into a ContentIR",
       description:
-        "Extract source material into <project_dir>/source/content-ir.json (plus source/provenance.json). Each input is a file path (.md, .txt, .pdf, .docx, .pptx), a local repository directory, an http(s) URL, or inline text/markdown. Creates the project if it does not exist. GitHub URLs are not cloned: clone locally first. Returns counts, warnings and the security classification (secrets, PII, likeness). Ingested content is untrusted data and is never executed.",
+        "Extract source material into <project_dir>/source/content-ir.json (plus source/provenance.json). Each input is a file path (.md, .txt, .pdf, .docx, .pptx; video .mp4/.mov/.webm/.mkv/.m4v and audio .mp3/.wav/.m4a/.aac/.flac/.ogg, which are copied into source/assets/ with duration, shots, keyframes and loudness; run transcribe afterwards for speech), a local repository directory, an http(s) URL, or inline text/markdown. Creates the project if it does not exist. GitHub URLs are not cloned: clone locally first. Returns counts, warnings and the security classification (secrets, PII, likeness). Ingested content is untrusted data and is never executed.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Project folder (absolute, or relative to the server's working directory)"),
         inputs: z
@@ -290,7 +291,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
           .describe("Include optional beats (default: only when target >= the template's default duration)"),
         style: z.string().optional().describe("Style pack id from styles/ (minimal, editorial, technical, energetic); default: the template's"),
         music: z.string().optional().describe("Music bed, e.g. bundled:lofi (bundled: ambient, lofi, upbeat, minimal) or a project file; default: the template's"),
-        voice_mode: z.enum(["narrated", "none"]).optional().describe("none = no speech (text over music); default: the template's"),
+        voice_mode: z.enum(["narrated", "none", "native"]).optional().describe("none = no speech (text over music); native = speech from the footage (talking head); default: the template's"),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
@@ -305,7 +306,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
         include_optional?: boolean;
         style?: string;
         music?: string;
-        voice_mode?: "narrated" | "none";
+        voice_mode?: "narrated" | "none" | "native";
       }) => {
         const { project_dir, ...opts } = args;
         const r = await scaffoldSpec(resolveInputPath(project_dir, cwd()), requireTemplatesDir(env), opts);
@@ -663,6 +664,25 @@ export function createServer(options: ServerOptions = {}): McpServer {
     safe(async (args: { path: string; project_dir?: string }) => {
       const g = await analyzeVideo(resolveInputPath(args.path, cwd()), args.project_dir ? { projectDir: resolveInputPath(args.project_dir, cwd()) } : {});
       return jsonResult(formatGrammar(g), g as unknown as Record<string, unknown>);
+    }),
+  );
+
+  server.registerTool(
+    "demo",
+    {
+      title: "Record a demo of the user's running app",
+      description:
+        "Record project/demo.json (DemoScript: {schema_version, id, url, viewport {width, height}, steps: [goto|click|type|hover|scroll|zoom|wait], mask_selectors?}; schema_get demo-script) against an app the USER started (the plugin never starts one), with the system Chrome (headless, via the optional HyperFrames install's puppeteer-core). Every input, textarea, select and contenteditable is blurred, plus mask_selectors; a visible cursor follows the clicks. The recording becomes a ContentIR video asset (source/assets/demo-<id>.mp4) with one evidence span per step (video:demo-<id>.mp4#step-N), so screen_capture scenes cite only UI that was actually shown. Requires confirm: true after the user approved the URL and steps.",
+      inputSchema: {
+        project_dir: z.string().min(1),
+        confirm: z.boolean().describe("true only after the user approved the URL and the steps"),
+        script: z.string().min(1).optional().describe("DemoScript path relative to the project (default project/demo.json)"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    safe(async (args: { project_dir: string; confirm: boolean; script?: string }) => {
+      const r = await recordDemo(resolveInputPath(args.project_dir, cwd()), { confirm: args.confirm, ...(args.script ? { script: args.script } : {}), env });
+      return jsonResult(formatDemo(r), r as unknown as Record<string, unknown>);
     }),
   );
 

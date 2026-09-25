@@ -1,0 +1,48 @@
+# Archetype: a person speaking to camera; the speech is in the footage (voice.mode native).
+schema_version: "1.0"
+id: talking-head
+name: Talking head
+description: A founder, expert or creator speaking to camera. The words come from the footage itself (voice native); captions come from the asset transcript. A name card, one emphasised line and a clear call to action sit over the video.
+goals: [explain, educate, promote, announce, launch, case_study]
+platforms: [instagram_reels, tiktok, youtube_shorts, linkedin, x]
+default_aspect_ratio: "9:16"
+default_duration_sec: 30
+duration_range: { min_sec: 15, max_sec: 60 }
+pacing: { avg_shot_sec: 5, max_words_per_sec: 3.3 }
+caption_preset: bold
+voice_mode: native
+default_style: minimal
+beats:
+  - purpose: hook
+    share: 0.15
+    guidance: The speaker's strongest opening line (pick the span from the transcript). A lower_third name card (name, role) over it.
+    suggested_visual_strategy: user_asset
+    suggested_deterministic_kind: lower_third
+  - purpose: point
+    share: 0.25
+    guidance: The main idea in the speaker's own words; one continuous span, no text overlay.
+    suggested_visual_strategy: user_asset
+  - purpose: point
+    share: 0.2
+    guidance: The line worth remembering, with its key words as kinetic_text (emphasis on one word).
+    suggested_visual_strategy: user_asset
+    suggested_deterministic_kind: kinetic_text
+  - purpose: proof
+    share: 0.2
+    guidance: An example, number or story from the recording that backs the point.
+    suggested_visual_strategy: user_asset
+    optional: true
+  - purpose: cta
+    share: 0.2
+    guidance: The speaker's ask, with the action as short kinetic_text (a URL or command).
+    suggested_visual_strategy: user_asset
+    suggested_deterministic_kind: kinetic_text
+hook_mechanisms: [contrarian_claim, story, question, promise, mistake]
+rules:
+  - "voice.mode is native: every scene's voiceover stays empty; captions come from the video's transcript (transcribe the asset first)."
+  - "Each scene is a footage span {asset, in_sec, out_sec} chosen from the transcript: start and end on sentence boundaries, never mid-word."
+  - "Scene audio is native (the speaker's voice); keep speed 1 so speech sounds natural. Short crossfades (100–200 ms) between spans hide the jump."
+  - "fit cover with focus on the face (focus.y about 0.35 for a centred speaker); blur_pad for landscape recordings you must not crop."
+  - "On-screen text never repeats the captions word for word: a name card, one emphasised line, the CTA."
+  - "Only spans the speaker actually said: never re-order sentences so they change the meaning."
+  - CTA must be an allowed brand CTA if a brand profile is present.

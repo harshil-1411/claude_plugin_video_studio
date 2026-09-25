@@ -1,0 +1,223 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ffprobe, runFfmpeg } from "@video-studio/media";
+import type { FootageClip, MediaInfo, Scene } from "@video-studio/schema";
+import { FOOTAGE_RENDERER_ID, createFootageRenderer, planFootage } from "./footage.js";
+import { renderScenes, sceneCacheKey } from "./select.js";
+import { resolveTokens, targetForAspect } from "./tokens.js";
+import type { RenderTarget } from "./types.js";
+
+// Tiny renders only: ≤ 180x320, ≤ 1.5 s, 15 fps, x264 ultrafast.
+const T = 60_000;
+const target: RenderTarget = targetForAspect("9:16", { shortSide: 180, fps: 15 });
+const tokens = resolveTokens();
+const renderer = createFootageRenderer({ encodePreset: "ultrafast" });
+let tmp: string;
+let ramp: string; // 320x240, 4 s: luma rises 60 per second
+let still: string;
+const rampMedia: MediaInfo = { duration_sec: 4, width: 320, height: 240, fps: 15, has_video: true, has_audio: true };
+
+beforeAll(async () => {
+  tmp = await mkdtemp(join(tmpdir(), "vs-footage-"));
+  ramp = join(tmp, "ramp.mp4");
+  await runFfmpeg([
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    "color=c=black:s=320x240:r=15:d=4,geq=lum='16+T*50':cb=128:cr=128",
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=330:sample_rate=48000:duration=4",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-shortest",
+    ramp,
+  ]);
+  still = join(tmp, "still.png");
+  await runFfmpeg(["-y", "-f", "lavfi", "-i", "testsrc2=s=320x240:d=1", "-frames:v", "1", still]);
+});
+afterAll(async () => {
+  await rm(tmp, { recursive: true, force: true });
+});
+
+function scene(footage: FootageClip, duration_sec = 1, extra: Partial<Scene> = {}): Scene {
+  return {
+    id: "s01",
+    duration_sec,
+    purpose: "point",
+    voiceover: "",
+    visual_strategy: "user_asset",
+    visual_requirements: { continuity_refs: [] },
+    claim_refs: [],
+    footage,
+    ...extra,
+  };
+}
+
+/** Mean luma per frame. */
+async function lumas(path: string): Promise<number[]> {
+  const out = join(tmp, `luma-${Math.random().toString(36).slice(2)}.txt`);
+  await runFfmpeg(["-i", path, "-vf", `signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG:file=${out}`, "-f", "null", "-"]);
+  return (await readFile(out, "utf8"))
+    .split("\n")
+    .filter((l) => l.includes("YAVG"))
+    .map((l) => Number(l.split("=")[1]));
+}
+
+async function render(name: string, sc: Scene, path = ramp, media: MediaInfo = rampMedia) {
+  const out = join(tmp, `${name}.mp4`);
+  const res = await renderer.render({ scene: sc, target, tokens, out_path: out, project_dir: tmp, footage: { path, sha256: "x", media } });
+  return { res, out, probe: await ffprobe(out) };
+}
+
+describe("planFootage (pure)", () => {
+  it("computes span, play length and fill mode", () => {
+    const p = planFootage({ asset: "v", in_sec: 1, speed: 2 }, rampMedia, ramp, target, 1, "#000000");
+    expect(p).toMatchObject({ kind: "video", frames: 15, span_sec: 2, play_sec: 1, fill: "exact" });
+    expect(planFootage({ asset: "v", in_sec: 3, out_sec: 3.5 }, rampMedia, ramp, target, 1.5, "#000").fill).toBe("hold");
+    expect(planFootage({ asset: "v", in_sec: 3, out_sec: 3.5, loop: true }, rampMedia, ramp, target, 1.5, "#000").fill).toBe("loop");
+    // Clamped to the asset's end.
+    expect(planFootage({ asset: "v", in_sec: 3.5 }, rampMedia, ramp, target, 1, "#000")).toMatchObject({ span_sec: 0.5, fill: "hold" });
+    expect(planFootage({ asset: "v", in_sec: 0 }, { duration_sec: 0 }, still, target, 1, "#000").kind).toBe("still");
+  });
+});
+
+describe("footage renderer", () => {
+  it.each(["cover", "contain", "blur_pad"] as const)(
+    "fit %s gives an exact-length clip at the target size, silent",
+    async (fit) => {
+      const { res, probe } = await render(`fit-${fit}`, scene({ asset: "v", in_sec: 0, fit }));
+      expect(res.renderer).toBe(FOOTAGE_RENDERER_ID);
+      expect([probe.width, probe.height]).toEqual([target.width, target.height]);
+      expect(probe.has_audio).toBe(false);
+      expect(res.duration_ms).toBe(1000);
+      expect(Math.abs(probe.duration_s - 1)).toBeLessThan(0.08);
+    },
+    T,
+  );
+
+  it(
+    "contain letterboxes on the background; blur_pad fills the bars with picture",
+    async () => {
+      // Top rows: the background colour for contain, blurred footage (brighter than black) for blur_pad.
+      const top = async (fit: "contain" | "blur_pad") => {
+        const out = join(tmp, `top-${fit}.png`);
+        const { out: clip } = await render(`top-${fit}`, scene({ asset: "v", in_sec: 3, fit }));
+        await runFfmpeg(["-y", "-i", clip, "-vf", "crop=iw:20:0:0", "-frames:v", "1", "-update", "1", out]);
+        return (await lumas(out))[0]!;
+      };
+      const bg = resolveTokens().color_background;
+      const contain = await top("contain");
+      const blur = await top("blur_pad");
+      expect(bg).toBeTruthy();
+      expect(blur - contain).toBeGreaterThan(40);
+    },
+    T,
+  );
+
+  it(
+    "trims in_sec and applies speed",
+    async () => {
+      const { out } = await render("speed", scene({ asset: "v", in_sec: 1, speed: 2, fit: "cover" }));
+      const y = await lumas(out);
+      expect(y.length).toBe(15);
+      // Source luma = 16 + 50 t; the clip starts at t = 1 and ends near t = 1 + 2 * 14/15.
+      expect(Math.abs(y[0]! - 66)).toBeLessThan(8);
+      expect(Math.abs(y[14]! - (16 + 50 * (1 + (2 * 14) / 15)))).toBeLessThan(10);
+    },
+    T,
+  );
+
+  it(
+    "holds the last frame, or loops, when the clip is shorter than the scene",
+    async () => {
+      const hold = await render("hold", scene({ asset: "v", in_sec: 3, out_sec: 3.5 }, 1.5));
+      const loop = await render("loop", scene({ asset: "v", in_sec: 3, out_sec: 3.5, loop: true }, 1.5));
+      expect(hold.res.warnings.join(" ")).toMatch(/last frame held/);
+      expect(loop.res.warnings.join(" ")).toMatch(/looped/);
+      const yh = await lumas(hold.out);
+      const yl = await lumas(loop.out);
+      expect(yh.length).toBe(23);
+      expect(yl.length).toBe(23);
+      // Held: the tail stays at the last source frame; looped: it drops back towards the start.
+      expect(Math.abs(yh[22]! - yh[10]!)).toBeLessThan(3);
+      expect(yh[22]! - yl[22]!).toBeGreaterThan(8);
+      expect(Math.abs(yl[8]! - yl[1]!)).toBeLessThan(6);
+    },
+    T,
+  );
+
+  it(
+    "draws a lower third over the footage and reports its text boxes",
+    async () => {
+      const sc = scene({ asset: "v", in_sec: 0 }, 1, { deterministic: { kind: "lower_third", props: { name: "Ada Lovelace", title: "Engineer" } } });
+      const { res } = await render("lower-third", sc);
+      expect(res.text_boxes?.map((b) => b.text)).toEqual(expect.arrayContaining(["Ada Lovelace", "Engineer"]));
+      const chart = scene({ asset: "v", in_sec: 0 }, 1, { deterministic: { kind: "chart", props: {} } });
+      const r2 = await render("chart-skip", chart);
+      expect(r2.res.warnings.join(" ")).toMatch(/"chart" is not drawn over footage/);
+      expect(r2.res.text_boxes).toBeUndefined();
+    },
+    T,
+  );
+
+  it(
+    "turns a still into a gentle push-in",
+    async () => {
+      const { probe, out } = await render("still", scene({ asset: "img", in_sec: 0 }), still, { duration_sec: 0, width: 320, height: 240, has_video: true, has_audio: false });
+      expect([probe.width, probe.height]).toEqual([target.width, target.height]);
+      expect((await lumas(out)).length).toBe(15);
+    },
+    T,
+  );
+});
+
+describe("renderScenes with footage", () => {
+  it("cache key changes with the asset hash and the footage params", () => {
+    const sc = scene({ asset: "v", in_sec: 0 });
+    const k = (s: Scene, sha: string) => sceneCacheKey(s, tokens, target, renderer, false, undefined, { sha256: sha });
+    expect(k(sc, "a")).not.toBe(k(sc, "b"));
+    expect(k(sc, "a")).not.toBe(k(scene({ asset: "v", in_sec: 1 }), "a"));
+    expect(k(sc, "a")).toBe(k(scene({ asset: "v", in_sec: 0 }), "a"));
+  });
+
+  it(
+    "routes footage scenes to the footage renderer, caches them and placeholders unresolved ones",
+    async () => {
+      const dir = join(tmp, "rs");
+      const s1 = scene({ asset: "v", in_sec: 0 });
+      const s2 = { ...scene({ asset: "missing", in_sec: 0 }), id: "s02" };
+      const opts = (sha: string) => ({
+        project_dir: tmp,
+        dir,
+        renderers: [],
+        tokens,
+        target,
+        placeholder: false,
+        footageRenderer: renderer,
+        footage: new Map([
+          ["s01", { path: ramp, sha256: sha, media: rampMedia }],
+          ["s02", { error: 'not a ContentIR asset' }],
+        ]),
+      });
+      const a = await renderScenes({ scenes: [s1, s2] }, opts("aaa"));
+      expect(a.scenes[0]).toMatchObject({ status: "rendered", renderer: FOOTAGE_RENDERER_ID });
+      expect(a.scenes[1]).toMatchObject({ status: "pending", reason: expect.stringMatching(/footage asset "missing": not a ContentIR asset/) });
+      const b = await renderScenes({ scenes: [s1] }, opts("aaa"));
+      expect(b.scenes[0]).toMatchObject({ status: "cached", from_cache: true });
+      const c = await renderScenes({ scenes: [s1] }, opts("bbb"));
+      expect(c.scenes[0]!.status).toBe("rendered");
+    },
+    T,
+  );
+});
