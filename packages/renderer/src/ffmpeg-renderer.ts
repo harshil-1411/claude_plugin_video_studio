@@ -15,7 +15,7 @@ import {
   runFfmpeg,
   runProcess,
 } from "@video-studio/media";
-import type { DeterministicKind, Scene } from "@video-studio/schema";
+import type { DeterministicKind, Scene, TextBox, TextRole } from "@video-studio/schema";
 import {
   type FitResult,
   type Rect,
@@ -29,7 +29,7 @@ import {
   wrapText,
 } from "./text-layout.js";
 import { type FontResolver, createFontResolver } from "./tokens.js";
-import type { Availability, RenderTarget, SceneRenderRequest, SceneRenderResult, SceneRenderer, VisualTokens } from "./types.js";
+import type { Availability, LayoutZones, RenderTarget, SceneRenderRequest, SceneRenderResult, SceneRenderer, VisualTokens } from "./types.js";
 
 /**
  * Chrome-free fallback renderer for deterministic scenes: one `-f lavfi color=` source at the
@@ -48,7 +48,7 @@ import type { Availability, RenderTarget, SceneRenderRequest, SceneRenderResult,
  */
 
 export const FFMPEG_RENDERER_ID = "ffmpeg-drawtext";
-export const FFMPEG_RENDERER_VERSION = "0.1.0";
+export const FFMPEG_RENDERER_VERSION = "0.2.0";
 
 export const FFMPEG_RENDERER_KINDS = [
   "typography",
@@ -130,7 +130,12 @@ type El = TextEl | BoxEl | ImageEl;
 export interface Composition {
   elements: El[];
   warnings: string[];
+  /** Every text block laid out, for lint (overflow, mask collisions, contrast). */
+  text_boxes: TextBox[];
 }
+
+/** What a per-kind layout returns; composeScene adds the recorded text boxes. */
+type Layout = Omit<Composition, "text_boxes">;
 
 interface Ctx {
   target: RenderTarget;
@@ -139,6 +144,10 @@ interface Ctx {
   /** Short side in px. */
   u: number;
   colors: Palette;
+  /** Role of the scene's main text: `hook` in the hook scene, else `headline`. */
+  main: TextRole;
+  /** Text boxes recorded while laying out. */
+  boxes: TextBox[];
 }
 
 interface Palette {
@@ -218,9 +227,33 @@ function asStr(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v : undefined;
 }
 
+/** Record a text block for lint: the box it was fitted into, its size, truncation and colours. */
+function note(
+  c: Ctx,
+  role: TextRole,
+  text: string,
+  box: { x?: number; y?: number; w: number; h: number },
+  fit: Pick<FitResult, "fontSize" | "truncated">,
+  color: string,
+  background: string = c.colors.bg,
+): void {
+  if (!text.trim()) return;
+  const x = r(box.x ?? 0);
+  const y = r(box.y ?? 0);
+  c.boxes.push({
+    role,
+    text,
+    rect: { x, y, w: Math.max(0, r((box.x ?? 0) + box.w) - x), h: Math.max(0, r((box.y ?? 0) + box.h) - y) },
+    font_px: fit.fontSize,
+    truncated: fit.truncated,
+    color: toHex(rgb(color)),
+    background: toHex(rgb(background)),
+  });
+}
+
 // ---------------------------------------------------------------------------------- per-kind layouts
 
-function typography(p: Record<string, unknown>, c: Ctx): Composition {
+function typography(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
   const lines = Array.isArray(p.lines) ? p.lines.filter((l): l is string => typeof l === "string" && l.trim() !== "") : [];
   if (lines.length === 0) warnings.push("typography: no lines to draw");
@@ -240,12 +273,13 @@ function typography(p: Record<string, unknown>, c: Ctx): Composition {
     return c.colors.text;
   };
   const els = textLines(fit, box, { font: "heading", color, beat: (i) => i });
+  note(c, c.main, lines.join("\n"), box, fit, c.colors.text);
   if (em && !hit) warnings.push(`typography: emphasis "${emphasis}" not found in lines`);
   if (em && hit) warnings.push("typography: emphasis colours the whole line containing it (no per-word styling in ffmpeg-drawtext)");
   return { elements: els, warnings };
 }
 
-function code(p: Record<string, unknown>, c: Ctx): Composition {
+function code(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
   const src = (asStr(p.code) ?? "").replace(/\r\n?/g, "\n").replace(/\t/g, "  ").replace(/\s+$/, "");
   const lang = asStr(p.language) ?? "";
@@ -256,6 +290,7 @@ function code(p: Record<string, unknown>, c: Ctx): Composition {
   const inner = { x: c.safe.x + pad, y: c.safe.y + pad + header, w: c.safe.w - 2 * pad, h: c.safe.h - 2 * pad - header };
   const fit = fitText(codeLines, inner, { mono: true, noWrap: true, maxSize: c.u * 0.05, minSize: c.u * 0.022, lineHeight: 1.4 });
   if (fit.truncated) warnings.push("code: code did not fit at the minimum size; long lines were cut and/or trailing lines dropped");
+  note(c, "code", src, inner, fit, c.colors.text, c.colors.panel);
   const panelH = Math.min(c.safe.h, r(fit.height + 2 * pad + header + fit.fontSize * 0.4));
   const panel: Rect = { x: c.safe.x, y: r(c.safe.y + (c.safe.h - panelH) / 2), w: c.safe.w, h: panelH };
   const body: Rect = { x: inner.x, y: panel.y + pad + header, w: inner.w, h: panel.h - 2 * pad - header };
@@ -266,6 +301,7 @@ function code(p: Record<string, unknown>, c: Ctx): Composition {
   if (lang) {
     const size = Math.max(6, r(c.u * 0.03));
     els.push({ type: "text", text: lang, font: "mono", size, color: c.colors.muted, x: inner.x, y: panel.y + r(pad * 0.7), beat: 0, slide: false });
+    note(c, "decorative", lang, { x: inner.x, y: panel.y + r(pad * 0.7), w: inner.w, h: size }, { fontSize: size, truncated: false }, c.colors.muted, c.colors.panel);
   }
   const placed = placeLines(fit, body, "left", "top", { mono: true });
   for (const n of highlights) {
@@ -291,7 +327,7 @@ function code(p: Record<string, unknown>, c: Ctx): Composition {
   return { elements: els, warnings };
 }
 
-function comparison(p: Record<string, unknown>, c: Ctx): Composition {
+function comparison(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
   const side = (v: unknown) => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
   const left = side(p.left);
@@ -318,20 +354,24 @@ function comparison(p: Record<string, unknown>, c: Ctx): Composition {
     els.push({ type: "box", ...pr, color: c.colors.panel, beat });
     els.push({ type: "box", x: pr.x, y: pr.y, w: pr.w, h: Math.max(2, r(c.u * 0.008)), color: accent, beat });
     const lf = fitText(asStr(s.label) ?? "", { w: pr.w - 2 * pad, h: labelH - pad / 2 }, { maxSize: c.u * 0.06, minSize: c.u * 0.03, maxLines: 1 });
-    els.push(...textLines(lf, { x: pr.x + pad, y: pr.y + pad, w: pr.w - 2 * pad, h: labelH - pad / 2 }, { font: "heading", color: accent, beat, valign: "top" }));
+    const labelBox = { x: pr.x + pad, y: pr.y + pad, w: pr.w - 2 * pad, h: labelH - pad / 2 };
+    els.push(...textLines(lf, labelBox, { font: "heading", color: accent, beat, valign: "top" }));
+    note(c, "label", asStr(s.label) ?? "", labelBox, lf, accent, c.colors.panel);
     const bf = fitText(asStr(s.text) ?? "", bodyBoxes[i]!, { maxSize: bodySize, minSize: Math.min(bodySize, c.u * 0.03) });
     if (bf.truncated) warnings.push(`comparison: ${i === 0 ? "left" : "right"} text truncated to fit`);
     els.push(...textLines(bf, bodyBoxes[i]!, { font: "body", color: c.colors.text, beat: beat + 1, valign: "top" }));
+    note(c, "body", asStr(s.text) ?? "", bodyBoxes[i]!, bf, c.colors.text, c.colors.panel);
   });
   if (verdict && verdictR) {
     const vf = fitText(verdict, verdictR, { maxSize: c.u * 0.06, minSize: c.u * 0.03 });
     if (vf.truncated) warnings.push("comparison: verdict truncated to fit");
     els.push(...textLines(vf, verdictR, { font: "heading", color: c.colors.text, beat: 4 }));
+    note(c, "headline", verdict, verdictR, vf, c.colors.text);
   }
   return { elements: els, warnings };
 }
 
-function cta(p: Record<string, unknown>, c: Ctx): Composition {
+function cta(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
   const headline = asStr(p.headline) ?? "";
   const action = asStr(p.action);
@@ -350,6 +390,7 @@ function cta(p: Record<string, unknown>, c: Ctx): Composition {
       const f = fitText(headline, rect, { maxSize: c.u * 0.11, minSize: c.u * 0.04 });
       if (f.truncated) warnings.push("cta: headline truncated to fit");
       els.push(...textLines(f, rect, { font: "heading", color: c.colors.text, beat: 0, valign: "bottom" }));
+      note(c, c.main === "hook" ? "hook" : "cta", headline, rect, f, c.colors.text);
     } else if (key === "action") {
       const maxW = r(rect.w * 0.9);
       const f = fitText(action!, { w: maxW - r(c.u * 0.08), h: rect.h * 0.6 }, { maxSize: c.u * 0.06, minSize: c.u * 0.03, maxLines: 1 });
@@ -359,6 +400,7 @@ function cta(p: Record<string, unknown>, c: Ctx): Composition {
       const pill: Rect = { x: r(rect.x + (rect.w - pillW) / 2), y: r(rect.y + (rect.h - pillH) / 2), w: pillW, h: pillH };
       els.push({ type: "box", ...pill, color: c.colors.primary, beat: 1 });
       els.push(...textLines(f, pill, { font: "heading", color: c.colors.bg, beat: 1, slide: false }));
+      note(c, "cta", action!, pill, f, c.colors.bg, c.colors.primary);
     } else if (key === "command") {
       const pad = r(c.u * 0.03);
       const text = `$ ${command}`;
@@ -370,15 +412,17 @@ function cta(p: Record<string, unknown>, c: Ctx): Composition {
       els.push({ type: "box", ...panel, color: c.colors.panel, beat: 2 });
       els.push({ type: "box", ...panel, color: c.colors.panelEdge, thickness: Math.max(1, r(c.u * 0.003)), beat: 2 });
       els.push(...textLines(f, inset(panel, pad), { font: "mono", color: c.colors.secondary, beat: 2, slide: false }));
+      note(c, "code", text, inset(panel, pad), f, c.colors.secondary, c.colors.panel);
     } else {
       const f = fitText(url!, rect, { maxSize: c.u * 0.04, minSize: c.u * 0.02, maxLines: 2 });
       els.push(...textLines(f, rect, { font: "body", color: c.colors.muted, beat: 3, valign: "top" }));
+      note(c, "label", url!, rect, f, c.colors.muted);
     }
   });
   return { elements: els, warnings };
 }
 
-function endCard(p: Record<string, unknown>, c: Ctx, logo: { path: string; width: number; height: number } | null): Composition {
+function endCard(p: Record<string, unknown>, c: Ctx, logo: { path: string; width: number; height: number } | null): Layout {
   const warnings: string[] = [];
   const title = asStr(p.title);
   const subtitle = asStr(p.subtitle);
@@ -407,10 +451,12 @@ function endCard(p: Record<string, unknown>, c: Ctx, logo: { path: string; width
       const f = fitText(title!, rect, { maxSize: c.u * 0.12, minSize: c.u * 0.04 });
       if (f.truncated) warnings.push("end_card: title truncated to fit");
       els.push(...textLines(f, rect, { font: "heading", color: c.colors.text, beat: 1, valign: parts.length === 1 ? "middle" : "bottom" }));
+      note(c, c.main, title!, rect, f, c.colors.text);
     } else {
       const f = fitText(subtitle!, rect, { maxSize: c.u * 0.055, minSize: c.u * 0.025 });
       if (f.truncated) warnings.push("end_card: subtitle truncated to fit");
       els.push(...textLines(f, rect, { font: "body", color: c.colors.primary, beat: 2, valign: "top" }));
+      note(c, "body", subtitle!, rect, f, c.colors.primary);
     }
   });
   return { elements: els, warnings };
@@ -421,23 +467,25 @@ function formatNumber(v: number): string {
   return String(Math.round(v * 100) / 100);
 }
 
-function statLayout(value: string, label: string | undefined, c: Ctx, warnings: string[]): Composition {
+function statLayout(value: string, label: string | undefined, c: Ctx, warnings: string[]): Layout {
   const [numR, labelR] = label ? splitV(c.safe, [3, 2], r(c.u * 0.03)) : [c.safe, undefined];
   const els: El[] = [];
   const nf = fitText(value, numR!, { maxSize: c.u * 0.32, minSize: c.u * 0.06, maxLines: 1, lineHeight: 1.1 });
   if (nf.truncated) warnings.push("chart: value truncated to fit");
   els.push(...textLines(nf, numR!, { font: "heading", color: c.colors.primary, beat: 0, valign: label ? "bottom" : "middle" }));
+  note(c, c.main, value, numR!, nf, c.colors.primary);
   if (label && labelR) {
     const lf = fitText(label, labelR, { maxSize: c.u * 0.065, minSize: c.u * 0.03 });
     if (lf.truncated) warnings.push("chart: label truncated to fit");
     els.push(...textLines(lf, labelR, { font: "body", color: c.colors.text, beat: 1, valign: "top" }));
+    note(c, "label", label, labelR, lf, c.colors.text);
   }
   return { elements: els, warnings };
 }
 
 const MAX_BARS = 12;
 
-function chart(p: Record<string, unknown>, c: Ctx): Composition {
+function chart(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
   const type = asStr(p.type) ?? "stat";
   const unit = typeof p.unit === "string" ? p.unit : "";
@@ -461,6 +509,7 @@ function chart(p: Record<string, unknown>, c: Ctx): Composition {
     if (label && titleR) {
       const tf = fitText(label, titleR, { maxSize: c.u * 0.065, minSize: c.u * 0.03, maxLines: 2 });
       els.push(...textLines(tf, titleR, { font: "heading", color: c.colors.text, beat: 0, valign: "bottom" }));
+      note(c, c.main, label, titleR, tf, c.colors.text);
     }
     // Compact rows (label + bar of at most 7% of the short side), centred in the chart area.
     const rowGap = r(c.u * 0.03);
@@ -476,6 +525,7 @@ function chart(p: Record<string, unknown>, c: Ctx): Composition {
       const labelLines = wrapText(s.label || " ", labelSize, rr.w);
       const text = labelLines.length > 1 ? `${labelLines[0]}…` : (labelLines[0] ?? "");
       if (text.trim()) els.push({ type: "text", text, font: "body", size: labelSize, color: c.colors.text, x: rr.x, y: rr.y, beat, slide: false });
+      note(c, "label", s.label, { x: rr.x, y: rr.y, w: rr.w, h: labelSize * 1.35 }, { fontSize: labelSize, truncated: labelLines.length > 1 }, c.colors.text);
       const barY = r(rr.y + labelSize * 1.35);
       const barH = Math.max(2, r(Math.min(rr.h - labelSize * 1.35, c.u * 0.07)));
       const trackW = Math.max(2, rr.w - valueW);
@@ -514,7 +564,7 @@ function chart(p: Record<string, unknown>, c: Ctx): Composition {
   return statLayout(fmt(value), statLabel, c, warnings);
 }
 
-function diagram(p: Record<string, unknown>, c: Ctx): Composition {
+function diagram(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings = ["diagram: basic grid layout with orthogonal edges and square arrowheads (ffmpeg-drawtext)"];
   const nodes = Array.isArray(p.nodes) ? [...new Set(p.nodes.filter((n): n is string => typeof n === "string" && n.trim() !== ""))] : [];
   const edges = Array.isArray(p.edges)
@@ -618,13 +668,14 @@ function diagram(p: Record<string, unknown>, c: Ctx): Composition {
     const f = fitText(name, labelBox, { maxSize: size, minSize: size });
     if (f.truncated) warnings.push(`diagram: label "${name}" truncated to fit`);
     els.push(...textLines(f, inset(rect, pad), { font: "body", color: c.colors.text, beat: i, slide: false }));
+    note(c, "label", name, inset(rect, pad), f, c.colors.text, c.colors.panel);
   }
   return { elements: els, warnings };
 }
 
 type Callout = { text: string; x?: number; y?: number };
 
-function screenshot(p: Record<string, unknown>, c: Ctx, image: { path: string; width: number; height: number } | null): Composition {
+function screenshot(p: Record<string, unknown>, c: Ctx, image: { path: string; width: number; height: number } | null): Layout {
   const warnings: string[] = [];
   const callouts: Callout[] = Array.isArray(p.callouts)
     ? p.callouts.flatMap((co): Callout[] => {
@@ -653,6 +704,7 @@ function screenshot(p: Record<string, unknown>, c: Ctx, image: { path: string; w
     els.push({ type: "box", ...frame, color: c.colors.panel, beat: 0 });
     const f = fitText(`screenshot "${asStr(p.asset) ?? "?"}" unavailable`, inset(frame, gap), { maxSize: c.u * 0.045, minSize: c.u * 0.02 });
     els.push(...textLines(f, inset(frame, gap), { font: "body", color: c.colors.muted, beat: 0, slide: false }));
+    note(c, "decorative", `screenshot "${asStr(p.asset) ?? "?"}" unavailable`, inset(frame, gap), f, c.colors.muted, c.colors.panel);
   }
   els.push({ type: "box", ...frame, color: c.colors.panelEdge, thickness: Math.max(1, r(c.u * 0.004)), beat: 0 });
 
@@ -671,6 +723,7 @@ function screenshot(p: Record<string, unknown>, c: Ctx, image: { path: string; w
     const rightX = mx + m;
     const x = rightX + tw + border * 2 > c.target.width - c.safe.x ? r(Math.max(border, mx - m - tw - border)) : rightX + border;
     els.push({ type: "text", text, font: "body", size, color: c.colors.text, x, y: my - r(size / 2), beat, slide: false, box: { color: ffColor(c.colors.bg, 0.85), border } });
+    note(c, "label", co.text, { x: x - border, y: my - r(size / 2) - border, w: tw + 2 * border, h: size + 2 * border }, { fontSize: size, truncated: text !== co.text }, c.colors.text);
   });
   if (listed.length && listR) {
     const rowsR = splitV(listR, listed.map(() => 1), r(c.u * 0.015));
@@ -683,6 +736,7 @@ function screenshot(p: Record<string, unknown>, c: Ctx, image: { path: string; w
       const f = fitText(co.text, tr, { maxSize: c.u * 0.05, minSize: c.u * 0.022, maxLines: 2 });
       if (f.truncated) warnings.push(`screenshot: callout "${co.text.slice(0, 30)}" truncated`);
       els.push(...textLines(f, tr, { font: "body", color: c.colors.text, beat, align: "left" }));
+      note(c, "body", co.text, tr, f, c.colors.text);
     });
   }
   return { elements: els, warnings };
@@ -693,13 +747,28 @@ function screenshot(p: Record<string, unknown>, c: Ctx, image: { path: string; w
 export interface ComposeInputs {
   /** Probed image for screenshot scenes / logo for end cards. */
   image?: { path: string; width: number; height: number } | null;
+  /** Layout zones for the enabled platform targets (the safe area is `zones.content`). */
+  zones?: LayoutZones;
 }
 
 /** Pure layout of a deterministic scene into draw elements (exported for tests and previews). */
 export function composeScene(scene: Scene, target: RenderTarget, tokens: VisualTokens, inputs: ComposeInputs = {}): Composition {
   const det = scene.deterministic;
   if (!det) throw new Error(`scene ${scene.id} has no deterministic content`);
-  const c: Ctx = { target, tokens, safe: safeArea(target), u: Math.min(target.width, target.height), colors: palette(tokens) };
+  const c: Ctx = {
+    target,
+    tokens,
+    safe: safeArea(target, inputs.zones),
+    u: Math.min(target.width, target.height),
+    colors: palette(tokens),
+    main: scene.purpose === "hook" ? "hook" : "headline",
+    boxes: [],
+  };
+  const comp = layoutKind(det, c, inputs);
+  return { ...comp, text_boxes: c.boxes };
+}
+
+function layoutKind(det: NonNullable<Scene["deterministic"]>, c: Ctx, inputs: ComposeInputs): Layout {
   const p = det.props;
   switch (det.kind) {
     case "typography":
@@ -764,7 +833,7 @@ export interface FontFiles {
 }
 
 /** Build the filtergraph for a composition. `textDir` is where text files will be written. */
-export function buildFilterGraph(comp: Composition, target: RenderTarget, durationS: number, fonts: FontFiles, textDir: string): BuiltGraph {
+export function buildFilterGraph(comp: Pick<Composition, "elements">, target: RenderTarget, durationS: number, fonts: FontFiles, textDir: string): BuiltGraph {
   const maxBeat = Math.max(0, ...comp.elements.map((e) => e.beat));
   const { step, fade } = motionTiming(durationS, maxBeat);
   const slide = Math.max(2, r(Math.min(target.width, target.height) * 0.025));
@@ -958,10 +1027,11 @@ export function createFfmpegRenderer(opts: FfmpegRendererOptions = {}): SceneRen
         }
       }
 
-      const comp = composeScene(scene, target, tokens, { image });
+      const comp = composeScene(scene, target, tokens, { image, ...(req.zones ? { zones: req.zones } : {}) });
       warnings.push(...comp.warnings);
       const fonts: FontFiles = {
-        heading: await fontResolver(tokens.font_heading),
+        // Bold headings, matching the HTML renderer (bundled Inter has a real Bold).
+        heading: await fontResolver(tokens.font_heading, 700),
         body: await fontResolver(tokens.font_body),
         mono: await fontResolver(tokens.font_mono),
       };
@@ -982,6 +1052,7 @@ export function createFfmpegRenderer(opts: FfmpegRendererOptions = {}): SceneRen
         renderer: FFMPEG_RENDERER_ID,
         renderer_version: FFMPEG_RENDERER_VERSION,
         warnings,
+        text_boxes: comp.text_boxes,
       };
     },
   };

@@ -8,6 +8,8 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > chart (9:
 <meta name="viewport" content="width=1080, height=1920">
 <title>s01 chart</title>
 <style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
 @font-face { font-family: "Inter"; src: local("Inter"); }
 @font-face { font-family: "Helvetica"; src: local("Helvetica"); }
 @font-face { font-family: "Arial"; src: local("Arial"); }
@@ -28,7 +30,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > chart (9:
 html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
 #vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
 .clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
-.vs-safe { position: absolute; left: 76px; top: 192px; width: 929px; height: 1119px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
 .vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
 .vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
 .vs-fade { animation-name: vs-fade; }
@@ -163,7 +165,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 
 exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > chart (9:16) 2`] = `
 {
-  "assets": [],
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
   "warnings": [],
 }
 `;
@@ -176,6 +181,8 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > code (9:1
 <meta name="viewport" content="width=1080, height=1920">
 <title>s01 code</title>
 <style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
 @font-face { font-family: "Inter"; src: local("Inter"); }
 @font-face { font-family: "Helvetica"; src: local("Helvetica"); }
 @font-face { font-family: "Arial"; src: local("Arial"); }
@@ -196,7 +203,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > code (9:1
 html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
 #vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
 .clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
-.vs-safe { position: absolute; left: 76px; top: 192px; width: 929px; height: 1119px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
 .vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
 .vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
 .vs-fade { animation-name: vs-fade; }
@@ -333,7 +340,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 
 exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > code (9:16) 2`] = `
 {
-  "assets": [],
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
   "warnings": [],
 }
 `;
@@ -346,6 +356,8 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > compariso
 <meta name="viewport" content="width=1080, height=1920">
 <title>s01 comparison</title>
 <style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
 @font-face { font-family: "Inter"; src: local("Inter"); }
 @font-face { font-family: "Helvetica"; src: local("Helvetica"); }
 @font-face { font-family: "Arial"; src: local("Arial"); }
@@ -366,7 +378,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > compariso
 html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
 #vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
 .clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
-.vs-safe { position: absolute; left: 76px; top: 192px; width: 929px; height: 1119px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
 .vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
 .vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
 .vs-fade { animation-name: vs-fade; }
@@ -454,8 +466,8 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div class="vs-safe">
 <div class="vs-stack vs-comparison">
 <div class="vs-compare vs-rows">
-<div class="vs-card vs-left vs-a vs-fade-up" style="--t:0.15s;--d:0.5s"><div class="vs-card-label" style="font-size:42.57px">Before</div><div class="vs-card-text" style="font-size:54px">...</div></div>
-<div class="vs-card vs-right vs-a vs-fade-up" style="--t:0.4s;--d:0.5s"><div class="vs-card-label" style="font-size:42.57px">After</div><div class="vs-card-text" style="font-size:54px">...</div></div>
+<div class="vs-card vs-left vs-a vs-fade-up" style="--t:0.15s;--d:0.5s"><div class="vs-card-label" style="font-size:39.16px">Before</div><div class="vs-card-text" style="font-size:54px">...</div></div>
+<div class="vs-card vs-right vs-a vs-fade-up" style="--t:0.4s;--d:0.5s"><div class="vs-card-label" style="font-size:39.16px">After</div><div class="vs-card-text" style="font-size:54px">...</div></div>
 </div>
 <div class="vs-verdict vs-a vs-fade-up" style="--t:0.9s;--d:0.5s;font-size:59.4px">...</div>
 </div>
@@ -504,7 +516,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 
 exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > comparison (9:16) 2`] = `
 {
-  "assets": [],
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
   "warnings": [],
 }
 `;
@@ -517,6 +532,8 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > cta (9:16
 <meta name="viewport" content="width=1080, height=1920">
 <title>s01 cta</title>
 <style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
 @font-face { font-family: "Inter"; src: local("Inter"); }
 @font-face { font-family: "Helvetica"; src: local("Helvetica"); }
 @font-face { font-family: "Arial"; src: local("Arial"); }
@@ -537,7 +554,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > cta (9:16
 html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
 #vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
 .clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
-.vs-safe { position: absolute; left: 76px; top: 192px; width: 929px; height: 1119px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
 .vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
 .vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
 .vs-fade { animation-name: vs-fade; }
@@ -673,7 +690,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 
 exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > cta (9:16) 2`] = `
 {
-  "assets": [],
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
   "warnings": [],
 }
 `;
@@ -686,6 +706,8 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > diagram (
 <meta name="viewport" content="width=1080, height=1920">
 <title>s01 diagram</title>
 <style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
 @font-face { font-family: "Inter"; src: local("Inter"); }
 @font-face { font-family: "Helvetica"; src: local("Helvetica"); }
 @font-face { font-family: "Arial"; src: local("Arial"); }
@@ -706,7 +728,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > diagram (
 html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
 #vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
 .clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
-.vs-safe { position: absolute; left: 76px; top: 192px; width: 929px; height: 1119px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
 .vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
 .vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
 .vs-fade { animation-name: vs-fade; }
@@ -792,11 +814,11 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-diagram" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<svg class="vs-edges" width="929" height="1119" viewBox="0 0 929 1119">
-<path d="M464.5 363.99 L464.5 733.41" pathLength="1" stroke="var(--vs-text)" stroke-opacity="0.7" stroke-width="4.86" fill="none" class="vs-a vs-draw" style="--t:0.7s;--d:0.4s"/><polygon points="464.5,755.01 452.62,733.41 476.38,733.41" fill="var(--vs-text)" fill-opacity="0.7" class="vs-a vs-fade" style="--t:1s;--d:0.2s"/>
+<svg class="vs-edges" width="936" height="1060" viewBox="0 0 936 1060">
+<path d="M468 349.24 L468 689.16" pathLength="1" stroke="var(--vs-text)" stroke-opacity="0.7" stroke-width="4.86" fill="none" class="vs-a vs-draw" style="--t:0.7s;--d:0.4s"/><polygon points="468,710.76 456.12,689.16 479.88,689.16" fill="var(--vs-text)" fill-opacity="0.7" class="vs-a vs-fade" style="--t:1s;--d:0.2s"/>
 </svg>
-<div class="vs-node" style="left:86.5px;top:204.15px;width:756px;height:151.2px;font-size:54px"><div class="vs-a vs-scale-in" style="--t:0.15s;--d:0.45s">A</div></div>
-<div class="vs-node" style="left:86.5px;top:763.65px;width:756px;height:151.2px;font-size:54px"><div class="vs-a vs-scale-in" style="--t:0.6s;--d:0.45s">B</div></div>
+<div class="vs-node" style="left:90px;top:189.4px;width:756px;height:151.2px;font-size:54px"><div class="vs-a vs-scale-in" style="--t:0.15s;--d:0.45s">A</div></div>
+<div class="vs-node" style="left:90px;top:719.4px;width:756px;height:151.2px;font-size:54px"><div class="vs-a vs-scale-in" style="--t:0.6s;--d:0.45s">B</div></div>
 </div>
 </div>
 </div>
@@ -842,7 +864,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 
 exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > diagram (9:16) 2`] = `
 {
-  "assets": [],
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
   "warnings": [],
 }
 `;
@@ -855,6 +880,8 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > end_card 
 <meta name="viewport" content="width=1080, height=1920">
 <title>s01 end_card</title>
 <style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
 @font-face { font-family: "Inter"; src: local("Inter"); }
 @font-face { font-family: "Helvetica"; src: local("Helvetica"); }
 @font-face { font-family: "Arial"; src: local("Arial"); }
@@ -875,7 +902,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > end_card 
 html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
 #vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
 .clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
-.vs-safe { position: absolute; left: 76px; top: 192px; width: 929px; height: 1119px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
 .vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
 .vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
 .vs-fade { animation-name: vs-fade; }
@@ -1011,7 +1038,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 
 exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > end_card (9:16) 2`] = `
 {
-  "assets": [],
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
   "warnings": [],
 }
 `;
@@ -1024,6 +1054,8 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > screensho
 <meta name="viewport" content="width=1080, height=1920">
 <title>s01 screenshot</title>
 <style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
 @font-face { font-family: "Inter"; src: local("Inter"); }
 @font-face { font-family: "Helvetica"; src: local("Helvetica"); }
 @font-face { font-family: "Arial"; src: local("Arial"); }
@@ -1044,7 +1076,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > screensho
 html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
 #vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
 .clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
-.vs-safe { position: absolute; left: 76px; top: 192px; width: 929px; height: 1119px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
 .vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
 .vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
 .vs-fade { animation-name: vs-fade; }
@@ -1130,7 +1162,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-screenshot" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-shot vs-a vs-scale-in" style="--t:0s;--d:0.5s;height:991.13px;font-size:36.72px">
+<div class="vs-shot vs-a vs-scale-in" style="--t:0s;--d:0.5s;height:932.13px;font-size:36.72px">
 <div class="vs-shot-missing">a1</div>
 </div>
 <div class="vs-callouts" style="font-size:36.72px">
@@ -1181,7 +1213,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 
 exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > screenshot (9:16) 2`] = `
 {
-  "assets": [],
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
   "warnings": [
     "screenshot: asset "a1" could not be resolved to an image in the project; drawing a placeholder",
   ],
@@ -1196,6 +1231,8 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > typograph
 <meta name="viewport" content="width=1080, height=1920">
 <title>s01 typography</title>
 <style>
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: "Inter"; src: url("assets/fonts/Inter-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: block; }
 @font-face { font-family: "Inter"; src: local("Inter"); }
 @font-face { font-family: "Helvetica"; src: local("Helvetica"); }
 @font-face { font-family: "Arial"; src: local("Arial"); }
@@ -1216,7 +1253,7 @@ exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > typograph
 html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); }
 #vs-root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--vs-bg); color: var(--vs-text); font-family: var(--vs-font-body); -webkit-font-smoothing: antialiased; }
 .clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
-.vs-safe { position: absolute; left: 76px; top: 192px; width: 929px; height: 1119px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
+.vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px; display: flex; flex-direction: column; justify-content: center; align-items: stretch; }
 .vs-stack { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--vs-u) * 2.5); width: 100%; }
 .vs-a { animation-duration: var(--d); animation-delay: var(--t); animation-fill-mode: both; animation-iteration-count: 1; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); animation-play-state: paused; }
 .vs-fade { animation-name: vs-fade; }
@@ -1350,7 +1387,10 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 
 exports[`buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES > typography (9:16) 2`] = `
 {
-  "assets": [],
+  "assets": [
+    "assets/fonts/Inter-Regular.ttf",
+    "assets/fonts/Inter-Bold.ttf",
+  ],
   "warnings": [],
 }
 `;

@@ -6,6 +6,7 @@ import { sha256Hex } from "@video-studio/core";
 import { ffprobe, runFfmpeg, runProcess, getTools } from "@video-studio/media";
 import type { DeterministicKind, Scene } from "@video-studio/schema";
 import { DETERMINISTIC_PROPS_EXAMPLES } from "@video-studio/schema";
+import { layoutZones } from "@video-studio/platforms";
 import { buildFilterGraph, composeScene, createFfmpegRenderer, ffColor, frameCount, motionTiming } from "./ffmpeg-renderer.js";
 import { resolveTokens, targetForAspect } from "./tokens.js";
 import type { RenderTarget } from "./types.js";
@@ -97,6 +98,39 @@ describe("pure parts", () => {
     }
   });
 
+  it("records a text box for every text block, inside the frame", () => {
+    for (const [kind, list] of Object.entries(PROPS) as [DeterministicKind, Record<string, unknown>[]][]) {
+      for (const props of list) {
+        const comp = composeScene(scene(kind, props), target, tokens, kind === "screenshot" ? { image: { path: "/x.png", width: 160, height: 90 } } : {});
+        expect(comp.text_boxes.length, kind).toBeGreaterThan(0);
+        for (const b of comp.text_boxes) {
+          expect(b.font_px, kind).toBeGreaterThan(0);
+          expect(b.color, kind).toMatch(/^#[0-9A-F]{6}$/);
+          expect(b.background, kind).toMatch(/^#[0-9A-F]{6}$/);
+          expect(b.rect.x + b.rect.w, `${kind} right`).toBeLessThanOrEqual(target.width);
+        }
+      }
+    }
+    const hook = composeScene({ ...scene("typography", { lines: ["Stop scrolling"] }), purpose: "hook" }, target, tokens);
+    expect(hook.text_boxes).toEqual([expect.objectContaining({ role: "hook", text: "Stop scrolling", truncated: false, color: tokens.color_text, background: tokens.color_background })]);
+    const cta = composeScene(scene("cta", PROPS.cta[0]!), target, tokens);
+    expect(cta.text_boxes.map((b) => b.role)).toEqual(["cta", "cta", "code", "label"]);
+    expect(cta.text_boxes[1]).toMatchObject({ color: tokens.color_background, background: tokens.color_primary });
+    const long = composeScene(scene("typography", { lines: [Array(200).fill("overflow").join(" ")] }), target, tokens);
+    expect(long.text_boxes[0]).toMatchObject({ role: "headline", truncated: true });
+  });
+
+  it("lays content inside zones.content when zones are given", () => {
+    const zones = { ...layoutZones(target), content: { x: 20, y: 40, w: 100, h: 150 } };
+    const comp = composeScene(scene("end_card", { title: "A title that wraps", subtitle: "sub" }), target, tokens, { zones });
+    for (const b of comp.text_boxes) {
+      expect(b.rect.x).toBeGreaterThanOrEqual(20);
+      expect(b.rect.y).toBeGreaterThanOrEqual(40);
+      expect(b.rect.x + b.rect.w).toBeLessThanOrEqual(120);
+      expect(b.rect.y + b.rect.h).toBeLessThanOrEqual(190);
+    }
+  });
+
   it("warns about unsupported chart types and basic diagrams", () => {
     expect(composeScene(scene("chart", PROPS.chart[2]!), target, tokens).warnings.join()).toMatch(/pie.*stat/);
     expect(composeScene(scene("diagram", PROPS.diagram[0]!), target, tokens).warnings.join()).toMatch(/basic/);
@@ -110,6 +144,7 @@ describe("renders every kind", () => {
     const res = await renderer.render({ scene: scene(kind, props), target, tokens, out_path: out, project_dir: dir });
     expect(res.duration_ms).toBe(1000);
     expect(res.renderer).toBe("ffmpeg-drawtext");
+    expect(res.text_boxes?.length).toBeGreaterThan(0);
     if (kind === "screenshot") expect(res.warnings.join()).not.toMatch(/could not be resolved/);
     const p = await ffprobe(out);
     expect([p.width, p.height]).toEqual([180, 320]);

@@ -1,0 +1,68 @@
+# Instagram Reels via the Instagram Graph API content publishing route.
+id: instagram
+name: Instagram Reels (Graph API publishing)
+contract_version: 1
+verified: "2026-09-25"
+sources:
+  - url: https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media
+    title: IG User Media (Reels video and cover photo specifications)
+    note: container, codecs, 3 s–15 min, 23–60 fps, 1920 px max horizontal, 25 Mbps VBR, 300 MB, AAC ≤48 kHz 128 kbps, cover JPEG ≤8 MB 9:16 with a centre 1:1 feed crop
+  - url: https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/error-codes
+    title: Instagram Platform error codes
+    note: post caption limits (2,200 characters, 30 hashtags, 20 @ tags; error 36004 / 2207010)
+platform: instagram_reels
+route: api
+video:
+  aspect_ratios: ["9:16", "4:5", "1:1", "16:9"]
+  recommended: { width: 1080, height: 1920 }
+  max_long_side: 1920
+  duration_sec: { min: 3, max: 900 }
+  fps: { min: 23, max: 60 }
+  max_size_mb: 300
+  max_bitrate_mbps: 25
+  container: [mp4, mov]
+  video_codecs: [h264, h265]
+  audio_codecs: [aac]
+  audio_sample_rate_hz: 48000
+  min_audio_bitrate_kbps: 128
+  note: >-
+    The API accepts aspect ratios from 0.01:1 to 10:1 but recommends 9:16 to avoid cropping or
+    blank space. "1920 px" is Meta's maximum horizontal pixel count. MP4 needs the moov atom at the
+    front, no edit lists, closed GOP, 4:2:0.
+cover:
+  mode: file_or_frame
+  formats: [jpeg]
+  max_size_mb: 8
+  recommended: { width: 1080, height: 1920 }
+  crops:
+    - id: feed-square
+      aspect_ratio: "1:1"
+      anchor: center
+      note: when the Reel is also shared to Feed, the middle 1:1 square is used as the feed cover
+captions:
+  post_caption_max_chars: 2200
+  hashtags_max: 30
+  mentions_max: 20
+  sidecar_formats: []
+  burn_in_recommended: true
+ui_masks:
+  - id: header
+    label: status bar and Reels header (title, camera)
+    aspect_ratio: "9:16"
+    rect: { x: 0, y: 0, w: 1, h: 0.08 }
+    severity: error
+  - id: action-rail
+    label: action rail (like, comment, share, more, audio)
+    aspect_ratio: "9:16"
+    rect: { x: 0.87, y: 0.45, w: 0.13, h: 0.42 }
+    severity: error
+  - id: footer
+    label: username, follow button, post caption and audio line
+    aspect_ratio: "9:16"
+    rect: { x: 0, y: 0.82, w: 1, h: 0.18 }
+    severity: error
+notes:
+  - "Re-verified 2026-09-25 against the two Meta pages above: every video, cover and post-caption value."
+  - "recommended 1080x1920 is the plugin's production master, not a Meta requirement."
+  - "ui_masks are approximations of the Instagram app UI measured by eye on 9:16 frames; Meta publishes no official safe-zone numbers. Re-measure when the app UI changes and bump contract_version."
+  - "No AI-disclosure field is documented on this publishing route; ai_disclosure is omitted."

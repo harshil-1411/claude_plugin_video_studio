@@ -1,7 +1,9 @@
-import { extname, isAbsolute, relative, resolve } from "node:path";
-import type { DeterministicKind } from "@video-studio/schema";
+import { basename, extname, isAbsolute, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { DeterministicKind, TextBox, TextRole } from "@video-studio/schema";
 import { escapeHtml, highlightLines, languageFamily } from "./hyperframes-highlight.js";
 import { safeArea } from "./text-layout.js";
+import { fontFaceCss } from "./tokens.js";
 import type { SceneRenderRequest, VisualTokens } from "./types.js";
 
 /**
@@ -37,6 +39,12 @@ export interface Composition {
   assets: CompositionAsset[];
   /** Props that could not be honoured (surfaced to QA). */
   warnings: string[];
+  /**
+   * Text blocks, for lint. Rects are the boxes the text was fitted into (the browser places the
+   * text inside them); `truncated` means the estimate did not fit at the minimum size, so the
+   * browser clips or overflows it.
+   */
+  text_boxes: TextBox[];
 }
 
 export interface BuildCompositionOptions {
@@ -155,20 +163,45 @@ function anim(effect: string, at: number, len: number, cls = "", style = ""): st
   return `class="${c}" style="--t:${fmtSec(at)}s;--d:${fmtSec(len)}s${style ? `;${style}` : ""}"`;
 }
 
+interface FontFit {
+  fs: number;
+  /** False when the text does not fit even at `minFs` (the browser will clip or overflow it). */
+  fits: boolean;
+}
+
 /**
  * Largest font size (px) at which `texts` fit a box when the browser wraps them at `boxW`,
  * estimated from an average advance of `em` × size per character.
  */
-function fitFont(texts: readonly string[], boxW: number, boxH: number, maxFs: number, minFs: number, lineHeight = 1.2, em = 0.56): number {
+function fitFontInfo(texts: readonly string[], boxW: number, boxH: number, maxFs: number, minFs: number, lineHeight = 1.2, em = 0.56): FontFit {
+  const longestWord = Math.max(0, ...texts.flatMap((t) => t.split(/\s+/).map((w) => Array.from(w).length)));
+  const ok = (size: number) => {
+    const perLine = Math.max(1, Math.floor(boxW / (size * em)));
+    const lines = texts.reduce((acc, t) => acc + Math.max(1, Math.ceil(Array.from(t).length / perLine)), 0);
+    return lines * size * lineHeight <= boxH && longestWord <= perLine;
+  };
   let fs = maxFs;
   for (let guard = 0; guard < 60 && fs > minFs; guard++) {
-    const perLine = Math.max(1, Math.floor(boxW / (fs * em)));
-    const longestWord = Math.max(0, ...texts.flatMap((t) => t.split(/\s+/).map((w) => Array.from(w).length)));
-    const lines = texts.reduce((acc, t) => acc + Math.max(1, Math.ceil(Array.from(t).length / perLine)), 0);
-    if (lines * fs * lineHeight <= boxH && longestWord <= perLine) break;
+    if (ok(fs)) break;
     fs *= 0.92;
   }
-  return Math.max(minFs, Math.round(fs * 100) / 100);
+  const size = Math.max(minFs, Math.round(fs * 100) / 100);
+  return { fs: size, fits: ok(size) };
+}
+
+function fitFont(texts: readonly string[], boxW: number, boxH: number, maxFs: number, minFs: number, lineHeight = 1.2, em = 0.56): number {
+  return fitFontInfo(texts, boxW, boxH, maxFs, minFs, lineHeight, em).fs;
+}
+
+/** `#RRGGBB` mix of a→b by t, matching CSS `color-mix(in srgb, b t, a)`. */
+function mixHex(a: string, b: string, t: number): string {
+  const ch = (h: string) => {
+    const x = h.replace(/^#/, "");
+    const full = x.length === 3 || x.length === 4 ? x.slice(0, 3).replace(/./g, (c) => c + c) : x.slice(0, 6);
+    return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16));
+  };
+  const [p, q] = [ch(a), ch(b)];
+  return `#${p.map((v, i) => Math.round(v + (q[i]! - v) * t).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 }
 
 // ---------------------------------------------------------------------------------- per kind
@@ -180,14 +213,50 @@ interface KindCtx {
   asset: (absPath: string, name: string) => string;
   resolveAsset: (id: string) => string | undefined;
   logo?: string;
+  /** Role of the scene's main text: `hook` in the hook scene, else `headline`. */
+  main: TextRole;
+  /** Resolved colours (#RRGGBB) for text-box contrast. */
+  colors: { bg: string; text: string; primary: string; secondary: string; panel: string };
+  boxes: TextBox[];
 }
 
-function renderTypography({ stage, props, warnings }: KindCtx): string {
+/** Record a text block drawn in `box` (stage px relative to the safe area unless `abs`). */
+function rec(
+  ctx: KindCtx,
+  role: TextRole,
+  text: string,
+  box: { x?: number; y?: number; w: number; h: number },
+  fit: FontFit,
+  color: string,
+  background: string = ctx.colors.bg,
+  abs = false,
+): void {
+  if (!text.trim()) return;
+  const { safe } = ctx.stage;
+  const x0 = (abs ? 0 : safe.x) + (box.x ?? 0);
+  const y0 = (abs ? 0 : safe.y) + (box.y ?? 0);
+  const x = Math.round(x0);
+  const y = Math.round(y0);
+  ctx.boxes.push({
+    role,
+    text,
+    rect: { x, y, w: Math.max(0, Math.round(x0 + box.w) - x), h: Math.max(0, Math.round(y0 + box.h) - y) },
+    font_px: fit.fs,
+    truncated: !fit.fits,
+    color: mixHex(color, color, 0),
+    background: mixHex(background, background, 0),
+  });
+}
+
+function renderTypography(ctx: KindCtx): string {
+  const { stage, props, warnings } = ctx;
   const lines = Array.isArray(props.lines) ? props.lines.map(str).filter((l): l is string => Boolean(l)) : [];
   if (lines.length === 0) warnings.push("typography: no `lines` to show");
   const emphasis = str(props.emphasis);
   const { u, safe } = stage;
-  const fs = fitFont(lines, safe.w, safe.h * 0.9, u * 11, u * 3.2, 1.15, 0.58);
+  const fit = fitFontInfo(lines, safe.w, safe.h * 0.9, u * 11, u * 3.2, 1.15, 0.58);
+  const fs = fit.fs;
+  rec(ctx, ctx.main, lines.join("\n"), { y: safe.h * 0.05, w: safe.w, h: safe.h * 0.9 }, fit, ctx.colors.text);
   const st = stagger(lines.length, stage.dur);
   let found = false;
   const body = lines
@@ -210,7 +279,8 @@ function renderTypography({ stage, props, warnings }: KindCtx): string {
   return `<div class="vs-stack vs-typography" style="font-size:${px(fs)}">\n${body}\n</div>`;
 }
 
-function renderCode({ stage, props, warnings }: KindCtx): string {
+function renderCode(ctx: KindCtx): string {
+  const { stage, props, warnings } = ctx;
   const language = str(props.language) ?? "text";
   const raw = (str(props.code) ?? "").replace(/\r\n?/g, "\n").replace(/\t/g, "  ").replace(/\n+$/, "");
   const highlight = new Set(Array.isArray(props.highlight_lines) ? props.highlight_lines.filter((n): n is number => Number.isInteger(n)) : []);
@@ -234,6 +304,8 @@ function renderCode({ stage, props, warnings }: KindCtx): string {
     warnings.push("code: long lines are clipped at the panel edge");
   }
   for (const n of highlight) if (n > shown.length) warnings.push(`code: highlight_lines ${n} is outside the shown code`);
+  const clipped = shown.length < allLines.length || maxLen * fs * 0.6 > innerW + 0.01;
+  rec(ctx, "code", raw, { x: u * 3, y: (safe.h - panelH) / 2 + u * 3, w: innerW, h: panelH - u * 6 }, { fs: Math.round(fs * 100) / 100, fits: !clipped }, ctx.colors.text, ctx.colors.panel);
   const st = stagger(shown.length, stage.dur, 0.25);
   const rows = shown
     .map((html, i) => {
@@ -257,7 +329,8 @@ interface SeriesPoint {
   value: number;
 }
 
-function renderChart({ stage, props, warnings }: KindCtx): string {
+function renderChart(ctx: KindCtx): string {
+  const { stage, props, warnings } = ctx;
   const type = str(props.type) ?? "stat";
   const series: SeriesPoint[] = Array.isArray(props.series)
     ? props.series
@@ -269,16 +342,21 @@ function renderChart({ stage, props, warnings }: KindCtx): string {
   const label = str(props.label);
   const { u, safe } = stage;
   const title = label ? `<div ${anim("fade-up", 0.05, 0.5, `vs-chart-title`)}>${esc(label)}</div>` : "";
+  const titleFs = u * 5.5;
 
   if (type === "stat" || series.length === 0) {
     if (type !== "stat") warnings.push(`chart: type "${type}" needs \`series\`; showing the value as a stat`);
     const raw = props.value ?? series[0]?.value;
     const value = typeof raw === "number" ? fmtNumber(raw) : (str(raw) ?? "");
-    const fs = fitFont([value + unit], safe.w, safe.h * 0.45, u * 30, u * 6, 1, 0.6);
+    const vfit = fitFontInfo([value + unit], safe.w, safe.h * 0.45, u * 30, u * 6, 1, 0.6);
+    const fs = vfit.fs;
+    const lfit = label ? fitFontInfo([label], safe.w, safe.h * 0.25, u * 7, u * 3) : undefined;
+    rec(ctx, ctx.main, value + unit, { y: safe.h * 0.05, w: safe.w, h: safe.h * 0.45 }, vfit, ctx.colors.primary);
+    if (label && lfit) rec(ctx, "label", label, { y: safe.h * 0.55, w: safe.w, h: safe.h * 0.25 }, lfit, ctx.colors.text);
     return [
       `<div class="vs-stack vs-stat">`,
       `<div ${anim("scale-in", 0.1, 0.6, `vs-stat-value`, `font-size:${px(fs)}`)}><span>${esc(value)}</span><span class="vs-stat-unit">${esc(unit)}</span></div>`,
-      label ? `<div ${anim("fade-up", 0.45, 0.5, `vs-stat-label`, `font-size:${px(fitFont([label], safe.w, safe.h * 0.25, u * 7, u * 3))}`)}>${esc(label)}</div>` : "",
+      label && lfit ? `<div ${anim("fade-up", 0.45, 0.5, `vs-stat-label`, `font-size:${px(lfit.fs)}`)}>${esc(label)}</div>` : "",
       `</div>`,
     ]
       .filter(Boolean)
@@ -287,6 +365,10 @@ function renderChart({ stage, props, warnings }: KindCtx): string {
 
   const chartW = safe.w;
   const chartH = safe.h * (label ? 0.78 : 0.9);
+  if (label) {
+    const perLine = Math.max(1, Math.floor(safe.w / (titleFs * 0.56)));
+    rec(ctx, ctx.main, label, { w: safe.w, h: safe.h - chartH }, { fs: r2(titleFs), fits: Math.ceil(Array.from(label).length / perLine) * titleFs * 1.2 <= safe.h - chartH }, ctx.colors.text);
+  }
   const fs = Math.max(8, u * 3);
   const max = Math.max(0, ...series.map((s) => s.value));
   const min = Math.min(0, ...series.map((s) => s.value));
@@ -423,7 +505,8 @@ export function layerNodes(n: number, edges: ReadonlyArray<readonly [number, num
   return layer.map((l) => used.indexOf(l));
 }
 
-function renderDiagram({ stage, props, warnings }: KindCtx): string {
+function renderDiagram(ctx: KindCtx): string {
+  const { stage, props, warnings } = ctx;
   const labels = Array.isArray(props.nodes) ? props.nodes.map(str).filter((s): s is string => Boolean(s)) : [];
   const index = new Map<string, number>();
   const nodes: string[] = [];
@@ -481,6 +564,12 @@ function renderDiagram({ stage, props, warnings }: KindCtx): string {
       fs = Math.min(fs, fitFont([nodes[nodeIdx]!], w - u * 2, h - u, u * 5, u * 1.8));
     });
   }
+  const nodeBg = mixHex(ctx.colors.bg, ctx.colors.primary, 0.14);
+  nodes.forEach((label, i) => {
+    const b = boxes[i]!;
+    const fit = fitFontInfo([label], b.w - u * 2, b.h - u, fs, fs);
+    rec(ctx, "label", label, { x: b.x + u, y: b.y + u / 2, w: b.w - u * 2, h: b.h - u }, { fs, fits: fit.fits }, ctx.colors.text, nodeBg);
+  });
   const layerTime = (l: number) => 0.15 + l * Math.min(0.45, Math.max(0.1, (stage.dur * 0.6 - 0.6) / Math.max(1, layerCount)));
   const nodeHtml = nodes
     .map((label, i) => {
@@ -526,7 +615,8 @@ function side(v: unknown): { label: string; text: string } {
   return { label: str(o.label) ?? "", text: str(o.text) ?? "" };
 }
 
-function renderComparison({ stage, props }: KindCtx): string {
+function renderComparison(ctx: KindCtx): string {
+  const { stage, props } = ctx;
   const left = side(props.left);
   const right = side(props.right);
   const verdict = str(props.verdict);
@@ -534,8 +624,21 @@ function renderComparison({ stage, props }: KindCtx): string {
   const columns = !stage.portrait && stage.W > stage.H;
   const cardW = columns ? (safe.w - u * 4) / 2 : safe.w;
   const cardH = (columns ? safe.h * 0.7 : (safe.h * (verdict ? 0.78 : 0.92) - u * 4) / 2) - u * 6;
-  const labelFs = fitFont([left.label, right.label], cardW - u * 6, cardH * 0.3, u * 6.5, u * 2.5);
-  const textFs = fitFont([left.text, right.text], cardW - u * 6, cardH * 0.62, u * 5, u * 2.2, 1.3);
+  const labelFit = fitFontInfo([left.label, right.label], cardW - u * 6, cardH * 0.3, u * 6.5, u * 2.5);
+  const textFit = fitFontInfo([left.text, right.text], cardW - u * 6, cardH * 0.62, u * 5, u * 2.2, 1.3);
+  const labelFs = labelFit.fs;
+  const textFs = textFit.fs;
+  const cardAt = (i: number) => ({ x: columns ? i * (cardW + u * 4) + u * 3 : u * 3, y: columns ? u * 3 : i * (cardH + u * 10) + u * 3 });
+  [left, right].forEach((sd, i) => {
+    const at = cardAt(i);
+    const accent = i === 0 ? ctx.colors.primary : ctx.colors.secondary;
+    rec(ctx, "label", sd.label, { ...at, w: cardW - u * 6, h: cardH * 0.3 }, labelFit, accent, ctx.colors.panel);
+    rec(ctx, "body", sd.text, { x: at.x, y: at.y + cardH * 0.34, w: cardW - u * 6, h: cardH * 0.62 }, textFit, ctx.colors.text, ctx.colors.panel);
+  });
+  const verdictFit = verdict ? fitFontInfo([verdict], safe.w - u * 6, safe.h * 0.14, u * 5.5, u * 2.4) : undefined;
+  if (verdict && verdictFit) {
+    rec(ctx, "headline", verdict, { x: u * 3, y: safe.h * 0.84, w: safe.w - u * 6, h: safe.h * 0.14 }, verdictFit, ctx.colors.text, mixHex(ctx.colors.bg, ctx.colors.primary, 0.18));
+  }
   const card = (s: { label: string; text: string }, cls: string, effect: string, at: number) =>
     `<div ${anim(effect, at, 0.5, `vs-card ${cls}`)}><div class="vs-card-label" style="font-size:${px(labelFs)}">${esc(s.label)}</div><div class="vs-card-text" style="font-size:${px(textFs)}">${esc(s.text)}</div></div>`;
   return [
@@ -544,8 +647,8 @@ function renderComparison({ stage, props }: KindCtx): string {
     card(left, "vs-left", columns ? "slide-right" : "fade-up", 0.15),
     card(right, "vs-right", columns ? "slide-left" : "fade-up", 0.4),
     `</div>`,
-    verdict
-      ? `<div ${anim("fade-up", Math.min(0.9, stage.dur * 0.45), 0.5, `vs-verdict`, `font-size:${px(fitFont([verdict], safe.w - u * 6, safe.h * 0.14, u * 5.5, u * 2.4))}`)}>${esc(verdict)}</div>`
+    verdict && verdictFit
+      ? `<div ${anim("fade-up", Math.min(0.9, stage.dur * 0.45), 0.5, `vs-verdict`, `font-size:${px(verdictFit.fs)}`)}>${esc(verdict)}</div>`
       : "",
     `</div>`,
   ]
@@ -566,15 +669,30 @@ function renderCta(ctx: KindCtx): string {
   const { u, safe } = stage;
   const st = stagger(2 + (command ? 1 : 0) + (url ? 1 : 0), stage.dur);
   let i = 0;
+  const hf = fitFontInfo([headline], safe.w, safe.h * 0.35, u * 10, u * 3.5, 1.1);
+  const af = fitFontInfo([action], safe.w * 0.8, safe.h * 0.12, u * 6, u * 2.5);
+  const cf = command ? fitFontInfo([command], safe.w - u * 8, safe.h * 0.12, u * 4.5, u * 1.8, 1.2, 0.62) : undefined;
+  const uf = url ? fitFontInfo([url], safe.w, safe.h * 0.08, u * 4, u * 2) : undefined;
+  // Boxes follow the vertical stack order (headline, action, command, url), centred in the safe area.
+  let y = safe.h * 0.1;
+  rec(ctx, ctx.main === "hook" ? "hook" : "cta", headline, { y, w: safe.w, h: safe.h * 0.35 }, hf, ctx.colors.text);
+  y += safe.h * 0.37;
+  rec(ctx, "cta", action, { x: safe.w * 0.1, y, w: safe.w * 0.8, h: safe.h * 0.12 }, af, ctx.colors.bg, ctx.colors.primary);
+  y += safe.h * 0.14;
+  if (command && cf) {
+    rec(ctx, "code", `$ ${command}`, { x: u * 4, y, w: safe.w - u * 8, h: safe.h * 0.12 }, cf, ctx.colors.text, ctx.colors.panel);
+    y += safe.h * 0.14;
+  }
+  if (url && uf) rec(ctx, "label", url, { y, w: safe.w, h: safe.h * 0.08 }, uf, ctx.colors.secondary);
   return [
     `<div class="vs-stack vs-cta">`,
     logoHtml(ctx, 0),
-    `<div ${anim("fade-up", st.at(i++), st.len, `vs-headline`, `font-size:${px(fitFont([headline], safe.w, safe.h * 0.35, u * 10, u * 3.5, 1.1))}`)}>${esc(headline)}</div>`,
-    `<div class="vs-action-wrap"><div ${anim("pop", st.at(i++), st.len, `vs-action`, `font-size:${px(fitFont([action], safe.w * 0.8, safe.h * 0.12, u * 6, u * 2.5))}`)}>${esc(action)}</div></div>`,
-    command
-      ? `<div ${anim("fade-up", st.at(i++), st.len, `vs-command`, `font-size:${px(fitFont([command], safe.w - u * 8, safe.h * 0.12, u * 4.5, u * 1.8, 1.2, 0.62))}`)}><span class="vs-prompt">$</span> ${esc(command)}</div>`
+    `<div ${anim("fade-up", st.at(i++), st.len, `vs-headline`, `font-size:${px(hf.fs)}`)}>${esc(headline)}</div>`,
+    `<div class="vs-action-wrap"><div ${anim("pop", st.at(i++), st.len, `vs-action`, `font-size:${px(af.fs)}`)}>${esc(action)}</div></div>`,
+    command && cf
+      ? `<div ${anim("fade-up", st.at(i++), st.len, `vs-command`, `font-size:${px(cf.fs)}`)}><span class="vs-prompt">$</span> ${esc(command)}</div>`
       : "",
-    url ? `<div ${anim("fade", st.at(i++), st.len, `vs-url`, `font-size:${px(fitFont([url], safe.w, safe.h * 0.08, u * 4, u * 2))}`)}>${esc(url)}</div>` : "",
+    url && uf ? `<div ${anim("fade", st.at(i++), st.len, `vs-url`, `font-size:${px(uf.fs)}`)}>${esc(url)}</div>` : "",
     `</div>`,
   ]
     .filter(Boolean)
@@ -587,11 +705,15 @@ function renderEndCard(ctx: KindCtx): string {
   const subtitle = str(props.subtitle);
   const { u, safe } = stage;
   if (!title && !subtitle && !ctx.logo) warnings.push("end_card: no title, subtitle or logo; card is empty");
+  const tf = title ? fitFontInfo([title], safe.w, safe.h * 0.3, u * 11, u * 4, 1.1) : undefined;
+  const sf = subtitle ? fitFontInfo([subtitle], safe.w, safe.h * 0.15, u * 5, u * 2.2) : undefined;
+  if (title && tf) rec(ctx, ctx.main, title, { y: safe.h * 0.25, w: safe.w, h: safe.h * 0.3 }, tf, ctx.colors.text);
+  if (subtitle && sf) rec(ctx, "body", subtitle, { y: safe.h * 0.58, w: safe.w, h: safe.h * 0.15 }, sf, ctx.colors.text);
   return [
     `<div class="vs-stack vs-end">`,
     logoHtml(ctx, 0.05),
-    title ? `<div ${anim("scale-in", 0.15, 0.6, `vs-headline`, `font-size:${px(fitFont([title], safe.w, safe.h * 0.3, u * 11, u * 4, 1.1))}`)}>${esc(title)}</div>` : "",
-    subtitle ? `<div ${anim("fade-up", 0.45, 0.5, `vs-subtitle`, `font-size:${px(fitFont([subtitle], safe.w, safe.h * 0.15, u * 5, u * 2.2))}`)}>${esc(subtitle)}</div>` : "",
+    title && tf ? `<div ${anim("scale-in", 0.15, 0.6, `vs-headline`, `font-size:${px(tf.fs)}`)}>${esc(title)}</div>` : "",
+    subtitle && sf ? `<div ${anim("fade-up", 0.45, 0.5, `vs-subtitle`, `font-size:${px(sf.fs)}`)}>${esc(subtitle)}</div>` : "",
     `<div ${anim("grow-x-center", 0.6, 0.5, `vs-rule`)}></div>`,
     `</div>`,
   ]
@@ -617,6 +739,7 @@ function renderScreenshot(ctx: KindCtx): string {
   } else {
     warnings.push(`screenshot: asset "${id}" could not be resolved to an image in the project; drawing a placeholder`);
     img = `<div class="vs-shot-missing">${esc(id || "missing asset")}</div>`;
+    rec(ctx, "decorative", id || "missing asset", { w: safe.w, h: safe.h * 0.6 }, { fs: r2(Math.max(9, u * 3.4)), fits: true }, ctx.colors.text, ctx.colors.panel);
   }
   const callouts = Array.isArray(props.callouts) ? props.callouts : [];
   const positioned: string[] = [];
@@ -630,11 +753,13 @@ function renderScreenshot(ctx: KindCtx): string {
     const x = pct(o.x);
     const y = pct(o.y);
     if (x !== undefined && y !== undefined) {
+      rec(ctx, "label", text, { x: (x / 100) * safe.w, y: (y / 100) * safe.h - fs, w: Math.min(safe.w, Array.from(text).length * fs * 0.56 + fs * 2.6), h: fs * 2 }, { fs: r2(fs), fits: true }, ctx.colors.bg, ctx.colors.primary);
       positioned.push(
         `<div class="vs-pin" style="left:${x}%;top:${y}%"><div ${anim("pop", st.at(i), st.len)}><span class="vs-pin-dot"></span><span class="vs-callout">${esc(text)}</span></div></div>`,
       );
     } else {
       listed.push(`<div ${anim("fade-up", st.at(i), st.len, `vs-callout`)}>${esc(text)}</div>`);
+      rec(ctx, "label", text, { y: safe.h - Math.min(safe.h * 0.35, callouts.length * fs * 2.6) + listed.length * fs * 1.6, w: safe.w, h: fs * 1.4 }, { fs: r2(fs), fits: true }, ctx.colors.bg, ctx.colors.primary);
     }
   });
   const listH = listed.length ? Math.min(safe.h * 0.35, listed.length * fs * 2.6) : 0;
@@ -663,10 +788,11 @@ const RENDERERS: Record<DeterministicKind, (ctx: KindCtx) => string> = {
 
 // ---------------------------------------------------------------------------------- document
 
-function stylesheet(stage: Stage, tokens: Record<keyof typeof FALLBACK_TOKENS, string>, fontNames: string[]): string {
+function stylesheet(stage: Stage, tokens: Record<keyof typeof FALLBACK_TOKENS, string>, fontNames: string[], bundledFaces = ""): string {
   const { W, H, u, safe } = stage;
   const faces = fontNames.map((n) => `@font-face { font-family: "${n}"; src: local("${n}"); }`).join("\n");
-  return `${faces}
+  // Bundled fonts (fontFaceCss) come first; the local() rules still cover system families.
+  return `${bundledFaces ? `${bundledFaces}\n` : ""}${faces}
 :root {
   --vs-bg: ${tokens.color_background};
   --vs-text: ${tokens.color_text};
@@ -886,9 +1012,12 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
     return /[/\\.]/.test(id) ? projectImage(id) : undefined;
   };
 
-  const safe = safeArea({ width: W, height: H, aspect_ratio: target.aspect_ratio });
+  const safe = safeArea({ width: W, height: H, aspect_ratio: target.aspect_ratio }, req.zones);
   const stage: Stage = { W, H, u: Math.min(W, H) / 100, safe, portrait: H > W, dur };
   const tok = resolveTokens(req.tokens, warnings);
+  const v = tok.values;
+  const colors = { bg: v.color_background, text: v.color_text, primary: v.color_primary, secondary: v.color_secondary, panel: mixHex(v.color_background, v.color_text, 0.07) };
+  const boxes: TextBox[] = [];
 
   let logo: string | undefined;
   if (req.tokens.logo_path && (det.kind === "cta" || det.kind === "end_card")) {
@@ -897,7 +1026,16 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
     else warnings.push(`tokens: logo_path "${req.tokens.logo_path}" is outside the project or not an image; logo omitted`);
   }
 
-  const content = render({ stage, props: det.props ?? {}, warnings, asset: addAsset, resolveAsset, logo });
+  const main: TextRole = scene.purpose === "hook" ? "hook" : "headline";
+  const content = render({ stage, props: det.props ?? {}, warnings, asset: addAsset, resolveAsset, logo, main, colors, boxes });
+  // Bundled font files are copied next to the composition and referenced relatively, so the
+  // page loads nothing from outside its directory and the HTML does not embed host paths.
+  const bundledFaces = fontFaceCss(req.tokens).replace(/url\("(file:[^"]+)"\)/g, (_m, href: string) => {
+    const src = fileURLToPath(href);
+    const dest = `assets/fonts/${basename(src).replace(/[^A-Za-z0-9._-]/g, "_")}`;
+    if (!assets.some((a) => a.dest === dest)) assets.push({ src, dest });
+    return `url("${dest}")`;
+  });
   const compositionId = compositionIdFor(scene.id);
   const d = fmtSec(dur);
   const html = `<!doctype html>
@@ -907,7 +1045,7 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
 <meta name="viewport" content="width=${W}, height=${H}">
 <title>${esc(`${scene.id} ${det.kind}`)}</title>
 <style>
-${stylesheet(stage, tok.values, tok.fontNames)}
+${stylesheet(stage, tok.values, tok.fontNames, bundledFaces)}
 </style>
 </head>
 <body>
@@ -924,5 +1062,5 @@ ${timelineScript(compositionId, dur)}
 </body>
 </html>
 `;
-  return { composition_id: compositionId, html, assets, warnings };
+  return { composition_id: compositionId, html, assets, warnings, text_boxes: boxes };
 }

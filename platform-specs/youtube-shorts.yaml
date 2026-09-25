@@ -1,0 +1,57 @@
+# YouTube Shorts (upload through YouTube Studio or the Data API; Shorts classification is automatic).
+id: youtube-shorts
+name: YouTube Shorts
+contract_version: 1
+verified: "2026-09-25"
+sources:
+  - url: https://support.google.com/youtube/answer/15424877
+    title: YouTube Help — which videos are Shorts
+    note: square or vertical, up to 3 minutes (uploads on or after 2024-10-15)
+  - url: https://support.google.com/youtube/answer/72431
+    title: YouTube Help — custom thumbnails
+    note: Shorts thumbnail 2160x3840 9:16, min height 640, JPG/PNG, 50 MB desktop (10 MB mobile), desktop Studio only, verified accounts
+  - url: https://developers.google.com/youtube/v3/docs/captions/insert
+    title: YouTube Data API captions.insert
+    note: caption track upload (files up to 100 MB)
+platform: youtube_shorts
+route: app_upload
+video:
+  aspect_ratios: ["9:16", "1:1"]
+  recommended: { width: 1080, height: 1920 }
+  duration_sec: { max: 180 }
+  container: [mp4, mov, webm]
+  video_codecs: [h264, h265, vp9, av1]
+  audio_codecs: [aac, opus, mp3]
+  note: >-
+    A video is classified as a Short when it is square or vertical and at most 3 minutes; wider
+    ratios (16:9) make it long-form. YouTube recommends keeping the source frame rate.
+cover:
+  mode: file_or_frame
+  formats: [jpeg, png]
+  max_size_mb: 50
+  recommended: { width: 2160, height: 3840 }
+  min_height: 640
+captions:
+  sidecar_formats: [srt, vtt]
+  burn_in_recommended: true
+ui_masks:
+  - id: header
+    label: status bar, search and menu
+    aspect_ratio: "9:16"
+    rect: { x: 0, y: 0, w: 1, h: 0.08 }
+    severity: error
+  - id: action-rail
+    label: action rail (like, dislike, comment, share, remix, sound)
+    aspect_ratio: "9:16"
+    rect: { x: 0.86, y: 0.42, w: 0.14, h: 0.45 }
+    severity: error
+  - id: footer
+    label: channel name, subscribe button, title, sound line and navigation bar
+    aspect_ratio: "9:16"
+    rect: { x: 0, y: 0.81, w: 1, h: 0.19 }
+    severity: error
+notes:
+  - "Re-verified 2026-09-25: Shorts classification (square/vertical, ≤ 3 min) and the custom thumbnail spec (2160x3840, min height 640, JPG/PNG, 50 MB desktop / 10 MB mobile)."
+  - "From the v2 report, unverified here: caption-track upload via captions.insert (100 MB). Container/codec lists follow YouTube's general upload guidance and are permissive; the plugin always delivers MP4/H.264/AAC."
+  - "No post-caption (title/description) limits are recorded: the v2 report gives none."
+  - "ui_masks are approximations of the YouTube app's Shorts player UI, not official safe zones."

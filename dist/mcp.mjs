@@ -40036,8 +40036,8 @@ function meshPackData(e) {
 }
 function buildMeshVertexData(e, t, n) {
 	let r = 0;
-	for (let e of n) if (e.type === f$1.TRIANGLES) r += e.coords.length;
-	else if (e.type === f$1.LATTICE) {
+	for (let e of n) if (e.type === f$2.TRIANGLES) r += e.coords.length;
+	else if (e.type === f$2.LATTICE) {
 		let t = e.verticesPerRow;
 		r += (Math.floor(e.coords.length / t) - 1) * (t - 1) * 6;
 	}
@@ -40046,8 +40046,8 @@ function buildMeshVertexData(e, t, n) {
 	};
 	for (let e of n) {
 		let t = e.coords, n = e.colors;
-		if (e.type === f$1.TRIANGLES) for (let e = 0, r = t.length; e < r; e++) addVertex(t[e], n[e]);
-		else if (e.type === f$1.LATTICE) {
+		if (e.type === f$2.TRIANGLES) for (let e = 0, r = t.length; e < r; e++) addVertex(t[e], n[e]);
+		else if (e.type === f$2.LATTICE) {
 			let r = e.verticesPerRow, i = Math.floor(t.length / r) - 1, a = r - 1;
 			for (let e = 0; e < i; e++) {
 				let i = e * r;
@@ -43556,7 +43556,7 @@ function HSLToRGB(e, t) {
 function computeLuminance(e) {
 	return e <= .03928 ? e / 12.92 : ((e + .055) / 1.055) ** 2.4;
 }
-function contrastRatio(e, t, n) {
+function contrastRatio$1(e, t, n) {
 	HSLToRGB(e, n), n.map(computeLuminance);
 	let r = .2126 * n[0] + .7152 * n[1] + .0722 * n[2];
 	HSLToRGB(t, n), n.map(computeLuminance);
@@ -43571,11 +43571,11 @@ function findContrastColor(e, t) {
 	let s = i.subarray(6, 9);
 	RGBToHSL(t, s);
 	let c = s[2] < .5, l = c ? 12 : 4.5;
-	if (o[2] = c ? Math.sqrt(o[2]) : 1 - Math.sqrt(1 - o[2]), contrastRatio(o, s, a) < l) {
+	if (o[2] = c ? Math.sqrt(o[2]) : 1 - Math.sqrt(1 - o[2]), contrastRatio$1(o, s, a) < l) {
 		let e, t;
 		for (c ? (e = o[2], t = 1) : (e = 0, t = o[2]); t - e > .005;) {
 			let n = o[2] = (e + t) / 2;
-			c === contrastRatio(o, s, a) < l ? e = n : t = n;
+			c === contrastRatio$1(o, s, a) < l ? e = n : t = n;
 		}
 		o[2] = c ? t : e;
 	}
@@ -44139,7 +44139,7 @@ function normalizeEdgeBoundary(e, t, n) {
 function percentage(e) {
 	return `${(e * 100).toFixed(2)}%`;
 }
-var e, t, n, r$1, i, a, o, s, c, l, u, d, f$1, p, m, h, g, _$2, v, y, b, x, S, C, w, T, E, D, O, k, PasswordException$1, UnknownErrorException$1, InvalidPDFException$1, ResponseException$1, FormatError$1, AbortException$1, FeatureTest$1, Util$1, j, ee, makeArr$1, makeMap$1, makeObj$1, M, te, ne, re, ie, N, ae, oe, F, L, RefSet, RefSetCache, BaseStream, se, ce, le, ue, de, fe, MissingDataException, ParserEOFException, XRefEntryException, XRefParseException, pe$1, me, QCMS, he, ge, _e, ve, ye, be, xe, Se, AlternateCS, PatternCS, IndexedCS, DeviceGrayCS, DeviceRgbCS, DeviceRgbaCS, DeviceCmykCS, CalGrayCS, Ce, LabCS, we, Te, Ee, StringStream, NullStream, ChunkedStream, ChunkedStreamManager, De, Oe, ke, DecodeStream, StreamsSequenceStream, ColorSpaceUtils, JpegError, DNLMarkerError, EOIMarkerError, Ae, je, Me, Ne, Pe, Fe, Ie, Le, JpegImage, Re, ze, NullOptimizer, QueueOptimizer, Be, CheckedOperatorList, Ve, Pattern, BaseShading, RadialAxialShading, He, MeshStreamReader, Ue, We, DummyShading, BinaryCMapStream, BinaryCMapReader, Ascii85Stream, AsciiHexStream, makeBrotliDecode, Ge, BrotliStream, Ke, qe, Jbig2Error, Je, CCITTFaxStream, Ye, Xe, Ze, Qe, $e, FlateStream, et, tt, JpxError, nt, JpxStream, LZWStream, PredictorStream, RunLengthStream, Parser$2, rt, Lexer, Linearization, it, at, CMap, IdentityCMap, CMapFactory, CSS_FONT_INFO$1, SYSTEM_FONT_INFO$1, FONT_INFO$1, PATTERN_INFO$1, ot, st, ct, lt, ut, dt, ft, pt, mt, ht, gt, _t, vt, yt, bt, xt, St, Ct, wt, Tt, DataBuilder, Et, Dt, Ot, kt, At, CFFParser, CFF, CFFHeader, CFFStrings, CFFIndex, CFFDict, jt, Mt, Nt, Pt, Ft, CFFCharset, CFFEncoding, CFFFDSelect, CFFOffsetTracker, It, Lt, Rt, zt, Bt, Vt, Ht, Ut, Wt, GlyfTable, Gt, Kt, Contour, qt, Jt, ToUnicodeMap, IdentityToUnicodeMap, CFFFont, Commands, Yt, TrueTypeCompiled, Type2Compiled, FontRendererFactory, Xt, Zt, Qt, $t, Type1CharString, en, Type1Parser, Type1Font, tn, nn, rn, an, fonts_Glyph, Font, ErrorFont, on$1, sn, cn, ln, un, dn, fn, pn, mn, hn, gn, _n, vn, yn, bn, xn, Sn, Cn, wn, Tn, En, Dn, On, kn, An, jn, Mn, Nn, Pn, Fn, In, Ln, Rn, zn, Bn, Vn, Hn, Un, Wn, Gn, Kn, R, Token, qn, Jn, z, PsNode, PsProgram, PsBlock, PsNumber, PsOperator, PsIf, PsIfElse, PsArgNode, PsConstNode, PsUnaryNode, PsBinaryNode, PsTernaryNode, Yn, Xn, V, Zn, Qn, PsJsCompiler, PSStackBasedInterpreter, H, $n, er, tr, nr, BaseLocalCache, LocalImageCache, LocalColorSpaceCache, LocalFunctionCache, LocalGStateCache, LocalTilingPatternCache, RegionalImageCache, GlobalColorSpaceCache, rr, ir, ar, PDFFunction, or$1, sr, cr, lr, ur, dr, fr, pr, mr, hr, gr, _r, vr, yr, MurmurHash3_64$1, br, xr, Sr, Cr, wr, Tr, TranslatedFont, StateManager, TextState, EvalState, Er, DefaultAppearanceEvaluator, AppearanceStreamEvaluator, Dr, Or, kr, NameOrNumberTree, NameTree, NumberTree, Ar, jr, Mr, SimpleDOMNode, SimpleXMLParser, MetadataParser, Nr, Pr, StructElementNode, StructElement, StructTreePage, isRef, Fr, Ir, Lr, Rr, zr, Vr, Hr, Ur, Wr, Gr, Kr, qr, U, Jr, Yr, W, Xr, Zr, Qr, $r, ei, ti, ni, ri, ii, ai, oi, si, ci, li, ui, G, di, fi, pi, mi, hi, gi, _i, vi, yi, bi, xi, Si, Ci, wi, Ti, Ei, Di, Oi, ki, Ai, ji, Mi, Ni, Pi, Fi, Ii, Ri, zi, Bi, Vi, Hi, Wi, Gi, Ki, qi, K, Ji, Yi, Xi, Zi, Qi, $i, ea, q, FontFinder, FontInfo$1, FontSelector, TextMeasure, ta, na, ra, ia, aa, oa, sa, ca$1, J, la, ua, da, fa, pa, ma, ha, ga, _a$2, va, ya, ba, xa, Sa, Ca, Y, X, XFAAttribute, wa, ContentObject, OptionObject, StringObject, IntegerObject, Option01, Option10, Ta, Z, Ea, Da, Oa, AppearanceFilter, Arc, Area, Assist, Barcode, Bind, BindItems, Bookend, BooleanElement, Border, Break, BreakAfter, BreakBefore, Button, Calculate, Caption, Certificate, Certificates, CheckButton, ChoiceList, Color, Comb, Connect, ContentArea, Corner, DateElement, DateTime, DateTimeEdit, Decimal, DefaultUi, Desc, DigestMethod, DigestMethods, Draw, Edge, Encoding, Encodings, Encrypt, EncryptData, Encryption, EncryptionMethod, EncryptionMethods, Event$1, ExData, ExObject, ExclGroup, Execute, Extras, Field, Fill, Filter, Float, template_Font, Format, Handler, Hyphenation, Image$1, ImageEdit, Integer, Issuers, Items, Keep, KeyUsage, Line, Linear, LockDocument, Manifest, Margin, Mdp, Medium, Message, NumericEdit, Occur, Oid, Oids, Overflow, PageArea, ka, Para, PasswordEdit, template_Pattern, Picture, Proto, Radial, Reason, Reasons, Rectangle, RefElement, Script$2, SetProperty, SignData, Signature, Signing, Solid, Speak, Stipple, Subform, SubformSet, SubjectDN, SubjectDNs, Submit, Template$1, Text$5, TextEdit, Time, TimeStamp, ToolTip, Traversal, Traverse, Ui, Validate, Value, Variables, Aa, ja, Binder, DataHandler, Q, Acrobat, Acrobat7, ADBE_JSConsole, ADBE_JSDebugger, AddSilentPrint, AddViewerPreferences, AdjustData, AdobeExtensionLevel, Agent, AlwaysEmbed, Amd, config_Area, Attributes, AutoSave, Base, BatchOutput, BehaviorOverride, Cache, Change, Common, Compress, CompressLogicalStructure, CompressObjectStream, Compression, Config, Conformance, ContentCopy, Copies, Creator, CurrentPage, Data, Debug, DefaultTypeface, Destination, DocumentAssembly, Driver, DuplexOption, DynamicRender, Embed, config_Encrypt, config_Encryption, EncryptionLevel, Enforce, Equate, EquateRange, Exclude, ExcludeNS, FlipLabel, config_FontInfo, FormFieldFilling, GroupParent, IfEmpty, IncludeXDPContent, IncrementalLoad, IncrementalMerge, Interactive, Jog, LabelPrinter, Layout, Level, Linearized, Locale, LocaleSet, Log, MapElement, MediumInfo, config_Message, Messaging, Mode, ModifyAnnots, MsgId, NameAttr, NeverEmbed, NumberOfCopies, OpenAction, Output, OutputBin, OutputXSL, Overprint, Packets, PageOffset, PageRange, Pagination, PaginationOverride, Part, Pcl, Pdf, Pdfa, Permissions, PickTrayByPDFSize, config_Picture, PlaintextMetadata, Presence, Present, Print, PrintHighQuality, PrintScaling, PrinterName, Producer, Ps, Range$1$1, Record, Relevant, Rename, RenderPolicy, RunScripts, config_Script, ScriptModel, Severity, SilentPrint, Staple, StartNode, StartPage, SubmitFormat, SubmitUrl, SubsetBelow, SuppressBanner, Tagged, config_Template, Threshold, To, TemplateCache, Trace, Transform$1, Type, Uri, config_Validate, ValidateApprovalSignatures, ValidationMessaging, Version, VersionControl, ViewerPreferences, WebClient, Whitespace, Window, Xdc, Xdp, Xsl, Zpl, Ma, Na, ConnectionSet, EffectiveInputPolicy, EffectiveOutputPolicy, Operation, RootElement, SoapAction, SoapAddress, connection_set_Uri, WsdlAddress, WsdlConnection, XmlConnection, XsdConnection, Pa, Fa, datasets_Data, Datasets, Ia, La, CalendarSymbols, CurrencySymbol, CurrencySymbols, DatePattern, DatePatterns, DateTimeSymbols, Day, DayNames, Era, EraNames, locale_set_Locale, locale_set_LocaleSet, Meridiem, MeridiemNames, Month, MonthNames, NumberPattern, NumberPatterns, NumberSymbol, NumberSymbols, TimePattern, TimePatterns, TypeFace, TypeFaces, Ra, za, signature_Signature, Ba, Va, Stylesheet, Ha, Ua, xdp_Xdp, Wa, Ga, Ka, qa, Ja, Ya, Xa, Za, Qa, XhtmlObject, A, B, Body, Br, Html, I, Li, Ol, P, Span, Sub, Sup, Ul, $a, eo, UnknownNamespace, Root$2, Empty, Builder, to, no, AnnotationFactory, Annotation, AnnotationBorderStyle, MarkupAnnotation, ro, TextWidgetAnnotation, ButtonWidgetAnnotation, ChoiceWidgetAnnotation, SignatureWidgetAnnotation, TextAnnotation, LinkAnnotation, PopupAnnotation, FreeTextAnnotation, LineAnnotation, SquareAnnotation, CircleAnnotation, PolylineAnnotation, PolygonAnnotation, CaretAnnotation, InkAnnotation, HighlightAnnotation, UnderlineAnnotation, SquigglyAnnotation, StrikeOutAnnotation, StampAnnotation, FileAttachmentAnnotation, io, ao, oo, so, DatasetXMLParser, DatasetReader, SingleIntersector, Intersector, Word64, co, lo, DecryptStream, ARCFourCipher, NullCipher, AESBaseCipher, AES128Cipher, AES256Cipher, PDFBase, PDF17, PDF20, CipherTransform, uo, XRef, fo, Page, po, mo, ho, PDFDocument, BasePdfManager, LocalPdfManager, NetworkPdfManager, go, _o, MessageHandler$1, PageData, DocumentData, XRefWrapper, PDFEditor, BasePDFStream$1, BasePDFStreamReader$1, BasePDFStreamRangeReader$1, PDFWorkerStream, PDFWorkerStreamReader, PDFWorkerStreamRangeReader, WorkerTask, WorkerMessageHandler, vo, yo, bo, xo, So, Co, wo, Eo, Do, Oo, $, ko, Ao, jo, Mo, No, Po, Fo, Io, Lo, Ro, zo, Bo, PasswordException, UnknownErrorException, InvalidPDFException, ResponseException, FormatError, AbortException, FeatureTest, Util, Vo, Ho, makeArr, makeMap, makeObj, Uo, Wo, XfaLayer, PixelsPerInch, RenderingCancelledException, StatTimer, PDFDateString, Go, Ko, ColorScheme, CSSConstants, qo, Jo, FloatingToolbar, Yo, Xo, IdManager, Zo, CommandManager, Qo, $o, es, ts, Comment$5, ns, rs, FakeEditor, is$2, as, os$4, MurmurHash3_64, ss, AnnotationStorage, PrintAnnotationStorage, cs$1, ls, us, ds, BBoxReader, ensureDebugMetadata, CanvasBBoxTracker, CanvasDependencyTracker, fs$7, ps, ms, FontLoader, FontFaceObject, CSS_FONT_INFO, SYSTEM_FONT_INFO, FONT_INFO, PATTERN_INFO, CssFontInfo, SystemFontInfo, FontInfo, PatternInfo, FontPathInfo, isRefProxy, isNameProxy, hs, LoopbackPort, gs, _s, MessageHandler, BaseBinaryDataFactory, DOMBinaryDataFactory, BaseCanvasFactory, DOMCanvasFactory, BaseFilterFactory, DOMFilterFactory, NodeFilterFactory, NodeCanvasFactory, NodeBinaryDataFactory, WebGPU, vs, ys, BaseShadingPattern, RadialAxialShadingPattern, MeshShadingPattern, DummyShadingPattern, bs, xs, Ss, Cs, CanvasExtraState, ws, Ts, Es, Ds, Os, BasePDFStream, BasePDFStreamReader, BasePDFStreamRangeReader, PDFFetchStream, PDFFetchStreamReader, PDFFetchStreamRangeReader, PDFDataTransportStream, PDFDataTransportStreamReader, PDFDataTransportStreamRangeReader, PDFNetworkStream, PDFNetworkStreamReader, PDFNetworkStreamRangeReader, PDFNodeStream, PDFNodeStreamReader, PDFNodeStreamRangeReader, GlobalWorkerOptions, Metadata, ks, OptionalContentGroup, As, PagesMapper, js, dataObj, PDFObjects, Ms, Ns, PDFDataRangeTransport, PDFDocumentProxy, Fs, Is, WorkerTransport, RenderTask, Ls, Rs, zs, Bs, Vs, ColorConverters, BaseSVGFactory, DOMSVGFactory, Hs, Us, AnnotationElementFactory, Ws, EditorAnnotationElement, LinkAnnotationElement, TextAnnotationElement, WidgetAnnotationElement, TextWidgetAnnotationElement, SignatureWidgetAnnotationElement, CheckboxWidgetAnnotationElement, RadioButtonWidgetAnnotationElement, PushButtonWidgetAnnotationElement, ChoiceWidgetAnnotationElement, PopupAnnotationElement, PopupElement, FreeTextAnnotationElement, LineAnnotationElement, SquareAnnotationElement, CircleAnnotationElement, PolylineAnnotationElement, PolygonAnnotationElement, CaretAnnotationElement, InkAnnotationElement, HighlightAnnotationElement, UnderlineAnnotationElement, SquigglyAnnotationElement, StrikeOutAnnotationElement, StampAnnotationElement, FileAttachmentAnnotationElement, MediaAnnotationElement, Gs, Ks, qs, Outline, Js, FreeDrawOutline, HighlightOutliner, HighlightOutline, FreeHighlightOutliner, FreeHighlightOutline, Ys, DrawingOptions, Xs, InkDrawOutliner, InkDrawOutline, Zs, Qs, ContourDrawOutline, SignatureExtractor, $s, ec, tc, StampEditor, nc, rc, ic;
+var e, t, n, r$1, i, a, o, s, c, l, u, d, f$2, p, m, h, g, _$2, v, y, b, x, S, C, w, T, E, D, O, k, PasswordException$1, UnknownErrorException$1, InvalidPDFException$1, ResponseException$1, FormatError$1, AbortException$1, FeatureTest$1, Util$1, j, ee, makeArr$1, makeMap$1, makeObj$1, M, te, ne, re, ie, N, ae, oe, F, L, RefSet, RefSetCache, BaseStream, se, ce, le, ue, de, fe, MissingDataException, ParserEOFException, XRefEntryException, XRefParseException, pe$1, me, QCMS, he, ge, _e, ve, ye, be, xe, Se, AlternateCS, PatternCS, IndexedCS, DeviceGrayCS, DeviceRgbCS, DeviceRgbaCS, DeviceCmykCS, CalGrayCS, Ce, LabCS, we, Te, Ee, StringStream, NullStream, ChunkedStream, ChunkedStreamManager, De, Oe, ke, DecodeStream, StreamsSequenceStream, ColorSpaceUtils, JpegError, DNLMarkerError, EOIMarkerError, Ae, je, Me, Ne, Pe, Fe, Ie, Le, JpegImage, Re, ze, NullOptimizer, QueueOptimizer, Be, CheckedOperatorList, Ve, Pattern, BaseShading, RadialAxialShading, He, MeshStreamReader, Ue, We, DummyShading, BinaryCMapStream, BinaryCMapReader, Ascii85Stream, AsciiHexStream, makeBrotliDecode, Ge, BrotliStream, Ke, qe, Jbig2Error, Je, CCITTFaxStream, Ye, Xe, Ze, Qe, $e, FlateStream, et, tt, JpxError, nt, JpxStream, LZWStream, PredictorStream, RunLengthStream, Parser$2, rt, Lexer, Linearization, it, at, CMap, IdentityCMap, CMapFactory, CSS_FONT_INFO$1, SYSTEM_FONT_INFO$1, FONT_INFO$1, PATTERN_INFO$1, ot, st, ct, lt, ut, dt, ft, pt, mt, ht, gt, _t, vt, yt, bt, xt, St, Ct, wt, Tt, DataBuilder, Et, Dt, Ot, kt, At, CFFParser, CFF, CFFHeader, CFFStrings, CFFIndex, CFFDict, jt, Mt, Nt, Pt, Ft, CFFCharset, CFFEncoding, CFFFDSelect, CFFOffsetTracker, It, Lt, Rt, zt, Bt, Vt, Ht, Ut, Wt, GlyfTable, Gt, Kt, Contour, qt, Jt, ToUnicodeMap, IdentityToUnicodeMap, CFFFont, Commands, Yt, TrueTypeCompiled, Type2Compiled, FontRendererFactory, Xt, Zt, Qt, $t, Type1CharString, en, Type1Parser, Type1Font, tn, nn, rn, an, fonts_Glyph, Font, ErrorFont, on$1, sn, cn, ln, un, dn, fn, pn, mn, hn, gn, _n, vn, yn, bn, xn, Sn, Cn, wn, Tn, En, Dn, On, kn, An, jn, Mn, Nn, Pn, Fn, In, Ln, Rn, zn, Bn, Vn, Hn, Un, Wn, Gn, Kn, R, Token, qn, Jn, z, PsNode, PsProgram, PsBlock, PsNumber, PsOperator, PsIf, PsIfElse, PsArgNode, PsConstNode, PsUnaryNode, PsBinaryNode, PsTernaryNode, Yn, Xn, V, Zn, Qn, PsJsCompiler, PSStackBasedInterpreter, H, $n, er, tr, nr, BaseLocalCache, LocalImageCache, LocalColorSpaceCache, LocalFunctionCache, LocalGStateCache, LocalTilingPatternCache, RegionalImageCache, GlobalColorSpaceCache, rr, ir, ar, PDFFunction, or$1, sr, cr, lr, ur, dr, fr, pr, mr, hr, gr, _r, vr, yr, MurmurHash3_64$1, br, xr, Sr, Cr, wr, Tr, TranslatedFont, StateManager, TextState, EvalState, Er, DefaultAppearanceEvaluator, AppearanceStreamEvaluator, Dr, Or, kr, NameOrNumberTree, NameTree, NumberTree, Ar, jr, Mr, SimpleDOMNode, SimpleXMLParser, MetadataParser, Nr, Pr, StructElementNode, StructElement, StructTreePage, isRef, Fr, Ir, Lr, Rr, zr, Vr, Hr, Ur, Wr, Gr, Kr, qr, U, Jr, Yr, W, Xr, Zr, Qr, $r, ei, ti, ni, ri, ii, ai, oi, si, ci, li, ui, G, di, fi, pi, mi, hi, gi, _i, vi, yi, bi, xi, Si, Ci, wi, Ti, Ei, Di, Oi, ki, Ai, ji, Mi, Ni, Pi, Fi, Ii, Ri, zi, Bi, Vi, Hi, Wi, Gi, Ki, qi, K, Ji, Yi, Xi, Zi, Qi, $i, ea, q, FontFinder, FontInfo$1, FontSelector, TextMeasure, ta, na, ra, ia, aa, oa, sa, ca$1, J, la, ua, da, fa, pa, ma, ha, ga, _a$2, va, ya, ba, xa, Sa, Ca, Y, X, XFAAttribute, wa, ContentObject, OptionObject, StringObject, IntegerObject, Option01, Option10, Ta, Z, Ea, Da, Oa, AppearanceFilter, Arc, Area, Assist, Barcode, Bind, BindItems, Bookend, BooleanElement, Border, Break, BreakAfter, BreakBefore, Button, Calculate, Caption, Certificate, Certificates, CheckButton, ChoiceList, Color, Comb, Connect, ContentArea, Corner, DateElement, DateTime, DateTimeEdit, Decimal, DefaultUi, Desc, DigestMethod, DigestMethods, Draw, Edge, Encoding, Encodings, Encrypt, EncryptData, Encryption, EncryptionMethod, EncryptionMethods, Event$1, ExData, ExObject, ExclGroup, Execute, Extras, Field, Fill, Filter, Float, template_Font, Format, Handler, Hyphenation, Image$1, ImageEdit, Integer, Issuers, Items, Keep, KeyUsage, Line, Linear, LockDocument, Manifest, Margin, Mdp, Medium, Message, NumericEdit, Occur, Oid, Oids, Overflow, PageArea, ka, Para, PasswordEdit, template_Pattern, Picture, Proto, Radial, Reason, Reasons, Rectangle, RefElement, Script$2, SetProperty, SignData, Signature, Signing, Solid, Speak, Stipple, Subform, SubformSet, SubjectDN, SubjectDNs, Submit, Template$1, Text$5, TextEdit, Time, TimeStamp, ToolTip, Traversal, Traverse, Ui, Validate, Value, Variables, Aa, ja, Binder, DataHandler, Q, Acrobat, Acrobat7, ADBE_JSConsole, ADBE_JSDebugger, AddSilentPrint, AddViewerPreferences, AdjustData, AdobeExtensionLevel, Agent, AlwaysEmbed, Amd, config_Area, Attributes, AutoSave, Base, BatchOutput, BehaviorOverride, Cache, Change, Common, Compress, CompressLogicalStructure, CompressObjectStream, Compression, Config, Conformance, ContentCopy, Copies, Creator, CurrentPage, Data, Debug, DefaultTypeface, Destination, DocumentAssembly, Driver, DuplexOption, DynamicRender, Embed, config_Encrypt, config_Encryption, EncryptionLevel, Enforce, Equate, EquateRange, Exclude, ExcludeNS, FlipLabel, config_FontInfo, FormFieldFilling, GroupParent, IfEmpty, IncludeXDPContent, IncrementalLoad, IncrementalMerge, Interactive, Jog, LabelPrinter, Layout, Level, Linearized, Locale, LocaleSet, Log, MapElement, MediumInfo, config_Message, Messaging, Mode, ModifyAnnots, MsgId, NameAttr, NeverEmbed, NumberOfCopies, OpenAction, Output, OutputBin, OutputXSL, Overprint, Packets, PageOffset, PageRange, Pagination, PaginationOverride, Part, Pcl, Pdf, Pdfa, Permissions, PickTrayByPDFSize, config_Picture, PlaintextMetadata, Presence, Present, Print, PrintHighQuality, PrintScaling, PrinterName, Producer, Ps, Range$1$1, Record, Relevant, Rename, RenderPolicy, RunScripts, config_Script, ScriptModel, Severity, SilentPrint, Staple, StartNode, StartPage, SubmitFormat, SubmitUrl, SubsetBelow, SuppressBanner, Tagged, config_Template, Threshold, To, TemplateCache, Trace, Transform$1, Type, Uri, config_Validate, ValidateApprovalSignatures, ValidationMessaging, Version, VersionControl, ViewerPreferences, WebClient, Whitespace, Window, Xdc, Xdp, Xsl, Zpl, Ma, Na, ConnectionSet, EffectiveInputPolicy, EffectiveOutputPolicy, Operation, RootElement, SoapAction, SoapAddress, connection_set_Uri, WsdlAddress, WsdlConnection, XmlConnection, XsdConnection, Pa, Fa, datasets_Data, Datasets, Ia, La, CalendarSymbols, CurrencySymbol, CurrencySymbols, DatePattern, DatePatterns, DateTimeSymbols, Day, DayNames, Era, EraNames, locale_set_Locale, locale_set_LocaleSet, Meridiem, MeridiemNames, Month, MonthNames, NumberPattern, NumberPatterns, NumberSymbol, NumberSymbols, TimePattern, TimePatterns, TypeFace, TypeFaces, Ra, za, signature_Signature, Ba, Va, Stylesheet, Ha, Ua, xdp_Xdp, Wa, Ga, Ka, qa, Ja, Ya, Xa, Za, Qa, XhtmlObject, A, B, Body, Br, Html, I, Li, Ol, P, Span, Sub, Sup, Ul, $a, eo, UnknownNamespace, Root$2, Empty, Builder, to, no, AnnotationFactory, Annotation, AnnotationBorderStyle, MarkupAnnotation, ro, TextWidgetAnnotation, ButtonWidgetAnnotation, ChoiceWidgetAnnotation, SignatureWidgetAnnotation, TextAnnotation, LinkAnnotation, PopupAnnotation, FreeTextAnnotation, LineAnnotation, SquareAnnotation, CircleAnnotation, PolylineAnnotation, PolygonAnnotation, CaretAnnotation, InkAnnotation, HighlightAnnotation, UnderlineAnnotation, SquigglyAnnotation, StrikeOutAnnotation, StampAnnotation, FileAttachmentAnnotation, io, ao, oo, so, DatasetXMLParser, DatasetReader, SingleIntersector, Intersector, Word64, co, lo, DecryptStream, ARCFourCipher, NullCipher, AESBaseCipher, AES128Cipher, AES256Cipher, PDFBase, PDF17, PDF20, CipherTransform, uo, XRef, fo, Page, po, mo, ho, PDFDocument, BasePdfManager, LocalPdfManager, NetworkPdfManager, go, _o, MessageHandler$1, PageData, DocumentData, XRefWrapper, PDFEditor, BasePDFStream$1, BasePDFStreamReader$1, BasePDFStreamRangeReader$1, PDFWorkerStream, PDFWorkerStreamReader, PDFWorkerStreamRangeReader, WorkerTask, WorkerMessageHandler, vo, yo, bo, xo, So, Co, wo, Eo, Do, Oo, $, ko, Ao, jo, Mo, No, Po, Fo, Io, Lo, Ro, zo, Bo, PasswordException, UnknownErrorException, InvalidPDFException, ResponseException, FormatError, AbortException, FeatureTest, Util, Vo, Ho, makeArr, makeMap, makeObj, Uo, Wo, XfaLayer, PixelsPerInch, RenderingCancelledException, StatTimer, PDFDateString, Go, Ko, ColorScheme, CSSConstants, qo, Jo, FloatingToolbar, Yo, Xo, IdManager, Zo, CommandManager, Qo, $o, es, ts, Comment$5, ns, rs, FakeEditor, is$2, as, os$4, MurmurHash3_64, ss, AnnotationStorage, PrintAnnotationStorage, cs$1, ls, us, ds, BBoxReader, ensureDebugMetadata, CanvasBBoxTracker, CanvasDependencyTracker, fs$7, ps, ms, FontLoader, FontFaceObject, CSS_FONT_INFO, SYSTEM_FONT_INFO, FONT_INFO, PATTERN_INFO, CssFontInfo, SystemFontInfo, FontInfo, PatternInfo, FontPathInfo, isRefProxy, isNameProxy, hs, LoopbackPort, gs, _s, MessageHandler, BaseBinaryDataFactory, DOMBinaryDataFactory, BaseCanvasFactory, DOMCanvasFactory, BaseFilterFactory, DOMFilterFactory, NodeFilterFactory, NodeCanvasFactory, NodeBinaryDataFactory, WebGPU, vs, ys, BaseShadingPattern, RadialAxialShadingPattern, MeshShadingPattern, DummyShadingPattern, bs, xs, Ss, Cs, CanvasExtraState, ws, Ts, Es, Ds, Os, BasePDFStream, BasePDFStreamReader, BasePDFStreamRangeReader, PDFFetchStream, PDFFetchStreamReader, PDFFetchStreamRangeReader, PDFDataTransportStream, PDFDataTransportStreamReader, PDFDataTransportStreamRangeReader, PDFNetworkStream, PDFNetworkStreamReader, PDFNetworkStreamRangeReader, PDFNodeStream, PDFNodeStreamReader, PDFNodeStreamRangeReader, GlobalWorkerOptions, Metadata, ks, OptionalContentGroup, As, PagesMapper, js, dataObj, PDFObjects, Ms, Ns, PDFDataRangeTransport, PDFDocumentProxy, Fs, Is, WorkerTransport, RenderTask, Ls, Rs, zs, Bs, Vs, ColorConverters, BaseSVGFactory, DOMSVGFactory, Hs, Us, AnnotationElementFactory, Ws, EditorAnnotationElement, LinkAnnotationElement, TextAnnotationElement, WidgetAnnotationElement, TextWidgetAnnotationElement, SignatureWidgetAnnotationElement, CheckboxWidgetAnnotationElement, RadioButtonWidgetAnnotationElement, PushButtonWidgetAnnotationElement, ChoiceWidgetAnnotationElement, PopupAnnotationElement, PopupElement, FreeTextAnnotationElement, LineAnnotationElement, SquareAnnotationElement, CircleAnnotationElement, PolylineAnnotationElement, PolygonAnnotationElement, CaretAnnotationElement, InkAnnotationElement, HighlightAnnotationElement, UnderlineAnnotationElement, SquigglyAnnotationElement, StrikeOutAnnotationElement, StampAnnotationElement, FileAttachmentAnnotationElement, MediaAnnotationElement, Gs, Ks, qs, Outline, Js, FreeDrawOutline, HighlightOutliner, HighlightOutline, FreeHighlightOutliner, FreeHighlightOutline, Ys, DrawingOptions, Xs, InkDrawOutliner, InkDrawOutline, Zs, Qs, ContourDrawOutline, SignatureExtractor, $s, ec, tc, StampEditor, nc, rc, ic;
 var init_pdfjs = __esmMin((() => {
 	if (polyfillDOMMatrix$1(), globalThis.FinalizationRegistry === void 0 && (globalThis.FinalizationRegistry = class FinalizationRegistry {
 		register() {}
@@ -44272,7 +44272,7 @@ var init_pdfjs = __esmMin((() => {
 		ASSEMBLE: 1024,
 		PRINT_HIGH_QUALITY: 2048
 	};
-	f$1 = {
+	f$2 = {
 		TRIANGLES: 1,
 		LATTICE: 2,
 		PATCH: 3
@@ -47304,7 +47304,7 @@ var init_pdfjs = __esmMin((() => {
 			let M = new Uint32Array(x);
 			for (let e = 0; e < x; e++) M[e] = e;
 			this.figures = [{
-				type: f$1.LATTICE,
+				type: f$2.LATTICE,
 				coords: M,
 				colors: new Uint32Array(M),
 				verticesPerRow: b
@@ -47439,7 +47439,7 @@ var init_pdfjs = __esmMin((() => {
 				i.push(t.length), t.push(s), n.push(c), a--, e.align();
 			}
 			this.figures.push({
-				type: f$1.TRIANGLES,
+				type: f$2.TRIANGLES,
 				coords: new Int32Array(i),
 				colors: new Int32Array(i)
 			});
@@ -47451,7 +47451,7 @@ var init_pdfjs = __esmMin((() => {
 				i.push(n.length), n.push(t), r.push(a);
 			}
 			this.figures.push({
-				type: f$1.LATTICE,
+				type: f$2.LATTICE,
 				coords: new Int32Array(i),
 				colors: new Int32Array(i),
 				verticesPerRow: t
@@ -47480,7 +47480,7 @@ var init_pdfjs = __esmMin((() => {
 					case 3: r[12] = r[0], r[13] = o + 0, r[14] = o + 1, r[15] = o + 2, r[8] = r[1], r[11] = o + 3, r[4] = r[2], r[7] = o + 4, r[0] = r[3], r[1] = o + 7, r[2] = o + 6, r[3] = o + 5, i[2] = i[0], i[3] = s, i[0] = i[1], i[1] = s + 1;
 				}
 				r[5] = t.length, t.push([(-4 * t[r[0]][0] - t[r[15]][0] + 6 * (t[r[4]][0] + t[r[1]][0]) - 2 * (t[r[12]][0] + t[r[3]][0]) + 3 * (t[r[13]][0] + t[r[7]][0])) / 9, (-4 * t[r[0]][1] - t[r[15]][1] + 6 * (t[r[4]][1] + t[r[1]][1]) - 2 * (t[r[12]][1] + t[r[3]][1]) + 3 * (t[r[13]][1] + t[r[7]][1])) / 9]), r[6] = t.length, t.push([(-4 * t[r[3]][0] - t[r[12]][0] + 6 * (t[r[2]][0] + t[r[7]][0]) - 2 * (t[r[0]][0] + t[r[15]][0]) + 3 * (t[r[4]][0] + t[r[14]][0])) / 9, (-4 * t[r[3]][1] - t[r[12]][1] + 6 * (t[r[2]][1] + t[r[7]][1]) - 2 * (t[r[0]][1] + t[r[15]][1]) + 3 * (t[r[4]][1] + t[r[14]][1])) / 9]), r[9] = t.length, t.push([(-4 * t[r[12]][0] - t[r[3]][0] + 6 * (t[r[8]][0] + t[r[13]][0]) - 2 * (t[r[0]][0] + t[r[15]][0]) + 3 * (t[r[11]][0] + t[r[1]][0])) / 9, (-4 * t[r[12]][1] - t[r[3]][1] + 6 * (t[r[8]][1] + t[r[13]][1]) - 2 * (t[r[0]][1] + t[r[15]][1]) + 3 * (t[r[11]][1] + t[r[1]][1])) / 9]), r[10] = t.length, t.push([(-4 * t[r[15]][0] - t[r[0]][0] + 6 * (t[r[11]][0] + t[r[14]][0]) - 2 * (t[r[12]][0] + t[r[3]][0]) + 3 * (t[r[2]][0] + t[r[8]][0])) / 9, (-4 * t[r[15]][1] - t[r[0]][1] + 6 * (t[r[11]][1] + t[r[14]][1]) - 2 * (t[r[12]][1] + t[r[3]][1]) + 3 * (t[r[2]][1] + t[r[8]][1])) / 9]), this.figures.push({
-					type: f$1.PATCH,
+					type: f$2.PATCH,
 					coords: new Int32Array(r),
 					colors: new Int32Array(i)
 				});
@@ -47509,7 +47509,7 @@ var init_pdfjs = __esmMin((() => {
 					case 3: r[12] = r[0], r[13] = o + 0, r[14] = o + 1, r[15] = o + 2, r[8] = r[1], r[9] = o + 9, r[10] = o + 10, r[11] = o + 3, r[4] = r[2], r[5] = o + 8, r[6] = o + 11, r[7] = o + 4, r[0] = r[3], r[1] = o + 7, r[2] = o + 6, r[3] = o + 5, i[2] = i[0], i[3] = s, i[0] = i[1], i[1] = s + 1;
 				}
 				this.figures.push({
-					type: f$1.PATCH,
+					type: f$2.PATCH,
 					coords: new Int32Array(r),
 					colors: new Int32Array(i)
 				});
@@ -47517,7 +47517,7 @@ var init_pdfjs = __esmMin((() => {
 		}
 		_buildFigureFromPatch(e) {
 			let t = this.figures[e];
-			assert$1(t.type === f$1.PATCH, `Unexpected patch mesh figure`);
+			assert$1(t.type === f$2.PATCH, `Unexpected patch mesh figure`);
 			let n = this.coords, r = this.colors, i = t.coords, a = t.colors, o = Math.min(n[i[0]][0], n[i[3]][0], n[i[12]][0], n[i[15]][0]), s = Math.min(n[i[0]][1], n[i[3]][1], n[i[12]][1], n[i[15]][1]), c = Math.max(n[i[0]][0], n[i[3]][0], n[i[12]][0], n[i[15]][0]), l = Math.max(n[i[0]][1], n[i[3]][1], n[i[12]][1], n[i[15]][1]), u = Math.ceil((c - o) * MeshShading.TRIANGLE_DENSITY / (this.bounds[2] - this.bounds[0]));
 			u = MathClamp$1(u, MeshShading.MIN_SPLIT_PATCH_CHUNKS_AMOUNT, MeshShading.MAX_SPLIT_PATCH_CHUNKS_AMOUNT);
 			let d = Math.ceil((l - s) * MeshShading.TRIANGLE_DENSITY / (this.bounds[3] - this.bounds[1]));
@@ -47538,7 +47538,7 @@ var init_pdfjs = __esmMin((() => {
 				}
 			}
 			m[0] = i[0], h[0] = a[0], m[u] = i[3], h[u] = a[1], m[p * d] = i[12], h[p * d] = a[2], m[p * d + u] = i[15], h[p * d + u] = a[3], this.figures[e] = {
-				type: f$1.LATTICE,
+				type: f$2.LATTICE,
 				coords: m,
 				colors: h,
 				verticesPerRow: p
@@ -229520,7 +229520,8 @@ const VoiceSettings = strictObject({
 });
 const CaptionSettings = strictObject({
 	preset: Id,
-	burn_in: boolean()
+	burn_in: boolean(),
+	position: strictObject({ y: number().min(0).max(1).describe("Vertical centre of the caption block as a fraction of frame height.") }).optional().describe("Manual caption placement. Omit to let the caption engine place captions in the platforms' caption zone.")
 });
 const MasterCanvas = strictObject({
 	width: int().min(2).max(7680),
@@ -230058,6 +230059,30 @@ const RenderStatus = _enum([
 	"cancelled",
 	"cached"
 ]);
+const PxBox = strictObject({
+	x: int(),
+	y: int(),
+	w: int().nonnegative(),
+	h: int().nonnegative()
+});
+const TextBox = strictObject({
+	role: _enum([
+		"hook",
+		"headline",
+		"body",
+		"label",
+		"code",
+		"caption",
+		"cta",
+		"decorative"
+	]).describe("hook, headline, caption and cta overflow is an error in lint; decorative is a warning."),
+	text: string(),
+	rect: PxBox.describe("Box the text was fitted into, in output pixels."),
+	font_px: number().positive(),
+	truncated: boolean().describe("fitText could not fit the text without cutting it."),
+	color: string().optional().describe("Text colour #RRGGBB."),
+	background: string().optional().describe("Colour behind the text #RRGGBB, for contrast checks.")
+}).describe("One text block a renderer drew.");
 const SceneRender = strictObject({
 	scene_id: SceneId,
 	provider: Id.describe("Adapter id that produced the output, e.g. `mock` or `hyperframes-local`."),
@@ -230076,7 +230101,8 @@ const SceneRender = strictObject({
 	error: string().optional(),
 	renderer_version: string().optional().describe("Version of the local renderer or adapter that produced the output."),
 	placeholder: boolean().optional().describe("True when the output is a titled stand-in for a scene a provider must still render."),
-	warnings: array(string()).optional()
+	warnings: array(string()).optional(),
+	text_boxes: array(TextBox).optional().describe("Text the renderer drew, for lint.")
 });
 const VoiceRender = strictObject({
 	provider: Id,
@@ -230102,6 +230128,8 @@ const CaptionFormat = _enum([
 const CaptionsRender = strictObject({
 	preset: Id,
 	burn_in: boolean(),
+	box: PxBox.optional().describe("Region the burned-in captions occupy, in output pixels, for lint."),
+	max_lines: int().positive().optional(),
 	files: array(strictObject({
 		format: CaptionFormat,
 		path: FilePath,
@@ -230147,6 +230175,17 @@ const TimingAdjustment = strictObject({
 	render_duration_sec: number().positive(),
 	reason: string()
 });
+const CoverRender = strictObject({
+	path: FilePath,
+	square_preview: FilePath.optional(),
+	at_ms: int().nonnegative().describe("Video time of the frame the cover was composed from."),
+	headline_box: TextBox.optional(),
+	crops: array(strictObject({
+		id: Id,
+		targets: array(Id),
+		rect: PxBox
+	})).describe("Regions of the cover that platforms crop to (e.g. a centre square); the headline must fit inside each.")
+}).describe("The compiled cover and where its headline landed, for lint.");
 const RenderSettings = strictObject({
 	quality: _enum(["preview", "final"]),
 	width: int().positive(),
@@ -230166,6 +230205,7 @@ const RenderManifest = strictObject({
 	renders: array(SceneRender),
 	voice: VoiceRender.optional(),
 	captions: CaptionsRender.optional(),
+	cover: CoverRender.optional(),
 	outputs: array(FinalOutput),
 	qa: QaSummary.optional(),
 	settings: RenderSettings.optional(),
@@ -231712,36 +231752,186 @@ function buildWordTimeline(scenes) {
 	return out;
 }
 const SENTENCE_END$1 = /[.!?…]["'”’)\]]*$/;
-/** Group words into caption lines. Breaks on: word/char limits, pauses, sentence ends and scene changes. */
+const CLAUSE_END$1 = /[,;:—–-]["'”’)\]]*$/;
+/** A caption or row may start with these (a clause boundary). */
+const CONJUNCTIONS = new Set("and but or nor so yet because since although though while whereas when whenever where which who whom whose that then unless until if instead".split(" "));
+/** Never end a caption or row on these: they belong to the next word. */
+const DANGLING = new Set("a an the of to in on at by for from with into onto as than my your our their its his her this these those".split(" "));
+const STOPWORDS$1 = new Set("a an and are as at be been being but by can could did do does for from had has have how i if in into is it its just like me more most my no not of on one only or our out over so some such than that the their them then there these they this those to too up us very was we were what when where which while who why will with would you your also about after all any because before both each few here her him his she he own same should through under until again further once off down new get got make made use used way really thing things lot".split(" "));
+const core$1 = (word) => word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+const charsOf = (ws, from, to) => {
+	let n = 0;
+	for (let i = from; i < to; i++) n += Array.from(ws[i].word).length + (i > from ? 1 : 0);
+	return n;
+};
+/** Cost of a break between `ws[i-1]` and `ws[i]` (0 = natural). */
+function breakCost(ws, i) {
+	const prev = ws[i - 1].word;
+	const next = core$1(ws[i].word).toLowerCase();
+	if (SENTENCE_END$1.test(prev) || CLAUSE_END$1.test(prev)) return 0;
+	let c = CONJUNCTIONS.has(next) ? 1 : 4;
+	if (DANGLING.has(core$1(prev).toLowerCase())) c += 3;
+	return c;
+}
+/**
+* Best split of `ws[from..to)` into ≤ maxLines rows of ≤ maxChars (a lone over-long word is
+* allowed): balanced rows, natural breaks, no 1-word orphan row when the caption has 3+ words.
+* Null when the words cannot fit.
+*/
+function planRows(ws, from, to, maxChars, maxLines) {
+	const n = to - from;
+	const rowOk = (a, b) => b - a === 1 || charsOf(ws, a, b) <= maxChars;
+	if (rowOk(from, to)) return {
+		sizes: [n],
+		cost: 0
+	};
+	let best = null;
+	const walk = (start, sizes, cost) => {
+		if (sizes.length === maxLines) return;
+		for (let end = start + 1; end <= to; end++) {
+			if (!rowOk(start, end)) break;
+			const next = [...sizes, end - start];
+			if (end === to) {
+				if (next.length < 2) continue;
+				const lens = next.map((_, k) => {
+					const a = from + next.slice(0, k).reduce((s, x) => s + x, 0);
+					return charsOf(ws, a, a + next[k]);
+				});
+				const imbalance = (Math.max(...lens) - Math.min(...lens)) / maxChars * 3;
+				const orphans = n >= 3 ? next.filter((x) => x === 1).length * 5 : 0;
+				const total = cost + imbalance + orphans + (next.length - 1);
+				if (!best || total < best.cost) best = {
+					sizes: next,
+					cost: total
+				};
+			} else walk(end, next, cost + breakCost(ws, end) * .5);
+		}
+	};
+	walk(from, [], 0);
+	return best;
+}
+/** 1–2 salient words: numbers, acronyms and capitalised terms first, else the longest non-stopword. */
+function pickEmphasis(words, prevWord) {
+	const scored = [];
+	words.forEach((w, i) => {
+		const c = core$1(w.word);
+		if (!c) return;
+		const lower = c.toLowerCase();
+		const sentenceStart = i === 0 ? !prevWord || SENTENCE_END$1.test(prevWord) : SENTENCE_END$1.test(words[i - 1].word);
+		const len = Array.from(c).length;
+		let score = 0;
+		if (/\p{N}/u.test(c)) score = 100 + len;
+		else if (STOPWORDS$1.has(lower)) score = 0;
+		else if (/^\p{Lu}{2,}s?$/u.test(c)) score = 60 + len;
+		else if (/^\p{Lu}/u.test(c) && !sentenceStart) score = 50 + len;
+		else if (len >= 4) score = len;
+		if (score > 0) scored.push({
+			i,
+			score
+		});
+	});
+	scored.sort((a, b) => b.score - a.score || a.i - b.i);
+	const out = scored.slice(0, 1).map((s) => s.i);
+	const second = scored[1];
+	if (second && words.length >= 5 && second.score >= 50) out.push(second.i);
+	return out.sort((a, b) => a - b);
+}
+/**
+* Group words into captions. Hard breaks: scene changes, pauses over `maxGapMs`, sentence ends.
+* Inside a phrase, captions of `minWords`–`maxWords` words that fit `maxLines` rows are chosen
+* to minimise a cost that prefers ~5 words, breaks after punctuation or before a conjunction,
+* and never ends on an article or preposition. Then timing is smoothed: short gaps are held
+* over and each caption stays up at least `minDisplayMs` unless the next one starts sooner.
+*/
 function groupCaptionLines(words, opts = {}) {
-	const maxWords = opts.maxWords ?? 5;
-	const maxChars = opts.maxChars ?? 32;
+	const minWords = Math.max(1, opts.minWords ?? 3);
+	const maxWords = Math.max(minWords, opts.maxWords ?? 7);
+	const maxChars = Math.max(1, opts.maxChars ?? 32);
+	const maxLines = Math.min(3, Math.max(1, opts.maxLines ?? 2));
 	const maxGap = opts.maxGapMs ?? 600;
 	const sentence = opts.breakOnSentence ?? true;
-	const lines = [];
-	let cur = [];
-	let chars = 0;
-	const flush = () => {
-		if (!cur.length) return;
-		lines.push({
-			start_ms: cur[0].start_ms,
-			end_ms: cur[cur.length - 1].end_ms,
-			text: cur.map((w) => w.word).join(" "),
-			words: cur
-		});
-		cur = [];
-		chars = 0;
-	};
+	const emphasis = opts.emphasis ?? true;
+	const runs = [];
+	let run = [];
 	for (const w of words) {
-		const prev = cur[cur.length - 1];
-		if (prev) {
-			if (cur.length >= maxWords || chars + 1 + w.word.length > maxChars || w.start_ms - prev.end_ms > maxGap || sentence && SENTENCE_END$1.test(prev.word) || prev.scene_id !== w.scene_id) flush();
+		const prev = run[run.length - 1];
+		if (prev && (w.start_ms - prev.end_ms > maxGap || sentence && SENTENCE_END$1.test(prev.word) || prev.scene_id !== w.scene_id)) {
+			runs.push(run);
+			run = [];
 		}
-		chars += (cur.length ? 1 : 0) + w.word.length;
-		cur.push(w);
+		run.push(w);
 	}
-	flush();
+	if (run.length) runs.push(run);
+	const lines = [];
+	for (const ws of runs) {
+		const n = ws.length;
+		const best = [{
+			cost: 0,
+			from: -1,
+			rows: []
+		}];
+		for (let i = 1; i <= n; i++) {
+			let pick;
+			for (let j = i - 1; j >= 0 && i - j <= maxWords; j--) {
+				const prior = best[j];
+				if (!prior || !Number.isFinite(prior.cost)) continue;
+				const rows = planRows(ws, j, i, maxChars, maxLines);
+				if (!rows) continue;
+				const k = i - j;
+				const size = (k < minWords ? 6 * (minWords - k) : 0) + .3 * (k - 5) ** 2;
+				const cost = prior.cost + 3 + size + rows.cost + (i < n ? breakCost(ws, i) : 0);
+				if (!pick || cost < pick.cost) pick = {
+					cost,
+					from: j,
+					rows: rows.sizes
+				};
+			}
+			best[i] = pick ?? {
+				cost: best[i - 1].cost + 100,
+				from: i - 1,
+				rows: [1]
+			};
+		}
+		const cues = [];
+		for (let i = n; i > 0; i = best[i].from) {
+			const { from, rows } = best[i];
+			const cw = ws.slice(from, i);
+			cues.unshift({
+				start_ms: cw[0].start_ms,
+				end_ms: cw[cw.length - 1].end_ms,
+				text: cw.map((w) => w.word).join(" "),
+				words: cw,
+				...rows.length > 1 ? { row_sizes: rows } : {}
+			});
+		}
+		lines.push(...cues);
+	}
+	const minDisplay = opts.minDisplayMs ?? 800;
+	const holdGap = opts.holdGapMs ?? 250;
+	lines.forEach((l, i) => {
+		if (emphasis) {
+			const prev = lines[i - 1]?.words.at(-1)?.word;
+			const e = pickEmphasis(l.words, prev);
+			if (e.length) l.emphasis = e;
+		}
+		const next = lines[i + 1];
+		const limit = Math.min(next ? next.start_ms : Number.POSITIVE_INFINITY, opts.endMs ?? Number.POSITIVE_INFINITY);
+		let end = Math.max(l.end_ms, l.start_ms + minDisplay);
+		if (next && next.start_ms - l.end_ms < holdGap) end = Math.max(end, next.start_ms);
+		l.end_ms = Math.max(l.end_ms, Math.min(end, limit));
+	});
 	return lines;
+}
+/** The caption's display rows (words joined per row). */
+function captionRows(line) {
+	const sizes = line.row_sizes ?? [line.words.length];
+	const rows = [];
+	let at = 0;
+	for (const n of sizes) {
+		rows.push(line.words.slice(at, at + n).map((w) => w.word).join(" "));
+		at += n;
+	}
+	return line.words.length ? rows : [line.text];
 }
 function pad(n, w = 2) {
 	return String(n).padStart(w, "0");
@@ -231772,13 +231962,13 @@ function assTimeCs(cs) {
 }
 const cs = (ms) => Math.round(ms / 10);
 function toSrt(lines) {
-	return lines.map((l, i) => `${i + 1}\n${srtTime(l.start_ms)} --> ${srtTime(l.end_ms)}\n${l.text}\n`).join("\n");
+	return lines.map((l, i) => `${i + 1}\n${srtTime(l.start_ms)} --> ${srtTime(l.end_ms)}\n${captionRows(l).join("\n")}\n`).join("\n");
 }
 function vttEscape(t) {
 	return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 function toVtt(lines) {
-	return `WEBVTT\n\n${lines.map((l) => `${vttTime(l.start_ms)} --> ${vttTime(l.end_ms)}\n${vttEscape(l.text)}\n`).join("\n")}`;
+	return `WEBVTT\n\n${lines.map((l) => `${vttTime(l.start_ms)} --> ${vttTime(l.end_ms)}\n${vttEscape(captionRows(l).join("\n"))}\n`).join("\n")}`;
 }
 /** Plain-text transcript: words joined with spaces, one paragraph per scene. */
 function toTranscript(words) {
@@ -231791,19 +231981,24 @@ function toTranscript(words) {
 	}
 	return paras.map((p) => p.join(" ")).join("\n\n") + (paras.length ? "\n" : "");
 }
-/** Canonical word timeline plus line grouping, for the HTML (HyperFrames) karaoke captions. */
+/** Canonical word timeline plus caption grouping, for the HTML (HyperFrames) captions. */
 function toCaptionJson(words, lines = groupCaptionLines(words)) {
 	const index = new Map(words.map((w, i) => [w, i]));
 	return {
 		version: 1,
 		words: words.map((w) => ({ ...w })),
-		lines: lines.map((l) => ({
-			start_ms: l.start_ms,
-			end_ms: l.end_ms,
-			text: l.text,
-			first_word: l.words[0] ? index.get(l.words[0]) ?? -1 : -1,
-			word_count: l.words.length
-		}))
+		lines: lines.map((l) => {
+			const first = l.words[0] ? index.get(l.words[0]) ?? -1 : -1;
+			return {
+				start_ms: l.start_ms,
+				end_ms: l.end_ms,
+				text: l.text,
+				first_word: first,
+				word_count: l.words.length,
+				rows: captionRows(l),
+				emphasis: first >= 0 ? (l.emphasis ?? []).map((i) => first + i) : []
+			};
+		})
 	};
 }
 /** `#RRGGBB` (or `#RRGGBBAA`, AA = opacity) → ASS `&HAABBGGRR` (ASS alpha: 00 = opaque). */
@@ -231813,6 +232008,10 @@ function assColor(hex) {
 	const rgb = m[1].toUpperCase();
 	return `&H${m[2] ? (255 - Number.parseInt(m[2], 16)).toString(16).padStart(2, "0").toUpperCase() : "00"}${rgb.slice(4, 6)}${rgb.slice(2, 4)}${rgb.slice(0, 2)}`;
 }
+/** `#RRGGBB` → an override-tag colour `&HBBGGRR&` (for `\c`). */
+function assTagColor(hex) {
+	return `${assColor(hex.slice(0, 7)).replace(/^&H00/, "&H")}&`;
+}
 /** Make a word safe inside an ASS Dialogue: braces start override blocks and `\` starts escapes. */
 function assEscape(text) {
 	return text.replace(/\\/g, "/").replace(/\{/g, "(").replace(/\}/g, ")").replace(/[\r\n]+/g, " ");
@@ -231820,61 +232019,168 @@ function assEscape(text) {
 function defaultMarginV(width, height) {
 	return Math.round(height * (height / width >= 1.5 ? .18 : .12));
 }
-/**
-* Fraction of the frame height, measured from the bottom, that burned-in
-* captions can occupy: the bottom margin plus one or two rows of the largest
-* preset with line spacing and padding. Scene renderers keep content above
-* this band so captions never overlap on-screen graphics.
-*/
-function captionReserveFraction(width, height) {
-	const lineHeight = Math.min(width, height) * .08 * 1.3;
-	const rows = height / width >= 1.5 ? 2 : 1;
-	return (defaultMarginV(width, height) + rows * lineHeight + height * .02) / height;
-}
+/** libass line advance per px of font size (ascent + descent of typical sans fonts). */
+const LINE_ADVANCE = 1.22;
+/** Average glyph advance per px of font size, for row width estimates. */
+const GLYPH_EM = {
+	regular: .54,
+	bold: .58
+};
 /** Style values for a preset at a given output size. */
 function assStyle(o) {
 	const preset = o.preset ?? "minimal";
 	const short = Math.min(o.width, o.height);
-	const bold = preset === "bold";
+	const bold = o.bold ?? preset === "bold";
 	return {
-		fontSize: o.fontSize ?? Math.max(8, Math.round(short * (bold ? .08 : .06))),
+		fontSize: o.fontSize ?? Math.max(8, Math.round(short * (preset === "bold" ? .08 : .06))),
 		bold,
-		outline: Math.max(1, Math.round(short * (bold ? .006 : .003))),
-		shadow: bold ? Math.max(1, Math.round(short * .003)) : 0,
+		outline: Math.max(1, Math.round(short * (preset === "bold" ? .006 : .003))),
+		shadow: preset === "bold" ? Math.max(1, Math.round(short * .003)) : 0,
 		marginV: o.marginV ?? defaultMarginV(o.width, o.height),
 		marginLR: Math.round(o.width * .06)
 	};
 }
-/** Karaoke text for one line: `{\kf<cs>}word ` per word, with `{\k<cs>}` for pauses, in centiseconds from the line start. */
-function assKaraokeText(line) {
+function captionLayout(o) {
+	const st = assStyle(o);
+	const maxLines = Math.min(3, Math.max(1, o.maxLines ?? 2));
+	const plate = Math.min(1, Math.max(0, o.plateOpacity ?? .55)) > 0;
+	const padFor = (size) => plate ? Math.max(2, Math.round(size * .22)) : st.outline;
+	const blockH = (size) => maxLines * size * LINE_ADVANCE + 2 * padFor(size);
+	let fontSize = st.fontSize;
+	let region;
+	if (o.box) {
+		region = {
+			x: Math.round(o.box.x),
+			y: Math.round(o.box.y),
+			w: Math.round(o.box.w),
+			h: Math.round(o.box.h)
+		};
+		while (fontSize > 8 && blockH(fontSize) > region.h) fontSize--;
+	} else {
+		const h = Math.round(blockH(fontSize));
+		const bottom = o.height - st.marginV;
+		region = {
+			x: st.marginLR,
+			y: bottom - h,
+			w: o.width - 2 * st.marginLR,
+			h
+		};
+	}
+	const pad = padFor(fontSize);
+	const em = st.bold ? GLYPH_EM.bold : GLYPH_EM.regular;
+	const maxChars = Math.max(4, Math.floor((region.w - 2 * pad) / (fontSize * em)));
+	const anchor = o.positionY !== void 0 ? {
+		kind: "center",
+		y: Math.round(Math.min(1, Math.max(0, o.positionY)) * o.height)
+	} : { kind: "bottom" };
+	return {
+		fontSize,
+		bold: st.bold,
+		pad,
+		plate,
+		lineAdvance: fontSize * LINE_ADVANCE,
+		maxChars,
+		maxLines,
+		region,
+		anchor
+	};
+}
+/**
+* Box the burned-in captions actually occupy (union over all captions, plate included), in
+* output pixels, clamped to the frame. With no captions, the space reserved for `maxLines` rows.
+*/
+function captionBlockBox(lines, layout, frame) {
+	const em = layout.bold ? GLYPH_EM.bold : GLYPH_EM.regular;
+	let w = 0;
+	let rows = 0;
+	for (const l of lines) {
+		const r = captionRows(l);
+		rows = Math.max(rows, r.length);
+		for (const row of r) w = Math.max(w, Array.from(row).length * layout.fontSize * em);
+	}
+	if (!lines.length) {
+		rows = layout.maxLines;
+		w = layout.region.w - 2 * layout.pad;
+	}
+	const bw = Math.min(frame.width, Math.ceil(w + 2 * layout.pad));
+	const bh = Math.ceil(rows * layout.lineAdvance + 2 * layout.pad);
+	const cx = layout.region.x + layout.region.w / 2;
+	const top = layout.anchor.kind === "center" ? layout.anchor.y - bh / 2 : layout.region.y + layout.region.h - bh;
+	const x = Math.max(0, Math.round(cx - bw / 2));
+	const y = Math.max(0, Math.min(frame.height - bh, Math.round(top)));
+	return {
+		x,
+		y,
+		w: Math.min(bw, frame.width - x),
+		h: Math.min(bh, frame.height - y)
+	};
+}
+/** Karaoke text for one caption: `{\kf<cs>}word` per word, `{\k<cs>}` for pauses, rows joined with `\N`. */
+function assKaraokeText(line, emphasis) {
 	let cursor = cs(line.start_ms);
 	const parts = [];
+	const breaks = rowBreaks(line);
+	const em = new Set(typeof emphasis === "object" ? line.emphasis ?? [] : []);
 	line.words.forEach((w, i) => {
 		const s = Math.max(cs(w.start_ms), cursor);
 		const e = Math.max(cs(w.end_ms), s);
 		if (s > cursor) parts.push(`{\\k${s - cursor}}`);
-		parts.push(`{\\kf${e - s}}${assEscape(w.word)}${i < line.words.length - 1 ? " " : ""}`);
+		const word = em.has(i) ? emphasize(w.word, emphasis) : assEscape(w.word);
+		parts.push(`{\\kf${e - s}}${word}${i < line.words.length - 1 ? breaks.has(i + 1) ? "\\N" : " " : ""}`);
 		cursor = e;
 	});
 	return parts.join("");
 }
+/** Wrap a word's letters/digits (not its surrounding punctuation) in emphasis overrides. */
+function emphasize(word, e) {
+	const m = /^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/u.exec(word);
+	if (!m || !m[2]) return assEscape(word);
+	return `${assEscape(m[1])}{${e.on}}${assEscape(m[2])}{${e.off}}${assEscape(m[3])}`;
+}
+/** Word indices that start a new row. */
+function rowBreaks(line) {
+	const out = /* @__PURE__ */ new Set();
+	let at = 0;
+	for (const n of (line.row_sizes ?? []).slice(0, -1)) out.add(at += n);
+	return out;
+}
+/** Static caption text: rows joined with `\N`, emphasised words wrapped in `on`/`off` overrides. */
+function assStaticText(line, emphasis) {
+	const breaks = rowBreaks(line);
+	const em = new Set(emphasis ? line.emphasis ?? [] : []);
+	return line.words.map((w, i) => {
+		const word = em.has(i) ? emphasize(w.word, emphasis) : assEscape(w.word);
+		return `${i > 0 ? breaks.has(i) ? "\\N" : " " : ""}${word}`;
+	}).join("");
+}
+/**
+* ASS captions: a plate (BorderStyle 3, opaque box per row) unless `plateOpacity` is 0,
+* keyword emphasis in the highlight colour (bold too when the text is not already bold), and
+* the karaoke sweep only with `activeWord`. Rows are pre-broken (`WrapStyle: 2`, no libass
+* wrapping) and the block is bottom-aligned in `box` (or the legacy bottom margin), or centred
+* on `positionY`. See `captionLayout`/`captionBlockBox` for the geometry.
+*/
 function toAss(lines, o) {
 	if (!(o.width > 0 && o.height > 0)) throw new Error("toAss: width and height are required");
 	const st = assStyle(o);
+	const layout = captionLayout(o);
 	const font = (o.font ?? "Arial").replace(/,/g, " ");
-	const base = assColor(o.primary ?? "#FFFFFF");
-	const hi = assColor(o.highlight ?? (o.preset === "bold" ? "#FFD60A" : "#FFFFFF"));
-	const outline = assColor(o.outline ?? "#000000");
-	const back = assColor("#00000080");
+	const baseHex = o.primary ?? "#FFFFFF";
+	const hiHex = o.highlight ?? "#FFD60A";
+	const karaoke = o.activeWord ?? false;
+	const opacity = Math.min(1, Math.max(0, o.plateOpacity ?? .55));
+	const plateAlpha = Math.round(opacity * 255).toString(16).padStart(2, "0");
+	const border = layout.plate ? assColor(`${o.plateColor ?? "#000000"}${plateAlpha}`) : assColor(o.outline ?? "#000000");
+	const { region } = layout;
 	const style = [
 		"Default",
 		font,
-		st.fontSize,
-		hi,
-		base,
-		outline,
-		back,
-		st.bold ? -1 : 0,
+		layout.fontSize,
+		assColor(karaoke ? hiHex : baseHex),
+		assColor(baseHex),
+		border,
+		layout.plate ? border : assColor("#00000080"),
+		layout.bold ? -1 : 0,
 		0,
 		0,
 		0,
@@ -231882,13 +232188,13 @@ function toAss(lines, o) {
 		100,
 		0,
 		0,
-		1,
-		st.outline,
-		st.shadow,
+		layout.plate ? 3 : 1,
+		layout.pad,
+		layout.plate ? 0 : st.shadow,
 		2,
-		st.marginLR,
-		st.marginLR,
-		st.marginV,
+		region.x,
+		Math.max(0, o.width - region.x - region.w),
+		Math.max(0, o.height - region.y - region.h + layout.pad),
 		1
 	].join(",");
 	const header = [
@@ -231897,7 +232203,7 @@ function toAss(lines, o) {
 		"ScriptType: v4.00+",
 		`PlayResX: ${o.width}`,
 		`PlayResY: ${o.height}`,
-		"WrapStyle: 0",
+		"WrapStyle: 2",
 		"ScaledBorderAndShadow: yes",
 		"YCbCr Matrix: TV.709",
 		"",
@@ -231908,13 +232214,31 @@ function toAss(lines, o) {
 		"[Events]",
 		"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
 	];
-	const events = lines.map((l) => `Dialogue: 0,${assTimeCs(cs(l.start_ms))},${assTimeCs(cs(l.end_ms))},Default,,0,0,0,,${assKaraokeText(l)}`);
+	const em = !(o.emphasis ?? true) || karaoke && layout.bold ? void 0 : karaoke ? {
+		on: "\\b1",
+		off: "\\b0"
+	} : {
+		on: `\\c${assTagColor(hiHex)}${layout.bold ? "" : "\\b1"}`,
+		off: `\\c${assTagColor(baseHex)}${layout.bold ? "" : "\\b0"}`
+	};
+	const pos = layout.anchor.kind === "center" ? `{\\an5\\pos(${Math.round(region.x + region.w / 2)},${layout.anchor.y})}` : "";
+	const events = lines.map((l) => `Dialogue: 0,${assTimeCs(cs(l.start_ms))},${assTimeCs(cs(l.end_ms))},Default,,0,0,0,,${pos}${karaoke ? assKaraokeText(l, em) : assStaticText(l, em)}`);
 	return `${[...header, ...events].join("\n")}\n`;
 }
 /** Write `<base>.json|.srt|.vtt|.txt` (and `.ass` when `ass` options are given) into `dir`. */
 async function writeCaptionSet(dir, base, words, opts = {}) {
 	await mkdir(dir, { recursive: true });
-	const lines = groupCaptionLines(words, opts);
+	const { ass, ...group } = opts;
+	const maxLines = Math.min(3, Math.max(1, opts.maxLines ?? ass?.maxLines ?? 2));
+	const layout = ass ? captionLayout({
+		...ass,
+		maxLines
+	}) : void 0;
+	const lines = groupCaptionLines(words, {
+		...group,
+		maxLines,
+		...layout && opts.maxChars === void 0 ? { maxChars: layout.maxChars } : {}
+	});
 	const files = {
 		json: join(dir, `${base}.json`),
 		srt: join(dir, `${base}.srt`),
@@ -231925,11 +232249,24 @@ async function writeCaptionSet(dir, base, words, opts = {}) {
 	await writeFile(files.srt, toSrt(lines));
 	await writeFile(files.vtt, toVtt(lines));
 	await writeFile(files.txt, toTranscript(words));
-	if (opts.ass) {
-		files.ass = join(dir, `${base}.ass`);
-		await writeFile(files.ass, toAss(lines, opts.ass));
-	}
-	return files;
+	if (!ass || !layout) return {
+		files,
+		lines
+	};
+	files.ass = join(dir, `${base}.ass`);
+	await writeFile(files.ass, toAss(lines, {
+		...ass,
+		maxLines
+	}));
+	return {
+		files,
+		lines,
+		placement: {
+			box: captionBlockBox(lines, layout, ass),
+			max_lines: maxLines,
+			font_size: layout.fontSize
+		}
+	};
 }
 //#endregion
 //#region ../media/dist/compose.js
@@ -232385,9 +232722,9 @@ async function writeQaReport(dir, report) {
 * HTML renderer can use them verbatim; the FFmpeg renderer resolves them to one font file.
 */
 const DEFAULT_TOKENS = Object.freeze({
-	font_heading: "Inter, Helvetica, Arial, sans-serif",
-	font_body: "Inter, Helvetica, Arial, sans-serif",
-	font_mono: "Menlo, \"DejaVu Sans Mono\", monospace",
+	font_heading: "Inter, \"Noto Sans\", Helvetica, Arial, sans-serif",
+	font_body: "Inter, \"Noto Sans\", Helvetica, Arial, sans-serif",
+	font_mono: "\"JetBrains Mono\", Menlo, \"DejaVu Sans Mono\", monospace",
 	color_background: "#0B0F19",
 	color_text: "#F5F7FA",
 	color_primary: "#4F8CFF",
@@ -232456,6 +232793,105 @@ function resolveTokens$1(brand, defaults = {}) {
 	if (logo) out.logo_path = logo;
 	else delete out.logo_path;
 	return out;
+}
+const BUNDLED_FONTS = Object.freeze([
+	{
+		family: "Inter",
+		weight: 400,
+		file: "Inter/Inter-Regular.ttf"
+	},
+	{
+		family: "Inter",
+		weight: 700,
+		file: "Inter/Inter-Bold.ttf"
+	},
+	{
+		family: "Noto Sans",
+		weight: 400,
+		file: "NotoSans/NotoSans-Regular.ttf"
+	},
+	{
+		family: "Noto Sans",
+		weight: 700,
+		file: "NotoSans/NotoSans-Bold.ttf"
+	},
+	{
+		family: "JetBrains Mono",
+		weight: 400,
+		file: "JetBrainsMono/JetBrainsMono-Regular.ttf"
+	},
+	{
+		family: "JetBrains Mono",
+		weight: 700,
+		file: "JetBrainsMono/JetBrainsMono-Bold.ttf"
+	}
+]);
+const FONTS_MARKER = "README.md";
+/**
+* The bundled `fonts/` directory: `${CLAUDE_PLUGIN_ROOT}/fonts`, else the first `fonts/` with a
+* README.md found walking up from this module (the repo root in dev, the plugin root from
+* `dist/mcp.mjs`). Null when the fonts are not installed; callers then fall back to host fonts
+* and should report it (see `bundledFontsStatus`).
+*/
+function findFontsDir(env = process.env, from) {
+	const root = env.CLAUDE_PLUGIN_ROOT;
+	if (root && existsSync(join(root, "fonts", FONTS_MARKER))) return join(root, "fonts");
+	let dir = from ?? dirname(fileURLToPath(import.meta.url));
+	for (let i = 0; i < 6; i++) {
+		const candidate = join(dir, "fonts");
+		if (existsSync(join(candidate, FONTS_MARKER))) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+/** Which bundled font files are present in `dir` (null dir: none). */
+function bundledFontsStatus(dir) {
+	const present = [];
+	const missing = [];
+	for (const f of BUNDLED_FONTS) (dir && existsSync(join(dir, f.file)) ? present : missing).push(f.file);
+	return {
+		dir,
+		present,
+		missing
+	};
+}
+/** Nearest bundled weight: 600 and up map to Bold, anything lighter to Regular. */
+function bundledWeight(weight) {
+	return (weight ?? 400) >= 600 ? 700 : 400;
+}
+/** Absolute path of the bundled file for `family` at (the nearest) `weight`, if bundled and present. */
+function bundledFontFile(family, weight, dir) {
+	if (!dir) return null;
+	const want = family.trim().toLowerCase();
+	const w = bundledWeight(weight);
+	const hit = BUNDLED_FONTS.find((f) => f.family.toLowerCase() === want && f.weight === w);
+	if (!hit) return null;
+	const p = join(dir, hit.file);
+	return existsSync(p) ? p : null;
+}
+/**
+* `@font-face` rules (file:// URLs) for every bundled family named in the tokens' chains, both
+* weights, for the HTML renderer. Empty when the fonts directory is missing, so callers can
+* embed it unconditionally; the chains' other families still apply through the browser.
+*/
+function fontFaceCss(tokens, opts = {}) {
+	const dir = opts.fontsDir === void 0 ? findFontsDir(opts.env ?? process.env) : opts.fontsDir;
+	if (!dir) return "";
+	const used = new Set([
+		tokens.font_heading,
+		tokens.font_body,
+		tokens.font_mono
+	].flatMap((c) => parseFontChain(c ?? "")).map((n) => n.toLowerCase()));
+	const rules = [];
+	for (const f of BUNDLED_FONTS) {
+		if (!used.has(f.family.toLowerCase())) continue;
+		const p = join(dir, f.file);
+		if (!existsSync(p)) continue;
+		rules.push(`@font-face { font-family: "${f.family}"; src: url("${pathToFileURL(p).href}") format("truetype"); font-weight: ${f.weight}; font-style: normal; font-display: block; }`);
+	}
+	return rules.join("\n");
 }
 /** Split a CSS font-family list into names (quotes removed). */
 function parseFontChain(chain) {
@@ -232529,14 +232965,17 @@ var FontNotFoundError = class extends Error {
 	}
 };
 /**
-* Locate a TTF/OTF/TTC file for a CSS-style family chain. Each named family is tried with
+* Locate a TTF/OTF/TTC file for a CSS-style family chain. For each named family, a bundled file
+* (Inter, Noto Sans, JetBrains Mono in `fonts/`, nearest of Regular/Bold to `weight`) wins first;
+* otherwise the family is tried with
 * `fc-match -f '%{family}\n%{file}'` and accepted only when fontconfig returns that family
 * (fontconfig otherwise substitutes silently). Then platform fallbacks (macOS Helvetica /
 * Arial / Menlo, Linux DejaVu / Liberation, Windows Arial / Consolas), then fontconfig's
 * substitute for the first family. Throws FontNotFoundError if nothing is found.
 */
-async function resolveFontFile(family, env = process.env, deps = {}) {
+async function resolveFontFile(family, env = process.env, deps = {}, weight) {
 	const platform = deps.platform ?? process.platform;
+	const fontsDir = deps.fontsDir === void 0 ? findFontsDir(env) : deps.fontsDir;
 	const fcMatch = deps.fcMatch ?? defaultFcMatch;
 	const exists = deps.exists ?? fileExists$1;
 	const names = parseFontChain(family);
@@ -232545,6 +232984,8 @@ async function resolveFontFile(family, env = process.env, deps = {}) {
 	let substitute = null;
 	for (const name of names) {
 		if (FONT_EXT.test(name) && await exists(name)) return name;
+		const bundled = bundledFontFile(name, weight, fontsDir);
+		if (bundled) return bundled;
 		const out = await fcMatch([
 			"-f",
 			"%{family}\n%{file}",
@@ -232573,12 +233014,13 @@ async function resolveFontFile(family, env = process.env, deps = {}) {
 /** A memoising FontResolver bound to `env`. */
 function createFontResolver(env = process.env, deps = {}) {
 	const cache = /* @__PURE__ */ new Map();
-	return (family) => {
-		let p = cache.get(family);
+	return (family, weight) => {
+		const key = `${family}\u0000${bundledWeight(weight)}`;
+		let p = cache.get(key);
 		if (!p) {
-			p = resolveFontFile(family, env, deps);
-			p.catch(() => cache.delete(family));
-			cache.set(family, p);
+			p = resolveFontFile(family, env, deps, weight);
+			p.catch(() => cache.delete(key));
+			cache.set(key, p);
 		}
 		return p;
 	};
@@ -232593,6 +233035,210 @@ function targetForAspect(aspect, opts = {}) {
 		height: aw <= ah ? even(s * ah / aw) : even(s),
 		fps: opts.fps ?? 30,
 		aspect_ratio: aspect
+	};
+}
+//#endregion
+//#region ../platforms/dist/registry.js
+/** Present in every `platform-specs/` directory, so it can be found before any contract exists. */
+const MARKER$1 = "README.md";
+/**
+* Locate the bundled `platform-specs/` directory: `${CLAUDE_PLUGIN_ROOT}/platform-specs` first, then
+* walk up from this module (works from `packages/*\/src`, `packages/*\/dist` and `dist/mcp.mjs`).
+*/
+function findPlatformSpecsDir(env = process.env, from) {
+	const root = env.CLAUDE_PLUGIN_ROOT;
+	if (root && existsSync(join(root, "platform-specs", MARKER$1))) return join(root, "platform-specs");
+	let dir = from ?? dirname(fileURLToPath(import.meta.url));
+	for (let i = 0; i < 6; i++) {
+		const candidate = join(dir, "platform-specs");
+		if (existsSync(join(candidate, MARKER$1))) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+function parseContract(text, file, fileId) {
+	const parsed = parseYamlOrJson(PlatformContract, text);
+	if (!parsed.ok) throw new Error(`invalid platform contract ${file}: ${parsed.errors.map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
+	if (parsed.data.id !== fileId) throw new Error(`platform contract ${file} has id "${parsed.data.id}" but is named "${fileId}.yaml"`);
+	return parsed.data;
+}
+/** Load and validate every `<dir>/<id>.yaml`, sorted by id. Throws on any invalid contract. */
+async function loadContracts(dir) {
+	const names = (await readdir(dir)).filter((n) => n.endsWith(".yaml")).sort();
+	const out = [];
+	for (const name of names) {
+		const file = join(dir, name);
+		out.push(parseContract(await readFile(file, "utf8"), file, name.slice(0, -5)));
+	}
+	return out;
+}
+/**
+* Check a spec's targets against the contract registry: every target must exist (error) and accept
+* the spec's aspect ratio (warning; the per-target compiler would have to crop or pad).
+*/
+function checkSpecTargets(spec, contracts) {
+	const errors = [];
+	const warnings = [];
+	const byId = new Map(contracts.map((c) => [c.id, c]));
+	const explicit = Boolean(spec.targets?.length);
+	resolveTargets(spec).forEach((id, i) => {
+		const path = explicit ? `targets.${i}` : "platform";
+		const contract = byId.get(id);
+		if (!contract) {
+			const near = closestMatches(id, byId.keys());
+			errors.push({
+				path,
+				message: `no platform contract "${id}" in platform-specs/`,
+				fix: near.length ? `use one of ${near.map((n) => `"${n}"`).join(", ")}` : "add platform-specs/" + id + ".yaml or remove the target"
+			});
+			return;
+		}
+		if (!contract.video.aspect_ratios.includes(spec.aspect_ratio)) warnings.push({
+			path,
+			message: `${contract.name} expects ${contract.video.aspect_ratios.join(" or ")}, but the spec is ${spec.aspect_ratio}`,
+			fix: `use aspect_ratio ${contract.video.aspect_ratios[0]} or drop "${id}" from targets`
+		});
+	});
+	return {
+		errors,
+		warnings
+	};
+}
+//#endregion
+//#region ../platforms/dist/geometry.js
+/** Normalized rect → pixel rect on a `width`×`height` frame (outer edges rounded outward). */
+function toPx(rect, width, height) {
+	const snap = (n) => Math.round(n * 1e6) / 1e6;
+	const x0 = Math.floor(snap(rect.x * width));
+	const y0 = Math.floor(snap(rect.y * height));
+	const x1 = Math.min(width, Math.ceil(snap((rect.x + rect.w) * width)));
+	const y1 = Math.min(height, Math.ceil(snap((rect.y + rect.h) * height)));
+	return {
+		x: x0,
+		y: y0,
+		w: x1 - x0,
+		h: y1 - y0
+	};
+}
+/** Overlap of two rects, or null when they do not intersect. */
+function intersect(a, b) {
+	const x = Math.max(a.x, b.x);
+	const y = Math.max(a.y, b.y);
+	const w = Math.min(a.x + a.w, b.x + b.w) - x;
+	const h = Math.min(a.y + a.h, b.y + b.h) - y;
+	return w > 0 && h > 0 ? {
+		x,
+		y,
+		w,
+		h
+	} : null;
+}
+/** The union of every enabled target's UI masks measured on `aspect` frames. */
+function masksFor(contracts, aspect) {
+	return contracts.flatMap((c) => c.ui_masks.filter((m) => m.aspect_ratio === aspect).map((m) => ({
+		...m,
+		target: c.id
+	})));
+}
+/** Masks (from `masks`) that a pixel rect overlaps on a `width`×`height` frame, with the overlap. */
+function maskCollisions(rect, masks, width, height) {
+	const out = [];
+	for (const mask of masks) {
+		const overlap = intersect(rect, toPx(mask.rect, width, height));
+		if (overlap) out.push({
+			mask,
+			overlap
+		});
+	}
+	return out;
+}
+/**
+* Smallest caption zone still worth using, as fractions of the frame: one caption line of
+* about 4% of the frame height, at half the design caption width. Below this the design caption
+* region is kept and lint reports the collision instead.
+*/
+const MIN_CAPTION_LINE = .04;
+const MIN_CAPTION_WIDTH = .5;
+/** Content smaller than this share of the design content area is not usable either. */
+const MIN_CONTENT_SHARE = .25;
+const rect = (x0, y0, x1, y1) => ({
+	x: x0,
+	y: y0,
+	w: x1 - x0,
+	h: y1 - y0
+});
+const area = (r) => Math.max(0, r.w) * Math.max(0, r.h);
+/**
+* Shrink `r` until it overlaps none of `blocks`. Each overlapping block is removed by cutting
+* one side of `r` (top, bottom, left or right), choosing the cut that keeps the most area;
+* ties prefer vertical cuts (keep full width for text). Blocks are handled largest overlap
+* first so a big footer is cut before a small rail. Returns null when nothing usable is left.
+*/
+function shrinkAway(r, blocks) {
+	let cur = { ...r };
+	const pending = [...blocks];
+	while (pending.length) {
+		const hits = pending.map((b, i) => ({
+			b,
+			i,
+			o: intersect(cur, b)
+		})).filter((h) => h.o !== null).sort((a, b) => area(b.o) - area(a.o) || a.i - b.i);
+		if (hits.length === 0) break;
+		const { b, i } = hits[0];
+		pending.splice(i, 1);
+		const x1 = cur.x + cur.w;
+		const y1 = cur.y + cur.h;
+		const options = [
+			rect(cur.x, cur.y, x1, Math.min(y1, b.y)),
+			rect(cur.x, Math.max(cur.y, b.y + b.h), x1, y1),
+			rect(cur.x, cur.y, Math.min(x1, b.x), y1),
+			rect(Math.max(cur.x, b.x + b.w), cur.y, x1, y1)
+		].filter((o) => o.w > 0 && o.h > 0);
+		if (options.length === 0) return null;
+		cur = options.reduce((best, o) => area(o) > area(best) ? o : best);
+	}
+	return cur;
+}
+/**
+* Layout zones for a target frame. Starts from the design grid (v2 report §A universal
+* production master, scaled from 1080×1920; percentage bands for non-portrait frames), then
+* shrinks each zone away from the enabled targets' `severity: error` UI masks:
+* - caption: the design caption region minus error masks; if that leaves less than one caption
+*   line (or half the width), the design region is kept and lint reports the collision;
+* - content: the design content rect minus error masks, kept above the caption zone;
+* - hook: the design hook region clipped to the content rect.
+* `warning` masks never move zones; lint reports them.
+*/
+function layoutZones(target, contracts = []) {
+	const { width: W, height: H } = target;
+	const sx = (px) => Math.round(px / 1080 * W);
+	const sy = (px) => Math.round(px / 1920 * H);
+	const portrait = H / W >= 1.5;
+	const designContent = portrait ? rect(sx(72), sy(180), sx(1008), sy(1240)) : rect(Math.round(W * .07), Math.round(H * .08), Math.round(W * .93), Math.round(H * .74));
+	const designCaption = portrait ? rect(sx(90), sy(1260), sx(990), sy(1530)) : rect(Math.round(W * .08), Math.round(H * .76), Math.round(W * .92), Math.round(H * .94));
+	const designHook = portrait ? rect(sx(90), sy(180), sx(990), sy(600)) : rect(designContent.x, designContent.y, designContent.x + designContent.w, designContent.y + Math.round(designContent.h * .4));
+	const masks = masksFor(contracts, target.aspect_ratio);
+	const blocks = masks.filter((m) => m.severity === "error").map((m) => toPx(m.rect, W, H));
+	const cap = shrinkAway(designCaption, blocks);
+	const caption = cap && cap.h >= Math.ceil(H * MIN_CAPTION_LINE) && cap.w >= designCaption.w * MIN_CAPTION_WIDTH ? cap : designCaption;
+	const gap = Math.max(0, designCaption.y - (designContent.y + designContent.h));
+	const contentBottom = Math.min(designContent.y + designContent.h, caption.y - gap);
+	const bounded = rect(designContent.x, designContent.y, designContent.x + designContent.w, Math.max(designContent.y + 1, contentBottom));
+	const shrunk = shrinkAway(bounded, blocks);
+	const content = shrunk && area(shrunk) >= area(designContent) * MIN_CONTENT_SHARE ? shrunk : bounded;
+	const hook = intersect(designHook, content) ?? rect(content.x, content.y, content.x + content.w, content.y + Math.round(content.h * .4));
+	return {
+		width: W,
+		height: H,
+		aspect_ratio: target.aspect_ratio,
+		content,
+		caption,
+		hook,
+		masks,
+		targets: contracts.map((c) => c.id),
+		version: 2
 	};
 }
 //#endregion
@@ -232711,41 +233357,30 @@ function placeLines(fit, box, align = "center", valign = "middle", opts = {}) {
 		};
 	});
 }
-const SAFE_MARGINS = {
-	"9:16": {
-		top: .1,
-		bottom: .2,
-		left: .07,
-		right: .07
-	},
-	"4:5": {
-		top: .07,
-		bottom: .15,
-		left: .07,
-		right: .07
-	},
-	"1:1": {
-		top: .07,
-		bottom: .15,
-		left: .07,
-		right: .07
-	},
-	"16:9": {
-		top: .08,
-		bottom: .17,
-		left: .07,
-		right: .07
-	}
-};
-/** The content-safe rectangle of a target, in px (integers). */
-function safeArea(target) {
-	const m = SAFE_MARGINS[target.aspect_ratio] ?? SAFE_MARGINS["16:9"];
-	const bottom = Math.max(m.bottom, captionReserveFraction(target.width, target.height));
+/**
+* The content-safe rectangle of a target, in px (integers): `zones.content` when the pipeline
+* passes layout zones for the enabled platform targets, else the design-grid content rect with
+* no masks (`layoutZones(target)`), which already keeps clear of the caption zone. Zones computed
+* for another frame size are scaled to this one.
+*/
+function safeArea(target, zones) {
+	const z = zones ?? layoutZones(target);
+	const c = z.content;
+	if (z.width === target.width && z.height === target.height) return {
+		x: c.x,
+		y: c.y,
+		w: c.w,
+		h: c.h
+	};
+	const kx = target.width / z.width;
+	const ky = target.height / z.height;
+	const x = Math.round(c.x * kx);
+	const y = Math.round(c.y * ky);
 	return {
-		x: Math.round(target.width * m.left),
-		y: Math.round(target.height * m.top),
-		w: Math.round(target.width * (1 - m.left - m.right)),
-		h: Math.round(target.height * (1 - m.top - bottom))
+		x,
+		y,
+		w: Math.round((c.x + c.w) * kx) - x,
+		h: Math.round((c.y + c.h) * ky) - y
 	};
 }
 /** Split a rect vertically by weights with `gap` px between parts. */
@@ -232808,7 +233443,7 @@ function inset(r, dx, dy = dx) {
 * tokens, not the host toolchain.
 */
 const FFMPEG_RENDERER_ID = "ffmpeg-drawtext";
-const FFMPEG_RENDERER_VERSION = "0.1.0";
+const FFMPEG_RENDERER_VERSION = "0.2.0";
 const FFMPEG_RENDERER_KINDS = [
 	"typography",
 	"code",
@@ -232880,6 +233515,26 @@ function textLines(fit, box, o) {
 function asStr(v) {
 	return typeof v === "string" && v.trim() ? v : void 0;
 }
+/** Record a text block for lint: the box it was fitted into, its size, truncation and colours. */
+function note(c, role, text, box, fit, color, background = c.colors.bg) {
+	if (!text.trim()) return;
+	const x = r(box.x ?? 0);
+	const y = r(box.y ?? 0);
+	c.boxes.push({
+		role,
+		text,
+		rect: {
+			x,
+			y,
+			w: Math.max(0, r((box.x ?? 0) + box.w) - x),
+			h: Math.max(0, r((box.y ?? 0) + box.h) - y)
+		},
+		font_px: fit.fontSize,
+		truncated: fit.truncated,
+		color: toHex(rgb(color)),
+		background: toHex(rgb(background))
+	});
+}
 function typography(p, c) {
 	const warnings = [];
 	const lines = Array.isArray(p.lines) ? p.lines.filter((l) => typeof l === "string" && l.trim() !== "") : [];
@@ -232907,6 +233562,7 @@ function typography(p, c) {
 		color,
 		beat: (i) => i
 	});
+	note(c, c.main, lines.join("\n"), box, fit, c.colors.text);
 	if (em && !hit) warnings.push(`typography: emphasis "${emphasis}" not found in lines`);
 	if (em && hit) warnings.push("typography: emphasis colours the whole line containing it (no per-word styling in ffmpeg-drawtext)");
 	return {
@@ -232936,6 +233592,7 @@ function code(p, c) {
 		lineHeight: 1.4
 	});
 	if (fit.truncated) warnings.push("code: code did not fit at the minimum size; long lines were cut and/or trailing lines dropped");
+	note(c, "code", src, inner, fit, c.colors.text, c.colors.panel);
 	const panelH = Math.min(c.safe.h, r(fit.height + 2 * pad + header + fit.fontSize * .4));
 	const panel = {
 		x: c.safe.x,
@@ -232976,6 +233633,15 @@ function code(p, c) {
 			beat: 0,
 			slide: false
 		});
+		note(c, "decorative", lang, {
+			x: inner.x,
+			y: panel.y + r(pad * .7),
+			w: inner.w,
+			h: size
+		}, {
+			fontSize: size,
+			truncated: false
+		}, c.colors.muted, c.colors.panel);
 	}
 	const placed = placeLines(fit, body, "left", "top", { mono: true });
 	for (const n of highlights) {
@@ -233063,17 +233729,19 @@ function comparison(p, c) {
 			minSize: c.u * .03,
 			maxLines: 1
 		});
-		els.push(...textLines(lf, {
+		const labelBox = {
 			x: pr.x + pad,
 			y: pr.y + pad,
 			w: pr.w - 2 * pad,
 			h: labelH - pad / 2
-		}, {
+		};
+		els.push(...textLines(lf, labelBox, {
 			font: "heading",
 			color: accent,
 			beat,
 			valign: "top"
 		}));
+		note(c, "label", asStr(s.label) ?? "", labelBox, lf, accent, c.colors.panel);
 		const bf = fitText(asStr(s.text) ?? "", bodyBoxes[i], {
 			maxSize: bodySize,
 			minSize: Math.min(bodySize, c.u * .03)
@@ -233085,6 +233753,7 @@ function comparison(p, c) {
 			beat: beat + 1,
 			valign: "top"
 		}));
+		note(c, "body", asStr(s.text) ?? "", bodyBoxes[i], bf, c.colors.text, c.colors.panel);
 	});
 	if (verdict && verdictR) {
 		const vf = fitText(verdict, verdictR, {
@@ -233097,6 +233766,7 @@ function comparison(p, c) {
 			color: c.colors.text,
 			beat: 4
 		}));
+		note(c, "headline", verdict, verdictR, vf, c.colors.text);
 	}
 	return {
 		elements: els,
@@ -233142,6 +233812,7 @@ function cta(p, c) {
 				beat: 0,
 				valign: "bottom"
 			}));
+			note(c, c.main === "hook" ? "hook" : "cta", headline, rect, f, c.colors.text);
 		} else if (key === "action") {
 			const maxW = r(rect.w * .9);
 			const f = fitText(action, {
@@ -233173,9 +233844,11 @@ function cta(p, c) {
 				beat: 1,
 				slide: false
 			}));
+			note(c, "cta", action, pill, f, c.colors.bg, c.colors.primary);
 		} else if (key === "command") {
 			const pad = r(c.u * .03);
-			const f = fitText([`$ ${command}`], {
+			const text = `$ ${command}`;
+			const f = fitText([text], {
 				w: rect.w - 2 * pad,
 				h: rect.h - 2 * pad
 			}, {
@@ -233212,6 +233885,7 @@ function cta(p, c) {
 				beat: 2,
 				slide: false
 			}));
+			note(c, "code", text, inset(panel, pad), f, c.colors.secondary, c.colors.panel);
 		} else {
 			const f = fitText(url, rect, {
 				maxSize: c.u * .04,
@@ -233224,6 +233898,7 @@ function cta(p, c) {
 				beat: 3,
 				valign: "top"
 			}));
+			note(c, "label", url, rect, f, c.colors.muted);
 		}
 	});
 	return {
@@ -233291,6 +233966,7 @@ function endCard(p, c, logo) {
 				beat: 1,
 				valign: parts.length === 1 ? "middle" : "bottom"
 			}));
+			note(c, c.main, title, rect, f, c.colors.text);
 		} else {
 			const f = fitText(subtitle, rect, {
 				maxSize: c.u * .055,
@@ -233303,6 +233979,7 @@ function endCard(p, c, logo) {
 				beat: 2,
 				valign: "top"
 			}));
+			note(c, "body", subtitle, rect, f, c.colors.primary);
 		}
 	});
 	return {
@@ -233330,6 +234007,7 @@ function statLayout(value, label, c, warnings) {
 		beat: 0,
 		valign: label ? "bottom" : "middle"
 	}));
+	note(c, c.main, value, numR, nf, c.colors.primary);
 	if (label && labelR) {
 		const lf = fitText(label, labelR, {
 			maxSize: c.u * .065,
@@ -233342,6 +234020,7 @@ function statLayout(value, label, c, warnings) {
 			beat: 1,
 			valign: "top"
 		}));
+		note(c, "label", label, labelR, lf, c.colors.text);
 	}
 	return {
 		elements: els,
@@ -233379,6 +234058,7 @@ function chart(p, c) {
 				beat: 0,
 				valign: "bottom"
 			}));
+			note(c, c.main, label, titleR, tf, c.colors.text);
 		}
 		const rowGap = r(c.u * .03);
 		const rowH = Math.min((barsR.h - rowGap * (rows.length - 1)) / rows.length, c.u * .07 + c.u * .045 * 1.35);
@@ -233406,6 +234086,15 @@ function chart(p, c) {
 				beat,
 				slide: false
 			});
+			note(c, "label", s.label, {
+				x: rr.x,
+				y: rr.y,
+				w: rr.w,
+				h: labelSize * 1.35
+			}, {
+				fontSize: labelSize,
+				truncated: labelLines.length > 1
+			}, c.colors.text);
 			const barY = r(rr.y + labelSize * 1.35);
 			const barH = Math.max(2, r(Math.min(rr.h - labelSize * 1.35, c.u * .07)));
 			const trackW = Math.max(2, rr.w - valueW);
@@ -233612,6 +234301,7 @@ function diagram(p, c) {
 			beat: i,
 			slide: false
 		}));
+		note(c, "label", name, inset(rect, pad), f, c.colors.text, c.colors.panel);
 	}
 	return {
 		elements: els,
@@ -233672,6 +234362,7 @@ function screenshot(p, c, image) {
 			beat: 0,
 			slide: false
 		}));
+		note(c, "decorative", `screenshot "${asStr(p.asset) ?? "?"}" unavailable`, inset(frame, gap), f, c.colors.muted, c.colors.panel);
 	}
 	els.push({
 		type: "box",
@@ -233717,6 +234408,15 @@ function screenshot(p, c, image) {
 				border
 			}
 		});
+		note(c, "label", co.text, {
+			x: x - border,
+			y: my - r(size / 2) - border,
+			w: tw + 2 * border,
+			h: size + 2 * border
+		}, {
+			fontSize: size,
+			truncated: text !== co.text
+		}, c.colors.text);
 	});
 	if (listed.length && listR) {
 		const rowsR = splitV(listR, listed.map(() => 1), r(c.u * .015));
@@ -233751,6 +234451,7 @@ function screenshot(p, c, image) {
 				beat,
 				align: "left"
 			}));
+			note(c, "body", co.text, tr, f, c.colors.text);
 		});
 	}
 	return {
@@ -233765,10 +234466,18 @@ function composeScene(scene, target, tokens, inputs = {}) {
 	const c = {
 		target,
 		tokens,
-		safe: safeArea(target),
+		safe: safeArea(target, inputs.zones),
 		u: Math.min(target.width, target.height),
-		colors: palette(tokens)
+		colors: palette(tokens),
+		main: scene.purpose === "hook" ? "hook" : "headline",
+		boxes: []
 	};
+	return {
+		...layoutKind(det, c, inputs),
+		text_boxes: c.boxes
+	};
+}
+function layoutKind(det, c, inputs) {
 	const p = det.props;
 	switch (det.kind) {
 		case "typography": return typography(p, c);
@@ -233783,7 +234492,7 @@ function composeScene(scene, target, tokens, inputs = {}) {
 	}
 }
 /** `name=k=v:...` with both escaping levels applied per value (the result is graph-safe). */
-function f(name, opts) {
+function f$1(name, opts) {
 	return `${name}=${Object.entries(opts).filter(([, v]) => v !== void 0).map(([k, v]) => `${k}=${escapeFiltergraph(escapeFilterOption(String(v)))}`).join(":")}`;
 }
 /** Stagger step and fade length for a clip: every element is fully visible by 60% of the clip. */
@@ -233817,7 +234526,7 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir) {
 	for (const el of comp.elements) {
 		const start = round3(el.beat * step);
 		const progress = `min(1,max(0,(t-${start})/${fade}))`;
-		if (el.type === "box") chain.push(f("drawbox", {
+		if (el.type === "box") chain.push(f$1("drawbox", {
 			x: el.x,
 			y: el.y,
 			w: Math.max(1, el.w),
@@ -233829,7 +234538,7 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir) {
 		else if (el.type === "text") {
 			const name = `t${textFiles.size}.txt`;
 			textFiles.set(name, el.text);
-			chain.push(f("drawtext", {
+			chain.push(f$1("drawtext", {
 				fontfile: fonts[el.font],
 				textfile: join(textDir, name),
 				expansion: "none",
@@ -233859,19 +234568,19 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir) {
 				el.path
 			]);
 			const img = `[i${idx}]`;
-			const fadeF = fade > 0 ? `,${f("fade", {
+			const fadeF = fade > 0 ? `,${f$1("fade", {
 				t: "in",
 				st: start,
 				d: fade,
 				alpha: 1
 			})}` : "";
-			chains.push(`[${idx}:v]${f("scale", {
+			chains.push(`[${idx}:v]${f$1("scale", {
 				w: el.w,
 				h: el.h,
 				flags: "bicubic"
 			})},format=rgba${fadeF}${img}`);
 			const out = `[b${label++}]`;
-			chains.push(`${cur}${img}${f("overlay", {
+			chains.push(`${cur}${img}${f$1("overlay", {
 				x: el.x,
 				y: el.y,
 				format: "auto",
@@ -233920,7 +234629,7 @@ function ffmpegRenderArgs(built, target, tokens, frames, encode, out) {
 		"-f",
 		"lavfi",
 		"-i",
-		f("color", {
+		f$1("color", {
 			c: ffColor(tokens.color_background),
 			s: `${target.width}x${target.height}`,
 			r: target.fps,
@@ -234032,10 +234741,13 @@ function createFfmpegRenderer(opts = {}) {
 					if (!image) warnings.push(`end_card: logo "${lp}" could not be read; skipped`);
 				}
 			}
-			const comp = composeScene(scene, target, tokens, { image });
+			const comp = composeScene(scene, target, tokens, {
+				image,
+				...req.zones ? { zones: req.zones } : {}
+			});
 			warnings.push(...comp.warnings);
 			const fonts = {
-				heading: await fontResolver(tokens.font_heading),
+				heading: await fontResolver(tokens.font_heading, 700),
 				body: await fontResolver(tokens.font_body),
 				mono: await fontResolver(tokens.font_mono)
 			};
@@ -234062,7 +234774,8 @@ function createFfmpegRenderer(opts = {}) {
 				duration_ms: Math.round(frames * 1e3 / target.fps),
 				renderer: FFMPEG_RENDERER_ID,
 				renderer_version: FFMPEG_RENDERER_VERSION,
-				warnings
+				warnings,
+				text_boxes: comp.text_boxes
 			};
 		}
 	};
@@ -234126,14 +234839,15 @@ async function selectRenderer(kind, renderers, env = process.env, preference = "
 	};
 }
 const PENDING_REASON = "provider rendering arrives in Phase 4";
-/** Cache key of a scene clip: scene canonical JSON + tokens + target + renderer id/version. */
-function sceneCacheKey(scene, tokens, target, renderer, placeholder = false) {
+/** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version. */
+function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones) {
 	return sha256Hex(canonicalJson({
 		v: 1,
-		layout: 2,
+		layout: 3,
 		scene,
 		tokens,
 		target,
+		...zones ? { zones } : {},
 		renderer: {
 			id: renderer.id,
 			version: renderer.version
@@ -234207,7 +234921,7 @@ async function renderScenes(spec, o) {
 			warnings: []
 		};
 		const r = sel.renderer;
-		const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder);
+		const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones);
 		const out = join(dir, `${orig.id}.mp4`);
 		const sidecarPath = join(dir, `${orig.id}.json`);
 		const base = {
@@ -234228,7 +234942,8 @@ async function renderScenes(spec, o) {
 				from_cache: true,
 				out_path: out,
 				duration_ms: sc.duration_ms,
-				warnings: sc.warnings
+				warnings: sc.warnings,
+				...sc.text_boxes ? { text_boxes: sc.text_boxes } : {}
 			};
 		}
 		const tmp = join(dir, `.${orig.id}.${process.pid}.tmp.mp4`);
@@ -234238,7 +234953,8 @@ async function renderScenes(spec, o) {
 				target: o.target,
 				tokens: o.tokens,
 				out_path: tmp,
-				project_dir: o.project_dir
+				project_dir: o.project_dir,
+				...o.zones ? { zones: o.zones } : {}
 			}, { signal: o.signal });
 			await rename(tmp, out);
 			await writeJsonAtomic(sidecarPath, {
@@ -234248,14 +234964,16 @@ async function renderScenes(spec, o) {
 				renderer_version: res.renderer_version,
 				duration_ms: res.duration_ms,
 				placeholder,
-				warnings: res.warnings
+				warnings: res.warnings,
+				...res.text_boxes ? { text_boxes: res.text_boxes } : {}
 			});
 			return {
 				...base,
 				status: placeholder ? "pending" : "rendered",
 				out_path: out,
 				duration_ms: res.duration_ms,
-				warnings: res.warnings
+				warnings: res.warnings,
+				...res.text_boxes ? { text_boxes: res.text_boxes } : {}
 			};
 		} catch (err) {
 			await rm(tmp, { force: true });
@@ -234624,22 +235342,76 @@ function anim(effect, at, len, cls = "", style = "") {
 * Largest font size (px) at which `texts` fit a box when the browser wraps them at `boxW`,
 * estimated from an average advance of `em` × size per character.
 */
-function fitFont(texts, boxW, boxH, maxFs, minFs, lineHeight = 1.2, em = .56) {
+function fitFontInfo(texts, boxW, boxH, maxFs, minFs, lineHeight = 1.2, em = .56) {
+	const longestWord = Math.max(0, ...texts.flatMap((t) => t.split(/\s+/).map((w) => Array.from(w).length)));
+	const ok = (size) => {
+		const perLine = Math.max(1, Math.floor(boxW / (size * em)));
+		return texts.reduce((acc, t) => acc + Math.max(1, Math.ceil(Array.from(t).length / perLine)), 0) * size * lineHeight <= boxH && longestWord <= perLine;
+	};
 	let fs = maxFs;
 	for (let guard = 0; guard < 60 && fs > minFs; guard++) {
-		const perLine = Math.max(1, Math.floor(boxW / (fs * em)));
-		const longestWord = Math.max(0, ...texts.flatMap((t) => t.split(/\s+/).map((w) => Array.from(w).length)));
-		if (texts.reduce((acc, t) => acc + Math.max(1, Math.ceil(Array.from(t).length / perLine)), 0) * fs * lineHeight <= boxH && longestWord <= perLine) break;
+		if (ok(fs)) break;
 		fs *= .92;
 	}
-	return Math.max(minFs, Math.round(fs * 100) / 100);
+	const size = Math.max(minFs, Math.round(fs * 100) / 100);
+	return {
+		fs: size,
+		fits: ok(size)
+	};
 }
-function renderTypography({ stage, props, warnings }) {
+function fitFont(texts, boxW, boxH, maxFs, minFs, lineHeight = 1.2, em = .56) {
+	return fitFontInfo(texts, boxW, boxH, maxFs, minFs, lineHeight, em).fs;
+}
+/** `#RRGGBB` mix of a→b by t, matching CSS `color-mix(in srgb, b t, a)`. */
+function mixHex(a, b, t) {
+	const ch = (h) => {
+		const x = h.replace(/^#/, "");
+		const full = x.length === 3 || x.length === 4 ? x.slice(0, 3).replace(/./g, (c) => c + c) : x.slice(0, 6);
+		return [
+			0,
+			2,
+			4
+		].map((i) => parseInt(full.slice(i, i + 2), 16));
+	};
+	const [p, q] = [ch(a), ch(b)];
+	return `#${p.map((v, i) => Math.round(v + (q[i] - v) * t).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+}
+/** Record a text block drawn in `box` (stage px relative to the safe area unless `abs`). */
+function rec(ctx, role, text, box, fit, color, background = ctx.colors.bg, abs = false) {
+	if (!text.trim()) return;
+	const { safe } = ctx.stage;
+	const x0 = (abs ? 0 : safe.x) + (box.x ?? 0);
+	const y0 = (abs ? 0 : safe.y) + (box.y ?? 0);
+	const x = Math.round(x0);
+	const y = Math.round(y0);
+	ctx.boxes.push({
+		role,
+		text,
+		rect: {
+			x,
+			y,
+			w: Math.max(0, Math.round(x0 + box.w) - x),
+			h: Math.max(0, Math.round(y0 + box.h) - y)
+		},
+		font_px: fit.fs,
+		truncated: !fit.fits,
+		color: mixHex(color, color, 0),
+		background: mixHex(background, background, 0)
+	});
+}
+function renderTypography(ctx) {
+	const { stage, props, warnings } = ctx;
 	const lines = Array.isArray(props.lines) ? props.lines.map(str).filter((l) => Boolean(l)) : [];
 	if (lines.length === 0) warnings.push("typography: no `lines` to show");
 	const emphasis = str(props.emphasis);
 	const { u, safe } = stage;
-	const fs = fitFont(lines, safe.w, safe.h * .9, u * 11, u * 3.2, 1.15, .58);
+	const fit = fitFontInfo(lines, safe.w, safe.h * .9, u * 11, u * 3.2, 1.15, .58);
+	const fs = fit.fs;
+	rec(ctx, ctx.main, lines.join("\n"), {
+		y: safe.h * .05,
+		w: safe.w,
+		h: safe.h * .9
+	}, fit, ctx.colors.text);
 	const st = stagger(lines.length, stage.dur);
 	let found = false;
 	const body = lines.map((line, i) => {
@@ -234656,7 +235428,8 @@ function renderTypography({ stage, props, warnings }) {
 	if (emphasis && !found) warnings.push(`typography: emphasis "${emphasis}" does not occur in any line`);
 	return `<div class="vs-stack vs-typography" style="font-size:${px(fs)}">\n${body}\n</div>`;
 }
-function renderCode({ stage, props, warnings }) {
+function renderCode(ctx) {
+	const { stage, props, warnings } = ctx;
 	const language = str(props.language) ?? "text";
 	const raw = (str(props.code) ?? "").replace(/\r\n?/g, "\n").replace(/\t/g, "  ").replace(/\n+$/, "");
 	const highlight = new Set(Array.isArray(props.highlight_lines) ? props.highlight_lines.filter((n) => Number.isInteger(n)) : []);
@@ -234680,6 +235453,16 @@ function renderCode({ stage, props, warnings }) {
 		warnings.push("code: long lines are clipped at the panel edge");
 	}
 	for (const n of highlight) if (n > shown.length) warnings.push(`code: highlight_lines ${n} is outside the shown code`);
+	const clipped = shown.length < allLines.length || maxLen * fs * .6 > innerW + .01;
+	rec(ctx, "code", raw, {
+		x: u * 3,
+		y: (safe.h - panelH) / 2 + u * 3,
+		w: innerW,
+		h: panelH - u * 6
+	}, {
+		fs: Math.round(fs * 100) / 100,
+		fits: !clipped
+	}, ctx.colors.text, ctx.colors.panel);
 	const st = stagger(shown.length, stage.dur, .25);
 	const rows = shown.map((html, i) => {
 		const n = i + 1;
@@ -234695,7 +235478,8 @@ function renderCode({ stage, props, warnings }) {
 		`</div>`
 	].join("\n");
 }
-function renderChart({ stage, props, warnings }) {
+function renderChart(ctx) {
+	const { stage, props, warnings } = ctx;
 	const type = str(props.type) ?? "stat";
 	const series = Array.isArray(props.series) ? props.series.map((p) => p && typeof p === "object" ? p : {}).filter((p) => typeof p.value === "number" && Number.isFinite(p.value)).map((p) => ({
 		label: typeof p.label === "string" ? p.label : "",
@@ -234705,19 +235489,43 @@ function renderChart({ stage, props, warnings }) {
 	const label = str(props.label);
 	const { u, safe } = stage;
 	const title = label ? `<div ${anim("fade-up", .05, .5, `vs-chart-title`)}>${esc(label)}</div>` : "";
+	const titleFs = u * 5.5;
 	if (type === "stat" || series.length === 0) {
 		if (type !== "stat") warnings.push(`chart: type "${type}" needs \`series\`; showing the value as a stat`);
 		const raw = props.value ?? series[0]?.value;
 		const value = typeof raw === "number" ? fmtNumber(raw) : str(raw) ?? "";
+		const vfit = fitFontInfo([value + unit], safe.w, safe.h * .45, u * 30, u * 6, 1, .6);
+		const fs = vfit.fs;
+		const lfit = label ? fitFontInfo([label], safe.w, safe.h * .25, u * 7, u * 3) : void 0;
+		rec(ctx, ctx.main, value + unit, {
+			y: safe.h * .05,
+			w: safe.w,
+			h: safe.h * .45
+		}, vfit, ctx.colors.primary);
+		if (label && lfit) rec(ctx, "label", label, {
+			y: safe.h * .55,
+			w: safe.w,
+			h: safe.h * .25
+		}, lfit, ctx.colors.text);
 		return [
 			`<div class="vs-stack vs-stat">`,
-			`<div ${anim("scale-in", .1, .6, `vs-stat-value`, `font-size:${px(fitFont([value + unit], safe.w, safe.h * .45, u * 30, u * 6, 1, .6))}`)}><span>${esc(value)}</span><span class="vs-stat-unit">${esc(unit)}</span></div>`,
-			label ? `<div ${anim("fade-up", .45, .5, `vs-stat-label`, `font-size:${px(fitFont([label], safe.w, safe.h * .25, u * 7, u * 3))}`)}>${esc(label)}</div>` : "",
+			`<div ${anim("scale-in", .1, .6, `vs-stat-value`, `font-size:${px(fs)}`)}><span>${esc(value)}</span><span class="vs-stat-unit">${esc(unit)}</span></div>`,
+			label && lfit ? `<div ${anim("fade-up", .45, .5, `vs-stat-label`, `font-size:${px(lfit.fs)}`)}>${esc(label)}</div>` : "",
 			`</div>`
 		].filter(Boolean).join("\n");
 	}
 	const chartW = safe.w;
 	const chartH = safe.h * (label ? .78 : .9);
+	if (label) {
+		const perLine = Math.max(1, Math.floor(safe.w / (titleFs * .56)));
+		rec(ctx, ctx.main, label, {
+			w: safe.w,
+			h: safe.h - chartH
+		}, {
+			fs: r2(titleFs),
+			fits: Math.ceil(Array.from(label).length / perLine) * titleFs * 1.2 <= safe.h - chartH
+		}, ctx.colors.text);
+	}
 	const fs = Math.max(8, u * 3);
 	const max = Math.max(0, ...series.map((s) => s.value));
 	const min = Math.min(0, ...series.map((s) => s.value));
@@ -234842,7 +235650,8 @@ function layerNodes(n, edges) {
 	const used = [...new Set(layer)].sort((x, y) => x - y);
 	return layer.map((l) => used.indexOf(l));
 }
-function renderDiagram({ stage, props, warnings }) {
+function renderDiagram(ctx) {
+	const { stage, props, warnings } = ctx;
 	const labels = Array.isArray(props.nodes) ? props.nodes.map(str).filter((s) => Boolean(s)) : [];
 	const index = /* @__PURE__ */ new Map();
 	const nodes = [];
@@ -234905,6 +235714,20 @@ function renderDiagram({ stage, props, warnings }) {
 			fs = Math.min(fs, fitFont([nodes[nodeIdx]], w - u * 2, h - u, u * 5, u * 1.8));
 		});
 	}
+	const nodeBg = mixHex(ctx.colors.bg, ctx.colors.primary, .14);
+	nodes.forEach((label, i) => {
+		const b = boxes[i];
+		const fit = fitFontInfo([label], b.w - u * 2, b.h - u, fs, fs);
+		rec(ctx, "label", label, {
+			x: b.x + u,
+			y: b.y + u / 2,
+			w: b.w - u * 2,
+			h: b.h - u
+		}, {
+			fs,
+			fits: fit.fits
+		}, ctx.colors.text, nodeBg);
+	});
 	const layerTime = (l) => .15 + l * Math.min(.45, Math.max(.1, (stage.dur * .6 - .6) / Math.max(1, layerCount)));
 	const nodeHtml = nodes.map((label, i) => {
 		const b = boxes[i];
@@ -234944,7 +235767,8 @@ function side(v) {
 		text: str(o.text) ?? ""
 	};
 }
-function renderComparison({ stage, props }) {
+function renderComparison(ctx) {
+	const { stage, props } = ctx;
 	const left = side(props.left);
 	const right = side(props.right);
 	const verdict = str(props.verdict);
@@ -234952,8 +235776,36 @@ function renderComparison({ stage, props }) {
 	const columns = !stage.portrait && stage.W > stage.H;
 	const cardW = columns ? (safe.w - u * 4) / 2 : safe.w;
 	const cardH = (columns ? safe.h * .7 : (safe.h * (verdict ? .78 : .92) - u * 4) / 2) - u * 6;
-	const labelFs = fitFont([left.label, right.label], cardW - u * 6, cardH * .3, u * 6.5, u * 2.5);
-	const textFs = fitFont([left.text, right.text], cardW - u * 6, cardH * .62, u * 5, u * 2.2, 1.3);
+	const labelFit = fitFontInfo([left.label, right.label], cardW - u * 6, cardH * .3, u * 6.5, u * 2.5);
+	const textFit = fitFontInfo([left.text, right.text], cardW - u * 6, cardH * .62, u * 5, u * 2.2, 1.3);
+	const labelFs = labelFit.fs;
+	const textFs = textFit.fs;
+	const cardAt = (i) => ({
+		x: columns ? i * (cardW + u * 4) + u * 3 : u * 3,
+		y: columns ? u * 3 : i * (cardH + u * 10) + u * 3
+	});
+	[left, right].forEach((sd, i) => {
+		const at = cardAt(i);
+		const accent = i === 0 ? ctx.colors.primary : ctx.colors.secondary;
+		rec(ctx, "label", sd.label, {
+			...at,
+			w: cardW - u * 6,
+			h: cardH * .3
+		}, labelFit, accent, ctx.colors.panel);
+		rec(ctx, "body", sd.text, {
+			x: at.x,
+			y: at.y + cardH * .34,
+			w: cardW - u * 6,
+			h: cardH * .62
+		}, textFit, ctx.colors.text, ctx.colors.panel);
+	});
+	const verdictFit = verdict ? fitFontInfo([verdict], safe.w - u * 6, safe.h * .14, u * 5.5, u * 2.4) : void 0;
+	if (verdict && verdictFit) rec(ctx, "headline", verdict, {
+		x: u * 3,
+		y: safe.h * .84,
+		w: safe.w - u * 6,
+		h: safe.h * .14
+	}, verdictFit, ctx.colors.text, mixHex(ctx.colors.bg, ctx.colors.primary, .18));
 	const card = (s, cls, effect, at) => `<div ${anim(effect, at, .5, `vs-card ${cls}`)}><div class="vs-card-label" style="font-size:${px(labelFs)}">${esc(s.label)}</div><div class="vs-card-text" style="font-size:${px(textFs)}">${esc(s.text)}</div></div>`;
 	return [
 		`<div class="vs-stack vs-comparison">`,
@@ -234961,7 +235813,7 @@ function renderComparison({ stage, props }) {
 		card(left, "vs-left", columns ? "slide-right" : "fade-up", .15),
 		card(right, "vs-right", columns ? "slide-left" : "fade-up", .4),
 		`</div>`,
-		verdict ? `<div ${anim("fade-up", Math.min(.9, stage.dur * .45), .5, `vs-verdict`, `font-size:${px(fitFont([verdict], safe.w - u * 6, safe.h * .14, u * 5.5, u * 2.4))}`)}>${esc(verdict)}</div>` : "",
+		verdict && verdictFit ? `<div ${anim("fade-up", Math.min(.9, stage.dur * .45), .5, `vs-verdict`, `font-size:${px(verdictFit.fs)}`)}>${esc(verdict)}</div>` : "",
 		`</div>`
 	].filter(Boolean).join("\n");
 }
@@ -234977,13 +235829,45 @@ function renderCta(ctx) {
 	const { u, safe } = stage;
 	const st = stagger(2 + (command ? 1 : 0) + (url ? 1 : 0), stage.dur);
 	let i = 0;
+	const hf = fitFontInfo([headline], safe.w, safe.h * .35, u * 10, u * 3.5, 1.1);
+	const af = fitFontInfo([action], safe.w * .8, safe.h * .12, u * 6, u * 2.5);
+	const cf = command ? fitFontInfo([command], safe.w - u * 8, safe.h * .12, u * 4.5, u * 1.8, 1.2, .62) : void 0;
+	const uf = url ? fitFontInfo([url], safe.w, safe.h * .08, u * 4, u * 2) : void 0;
+	let y = safe.h * .1;
+	rec(ctx, ctx.main === "hook" ? "hook" : "cta", headline, {
+		y,
+		w: safe.w,
+		h: safe.h * .35
+	}, hf, ctx.colors.text);
+	y += safe.h * .37;
+	rec(ctx, "cta", action, {
+		x: safe.w * .1,
+		y,
+		w: safe.w * .8,
+		h: safe.h * .12
+	}, af, ctx.colors.bg, ctx.colors.primary);
+	y += safe.h * .14;
+	if (command && cf) {
+		rec(ctx, "code", `$ ${command}`, {
+			x: u * 4,
+			y,
+			w: safe.w - u * 8,
+			h: safe.h * .12
+		}, cf, ctx.colors.text, ctx.colors.panel);
+		y += safe.h * .14;
+	}
+	if (url && uf) rec(ctx, "label", url, {
+		y,
+		w: safe.w,
+		h: safe.h * .08
+	}, uf, ctx.colors.secondary);
 	return [
 		`<div class="vs-stack vs-cta">`,
 		logoHtml(ctx, 0),
-		`<div ${anim("fade-up", st.at(i++), st.len, `vs-headline`, `font-size:${px(fitFont([headline], safe.w, safe.h * .35, u * 10, u * 3.5, 1.1))}`)}>${esc(headline)}</div>`,
-		`<div class="vs-action-wrap"><div ${anim("pop", st.at(i++), st.len, `vs-action`, `font-size:${px(fitFont([action], safe.w * .8, safe.h * .12, u * 6, u * 2.5))}`)}>${esc(action)}</div></div>`,
-		command ? `<div ${anim("fade-up", st.at(i++), st.len, `vs-command`, `font-size:${px(fitFont([command], safe.w - u * 8, safe.h * .12, u * 4.5, u * 1.8, 1.2, .62))}`)}><span class="vs-prompt">$</span> ${esc(command)}</div>` : "",
-		url ? `<div ${anim("fade", st.at(i++), st.len, `vs-url`, `font-size:${px(fitFont([url], safe.w, safe.h * .08, u * 4, u * 2))}`)}>${esc(url)}</div>` : "",
+		`<div ${anim("fade-up", st.at(i++), st.len, `vs-headline`, `font-size:${px(hf.fs)}`)}>${esc(headline)}</div>`,
+		`<div class="vs-action-wrap"><div ${anim("pop", st.at(i++), st.len, `vs-action`, `font-size:${px(af.fs)}`)}>${esc(action)}</div></div>`,
+		command && cf ? `<div ${anim("fade-up", st.at(i++), st.len, `vs-command`, `font-size:${px(cf.fs)}`)}><span class="vs-prompt">$</span> ${esc(command)}</div>` : "",
+		url && uf ? `<div ${anim("fade", st.at(i++), st.len, `vs-url`, `font-size:${px(uf.fs)}`)}>${esc(url)}</div>` : "",
 		`</div>`
 	].filter(Boolean).join("\n");
 }
@@ -234993,11 +235877,23 @@ function renderEndCard(ctx) {
 	const subtitle = str(props.subtitle);
 	const { u, safe } = stage;
 	if (!title && !subtitle && !ctx.logo) warnings.push("end_card: no title, subtitle or logo; card is empty");
+	const tf = title ? fitFontInfo([title], safe.w, safe.h * .3, u * 11, u * 4, 1.1) : void 0;
+	const sf = subtitle ? fitFontInfo([subtitle], safe.w, safe.h * .15, u * 5, u * 2.2) : void 0;
+	if (title && tf) rec(ctx, ctx.main, title, {
+		y: safe.h * .25,
+		w: safe.w,
+		h: safe.h * .3
+	}, tf, ctx.colors.text);
+	if (subtitle && sf) rec(ctx, "body", subtitle, {
+		y: safe.h * .58,
+		w: safe.w,
+		h: safe.h * .15
+	}, sf, ctx.colors.text);
 	return [
 		`<div class="vs-stack vs-end">`,
 		logoHtml(ctx, .05),
-		title ? `<div ${anim("scale-in", .15, .6, `vs-headline`, `font-size:${px(fitFont([title], safe.w, safe.h * .3, u * 11, u * 4, 1.1))}`)}>${esc(title)}</div>` : "",
-		subtitle ? `<div ${anim("fade-up", .45, .5, `vs-subtitle`, `font-size:${px(fitFont([subtitle], safe.w, safe.h * .15, u * 5, u * 2.2))}`)}>${esc(subtitle)}</div>` : "",
+		title && tf ? `<div ${anim("scale-in", .15, .6, `vs-headline`, `font-size:${px(tf.fs)}`)}>${esc(title)}</div>` : "",
+		subtitle && sf ? `<div ${anim("fade-up", .45, .5, `vs-subtitle`, `font-size:${px(sf.fs)}`)}>${esc(subtitle)}</div>` : "",
 		`<div ${anim("grow-x-center", .6, .5, `vs-rule`)}></div>`,
 		`</div>`
 	].filter(Boolean).join("\n");
@@ -235019,6 +235915,13 @@ function renderScreenshot(ctx) {
 	} else {
 		warnings.push(`screenshot: asset "${id}" could not be resolved to an image in the project; drawing a placeholder`);
 		img = `<div class="vs-shot-missing">${esc(id || "missing asset")}</div>`;
+		rec(ctx, "decorative", id || "missing asset", {
+			w: safe.w,
+			h: safe.h * .6
+		}, {
+			fs: r2(Math.max(9, u * 3.4)),
+			fits: true
+		}, ctx.colors.text, ctx.colors.panel);
 	}
 	const callouts = Array.isArray(props.callouts) ? props.callouts : [];
 	const positioned = [];
@@ -235031,8 +235934,28 @@ function renderScreenshot(ctx) {
 		const o = c && typeof c === "object" ? c : {};
 		const x = pct(o.x);
 		const y = pct(o.y);
-		if (x !== void 0 && y !== void 0) positioned.push(`<div class="vs-pin" style="left:${x}%;top:${y}%"><div ${anim("pop", st.at(i), st.len)}><span class="vs-pin-dot"></span><span class="vs-callout">${esc(text)}</span></div></div>`);
-		else listed.push(`<div ${anim("fade-up", st.at(i), st.len, `vs-callout`)}>${esc(text)}</div>`);
+		if (x !== void 0 && y !== void 0) {
+			rec(ctx, "label", text, {
+				x: x / 100 * safe.w,
+				y: y / 100 * safe.h - fs,
+				w: Math.min(safe.w, Array.from(text).length * fs * .56 + fs * 2.6),
+				h: fs * 2
+			}, {
+				fs: r2(fs),
+				fits: true
+			}, ctx.colors.bg, ctx.colors.primary);
+			positioned.push(`<div class="vs-pin" style="left:${x}%;top:${y}%"><div ${anim("pop", st.at(i), st.len)}><span class="vs-pin-dot"></span><span class="vs-callout">${esc(text)}</span></div></div>`);
+		} else {
+			listed.push(`<div ${anim("fade-up", st.at(i), st.len, `vs-callout`)}>${esc(text)}</div>`);
+			rec(ctx, "label", text, {
+				y: safe.h - Math.min(safe.h * .35, callouts.length * fs * 2.6) + listed.length * fs * 1.6,
+				w: safe.w,
+				h: fs * 1.4
+			}, {
+				fs: r2(fs),
+				fits: true
+			}, ctx.colors.bg, ctx.colors.primary);
+		}
 	});
 	const listH = listed.length ? Math.min(safe.h * .35, listed.length * fs * 2.6) : 0;
 	return [
@@ -235053,9 +235976,10 @@ const RENDERERS = {
 	end_card: renderEndCard,
 	screenshot: renderScreenshot
 };
-function stylesheet(stage, tokens, fontNames) {
+function stylesheet(stage, tokens, fontNames, bundledFaces = "") {
 	const { W, H, u, safe } = stage;
-	return `${fontNames.map((n) => `@font-face { font-family: "${n}"; src: local("${n}"); }`).join("\n")}
+	const faces = fontNames.map((n) => `@font-face { font-family: "${n}"; src: local("${n}"); }`).join("\n");
+	return `${bundledFaces ? `${bundledFaces}\n` : ""}${faces}
 :root {
   --vs-bg: ${tokens.color_background};
   --vs-text: ${tokens.color_text};
@@ -235279,7 +236203,7 @@ function buildComposition(req, opts = {}) {
 		width: W,
 		height: H,
 		aspect_ratio: target.aspect_ratio
-	});
+	}, req.zones);
 	const stage = {
 		W,
 		H,
@@ -235289,19 +236213,41 @@ function buildComposition(req, opts = {}) {
 		dur
 	};
 	const tok = resolveTokens(req.tokens, warnings);
+	const v = tok.values;
+	const colors = {
+		bg: v.color_background,
+		text: v.color_text,
+		primary: v.color_primary,
+		secondary: v.color_secondary,
+		panel: mixHex(v.color_background, v.color_text, .07)
+	};
+	const boxes = [];
 	let logo;
 	if (req.tokens.logo_path && (det.kind === "cta" || det.kind === "end_card")) {
 		const abs = projectImage(req.tokens.logo_path);
 		if (abs) logo = addAsset(abs, "logo");
 		else warnings.push(`tokens: logo_path "${req.tokens.logo_path}" is outside the project or not an image; logo omitted`);
 	}
+	const main = scene.purpose === "hook" ? "hook" : "headline";
 	const content = render({
 		stage,
 		props: det.props ?? {},
 		warnings,
 		asset: addAsset,
 		resolveAsset,
-		logo
+		logo,
+		main,
+		colors,
+		boxes
+	});
+	const bundledFaces = fontFaceCss(req.tokens).replace(/url\("(file:[^"]+)"\)/g, (_m, href) => {
+		const src = fileURLToPath(href);
+		const dest = `assets/fonts/${basename(src).replace(/[^A-Za-z0-9._-]/g, "_")}`;
+		if (!assets.some((a) => a.dest === dest)) assets.push({
+			src,
+			dest
+		});
+		return `url("${dest}")`;
 	});
 	const compositionId = compositionIdFor(scene.id);
 	const d = fmtSec(dur);
@@ -235314,7 +236260,7 @@ function buildComposition(req, opts = {}) {
 <meta name="viewport" content="width=${W}, height=${H}">
 <title>${esc(`${scene.id} ${det.kind}`)}</title>
 <style>
-${stylesheet(stage, tok.values, tok.fontNames)}
+${stylesheet(stage, tok.values, tok.fontNames, bundledFaces)}
 </style>
 </head>
 <body>
@@ -235332,7 +236278,8 @@ ${timelineScript(compositionId, dur)}
 </html>
 `,
 		assets,
-		warnings
+		warnings,
+		text_boxes: boxes
 	};
 }
 //#endregion
@@ -235717,7 +236664,8 @@ function createHyperframesRenderer(opts = {}) {
 				duration_ms: Math.round(probed.duration_s * 1e3),
 				renderer: "hyperframes",
 				renderer_version: HYPERFRAMES_VERSION,
-				warnings
+				warnings,
+				text_boxes: comp.text_boxes
 			};
 		}
 	};
@@ -236255,19 +237203,609 @@ function findSchemasDir(env = process.env, from) {
 	return null;
 }
 //#endregion
+//#region src/spec-validate.ts
+async function readIfExists$1(path) {
+	try {
+		return await readFile(path, "utf8");
+	} catch (err) {
+		if (err.code === "ENOENT") return null;
+		throw err;
+	}
+}
+/** Conventional locations inside a project folder. */
+function projectSpecPaths(projectDir) {
+	return {
+		spec: join(projectDir, "project", "video-spec.json"),
+		contentIr: join(projectDir, "source", "content-ir.json")
+	};
+}
+/**
+* Validate a VideoSpec file: schema first, then semantic rules. If a ContentIR path
+* is given and exists, evidence refs and asset ids are cross-checked against it.
+*/
+async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = findPlatformSpecsDir()) {
+	const result = {
+		ok: false,
+		spec_path: specPath,
+		content_ir_path: null,
+		errors: [],
+		warnings: []
+	};
+	const text = await readIfExists$1(specPath);
+	if (text === null) throw new Error(`spec file not found: ${specPath}`);
+	const parsed = parseYamlOrJson(VideoSpec, text);
+	if (!parsed.ok) {
+		for (const e of parsed.errors) {
+			const syntax = e.message.startsWith("syntax error");
+			result.errors.push({
+				...e,
+				stage: syntax ? "syntax" : "schema",
+				fix: syntax ? "fix the JSON/YAML syntax at the reported position" : `correct ${e.path || "the document"} to match the VideoSpec schema (schema_get name=video-spec)`
+			});
+		}
+		return result;
+	}
+	let ir;
+	if (contentIrPath) {
+		const irText = await readIfExists$1(contentIrPath);
+		if (irText !== null) {
+			result.content_ir_path = contentIrPath;
+			const irParsed = parseYamlOrJson(ContentIR, irText);
+			if (irParsed.ok) ir = irParsed.data;
+			else result.warnings.push({
+				path: "",
+				stage: "content-ir",
+				fix: "re-run ingest to regenerate source/content-ir.json",
+				message: `content IR at ${contentIrPath} is invalid, so evidence refs were not cross-checked: ${irParsed.errors.slice(0, 3).map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`
+			});
+		}
+	}
+	if (!ir) result.warnings.push({
+		path: "",
+		stage: "content-ir",
+		message: "no valid ContentIR available; evidence_refs and asset ids were not cross-checked",
+		fix: "run ingest for this project (or pass content_ir_path) so claim_refs can be verified"
+	});
+	const semantic = validateVideoSpecSemantics(parsed.data, ir);
+	result.errors.push(...semantic.errors.map((e) => ({
+		...e,
+		stage: "semantic"
+	})));
+	result.warnings.push(...semantic.warnings.map((e) => ({
+		...e,
+		stage: "semantic"
+	})));
+	const contracts = platformSpecsDir ? await loadContracts(platformSpecsDir) : [];
+	if (contracts.length > 0) {
+		const t = checkSpecTargets(parsed.data, contracts);
+		result.errors.push(...t.errors.map((e) => ({
+			...e,
+			stage: "platform"
+		})));
+		result.warnings.push(...t.warnings.map((e) => ({
+			...e,
+			stage: "platform"
+		})));
+	}
+	result.ok = result.errors.length === 0;
+	return result;
+}
+function formatSpecValidation(r) {
+	const lines = [`${r.ok ? "VALID" : "INVALID"}: ${r.spec_path}`];
+	if (r.content_ir_path) lines.push(`cross-checked against ${r.content_ir_path}`);
+	for (const e of r.errors) lines.push(`error   [${e.stage}] ${e.path || "(root)"}: ${e.message}\n        fix: ${e.fix}`);
+	for (const w of r.warnings) lines.push(`warning [${w.stage}] ${w.path || "(root)"}: ${w.message}\n        fix: ${w.fix}`);
+	return lines.join("\n");
+}
+//#endregion
+//#region src/lint.ts
+/**
+* Platform lint: checks a planned (and ideally rendered) project against the contracts of its
+* targets and the design rules. Read-only apart from `qa/lint.{json,md}`. Every finding carries
+* an actionable `fix` that the lint skill applies to the spec before re-rendering.
+*
+* Platform numbers come only from the contracts (`platform-specs/*.yaml`); the constants below
+* are video-studio design rules, not platform facts.
+*/
+/** Words per second above which captions get hard to read (design rule). */
+const MAX_WORDS_PER_SEC = 3.3;
+/** WCAG 2.x contrast minimums (AA): normal text and large text. */
+const CONTRAST_NORMAL = 4.5;
+/**
+* "Large text" is 24 px CSS (18 pt) on a ~533 px-tall phone viewport, i.e. about 4.5% of the
+* frame height once a 9:16 video fills the screen; applied to every aspect as an approximation.
+*/
+const LARGE_TEXT_FRACTION = .045;
+/** Roles whose overflow or low contrast is an error (v2 design grid: hard failure for hook/caption). */
+const CRITICAL_ROLES = /* @__PURE__ */ new Set([
+	"hook",
+	"headline",
+	"caption",
+	"cta"
+]);
+const round2 = (n) => Math.round(n * 100) / 100;
+async function readOptionalJson(path) {
+	if (!existsSync(path)) return void 0;
+	try {
+		return await readJson(path);
+	} catch {
+		return;
+	}
+}
+async function loadBrand$1(root) {
+	for (const p of [join(root, "brand.yaml"), join(root, "project", "brand.yaml")]) {
+		if (!existsSync(p)) continue;
+		const parsed = parseYamlOrJson(Brand, await readFile(p, "utf8"));
+		if (!parsed.ok) throw new Error(`invalid brand file ${p}: ${parsed.errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`);
+		return parsed.data;
+	}
+}
+/** sRGB relative luminance of `#RRGGBB` (WCAG 2.x). */
+function relativeLuminance(hex) {
+	const h = hex.replace(/^#/, "");
+	const full = h.length === 3 ? h.replace(/./g, (c) => c + c) : h.slice(0, 6);
+	const [r, g, b] = [
+		0,
+		2,
+		4
+	].map((i) => {
+		const c = parseInt(full.slice(i, i + 2), 16) / 255;
+		return c <= .03928 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4;
+	});
+	return .2126 * r + .7152 * g + .0722 * b;
+}
+/** WCAG contrast ratio of two `#RRGGBB` colours (1–21). */
+function contrastRatio(a, b) {
+	const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+	return (hi + .05) / (lo + .05);
+}
+const wordCount = (s) => s.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+/** Every string inside a props value (deterministic scene props are an open record). */
+function strings(v, out = []) {
+	if (typeof v === "string") out.push(v);
+	else if (Array.isArray(v)) for (const x of v) strings(x, out);
+	else if (v && typeof v === "object") for (const x of Object.values(v)) strings(x, out);
+	return out;
+}
+function snippet(text, max = 40) {
+	const one = text.replace(/\s+/g, " ").trim();
+	return one.length > max ? `${one.slice(0, max - 1)}…` : one;
+}
+function checkEnvelope(spec, contracts, state, out) {
+	const master = resolveMaster(spec);
+	const specTotal = round2(spec.scenes.reduce((a, s) => a + s.duration_sec, 0));
+	const renderTotal = state?.duration_ms !== void 0 ? round2(state.duration_ms / 1e3) : void 0;
+	for (const c of contracts) {
+		const v = c.video;
+		const target = c.id;
+		if (!v.aspect_ratios.includes(spec.aspect_ratio)) out.push({
+			id: "envelope_aspect",
+			severity: "error",
+			target,
+			message: `${c.name} accepts ${v.aspect_ratios.join(", ")}, but the spec is ${spec.aspect_ratio}`,
+			fix: `set aspect_ratio to ${v.aspect_ratios[0]} (and master to match) or remove "${target}" from targets`
+		});
+		const { min, max } = v.duration_sec;
+		for (const [label, total] of [["spec", specTotal], ["render", renderTotal]]) {
+			if (total === void 0) continue;
+			if (max !== void 0 && total > max) out.push({
+				id: "envelope_duration",
+				severity: "error",
+				target,
+				message: `${label} duration ${total}s is longer than ${c.name}'s ${max}s limit`,
+				fix: `shorten scenes (duration_sec and voiceover) so the video totals at most ${max}s, or remove "${target}" from targets`
+			});
+			if (min !== void 0 && total < min) out.push({
+				id: "envelope_duration",
+				severity: "error",
+				target,
+				message: `${label} duration ${total}s is shorter than ${c.name}'s ${min}s minimum`,
+				fix: `lengthen scenes so the video lasts at least ${min}s`
+			});
+		}
+		if (v.fps && (v.fps.min !== void 0 && master.fps < v.fps.min || v.fps.max !== void 0 && master.fps > v.fps.max)) out.push({
+			id: "envelope_fps",
+			severity: "error",
+			target,
+			message: `master fps ${master.fps} is outside ${c.name}'s ${v.fps.min ?? "?"}–${v.fps.max ?? "?"} fps`,
+			fix: `set master.fps to a value in ${v.fps.min ?? 1}–${v.fps.max ?? 60} (24, 30 or 60)`
+		});
+		if (v.min && (master.width < v.min.width || master.height < v.min.height)) out.push({
+			id: "envelope_size",
+			severity: "error",
+			target,
+			message: `master ${master.width}x${master.height} is smaller than ${c.name}'s minimum ${v.min.width}x${v.min.height}`,
+			fix: `set master to ${v.recommended.width}x${v.recommended.height} (or remove master for the default)`
+		});
+		if (v.max_long_side && Math.max(master.width, master.height) > v.max_long_side) out.push({
+			id: "envelope_size",
+			severity: "error",
+			target,
+			message: `master ${master.width}x${master.height} exceeds ${c.name}'s ${v.max_long_side}px long side`,
+			fix: `set master to ${v.recommended.width}x${v.recommended.height}`
+		});
+		if (!c.ui_masks.some((m) => m.aspect_ratio === spec.aspect_ratio)) out.push({
+			id: "masks_unknown",
+			severity: "warning",
+			target,
+			message: `${c.name} has no UI masks for ${spec.aspect_ratio}; captions and text were not checked against its UI`,
+			fix: `check a ${spec.aspect_ratio} frame on ${c.name} by eye, or add ui_masks to platform-specs/${target}.yaml`
+		});
+	}
+}
+function sceneBoxes(state, manifest) {
+	return ((state?.scenes?.some((s) => s.text_boxes?.length) ? state.scenes : manifest?.renders) ?? []).flatMap((s) => (s.text_boxes ?? []).map((box) => ({
+		scene_id: s.scene_id,
+		box
+	})));
+}
+function checkOverflow(boxes, out) {
+	for (const { scene_id, box } of boxes) {
+		if (!box.truncated) continue;
+		out.push({
+			id: "text_overflow",
+			severity: CRITICAL_ROLES.has(box.role) ? "error" : "warning",
+			scene_id,
+			message: `${box.role} text "${snippet(box.text)}" does not fit its box at the minimum size and is cut off`,
+			fix: `shorten that text in scene ${scene_id} (deterministic.props) to about two thirds of its length, or split it across two scenes`
+		});
+	}
+}
+function checkTextMasks(boxes, masks, W, H, out) {
+	for (const { scene_id, box } of boxes) for (const [target, hits] of byTarget(maskCollisions(box.rect, masks, W, H).map((h) => h.mask))) out.push({
+		id: "text_mask",
+		severity: box.role === "decorative" ? "warning" : worst(hits),
+		target,
+		scene_id,
+		message: `${box.role} text "${snippet(box.text)}" sits under ${target}'s ${hits.map((m) => m.label).join("; ")}`,
+		fix: `re-render so the layout uses the target zones (remove any manual positions), or shorten the text in scene ${scene_id} so it fits the content zone`
+	});
+}
+/** Top edge (px) of a caption block of height `h` centred at `y` × `H`. */
+const captionTop = (y, h, H) => Math.round(y * H - h / 2);
+/**
+* Nearest caption centres (fractions of the height, 2 decimals) above and below `cy` at which a
+* box of `box.w`×`box.h` at `box.x` overlaps no error mask; undefined when there is none.
+*/
+function freeCentres(box, cy, masks, W, H) {
+	const errors = masks.filter((m) => m.severity === "error");
+	const clear = (y) => {
+		const top = captionTop(y, box.h, H);
+		return top >= 0 && top + box.h <= H && maskCollisions({
+			...box,
+			y: top
+		}, errors, W, H).length === 0;
+	};
+	const start = Math.round(cy / H * 100);
+	let up;
+	let down;
+	for (let p = start; p >= 0 && up === void 0; p--) if (clear(p / 100)) up = p / 100;
+	for (let p = start; p <= 100 && down === void 0; p++) if (clear(p / 100)) down = p / 100;
+	return {
+		...up !== void 0 ? { up } : {},
+		...down !== void 0 ? { down } : {}
+	};
+}
+function checkCaptions(spec, zones, manifestBox, burnIn, out) {
+	if (!burnIn) return;
+	const { width: W, height: H, masks } = zones;
+	const position = spec.captions.position;
+	let box;
+	let source;
+	if (manifestBox) {
+		box = manifestBox;
+		source = "rendered captions";
+	} else if (position) {
+		const h = zones.caption.h;
+		box = {
+			x: zones.caption.x,
+			y: captionTop(position.y, h, H),
+			w: zones.caption.w,
+			h
+		};
+		source = `captions.position.y ${position.y}`;
+	} else {
+		box = zones.caption;
+		source = "the caption zone";
+	}
+	for (const [target, hits] of byTarget(maskCollisions(box, masks, W, H).map((h) => h.mask))) {
+		let fix;
+		if (position) {
+			const cy = position.y * H;
+			const { up, down } = freeCentres(box, cy, masks, W, H);
+			const pick = up !== void 0 && (down === void 0 || position.y - up <= down - position.y) ? `set y ≤ ${up}` : down !== void 0 ? `set y ≥ ${down}` : void 0;
+			fix = pick ? `remove captions.position (auto placement in the caption zone) or ${pick}` : "remove captions.position (auto placement in the caption zone)";
+		} else if (manifestBox) fix = "remove captions.position if set and re-render so the caption engine places captions in the targets' caption zone; if it persists, shorten voiceover phrases so captions fit in fewer lines";
+		else fix = `the design caption zone collides with ${target}'s UI: drop a target that shares this aspect ratio or set captions.position.y into a free band`;
+		out.push({
+			id: "caption_mask",
+			severity: worst(hits),
+			target,
+			message: `captions (${source}, y ${box.y}–${box.y + box.h}px of ${H}) overlap ${target}'s ${hits.map((m) => m.label).join("; ")}`,
+			fix
+		});
+	}
+}
+/** Masks grouped by target, in first-seen order. */
+function byTarget(masks) {
+	const out = /* @__PURE__ */ new Map();
+	for (const m of masks) out.set(m.target, [...out.get(m.target) ?? [], m]);
+	return out;
+}
+const worst = (masks) => masks.some((m) => m.severity === "error") ? "error" : "warning";
+function checkContrast(boxes, H, out) {
+	for (const { scene_id, box } of boxes) {
+		if (!box.color || !box.background) continue;
+		const large = box.font_px >= LARGE_TEXT_FRACTION * H;
+		const need = large ? 3 : CONTRAST_NORMAL;
+		const ratio = contrastRatio(box.color, box.background);
+		if (ratio + 1e-9 >= need) continue;
+		out.push({
+			id: "contrast",
+			severity: CRITICAL_ROLES.has(box.role) ? "error" : "warning",
+			scene_id,
+			message: `${box.role} text "${snippet(box.text)}" has contrast ${round2(ratio)}:1 (${box.color} on ${box.background}); WCAG needs ${need}:1 for ${large ? "large" : "normal"} text`,
+			fix: `change the brand palette (visual.palette text/background/primary) so ${box.color} vs ${box.background} reaches ${need}:1, or enlarge the text`
+		});
+	}
+}
+function checkDensity(spec, out) {
+	for (const s of spec.scenes) {
+		const words = wordCount(s.voiceover);
+		const wps = words / s.duration_sec;
+		if (wps <= 3.3) continue;
+		const maxWords = Math.floor(MAX_WORDS_PER_SEC * s.duration_sec);
+		out.push({
+			id: "reading_density",
+			severity: "warning",
+			scene_id: s.id,
+			message: `${words} voiceover words in ${s.duration_sec}s is ${round2(wps)} words/s; captions above ${MAX_WORDS_PER_SEC} words/s are hard to read`,
+			fix: `cut scene ${s.id}'s voiceover to at most ${maxWords} words, or raise duration_sec to at least ${Math.ceil(words / MAX_WORDS_PER_SEC * 10) / 10}`
+		});
+	}
+}
+function checkPostCopy(spec, contracts, out) {
+	for (const c of contracts) {
+		const copy = spec.publish?.[c.id];
+		if (!copy) continue;
+		const tags = copy.hashtags ?? [];
+		const inline = copy.post_caption.match(/(^|\s)#[\p{L}\p{N}_]+/gu) ?? [];
+		const length = [copy.post_caption, ...tags.filter((t) => !copy.post_caption.includes(t))].join(" ").trim().length;
+		const lim = c.captions;
+		if (lim.post_caption_max_chars !== void 0 && length > lim.post_caption_max_chars) out.push({
+			id: "post_caption_length",
+			severity: "error",
+			target: c.id,
+			message: `publish.${c.id} post caption with hashtags is ${length} characters; ${c.name} allows ${lim.post_caption_max_chars}`,
+			fix: `shorten publish.${c.id}.post_caption (or drop hashtags) by at least ${length - lim.post_caption_max_chars} characters`
+		});
+		const hashtagCount = new Set([...tags, ...inline.map((t) => t.trim())].map((t) => t.toLowerCase())).size;
+		if (lim.hashtags_max !== void 0 && hashtagCount > lim.hashtags_max) out.push({
+			id: "post_hashtags",
+			severity: "error",
+			target: c.id,
+			message: `publish.${c.id} has ${hashtagCount} hashtags; ${c.name} allows ${lim.hashtags_max}`,
+			fix: `keep at most ${lim.hashtags_max} hashtags in publish.${c.id}`
+		});
+		const mentions = (copy.post_caption.match(/(^|\s)@[\p{L}\p{N}_.]+/gu) ?? []).length;
+		if (lim.mentions_max !== void 0 && mentions > lim.mentions_max) out.push({
+			id: "post_mentions",
+			severity: "error",
+			target: c.id,
+			message: `publish.${c.id} mentions ${mentions} accounts; ${c.name} allows ${lim.mentions_max}`,
+			fix: `keep at most ${lim.mentions_max} @mentions in publish.${c.id}.post_caption`
+		});
+	}
+}
+function checkCover(spec, contracts, rendered, out) {
+	const needing = contracts.filter((c) => c.cover.mode !== "none");
+	if (!spec.cover) {
+		if (needing.length) out.push({
+			id: "cover_missing",
+			severity: "warning",
+			message: `no cover: ${needing.map((c) => `${c.name} (${c.cover.mode})`).join(", ")} ${needing.length === 1 ? "uses" : "use"} a cover image or frame`,
+			fix: "add cover {headline, focal_time_sec} to the spec, with focal_time_sec inside the hook scene where the headline is on screen"
+		});
+		return;
+	}
+	const words = wordCount(spec.cover.headline);
+	if (words > 7 || spec.cover.headline.length > 40) out.push({
+		id: "cover_headline",
+		severity: "warning",
+		message: `cover headline "${snippet(spec.cover.headline)}" has ${words} words / ${spec.cover.headline.length} characters; covers read best at ≤ 7 words and ≤ 40 characters`,
+		fix: `shorten cover.headline to at most 7 words`
+	});
+	const box = rendered?.headline_box;
+	if (box) {
+		if (box.truncated) out.push({
+			id: "cover_overflow",
+			severity: "error",
+			message: `cover headline "${snippet(spec.cover.headline)}" does not fit the cover frame and was cut`,
+			fix: `shorten cover.headline to at most 7 words`
+		});
+		for (const crop of rendered.crops) {
+			const inside = intersect(box.rect, crop.rect);
+			if (inside && inside.w === box.rect.w && inside.h === box.rect.h) continue;
+			out.push({
+				id: "cover_crop",
+				severity: "error",
+				...crop.targets.length === 1 ? { target: crop.targets[0] } : {},
+				message: `the cover headline (${box.rect.x},${box.rect.y} ${box.rect.w}×${box.rect.h}) falls outside the "${crop.id}" crop${crop.targets.length ? ` used by ${crop.targets.join(", ")}` : ""}`,
+				fix: "shorten cover.headline so it fits the centre of the frame, then re-render"
+			});
+		}
+		return;
+	}
+	const crops = needing.flatMap((c) => (c.cover.crops ?? []).map((k) => `${c.name} ${k.aspect_ratio} ${k.anchor}`));
+	if (crops.length && words > 4.5) out.push({
+		id: "cover_crop",
+		severity: "warning",
+		message: `the cover is also cropped to ${crops.join(", ")}; a ${words}-word headline may be cut in the crop`,
+		fix: "keep cover.headline to about 4 words so it survives the centre crop, or check the cover preview"
+	});
+}
+function checkBanned(spec, brand, out) {
+	const banned = brand?.voice?.banned_phrases ?? [];
+	if (banned.length === 0) return;
+	const fields = [];
+	for (const s of spec.scenes) {
+		fields.push({
+			where: `scenes ${s.id} voiceover`,
+			scene_id: s.id,
+			text: s.voiceover
+		});
+		if (s.on_screen_text) fields.push({
+			where: `scenes ${s.id} on_screen_text`,
+			scene_id: s.id,
+			text: s.on_screen_text
+		});
+		if (s.deterministic) fields.push({
+			where: `scenes ${s.id} deterministic.props`,
+			scene_id: s.id,
+			text: strings(s.deterministic.props).join("\n")
+		});
+	}
+	if (spec.cover) fields.push({
+		where: "cover.headline",
+		text: spec.cover.headline
+	});
+	for (const [id, p] of Object.entries(spec.publish ?? {})) fields.push({
+		where: `publish.${id}`,
+		text: [p.post_caption, ...p.hashtags ?? []].join(" ")
+	});
+	for (const phrase of banned) {
+		const needle = phrase.toLowerCase();
+		for (const f of fields) {
+			if (!f.text.toLowerCase().includes(needle)) continue;
+			out.push({
+				id: "brand_banned_phrase",
+				severity: "error",
+				...f.scene_id ? { scene_id: f.scene_id } : {},
+				message: `banned brand phrase "${phrase}" appears in ${f.where}`,
+				fix: `rewrite ${f.where} without "${phrase}" (brand.yaml voice.banned_phrases)`
+			});
+		}
+	}
+}
+function formatMarkdown(r) {
+	const lines = [
+		`# Lint: ${r.status}`,
+		"",
+		`Targets: ${r.targets.join(", ") || "(none)"}. Render (${r.quality}): ${r.rendered ? "checked" : "not found; render checks skipped"}.`,
+		`${r.counts.errors} error(s), ${r.counts.warnings} warning(s).`,
+		""
+	];
+	for (const f of r.findings) {
+		const where = [f.target, f.scene_id].filter(Boolean).join(" ");
+		lines.push(`- **${f.severity}** \`${f.id}\`${where ? ` (${where})` : ""}: ${f.message}`, `  - fix: ${f.fix}`);
+	}
+	return `${lines.join("\n")}\n`;
+}
+/**
+* Lint a project: spec + target contracts + (when present) the `quality` render's text boxes,
+* duration and caption box. Writes qa/lint.json and qa/lint.md.
+*/
+async function lintProject(projectDir, opts = {}) {
+	const paths = projectPaths(projectDir);
+	const quality = opts.quality ?? "final";
+	const specPath = projectSpecPaths(paths.root).spec;
+	if (!existsSync(specPath)) throw new Error(`no spec at ${specPath}; plan the video first (the plan skill writes project/video-spec.json)`);
+	const parsed = parseYamlOrJson(VideoSpec, await readFile(specPath, "utf8"));
+	if (!parsed.ok) throw new Error(`project/video-spec.json does not match the VideoSpec schema; run spec_validate first (${parsed.errors.slice(0, 3).map((e) => `${e.path}: ${e.message}`).join("; ")})`);
+	const spec = parsed.data;
+	const findings = [];
+	const wanted = resolveTargets(spec);
+	const specsDir = opts.specsDir === void 0 ? findPlatformSpecsDir() : opts.specsDir;
+	const all = specsDir ? await loadContracts(specsDir) : [];
+	const contracts = all.filter((c) => wanted.includes(c.id));
+	for (const id of wanted) {
+		if (contracts.some((c) => c.id === id)) continue;
+		findings.push({
+			id: "target_unknown",
+			severity: "error",
+			target: id,
+			message: `no platform contract "${id}" in platform-specs/`,
+			fix: `use one of ${all.map((c) => `"${c.id}"`).join(", ") || "(none available)"} in targets, or remove "${id}"`
+		});
+	}
+	const state = await readOptionalJson(join(paths.renders, quality, "render-state.json"));
+	const manifestRaw = await readOptionalJson(join(paths.dist, "render-manifest.json"));
+	const manifest = manifestRaw?.settings?.quality === quality ? manifestRaw : void 0;
+	const master = resolveMaster(spec);
+	const W = state?.target?.width ?? manifest?.settings?.width ?? master.width;
+	const H = state?.target?.height ?? manifest?.settings?.height ?? master.height;
+	const zones = layoutZones({
+		width: W,
+		height: H,
+		aspect_ratio: spec.aspect_ratio
+	}, contracts);
+	const boxes = sceneBoxes(state, manifest);
+	checkEnvelope(spec, contracts, state, findings);
+	checkOverflow(boxes, findings);
+	checkTextMasks(boxes, zones.masks, W, H, findings);
+	const burnIn = state?.burn_in ?? manifest?.captions?.burn_in ?? spec.captions.burn_in;
+	checkCaptions(spec, zones, state?.captions?.box ?? manifest?.captions?.box, burnIn, findings);
+	checkContrast(boxes, H, findings);
+	checkDensity(spec, findings);
+	checkPostCopy(spec, contracts, findings);
+	checkCover(spec, contracts, state?.cover ? {
+		...state.cover.headline_box ? { headline_box: state.cover.headline_box } : {},
+		crops: (state.cover.crops ?? []).map(({ id, targets, x, y, w, h }) => ({
+			id,
+			targets,
+			rect: {
+				x,
+				y,
+				w,
+				h
+			}
+		}))
+	} : manifest?.cover, findings);
+	checkBanned(spec, await loadBrand$1(paths.root), findings);
+	findings.sort((a, b) => a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1);
+	const errors = findings.filter((f) => f.severity === "error").length;
+	const warnings = findings.length - errors;
+	const core = {
+		status: errors ? "fail" : warnings ? "warn" : "pass",
+		quality,
+		targets: wanted,
+		rendered: Boolean(state),
+		counts: {
+			errors,
+			warnings
+		},
+		findings
+	};
+	const reportJson = join(paths.qa, "lint.json");
+	const reportMd = join(paths.qa, "lint.md");
+	await writeJsonAtomic(reportJson, core);
+	await writeFileAtomic(reportMd, formatMarkdown(core));
+	return {
+		...core,
+		findings: [...findings],
+		targets: [...wanted],
+		report_json: reportJson,
+		report_md: reportMd
+	};
+}
+/** One-screen summary for the tool result. */
+function formatLint(r) {
+	return [`lint ${r.status}: ${r.counts.errors} error(s), ${r.counts.warnings} warning(s) for ${r.targets.join(", ") || "no targets"} (${r.rendered ? `${r.quality} render checked` : `no ${r.quality} render; spec-only checks`}); report ${r.report_md}`, ...r.findings.map((f) => `- ${f.severity} ${f.id}${f.target ? ` [${f.target}]` : ""}${f.scene_id ? ` ${f.scene_id}` : ""}: ${f.message} (fix: ${f.fix})`)].join("\n");
+}
+//#endregion
 //#region src/templates.ts
-const MARKER$1 = join("explain", "template.yaml");
+const MARKER = join("explain", "template.yaml");
 /**
 * Locate the bundled `templates/` directory: `${CLAUDE_PLUGIN_ROOT}/templates` first, then
 * walk up from this module (works from `packages/mcp/src`, `packages/mcp/dist` and `dist/mcp.mjs`).
 */
 function findTemplatesDir(env = process.env, from) {
 	const root = env.CLAUDE_PLUGIN_ROOT;
-	if (root && existsSync(join(root, "templates", MARKER$1))) return join(root, "templates");
+	if (root && existsSync(join(root, "templates", MARKER))) return join(root, "templates");
 	let dir = from ?? dirname(fileURLToPath(import.meta.url));
 	for (let i = 0; i < 6; i++) {
 		const candidate = join(dir, "templates");
-		if (existsSync(join(candidate, MARKER$1))) return candidate;
+		if (existsSync(join(candidate, MARKER))) return candidate;
 		const parent = dirname(dir);
 		if (parent === dir) break;
 		dir = parent;
@@ -236318,7 +237856,7 @@ function summarizeTemplate(t) {
 }
 //#endregion
 //#region src/plan.ts
-async function readIfExists$1(path) {
+async function readIfExists(path) {
 	try {
 		return await readFile(path, "utf8");
 	} catch (err) {
@@ -236342,7 +237880,7 @@ function planPaths(projectDir) {
 async function findBrief(projectDir) {
 	for (const name of BRIEF_NAMES) {
 		const path = join(projectDir, "project", name);
-		const text = await readIfExists$1(path);
+		const text = await readIfExists(path);
 		if (text !== null) return {
 			path,
 			text
@@ -236351,7 +237889,7 @@ async function findBrief(projectDir) {
 	return null;
 }
 async function loadContentIr(path) {
-	const text = await readIfExists$1(path);
+	const text = await readIfExists(path);
 	if (text === null) return null;
 	const r = parseYamlOrJson(ContentIR, text);
 	return r.ok ? r.data : null;
@@ -236624,7 +238162,7 @@ function renderStoryboardMarkdown(spec, ir) {
 /** Render `<project>/project/storyboard.md` from the project's VideoSpec (and ContentIR when present). */
 async function renderStoryboard(projectDir) {
 	const paths = planPaths(projectDir);
-	const text = await readIfExists$1(paths.spec);
+	const text = await readIfExists(paths.spec);
 	if (text === null) throw new Error(`spec file not found: ${paths.spec}`);
 	const parsed = parseYamlOrJson(VideoSpec, text);
 	if (!parsed.ok) throw new Error(`video-spec.json does not match the schema; run spec_validate first. ${parsed.errors.slice(0, 5).map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
@@ -237635,168 +239173,261 @@ async function synthesizeSpec(spec, options) {
 	};
 }
 //#endregion
-//#region ../platforms/dist/registry.js
-/** Present in every `platform-specs/` directory, so it can be found before any contract exists. */
-const MARKER = "README.md";
-/**
-* Locate the bundled `platform-specs/` directory: `${CLAUDE_PLUGIN_ROOT}/platform-specs` first, then
-* walk up from this module (works from `packages/*\/src`, `packages/*\/dist` and `dist/mcp.mjs`).
-*/
-function findPlatformSpecsDir(env = process.env, from) {
-	const root = env.CLAUDE_PLUGIN_ROOT;
-	if (root && existsSync(join(root, "platform-specs", MARKER))) return join(root, "platform-specs");
-	let dir = from ?? dirname(fileURLToPath(import.meta.url));
-	for (let i = 0; i < 6; i++) {
-		const candidate = join(dir, "platform-specs");
-		if (existsSync(join(candidate, MARKER))) return candidate;
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
+//#region src/cover.ts
+/** The largest `aspect` rect inside a W×H frame, anchored centre/top/bottom. */
+function cropRect(width, height, aspect, anchor = "center") {
+	const [aw, ah] = aspect.split(":").map(Number);
+	let w = width;
+	let h = Math.round(width * ah / aw);
+	if (h > height) {
+		h = height;
+		w = Math.round(height * aw / ah);
 	}
-	return null;
+	return {
+		x: Math.round((width - w) / 2),
+		y: anchor === "top" ? 0 : anchor === "bottom" ? height - h : Math.round((height - h) / 2),
+		w,
+		h
+	};
 }
-function parseContract(text, file, fileId) {
-	const parsed = parseYamlOrJson(PlatformContract, text);
-	if (!parsed.ok) throw new Error(`invalid platform contract ${file}: ${parsed.errors.map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
-	if (parsed.data.id !== fileId) throw new Error(`platform contract ${file} has id "${parsed.data.id}" but is named "${fileId}.yaml"`);
-	return parsed.data;
-}
-/** Load and validate every `<dir>/<id>.yaml`, sorted by id. Throws on any invalid contract. */
-async function loadContracts(dir) {
-	const names = (await readdir(dir)).filter((n) => n.endsWith(".yaml")).sort();
-	const out = [];
-	for (const name of names) {
-		const file = join(dir, name);
-		out.push(parseContract(await readFile(file, "utf8"), file, name.slice(0, -5)));
+/** Crops the headline must survive: every target's cover crops plus the centre-square preview. */
+function coverCrops(width, height, contracts = []) {
+	const out = [{
+		id: "square-preview",
+		aspect_ratio: "1:1",
+		anchor: "center",
+		targets: ["preview"],
+		...cropRect(width, height, "1:1", "center")
+	}];
+	for (const c of contracts) for (const crop of c.cover.crops ?? []) {
+		const same = out.find((o) => o.aspect_ratio === crop.aspect_ratio && o.anchor === crop.anchor);
+		if (same) same.targets.push(c.id);
+		else out.push({
+			id: crop.id,
+			aspect_ratio: crop.aspect_ratio,
+			anchor: crop.anchor,
+			targets: [c.id],
+			...cropRect(width, height, crop.aspect_ratio, crop.anchor)
+		});
 	}
 	return out;
 }
+/** Smallest cover file limit among targets that take an uploaded cover (bytes), if any. */
+function coverMaxBytes(contracts = []) {
+	const mbs = contracts.filter((c) => c.cover.mode === "file" || c.cover.mode === "file_or_frame").map((c) => c.cover.max_size_mb).filter((m) => m !== void 0);
+	return mbs.length ? Math.floor(Math.min(...mbs) * 1024 * 1024) : void 0;
+}
 /**
-* Check a spec's targets against the contract registry: every target must exist (error) and accept
-* the spec's aspect ratio (warning; the per-target compiler would have to crop or pad).
+* Where the headline goes: the hook zone intersected with every crop. When that leaves less than
+* `minHeight` (a top hook zone vs a centre square), the content zone ∩ crops is used from its
+* top, as tall as the hook zone (at least `minHeight`).
 */
-function checkSpecTargets(spec, contracts) {
-	const errors = [];
+function headlineRegion(zones, crops, minHeight) {
+	const within = (r) => crops.reduce((acc, c) => acc ? intersect(acc, c) : null, r);
+	const hook = within(zones.hook);
+	if (hook && hook.h >= minHeight) return hook;
+	const content = within(zones.content);
+	if (content) return {
+		...content,
+		h: Math.min(content.h, Math.max(zones.hook.h, minHeight))
+	};
+	return hook ?? zones.hook;
+}
+/** `name=k=v:...` with both escaping levels applied per value. */
+function f(name, opts) {
+	return `${name}=${Object.entries(opts).filter(([, v]) => v !== void 0).map(([k, v]) => `${k}=${escapeFiltergraph(escapeFilterOption(String(v)))}`).join(":")}`;
+}
+const BITEXACT = [
+	"-fflags",
+	"+bitexact",
+	"-flags:v",
+	"+bitexact",
+	"-map_metadata",
+	"-1"
+];
+/** Compose and write the cover files. */
+async function renderCover(o) {
 	const warnings = [];
-	const byId = new Map(contracts.map((c) => [c.id, c]));
-	const explicit = Boolean(spec.targets?.length);
-	resolveTargets(spec).forEach((id, i) => {
-		const path = explicit ? `targets.${i}` : "platform";
-		const contract = byId.get(id);
-		if (!contract) {
-			const near = closestMatches(id, byId.keys());
-			errors.push({
-				path,
-				message: `no platform contract "${id}" in platform-specs/`,
-				fix: near.length ? `use one of ${near.map((n) => `"${n}"`).join(", ")}` : "add platform-specs/" + id + ".yaml or remove the target"
-			});
-			return;
-		}
-		if (!contract.video.aspect_ratios.includes(spec.aspect_ratio)) warnings.push({
-			path,
-			message: `${contract.name} expects ${contract.video.aspect_ratios.join(" or ")}, but the spec is ${spec.aspect_ratio}`,
-			fix: `use aspect_ratio ${contract.video.aspect_ratios[0]} or drop "${id}" from targets`
-		});
+	const run = {
+		...o.signal ? { signal: o.signal } : {},
+		...o.tools ? { tools: o.tools } : {}
+	};
+	const probe = await ffprobe(o.master, run);
+	if (!probe.width || !probe.height) throw new Error(`cover: ${o.master} has no video stream`);
+	const W = probe.width;
+	const H = probe.height;
+	const maxMs = Math.max(0, Math.floor(probe.duration_s * 1e3) - 100);
+	const at = Math.min(Math.max(0, Math.round(o.atMs)), maxMs);
+	const crops = coverCrops(W, H, o.contracts);
+	const short = Math.min(W, H);
+	const maxSize = Math.max(10, Math.round(short * .096));
+	const minSize = Math.max(8, Math.round(short * .044));
+	const padX = Math.round(short * .03);
+	const padY = Math.round(short * .022);
+	const region = headlineRegion(o.zones, crops, Math.round(maxSize * 2 * 1.12 + 2 * padY));
+	const fit = fitText(o.headline.trim(), {
+		w: Math.max(1, region.w - 2 * padX),
+		h: Math.max(1, region.h - 2 * padY)
+	}, {
+		maxSize,
+		minSize,
+		maxLines: 3,
+		lineHeight: 1.12
 	});
+	if (fit.truncated) warnings.push(`cover: headline "${o.headline}" does not fit at ${minSize}px; truncated (shorten cover.headline)`);
+	await mkdir(o.outDir, { recursive: true });
+	const thumbnail = join(o.outDir, "thumbnail.png");
+	const cover = join(o.outDir, "cover.jpg");
+	const square = join(o.outDir, "cover-square-preview.jpg");
+	const tmp = await mkdtemp(join(tmpdir(), "vs-cover-"));
+	let headline_box;
+	try {
+		const filters = [];
+		let font = null;
+		try {
+			font = await (o.fontResolver ?? createFontResolver(o.env ?? process.env))(o.tokens.font_heading, 700);
+		} catch (e) {
+			warnings.push(`cover: no font for "${o.tokens.font_heading}" (${e instanceof Error ? e.message : String(e)}); cover has no headline`);
+		}
+		if (font && fit.lines.length) {
+			const cx = Math.round(region.x + region.w / 2);
+			const blockW = Math.min(region.w, Math.ceil(fit.width + 2 * padX));
+			const blockH = Math.min(region.h, Math.ceil(fit.height + 2 * padY));
+			const bx = Math.round(cx - blockW / 2);
+			const by = Math.round(region.y + (region.h - blockH) / 2);
+			filters.push(`gblur=sigma=${Math.max(2, Math.round(Math.min(W, H) * .025))}`);
+			filters.push(f("drawbox", {
+				x: 0,
+				y: 0,
+				w: W,
+				h: H,
+				color: ffColor(o.tokens.color_background, .7),
+				t: "fill"
+			}));
+			filters.push(f("drawbox", {
+				x: bx,
+				y: by,
+				w: blockW,
+				h: blockH,
+				color: ffColor(o.tokens.color_background, 1),
+				t: "fill"
+			}));
+			const top = by + (blockH - fit.height) / 2;
+			for (const [i, line] of fit.lines.entries()) {
+				const file = join(tmp, `l${i}.txt`);
+				await writeFile(file, line, "utf8");
+				filters.push(f("drawtext", {
+					fontfile: font,
+					textfile: file,
+					expansion: "none",
+					fontsize: fit.fontSize,
+					fontcolor: ffColor(o.tokens.color_text),
+					x: `${cx}-text_w/2`,
+					y: Math.round(top + i * fit.lineAdvance),
+					y_align: "font"
+				}));
+			}
+			headline_box = {
+				role: "headline",
+				text: o.headline.trim(),
+				rect: {
+					x: bx,
+					y: by,
+					w: blockW,
+					h: blockH
+				},
+				font_px: fit.fontSize,
+				truncated: fit.truncated,
+				color: o.tokens.color_text,
+				background: o.tokens.color_background
+			};
+		}
+		filters.push("format=rgb24");
+		await runFfmpeg([
+			"-y",
+			"-ss",
+			secs(at),
+			"-i",
+			o.master,
+			"-frames:v",
+			"1",
+			"-vf",
+			filters.join(","),
+			...BITEXACT,
+			"-update",
+			"1",
+			"-c:v",
+			"png",
+			thumbnail
+		], run);
+	} finally {
+		await rm(tmp, {
+			recursive: true,
+			force: true
+		});
+	}
+	const max_bytes = coverMaxBytes(o.contracts);
+	let q = 2;
+	let bytes = 0;
+	for (;;) {
+		await runFfmpeg([
+			"-y",
+			"-i",
+			thumbnail,
+			"-frames:v",
+			"1",
+			"-vf",
+			"format=yuvj420p",
+			...BITEXACT,
+			"-update",
+			"1",
+			"-c:v",
+			"mjpeg",
+			"-q:v",
+			String(q),
+			cover
+		], run);
+		bytes = (await stat(cover)).size;
+		if (max_bytes === void 0 || bytes <= max_bytes) break;
+		if (q >= 31) {
+			warnings.push(`cover: cover.jpg is ${bytes} bytes, over the targets' ${max_bytes}-byte limit even at the lowest quality`);
+			break;
+		}
+		q = Math.min(31, q + 3);
+	}
+	const sq = crops[0];
+	await runFfmpeg([
+		"-y",
+		"-i",
+		thumbnail,
+		"-frames:v",
+		"1",
+		"-vf",
+		`crop=${sq.w}:${sq.h}:${sq.x}:${sq.y},format=yuvj420p`,
+		...BITEXACT,
+		"-update",
+		"1",
+		"-c:v",
+		"mjpeg",
+		"-q:v",
+		"2",
+		square
+	], run);
 	return {
-		errors,
+		thumbnail,
+		cover,
+		square_preview: square,
+		width: W,
+		height: H,
+		at_ms: at,
+		bytes,
+		jpeg_q: q,
+		...max_bytes !== void 0 ? { max_bytes } : {},
+		...headline_box ? { headline_box } : {},
+		region,
+		crops,
 		warnings
 	};
-}
-//#endregion
-//#region src/spec-validate.ts
-async function readIfExists(path) {
-	try {
-		return await readFile(path, "utf8");
-	} catch (err) {
-		if (err.code === "ENOENT") return null;
-		throw err;
-	}
-}
-/** Conventional locations inside a project folder. */
-function projectSpecPaths(projectDir) {
-	return {
-		spec: join(projectDir, "project", "video-spec.json"),
-		contentIr: join(projectDir, "source", "content-ir.json")
-	};
-}
-/**
-* Validate a VideoSpec file: schema first, then semantic rules. If a ContentIR path
-* is given and exists, evidence refs and asset ids are cross-checked against it.
-*/
-async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = findPlatformSpecsDir()) {
-	const result = {
-		ok: false,
-		spec_path: specPath,
-		content_ir_path: null,
-		errors: [],
-		warnings: []
-	};
-	const text = await readIfExists(specPath);
-	if (text === null) throw new Error(`spec file not found: ${specPath}`);
-	const parsed = parseYamlOrJson(VideoSpec, text);
-	if (!parsed.ok) {
-		for (const e of parsed.errors) {
-			const syntax = e.message.startsWith("syntax error");
-			result.errors.push({
-				...e,
-				stage: syntax ? "syntax" : "schema",
-				fix: syntax ? "fix the JSON/YAML syntax at the reported position" : `correct ${e.path || "the document"} to match the VideoSpec schema (schema_get name=video-spec)`
-			});
-		}
-		return result;
-	}
-	let ir;
-	if (contentIrPath) {
-		const irText = await readIfExists(contentIrPath);
-		if (irText !== null) {
-			result.content_ir_path = contentIrPath;
-			const irParsed = parseYamlOrJson(ContentIR, irText);
-			if (irParsed.ok) ir = irParsed.data;
-			else result.warnings.push({
-				path: "",
-				stage: "content-ir",
-				fix: "re-run ingest to regenerate source/content-ir.json",
-				message: `content IR at ${contentIrPath} is invalid, so evidence refs were not cross-checked: ${irParsed.errors.slice(0, 3).map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`
-			});
-		}
-	}
-	if (!ir) result.warnings.push({
-		path: "",
-		stage: "content-ir",
-		message: "no valid ContentIR available; evidence_refs and asset ids were not cross-checked",
-		fix: "run ingest for this project (or pass content_ir_path) so claim_refs can be verified"
-	});
-	const semantic = validateVideoSpecSemantics(parsed.data, ir);
-	result.errors.push(...semantic.errors.map((e) => ({
-		...e,
-		stage: "semantic"
-	})));
-	result.warnings.push(...semantic.warnings.map((e) => ({
-		...e,
-		stage: "semantic"
-	})));
-	const contracts = platformSpecsDir ? await loadContracts(platformSpecsDir) : [];
-	if (contracts.length > 0) {
-		const t = checkSpecTargets(parsed.data, contracts);
-		result.errors.push(...t.errors.map((e) => ({
-			...e,
-			stage: "platform"
-		})));
-		result.warnings.push(...t.warnings.map((e) => ({
-			...e,
-			stage: "platform"
-		})));
-	}
-	result.ok = result.errors.length === 0;
-	return result;
-}
-function formatSpecValidation(r) {
-	const lines = [`${r.ok ? "VALID" : "INVALID"}: ${r.spec_path}`];
-	if (r.content_ir_path) lines.push(`cross-checked against ${r.content_ir_path}`);
-	for (const e of r.errors) lines.push(`error   [${e.stage}] ${e.path || "(root)"}: ${e.message}\n        fix: ${e.fix}`);
-	for (const w of r.warnings) lines.push(`warning [${w.stage}] ${w.path || "(root)"}: ${w.message}\n        fix: ${w.fix}`);
-	return lines.join("\n");
 }
 //#endregion
 //#region src/pipeline.ts
@@ -237868,6 +239499,15 @@ async function loadValidSpec(projectDir) {
 		irPath: contentIr
 	};
 }
+/**
+* Contracts for the spec's targets that exist in platform-specs/. Unknown ids are skipped here:
+* spec_validate already reports them as errors once the registry has contracts.
+*/
+async function loadTargetContracts(spec, dir = findPlatformSpecsDir()) {
+	if (!dir) return [];
+	const wanted = new Set(resolveTargets(spec));
+	return (await loadContracts(dir)).filter((c) => wanted.has(c.id));
+}
 /** Frame size / fps for a quality. Final: the spec's master canvas. Preview: half resolution, 15 fps (24 when HyperFrames draws, it needs 24/30/60). */
 function targetFor(spec, quality, hyperframes, override = {}) {
 	const master = resolveMaster(spec);
@@ -237912,6 +239552,10 @@ async function renderProject(projectDir, o = {}) {
 	const tokens = resolveTokens$1(brand);
 	const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
 	const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
+	const brandCaptions = brand?.captions;
+	const fontsDir = findFontsDir(env);
+	const fonts = bundledFontsStatus(fontsDir);
+	if (fonts.missing.length) warnings.push(`fonts: bundled fonts missing (${fonts.missing.join(", ")}${fontsDir ? ` in ${fontsDir}` : "; no fonts/ directory found"}); using host fonts, so text may look different on other machines`);
 	const renderers = o.renderers ?? defaultRenderers(env, quality, o.encodePreset);
 	const probe = await selectRenderer("typography", renderers, env, preference, /* @__PURE__ */ new Map());
 	const target = targetFor(spec, quality, probe.renderer ? rendererFamily(probe.renderer) === "hyperframes" : false, o.target);
@@ -237992,12 +239636,15 @@ async function renderProject(projectDir, o = {}) {
 		});
 	};
 	for (const s of planScenes) sceneStart.set(s.id, now().toISOString());
+	const contracts = await loadTargetContracts(spec);
+	const zones = layoutZones(target, contracts);
 	const baseOpts = {
 		project_dir: root,
 		dir: scenesDir,
 		renderers,
 		tokens,
 		target,
+		zones,
 		placeholder,
 		env,
 		...signal ? { signal } : {}
@@ -238069,13 +239716,25 @@ async function renderProject(projectDir, o = {}) {
 		recursive: true,
 		force: true
 	});
-	const captionFiles = words.length ? await writeCaptionSet(captionsDir, "captions", words, { ass: {
+	const assOpts = {
 		width: target.width,
 		height: target.height,
 		preset: captionPreset === "bold" ? "bold" : "minimal",
-		font: parseFontChain(tokens.font_body)[0] ?? "sans-serif",
-		highlight: tokens.color_primary
-	} }) : void 0;
+		font: brandCaptions?.family ?? parseFontChain(tokens.font_body)[0] ?? "sans-serif",
+		highlight: tokens.color_primary,
+		box: zones.caption,
+		...spec.captions.position ? { positionY: spec.captions.position.y } : {},
+		...brandCaptions?.weight !== void 0 ? { bold: brandCaptions.weight >= 600 } : {},
+		...brandCaptions?.plate_opacity !== void 0 ? { plateOpacity: brandCaptions.plate_opacity } : {},
+		...brandCaptions?.active_word !== void 0 ? { activeWord: brandCaptions.active_word } : {},
+		maxLines: brandCaptions?.max_lines ?? 2
+	};
+	const captionSet = words.length ? await writeCaptionSet(captionsDir, "captions", words, {
+		ass: assOpts,
+		maxLines: assOpts.maxLines,
+		endMs: totalMs
+	}) : void 0;
+	const captionFiles = captionSet?.files;
 	if (!words.length) warnings.push("no voiceover text: captions and transcript skipped");
 	const segments = await Promise.all(ordered.map(async (e, i) => ({
 		path: e.out_path,
@@ -238093,7 +239752,7 @@ async function renderProject(projectDir, o = {}) {
 	const burn = burnIn && !!captionFiles?.ass;
 	const assSha = captionFiles?.ass ? sha256Hex(await readFile(captionFiles.ass)) : null;
 	const assemblyKey = sha256Hex(canonicalJson({
-		v: 1,
+		v: 2,
 		target,
 		encode: encodePreset ?? null,
 		pad: tokens.color_background,
@@ -238106,7 +239765,9 @@ async function renderProject(projectDir, o = {}) {
 			ms: s.duration_ms
 		})) : null,
 		burn,
-		ass: burn ? assSha : null
+		ass: burn ? assSha : null,
+		captions: burn ? assOpts : null,
+		fonts: burn ? fonts.present : null
 	}));
 	const master = join(rdir, "master.mp4");
 	const reel = join(rdir, "reel.mp4");
@@ -238144,7 +239805,8 @@ async function renderProject(projectDir, o = {}) {
 			master,
 			...burn ? {
 				reel,
-				assPath: captionFiles.ass
+				assPath: captionFiles.ass,
+				...fontsDir ? { fontsDir } : {}
 			} : {}
 		}, {
 			...encodePreset ? { encode: { preset: encodePreset } } : {},
@@ -238155,7 +239817,59 @@ async function renderProject(projectDir, o = {}) {
 	const hookIdx = Math.max(0, planScenes.findIndex((s) => s.purpose === "hook"));
 	const hookStart = placements[hookIdx].scene_start_ms;
 	const hookMid = Math.round(hookStart + slotMs[hookIdx] / 2);
-	if (!reuse || !await exists(thumbnail)) {
+	const coverAt = spec.cover ? Math.round(spec.cover.focal_time_sec * 1e3) : hookMid;
+	const thumbnailKey = sha256Hex(canonicalJson({
+		v: 2,
+		assembly: assemblyKey,
+		at: coverAt,
+		cover: spec.cover ?? null,
+		...spec.cover ? {
+			zones,
+			tokens,
+			fonts: fonts.present,
+			contracts: contracts.map((c) => `${c.id}@${c.contract_version}`)
+		} : {}
+	}));
+	let coverState;
+	const coverFilesExist = async (c) => await exists(join(root, c.path)) && await exists(join(root, c.square_preview));
+	if (reuse && prev?.thumbnail_key === thumbnailKey && await exists(thumbnail) && (!prev.cover || await coverFilesExist(prev.cover))) coverState = prev.cover;
+	else if (spec.cover) {
+		progress({
+			stage: "thumbnail",
+			message: "composing cover"
+		});
+		const c = await renderCover({
+			master,
+			outDir: rdir,
+			atMs: coverAt,
+			headline: spec.cover.headline,
+			zones,
+			tokens,
+			contracts,
+			env,
+			...signal ? { signal } : {}
+		});
+		warnings.push(...c.warnings);
+		coverState = {
+			path: rel(root, c.cover),
+			square_preview: rel(root, c.square_preview),
+			at_ms: c.at_ms,
+			width: c.width,
+			height: c.height,
+			bytes: c.bytes,
+			...c.max_bytes !== void 0 ? { max_bytes: c.max_bytes } : {},
+			...c.headline_box ? { headline_box: c.headline_box } : {},
+			region: c.region,
+			crops: c.crops.map(({ id, targets, x, y, w, h }) => ({
+				id,
+				targets,
+				x,
+				y,
+				w,
+				h
+			}))
+		};
+	} else {
 		progress({
 			stage: "thumbnail",
 			message: "extracting thumbnail"
@@ -238164,6 +239878,7 @@ async function renderProject(projectDir, o = {}) {
 			atMs: hookMid,
 			...signal ? { signal } : {}
 		});
+		for (const name of ["cover.jpg", "cover-square-preview.jpg"]) await rm(join(rdir, name), { force: true });
 	}
 	const tool_versions = {
 		node: process.versions.node,
@@ -238204,7 +239919,8 @@ async function renderProject(projectDir, o = {}) {
 			started_at: sceneStart.get(e.scene_id) ?? started_at,
 			finished_at: sceneEnd.get(e.scene_id) ?? started_at,
 			claim_refs: spec.scenes[i].claim_refs,
-			visual_strategy: spec.scenes[i].visual_strategy
+			visual_strategy: spec.scenes[i].visual_strategy,
+			...e.text_boxes ? { text_boxes: e.text_boxes } : {}
 		})),
 		voice: {
 			requested: voiceChoice,
@@ -238229,9 +239945,12 @@ async function renderProject(projectDir, o = {}) {
 			reasons
 		},
 		captions: captionFiles ? Object.fromEntries(Object.entries(captionFiles).map(([k, v]) => [k, rel(root, v)])) : {},
+		...burn && captionSet?.placement ? { caption_layout: captionSet.placement } : {},
 		master: rel(root, master),
 		reel: rel(root, reel),
 		thumbnail: rel(root, thumbnail),
+		thumbnail_key: thumbnailKey,
+		...coverState ? { cover: coverState } : {},
 		assembly_key: assemblyKey,
 		...reuse && prev?.qa ? { qa: prev.qa } : {},
 		timing_adjustments,
@@ -238448,6 +240167,12 @@ async function exportFromState(root, state, now) {
 	await copyFile(join(root, state.reel), out.reel);
 	await copyFile(join(root, state.master), out.clean_master);
 	await copyFile(join(root, state.thumbnail), out.thumbnail);
+	if (state.cover && await exists(join(root, state.cover.path)) && await exists(join(root, state.cover.square_preview))) {
+		out.cover = d("cover.jpg");
+		out.cover_square_preview = d("cover-square-preview.jpg");
+		await copyFile(join(root, state.cover.path), out.cover);
+		await copyFile(join(root, state.cover.square_preview), out.cover_square_preview);
+	} else for (const name of ["cover.jpg", "cover-square-preview.jpg"]) await rm(d(name), { force: true });
 	for (const [key, src, name] of [
 		[
 			"captions_srt",
@@ -238535,6 +240260,25 @@ async function exportFromState(root, state, now) {
 		width: state.target.width,
 		height: state.target.height
 	});
+	if (out.cover && out.cover_square_preview && state.cover) {
+		const sq = state.cover.crops.find((c) => c.id === "square-preview");
+		outputs.push({
+			kind: "thumbnail",
+			path: rel(root, out.cover),
+			sha256: await sha(out.cover),
+			width: state.cover.width,
+			height: state.cover.height
+		});
+		outputs.push({
+			kind: "other",
+			path: rel(root, out.cover_square_preview),
+			sha256: await sha(out.cover_square_preview),
+			...sq ? {
+				width: sq.w,
+				height: sq.h
+			} : {}
+		});
+	}
 	outputs.push({
 		kind: "social_copy",
 		path: rel(root, out.social_copy),
@@ -238567,7 +240311,8 @@ async function exportFromState(root, state, now) {
 			placeholder: true,
 			error: `placeholder: ${s.reason ?? "provider rendering arrives in Phase 4"}`
 		} : {},
-		...s.warnings.length ? { warnings: s.warnings } : {}
+		...s.warnings.length ? { warnings: s.warnings } : {},
+		...s.text_boxes?.length ? { text_boxes: s.text_boxes } : {}
 	}));
 	const captionFiles = [];
 	for (const fmt of [
@@ -238610,7 +240355,27 @@ async function exportFromState(root, state, now) {
 		...captionFiles.length ? { captions: {
 			preset: state.caption_preset,
 			burn_in: state.burn_in,
+			...state.burn_in && state.caption_layout ? {
+				box: state.caption_layout.box,
+				max_lines: state.caption_layout.max_lines
+			} : {},
 			files: captionFiles
+		} } : {},
+		...out.cover && state.cover ? { cover: {
+			path: rel(root, out.cover),
+			...out.cover_square_preview ? { square_preview: rel(root, out.cover_square_preview) } : {},
+			at_ms: state.cover.at_ms,
+			...state.cover.headline_box ? { headline_box: state.cover.headline_box } : {},
+			crops: state.cover.crops.map(({ id, targets, x, y, w, h }) => ({
+				id,
+				targets,
+				rect: {
+					x,
+					y,
+					w,
+					h
+				}
+			}))
 		} } : {},
 		outputs,
 		...state.qa ? { qa: {
@@ -239154,6 +240919,23 @@ function createServer(options = {}) {
 	}, safe(async ({ project_dir, quality }) => {
 		const r = await runQa(resolveInputPath(project_dir, cwd()), quality ? { quality } : {});
 		return jsonResult([`QA ${r.qa.status} (${r.quality} render); report ${r.qa.report_md}`, ...r.qa.findings.map((f) => `- ${f.id} ${f.status}: ${f.detail}${f.fix ? ` (fix: ${f.fix})` : ""}`)].join("\n"), r);
+	}));
+	server.registerTool("lint", {
+		title: "Lint against platform contracts",
+		description: "Check <project_dir> against its targets' platform contracts (platform-specs/) and the design rules: duration/fps/size/aspect envelopes, text overflow (renderer text boxes), text and burned-in captions under platform UI masks, WCAG contrast, caption reading speed, post caption/hashtag limits, cover, and brand banned phrases. Uses the spec plus, when present, the render of `quality` (default final). Writes qa/lint.{json,md}. Returns {status: pass|warn|fail, findings[] {id, severity, target?, scene_id?, message, fix}}; apply each fix to project/video-spec.json, re-render, lint again.",
+		inputSchema: {
+			project_dir: string().min(1).describe("Project folder with project/video-spec.json"),
+			quality: QUALITY.optional().describe("Which render to check (default: final); spec-only checks run without a render")
+		},
+		annotations: {
+			readOnlyHint: true,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async ({ project_dir, quality }) => {
+		const r = await lintProject(resolveInputPath(project_dir, cwd()), quality ? { quality } : {});
+		return jsonResult(formatLint(r), r);
 	}));
 	server.registerTool("export", {
 		title: "Re-export dist/",

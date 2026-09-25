@@ -115,6 +115,7 @@ describe("MCP server (in-memory)", () => {
       "export",
       "ingest",
       "job_status",
+      "lint",
       "project_init",
       "qa_run",
       "render_submit",
@@ -166,6 +167,23 @@ describe("MCP server (in-memory)", () => {
 
     const both = (await client.callTool({ name: "spec_validate", arguments: { project_dir: root, spec_path: SPEC } })) as CallToolResult;
     expect(both.isError).toBe(true);
+    await close();
+  });
+
+  it("lint reports platform findings with fixes and writes qa/lint.json", async () => {
+    const { client, close } = await connect();
+    const root = join(tmp, "lint-proj");
+    await mkdir(join(root, "project"), { recursive: true });
+    await writeFile(join(root, "project", "video-spec.json"), await readFile(join(here, "__fixtures__", "lint", "tiktok-low-captions", "project", "video-spec.json")));
+    const r = (await client.callTool({ name: "lint", arguments: { project_dir: root } })) as CallToolResult;
+    expect(r.isError).toBeFalsy();
+    expect(text(r)).toMatch(/^lint fail: 1 error/);
+    const data = r.structuredContent as { status: string; findings: { id: string; fix: string }[] };
+    expect(data.status).toBe("fail");
+    expect(data.findings.find((f) => f.id === "caption_mask")!.fix).toMatch(/remove captions\.position/);
+    expect(JSON.parse(await readFile(join(root, "qa", "lint.json"), "utf8")).status).toBe("fail");
+    const missing = (await client.callTool({ name: "lint", arguments: { project_dir: join(tmp, "nope") } })) as CallToolResult;
+    expect(missing.isError).toBe(true);
     await close();
   });
 

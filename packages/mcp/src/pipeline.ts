@@ -3,6 +3,7 @@ import { basename, join, relative, sep } from "node:path";
 import { canonicalJson, ensureDir, hashFile, projectPaths, readJson, resolveDataDir, sha256Hex, writeJsonAtomic } from "@video-studio/core";
 import {
   type AudioSlot,
+  type CaptionPlacement,
   type QaReport,
   assemble,
   buildWordTimeline,
@@ -18,7 +19,9 @@ import {
   type SceneRenderEntry,
   type SceneRenderer,
   type VisualTokens,
+  bundledFontsStatus,
   createFfmpegRenderer,
+  findFontsDir,
   createHyperframesRenderer,
   parseFontChain,
   rendererFamily,
@@ -44,6 +47,7 @@ import {
 } from "@video-studio/schema";
 import { findPlatformSpecsDir, layoutZones, loadContracts } from "@video-studio/platforms";
 import { type BackendChoice, type BackendSet, type SynthesizeSpecResult, defaultBackends, selectBackend, synthesizeSpec } from "@video-studio/voice";
+import { COVER_VERSION, renderCover } from "./cover.js";
 import { hyperframesOptions } from "./hyperframes.js";
 import { type ValidationIssue, projectSpecPaths, validateSpecFile } from "./spec-validate.js";
 
@@ -51,8 +55,8 @@ type Env = Record<string, string | undefined>;
 
 /** Engine version recorded in manifests. Keep in sync with SERVER_VERSION. */
 export const ENGINE_VERSION = "0.1.0";
-/** Bump to invalidate assembled masters/reels. */
-export const ASSEMBLY_VERSION = 1;
+/** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. */
+export const ASSEMBLY_VERSION = 2;
 
 export type Quality = "preview" | "final";
 
@@ -129,6 +133,9 @@ export interface DistFiles {
   captions_vtt?: string;
   transcript?: string;
   thumbnail: string;
+  /** Present when the spec has a `cover`: the composed cover JPEG and its centre-square crop. */
+  cover?: string;
+  cover_square_preview?: string;
   social_copy: string;
   render_manifest: string;
   provenance: string;
@@ -192,9 +199,25 @@ interface RenderState {
   };
   renderer: { preference: RendererPreference; used: string[]; reasons: string[] };
   captions: { json?: string; srt?: string; vtt?: string; txt?: string; ass?: string };
+  /** Where burned-in captions sit (from the caption zone or `captions.position`). */
+  caption_layout?: CaptionPlacement;
   master: string;
   reel: string;
   thumbnail: string;
+  /** Hash of everything the thumbnail/cover depends on. */
+  thumbnail_key?: string;
+  cover?: {
+    path: string;
+    square_preview: string;
+    at_ms: number;
+    width: number;
+    height: number;
+    bytes: number;
+    max_bytes?: number;
+    headline_box?: TextBox;
+    region: { x: number; y: number; w: number; h: number };
+    crops: Array<{ id: string; targets: string[]; x: number; y: number; w: number; h: number }>;
+  };
   assembly_key: string;
   qa?: { status: "pass" | "warn" | "fail"; video_sha256: string; checks: Array<{ id: string; status: "pass" | "warn" | "fail"; message?: string }>; findings: QaFinding[] };
   timing_adjustments: TimingAdjustment[];
@@ -308,6 +331,15 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   const tokens: VisualTokens = resolveTokens(brand);
   const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
   const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
+  const brandCaptions = brand?.captions;
+  // Bundled fonts (fonts/): libass burn-in, the cover and the scene renderers use them first.
+  const fontsDir = findFontsDir(env);
+  const fonts = bundledFontsStatus(fontsDir);
+  if (fonts.missing.length) {
+    warnings.push(
+      `fonts: bundled fonts missing (${fonts.missing.join(", ")}${fontsDir ? ` in ${fontsDir}` : "; no fonts/ directory found"}); using host fonts, so text may look different on other machines`,
+    );
+  }
 
   // b. target
   const renderers = o.renderers ?? defaultRenderers(env, quality, o.encodePreset);
@@ -372,7 +404,8 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     progress({ stage: "scenes", message: `scene ${e.scene_id}: ${e.status}${e.renderer ? ` (${e.renderer})` : ""}`, scene_index: done, scene_count: count, scene_id: e.scene_id });
   };
   for (const s of planScenes) sceneStart.set(s.id, now().toISOString());
-  const zones = layoutZones(target, await loadTargetContracts(spec));
+  const contracts = await loadTargetContracts(spec);
+  const zones = layoutZones(target, contracts);
   const baseOpts = {
     project_dir: root,
     dir: scenesDir,
@@ -430,17 +463,22 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   const words = buildWordTimeline(placements);
   const captionsDir = join(rdir, "captions");
   await rm(captionsDir, { recursive: true, force: true });
-  const captionFiles = words.length
-    ? await writeCaptionSet(captionsDir, "captions", words, {
-        ass: {
-          width: target.width,
-          height: target.height,
-          preset: captionPreset === "bold" ? "bold" : "minimal",
-          font: parseFontChain(tokens.font_body)[0] ?? "sans-serif",
-          highlight: tokens.color_primary,
-        },
-      })
-    : undefined;
+  // Caption engine: phrases placed in the caption zone (or centred on captions.position.y), brand caption styling.
+  const assOpts = {
+    width: target.width,
+    height: target.height,
+    preset: captionPreset === "bold" ? ("bold" as const) : ("minimal" as const),
+    font: brandCaptions?.family ?? parseFontChain(tokens.font_body)[0] ?? "sans-serif",
+    highlight: tokens.color_primary,
+    box: zones.caption,
+    ...(spec.captions.position ? { positionY: spec.captions.position.y } : {}),
+    ...(brandCaptions?.weight !== undefined ? { bold: brandCaptions.weight >= 600 } : {}),
+    ...(brandCaptions?.plate_opacity !== undefined ? { plateOpacity: brandCaptions.plate_opacity } : {}),
+    ...(brandCaptions?.active_word !== undefined ? { activeWord: brandCaptions.active_word } : {}),
+    maxLines: brandCaptions?.max_lines ?? 2,
+  };
+  const captionSet = words.length ? await writeCaptionSet(captionsDir, "captions", words, { ass: assOpts, maxLines: assOpts.maxLines, endMs: totalMs }) : undefined;
+  const captionFiles = captionSet?.files;
   if (!words.length) warnings.push("no voiceover text: captions and transcript skipped");
 
   // f. assembly (skipped when the inputs are unchanged)
@@ -465,6 +503,8 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
       audio: hasAudio ? slots.map((s) => ({ sha: s.sha256, ms: s.duration_ms })) : null,
       burn,
       ass: burn ? assSha : null,
+      captions: burn ? assOpts : null,
+      fonts: burn ? fonts.present : null,
     }),
   );
   const master = join(rdir, "master.mp4");
@@ -487,20 +527,51 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
         segments: segments.map(({ path, duration_ms }) => ({ path, duration_ms })),
         ...(audio ? { audio, loudness: { I: -14, TP: -1 } } : {}),
         master,
-        ...(burn ? { reel, assPath: captionFiles!.ass! } : {}),
+        ...(burn ? { reel, assPath: captionFiles!.ass!, ...(fontsDir ? { fontsDir } : {}) } : {}),
       },
       { ...(encodePreset ? { encode: { preset: encodePreset } } : {}), ...(signal ? { signal } : {}) },
     );
     if (!burn) await copyFile(master, reel);
   }
 
-  // g. thumbnail at the hook scene's midpoint (from the clean master)
+  // g. cover (spec.cover: headline frame at the focal time) or thumbnail at the hook scene's midpoint, from the clean master
   const hookIdx = Math.max(0, planScenes.findIndex((s) => s.purpose === "hook"));
   const hookStart = placements[hookIdx]!.scene_start_ms;
   const hookMid = Math.round(hookStart + slotMs[hookIdx]! / 2);
-  if (!reuse || !(await exists(thumbnail))) {
+  const coverAt = spec.cover ? Math.round(spec.cover.focal_time_sec * 1000) : hookMid;
+  const thumbnailKey = sha256Hex(
+    canonicalJson({
+      v: COVER_VERSION,
+      assembly: assemblyKey,
+      at: coverAt,
+      cover: spec.cover ?? null,
+      ...(spec.cover ? { zones, tokens, fonts: fonts.present, contracts: contracts.map((c) => `${c.id}@${c.contract_version}`) } : {}),
+    }),
+  );
+  let coverState: RenderState["cover"];
+  const coverFilesExist = async (c: NonNullable<RenderState["cover"]>) => (await exists(join(root, c.path))) && (await exists(join(root, c.square_preview)));
+  if (reuse && prev?.thumbnail_key === thumbnailKey && (await exists(thumbnail)) && (!prev.cover || (await coverFilesExist(prev.cover)))) {
+    coverState = prev.cover;
+  } else if (spec.cover) {
+    progress({ stage: "thumbnail", message: "composing cover" });
+    const c = await renderCover({ master, outDir: rdir, atMs: coverAt, headline: spec.cover.headline, zones, tokens, contracts, env: env as NodeJS.ProcessEnv, ...(signal ? { signal } : {}) });
+    warnings.push(...c.warnings);
+    coverState = {
+      path: rel(root, c.cover),
+      square_preview: rel(root, c.square_preview),
+      at_ms: c.at_ms,
+      width: c.width,
+      height: c.height,
+      bytes: c.bytes,
+      ...(c.max_bytes !== undefined ? { max_bytes: c.max_bytes } : {}),
+      ...(c.headline_box ? { headline_box: c.headline_box } : {}),
+      region: c.region,
+      crops: c.crops.map(({ id, targets, x, y, w, h }) => ({ id, targets, x, y, w, h })),
+    };
+  } else {
     progress({ stage: "thumbnail", message: "extracting thumbnail" });
     await makeThumbnail(master, thumbnail, { atMs: hookMid, ...(signal ? { signal } : {}) });
+    for (const name of ["cover.jpg", "cover-square-preview.jpg"]) await rm(join(rdir, name), { force: true });
   }
 
   // tool versions
@@ -556,9 +627,12 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     },
     renderer: { preference, used, reasons },
     captions: captionFiles ? Object.fromEntries(Object.entries(captionFiles).map(([k, v]) => [k, rel(root, v as string)])) : {},
+    ...(burn && captionSet?.placement ? { caption_layout: captionSet.placement } : {}),
     master: rel(root, master),
     reel: rel(root, reel),
     thumbnail: rel(root, thumbnail),
+    thumbnail_key: thumbnailKey,
+    ...(coverState ? { cover: coverState } : {}),
     assembly_key: assemblyKey,
     ...(reuse && prev?.qa ? { qa: prev.qa } : {}),
     timing_adjustments,
@@ -756,6 +830,14 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
   await copyFile(join(root, state.reel), out.reel);
   await copyFile(join(root, state.master), out.clean_master);
   await copyFile(join(root, state.thumbnail), out.thumbnail);
+  if (state.cover && (await exists(join(root, state.cover.path))) && (await exists(join(root, state.cover.square_preview)))) {
+    out.cover = d("cover.jpg");
+    out.cover_square_preview = d("cover-square-preview.jpg");
+    await copyFile(join(root, state.cover.path), out.cover);
+    await copyFile(join(root, state.cover.square_preview), out.cover_square_preview);
+  } else {
+    for (const name of ["cover.jpg", "cover-square-preview.jpg"]) await rm(d(name), { force: true });
+  }
   for (const [key, src, name] of [
     ["captions_srt", state.captions.srt, "captions.srt"],
     ["captions_vtt", state.captions.vtt, "captions.vtt"],
@@ -807,6 +889,11 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
   if (out.captions_vtt) outputs.push({ kind: "captions", path: rel(root, out.captions_vtt), sha256: await sha(out.captions_vtt) });
   if (out.transcript) outputs.push({ kind: "other", path: rel(root, out.transcript), sha256: await sha(out.transcript) });
   outputs.push({ kind: "thumbnail", path: rel(root, out.thumbnail), sha256: await sha(out.thumbnail), width: state.target.width, height: state.target.height });
+  if (out.cover && out.cover_square_preview && state.cover) {
+    const sq = state.cover.crops.find((c) => c.id === "square-preview");
+    outputs.push({ kind: "thumbnail", path: rel(root, out.cover), sha256: await sha(out.cover), width: state.cover.width, height: state.cover.height });
+    outputs.push({ kind: "other", path: rel(root, out.cover_square_preview), sha256: await sha(out.cover_square_preview), ...(sq ? { width: sq.w, height: sq.h } : {}) });
+  }
   outputs.push({ kind: "social_copy", path: rel(root, out.social_copy), sha256: await sha(out.social_copy) });
   outputs.push({ kind: "provenance", path: rel(root, out.provenance), sha256: await sha(out.provenance) });
 
@@ -859,7 +946,27 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
           },
         }
       : {}),
-    ...(captionFiles.length ? { captions: { preset: state.caption_preset, burn_in: state.burn_in, files: captionFiles } } : {}),
+    ...(captionFiles.length
+      ? {
+          captions: {
+            preset: state.caption_preset,
+            burn_in: state.burn_in,
+            ...(state.burn_in && state.caption_layout ? { box: state.caption_layout.box, max_lines: state.caption_layout.max_lines } : {}),
+            files: captionFiles,
+          },
+        }
+      : {}),
+    ...(out.cover && state.cover
+      ? {
+          cover: {
+            path: rel(root, out.cover),
+            ...(out.cover_square_preview ? { square_preview: rel(root, out.cover_square_preview) } : {}),
+            at_ms: state.cover.at_ms,
+            ...(state.cover.headline_box ? { headline_box: state.cover.headline_box } : {}),
+            crops: state.cover.crops.map(({ id, targets, x, y, w, h }) => ({ id, targets, rect: { x, y, w, h } })),
+          },
+        }
+      : {}),
     outputs,
     ...(state.qa ? { qa: { status: state.qa.status, checks: state.qa.checks, report_path: "qa/report.json" } } : {}),
     settings: {

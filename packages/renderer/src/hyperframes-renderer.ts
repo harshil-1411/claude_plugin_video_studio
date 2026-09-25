@@ -440,6 +440,7 @@ export function createHyperframesRenderer(opts: HyperframesRendererOptions = {})
         renderer: "hyperframes",
         renderer_version: HYPERFRAMES_VERSION,
         warnings,
+        text_boxes: comp.text_boxes,
       };
     },
   };

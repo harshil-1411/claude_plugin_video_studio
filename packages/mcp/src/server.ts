@@ -9,6 +9,7 @@ import { AspectRatio, Platform, PlatformTargetId } from "@video-studio/schema";
 import { z } from "zod";
 import { type DoctorDeps, defaultDoctorDeps, formatDoctorReport, runDoctor } from "./doctor.js";
 import { SCHEMA_NAMES, findSchemasDir, resolveInputPath } from "./paths.js";
+import { formatLint, lintProject } from "./lint.js";
 import { formatIssues, renderStoryboard, scaffoldSpec, validateBrief } from "./plan.js";
 import { type RenderProjectOptions, SpecInvalidError, exportProject, loadValidSpec, runQa } from "./pipeline.js";
 import { type RenderJobView, RenderJobManager } from "./render-jobs.js";
@@ -422,6 +423,24 @@ export function createServer(options: ServerOptions = {}): McpServer {
         ...r.qa.findings.map((f) => `- ${f.id} ${f.status}: ${f.detail}${f.fix ? ` (fix: ${f.fix})` : ""}`),
       ].join("\n");
       return jsonResult(text, r as unknown as Record<string, unknown>);
+    }),
+  );
+
+  server.registerTool(
+    "lint",
+    {
+      title: "Lint against platform contracts",
+      description:
+        "Check <project_dir> against its targets' platform contracts (platform-specs/) and the design rules: duration/fps/size/aspect envelopes, text overflow (renderer text boxes), text and burned-in captions under platform UI masks, WCAG contrast, caption reading speed, post caption/hashtag limits, cover, and brand banned phrases. Uses the spec plus, when present, the render of `quality` (default final). Writes qa/lint.{json,md}. Returns {status: pass|warn|fail, findings[] {id, severity, target?, scene_id?, message, fix}}; apply each fix to project/video-spec.json, re-render, lint again.",
+      inputSchema: {
+        project_dir: z.string().min(1).describe("Project folder with project/video-spec.json"),
+        quality: QUALITY.optional().describe("Which render to check (default: final); spec-only checks run without a render"),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async ({ project_dir, quality }: { project_dir: string; quality?: "preview" | "final" }) => {
+      const r = await lintProject(resolveInputPath(project_dir, cwd()), quality ? { quality } : {});
+      return jsonResult(formatLint(r), r as unknown as Record<string, unknown>);
     }),
   );
 

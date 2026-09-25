@@ -1,6 +1,5 @@
-import type { AspectRatio } from "@video-studio/schema";
+import { type LayoutZones, layoutZones } from "@video-studio/platforms";
 import type { RenderTarget } from "./types.js";
-import { captionReserveFraction } from "@video-studio/media";
 
 /**
  * Pure text layout for renderers that cannot measure text (FFmpeg drawtext). Widths are
@@ -170,39 +169,28 @@ export function placeLines(
 
 // ---------------------------------------------------------------------------------- safe areas
 
-/** Fractions of the frame reserved on each side. */
-export interface SafeMargins {
-  top: number;
-  bottom: number;
-  left: number;
-  right: number;
-}
-
-/**
- * Reserved margins per aspect. 9:16 keeps the top 10% (platform UI) and bottom 20%
- * (captions, platform UI) clear; all aspects keep 7% side margins.
- */
 /**
  * Bump whenever layout rules change the pixels of an existing scene (safe
  * areas, wrapping); it is part of every scene cache key so stale clips re-render.
+ * v3: the safe area is the platform zones' content rect (design grid minus UI masks).
  */
-export const LAYOUT_VERSION = 2;
+export const LAYOUT_VERSION = 3;
 
-export const SAFE_MARGINS: Record<AspectRatio, SafeMargins> = {
-  "9:16": { top: 0.1, bottom: 0.2, left: 0.07, right: 0.07 },
-  "4:5": { top: 0.07, bottom: 0.15, left: 0.07, right: 0.07 },
-  "1:1": { top: 0.07, bottom: 0.15, left: 0.07, right: 0.07 },
-  "16:9": { top: 0.08, bottom: 0.17, left: 0.07, right: 0.07 },
-};
-
-/** The content-safe rectangle of a target, in px (integers). */
-export function safeArea(target: Pick<RenderTarget, "width" | "height" | "aspect_ratio">): Rect {
-  const m = SAFE_MARGINS[target.aspect_ratio] ?? SAFE_MARGINS["16:9"];
-  // Keep content clear of the burned-in caption band as well as platform UI.
-  const bottom = Math.max(m.bottom, captionReserveFraction(target.width, target.height));
-  const x = Math.round(target.width * m.left);
-  const y = Math.round(target.height * m.top);
-  return { x, y, w: Math.round(target.width * (1 - m.left - m.right)), h: Math.round(target.height * (1 - m.top - bottom)) };
+/**
+ * The content-safe rectangle of a target, in px (integers): `zones.content` when the pipeline
+ * passes layout zones for the enabled platform targets, else the design-grid content rect with
+ * no masks (`layoutZones(target)`), which already keeps clear of the caption zone. Zones computed
+ * for another frame size are scaled to this one.
+ */
+export function safeArea(target: Pick<RenderTarget, "width" | "height" | "aspect_ratio">, zones?: LayoutZones): Rect {
+  const z = zones ?? layoutZones(target);
+  const c = z.content;
+  if (z.width === target.width && z.height === target.height) return { x: c.x, y: c.y, w: c.w, h: c.h };
+  const kx = target.width / z.width;
+  const ky = target.height / z.height;
+  const x = Math.round(c.x * kx);
+  const y = Math.round(c.y * ky);
+  return { x, y, w: Math.round((c.x + c.w) * kx) - x, h: Math.round((c.y + c.h) * ky) - y };
 }
 
 /** Split a rect vertically by weights with `gap` px between parts. */

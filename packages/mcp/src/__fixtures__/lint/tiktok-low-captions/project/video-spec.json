@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "id": "lint-tiktok-low-captions",
+  "title": "Captions placed under the TikTok UI",
+  "goal": "explain",
+  "audience": "Developers who publish short explainers",
+  "platform": "tiktok",
+  "aspect_ratio": "9:16",
+  "targets": ["tiktok"],
+  "target_duration_sec": 8,
+  "language": "en-US",
+  "grounding": "strict",
+  "voice": {},
+  "captions": { "preset": "minimal", "burn_in": true, "position": { "y": 0.9 } },
+  "cover": { "headline": "Captions under the UI", "focal_time_sec": 1 },
+  "publish": { "tiktok": { "post_caption": "Why captions vanish under the app UI", "hashtags": ["#video"] } },
+  "scenes": [
+    {
+      "id": "s01",
+      "duration_sec": 3,
+      "purpose": "hook",
+      "voiceover": "Your captions hide under the app.",
+      "visual_strategy": "motion_graphic",
+      "deterministic": { "kind": "typography", "props": { "lines": ["Captions hide", "under the UI"] } },
+      "visual_requirements": { "continuity_refs": [] },
+      "claim_refs": []
+    },
+    {
+      "id": "s02",
+      "duration_sec": 5,
+      "purpose": "cta",
+      "voiceover": "Let lint place them in the safe zone.",
+      "visual_strategy": "motion_graphic",
+      "deterministic": { "kind": "cta", "props": { "headline": "Lint before you post", "action": "Run lint" } },
+      "visual_requirements": { "continuity_refs": [] },
+      "claim_refs": []
+    }
+  ]
+}

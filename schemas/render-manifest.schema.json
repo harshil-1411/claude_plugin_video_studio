@@ -97,6 +97,170 @@
       "pattern": "^[a-f0-9]{64}$",
       "type": "string"
     },
+    "cover": {
+      "description": "The compiled cover and where its headline landed, for lint.",
+      "additionalProperties": false,
+      "properties": {
+        "at_ms": {
+          "description": "Video time of the frame the cover was composed from.",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "crops": {
+          "description": "Regions of the cover that platforms crop to (e.g. a centre square); the headline must fit inside each.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                "type": "string"
+              },
+              "rect": {
+                "additionalProperties": false,
+                "properties": {
+                  "h": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "w": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "x": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "y": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "type": "object"
+              },
+              "targets": {
+                "items": {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "id",
+              "targets",
+              "rect"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "headline_box": {
+          "description": "One text block a renderer drew.",
+          "additionalProperties": false,
+          "properties": {
+            "background": {
+              "description": "Colour behind the text #RRGGBB, for contrast checks.",
+              "type": "string"
+            },
+            "color": {
+              "description": "Text colour #RRGGBB.",
+              "type": "string"
+            },
+            "font_px": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "rect": {
+              "description": "Box the text was fitted into, in output pixels.",
+              "additionalProperties": false,
+              "properties": {
+                "h": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "w": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "x": {
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
+                "y": {
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "x",
+                "y",
+                "w",
+                "h"
+              ],
+              "type": "object"
+            },
+            "role": {
+              "description": "hook, headline, caption and cta overflow is an error in lint; decorative is a warning.",
+              "enum": [
+                "hook",
+                "headline",
+                "body",
+                "label",
+                "code",
+                "caption",
+                "cta",
+                "decorative"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "truncated": {
+              "description": "fitText could not fit the text without cutting it.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "role",
+            "text",
+            "rect",
+            "font_px",
+            "truncated"
+          ],
+          "type": "object"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "square_preview": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "at_ms",
+        "crops"
+      ],
+      "type": "object"
+    },
     "created_at": {
       "format": "date-time",
       "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",

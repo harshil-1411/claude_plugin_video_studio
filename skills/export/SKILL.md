@@ -12,7 +12,8 @@ allowed-tools: mcp__plugin_video-studio_engine__export Read Write
    otherwise offer the `render` skill.
 2. Call `mcp__plugin_video-studio_engine__export {project_dir}` (optionally
    `quality: "final"` or `"preview"`; default is the latest render).
-3. List the `dist/` files in one short block.
+3. List the `dist/` files in one short block (including `cover.jpg` and
+   `cover-square-preview.jpg` when the spec has a `cover`).
 4. Read `dist/social-copy.md` (a deterministic draft) and the brief
    (`project/creative-brief.yaml`), then rewrite the copy for the target
    platform: a title, 2-3 description lines in the brief's tone, the desired

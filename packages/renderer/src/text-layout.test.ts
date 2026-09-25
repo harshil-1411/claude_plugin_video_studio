@@ -1,3 +1,4 @@
+import { layoutZones } from "@video-studio/platforms";
 import { describe, expect, it } from "vitest";
 import { estimateTextWidth, fitText, placeLines, safeArea, splitH, splitV, wrapText } from "./text-layout.js";
 
@@ -73,20 +74,23 @@ describe("placeLines", () => {
 });
 
 describe("safeArea", () => {
-  it("reserves top 10%, 7% sides and the caption band (~32%) at the bottom on 9:16", () => {
-    expect(safeArea({ width: 1080, height: 1920, aspect_ratio: "9:16" })).toEqual({ x: 76, y: 192, w: 929, h: 1119 });
-  });
-  it("keeps 7% side margins on 16:9", () => {
+  it("uses the design-grid content rect without zones", () => {
+    expect(safeArea({ width: 1080, height: 1920, aspect_ratio: "9:16" })).toEqual({ x: 72, y: 180, w: 936, h: 1060 });
     const s = safeArea({ width: 1920, height: 1080, aspect_ratio: "16:9" });
     expect(s.x).toBe(134);
     expect(s.y + s.h).toBeLessThan(1080);
   });
-  it("keeps content above the burned-in caption band", async () => {
-    const { captionReserveFraction } = await import("@video-studio/media");
+  it("keeps content above the caption zone for every aspect", () => {
     for (const [width, height, aspect_ratio] of [[1080, 1920, "9:16"], [1920, 1080, "16:9"], [1080, 1080, "1:1"], [1080, 1350, "4:5"]] as const) {
       const s = safeArea({ width, height, aspect_ratio });
-      expect(s.y + s.h).toBeLessThanOrEqual(Math.ceil(height * (1 - captionReserveFraction(width, height))));
+      expect(s.y + s.h).toBeLessThanOrEqual(layoutZones({ width, height, aspect_ratio }).caption.y);
     }
+  });
+  it("returns the zones' content rect, scaled to the target", () => {
+    const zones = layoutZones({ width: 1080, height: 1920, aspect_ratio: "9:16" });
+    const custom = { ...zones, content: { x: 100, y: 200, w: 800, h: 1000 } };
+    expect(safeArea({ width: 1080, height: 1920, aspect_ratio: "9:16" }, custom)).toEqual({ x: 100, y: 200, w: 800, h: 1000 });
+    expect(safeArea({ width: 540, height: 960, aspect_ratio: "9:16" }, custom)).toEqual({ x: 50, y: 100, w: 400, h: 500 });
   });
   it("splits rects", () => {
     expect(splitV({ x: 0, y: 0, w: 10, h: 110 }, [1, 1], 10)).toEqual([

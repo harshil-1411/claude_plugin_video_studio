@@ -1,5 +1,7 @@
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { runProcess } from "@video-studio/media";
 import type { AspectRatio, Brand } from "@video-studio/schema";
 import type { RenderTarget, VisualTokens } from "./types.js";
@@ -11,9 +13,9 @@ import type { RenderTarget, VisualTokens } from "./types.js";
  */
 
 export const DEFAULT_TOKENS: Readonly<VisualTokens> = Object.freeze({
-  font_heading: "Inter, Helvetica, Arial, sans-serif",
-  font_body: "Inter, Helvetica, Arial, sans-serif",
-  font_mono: 'Menlo, "DejaVu Sans Mono", monospace',
+  font_heading: 'Inter, "Noto Sans", Helvetica, Arial, sans-serif',
+  font_body: 'Inter, "Noto Sans", Helvetica, Arial, sans-serif',
+  font_mono: '"JetBrains Mono", Menlo, "DejaVu Sans Mono", monospace',
   color_background: "#0B0F19",
   color_text: "#F5F7FA",
   color_primary: "#4F8CFF",
@@ -85,12 +87,88 @@ export function resolveTokens(brand?: Brand, defaults: Partial<VisualTokens> = {
 
 // ---------------------------------------------------------------------------------- fonts
 
+/** One static font file shipped in `fonts/` (see fonts/README.md for sources and hashes). */
+export interface BundledFont {
+  family: string;
+  weight: 400 | 700;
+  /** Path relative to the fonts directory. */
+  file: string;
+}
+
+export const BUNDLED_FONTS: readonly BundledFont[] = Object.freeze([
+  { family: "Inter", weight: 400, file: "Inter/Inter-Regular.ttf" },
+  { family: "Inter", weight: 700, file: "Inter/Inter-Bold.ttf" },
+  { family: "Noto Sans", weight: 400, file: "NotoSans/NotoSans-Regular.ttf" },
+  { family: "Noto Sans", weight: 700, file: "NotoSans/NotoSans-Bold.ttf" },
+  { family: "JetBrains Mono", weight: 400, file: "JetBrainsMono/JetBrainsMono-Regular.ttf" },
+  { family: "JetBrains Mono", weight: 700, file: "JetBrainsMono/JetBrainsMono-Bold.ttf" },
+]);
+
+const FONTS_MARKER = "README.md";
+
 /**
- * `@font-face` rules for the bundled fonts used by `tokens`, for the HTML renderer.
- * Empty until the bundled fonts land (Phase 4 M8); callers can embed it unconditionally.
+ * The bundled `fonts/` directory: `${CLAUDE_PLUGIN_ROOT}/fonts`, else the first `fonts/` with a
+ * README.md found walking up from this module (the repo root in dev, the plugin root from
+ * `dist/mcp.mjs`). Null when the fonts are not installed; callers then fall back to host fonts
+ * and should report it (see `bundledFontsStatus`).
  */
-export function fontFaceCss(_tokens: VisualTokens): string {
-  return "";
+export function findFontsDir(env: Record<string, string | undefined> = process.env, from?: string): string | null {
+  const root = env.CLAUDE_PLUGIN_ROOT;
+  if (root && existsSync(join(root, "fonts", FONTS_MARKER))) return join(root, "fonts");
+  let dir = from ?? dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 6; i++) {
+    const candidate = join(dir, "fonts");
+    if (existsSync(join(candidate, FONTS_MARKER))) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/** Which bundled font files are present in `dir` (null dir: none). */
+export function bundledFontsStatus(dir: string | null): { dir: string | null; present: string[]; missing: string[] } {
+  const present: string[] = [];
+  const missing: string[] = [];
+  for (const f of BUNDLED_FONTS) (dir && existsSync(join(dir, f.file)) ? present : missing).push(f.file);
+  return { dir, present, missing };
+}
+
+/** Nearest bundled weight: 600 and up map to Bold, anything lighter to Regular. */
+function bundledWeight(weight: number | undefined): 400 | 700 {
+  return (weight ?? 400) >= 600 ? 700 : 400;
+}
+
+/** Absolute path of the bundled file for `family` at (the nearest) `weight`, if bundled and present. */
+export function bundledFontFile(family: string, weight: number | undefined, dir: string | null): string | null {
+  if (!dir) return null;
+  const want = family.trim().toLowerCase();
+  const w = bundledWeight(weight);
+  const hit = BUNDLED_FONTS.find((f) => f.family.toLowerCase() === want && f.weight === w);
+  if (!hit) return null;
+  const p = join(dir, hit.file);
+  return existsSync(p) ? p : null;
+}
+
+/**
+ * `@font-face` rules (file:// URLs) for every bundled family named in the tokens' chains, both
+ * weights, for the HTML renderer. Empty when the fonts directory is missing, so callers can
+ * embed it unconditionally; the chains' other families still apply through the browser.
+ */
+export function fontFaceCss(tokens: VisualTokens, opts: { fontsDir?: string | null; env?: Record<string, string | undefined> } = {}): string {
+  const dir = opts.fontsDir === undefined ? findFontsDir(opts.env ?? process.env) : opts.fontsDir;
+  if (!dir) return "";
+  const used = new Set([tokens.font_heading, tokens.font_body, tokens.font_mono].flatMap((c) => parseFontChain(c ?? "")).map((n) => n.toLowerCase()));
+  const rules: string[] = [];
+  for (const f of BUNDLED_FONTS) {
+    if (!used.has(f.family.toLowerCase())) continue;
+    const p = join(dir, f.file);
+    if (!existsSync(p)) continue;
+    rules.push(
+      `@font-face { font-family: "${f.family}"; src: url("${pathToFileURL(p).href}") format("truetype"); font-weight: ${f.weight}; font-style: normal; font-display: block; }`,
+    );
+  }
+  return rules.join("\n");
 }
 
 /** Split a CSS font-family list into names (quotes removed). */
@@ -108,6 +186,8 @@ export interface FontResolverDeps {
   /** Runs `fc-match` with the given args and returns stdout, or null if unavailable/failed. */
   fcMatch?: (args: string[], env: NodeJS.ProcessEnv) => Promise<string | null>;
   exists?: (path: string) => Promise<boolean>;
+  /** Bundled fonts directory; undefined: `findFontsDir(env)`, null: do not use bundled fonts. */
+  fontsDir?: string | null;
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -165,14 +245,17 @@ export class FontNotFoundError extends Error {
 }
 
 /**
- * Locate a TTF/OTF/TTC file for a CSS-style family chain. Each named family is tried with
+ * Locate a TTF/OTF/TTC file for a CSS-style family chain. For each named family, a bundled file
+ * (Inter, Noto Sans, JetBrains Mono in `fonts/`, nearest of Regular/Bold to `weight`) wins first;
+ * otherwise the family is tried with
  * `fc-match -f '%{family}\n%{file}'` and accepted only when fontconfig returns that family
  * (fontconfig otherwise substitutes silently). Then platform fallbacks (macOS Helvetica /
  * Arial / Menlo, Linux DejaVu / Liberation, Windows Arial / Consolas), then fontconfig's
  * substitute for the first family. Throws FontNotFoundError if nothing is found.
  */
-export async function resolveFontFile(family: string, env: NodeJS.ProcessEnv = process.env, deps: FontResolverDeps = {}): Promise<string> {
+export async function resolveFontFile(family: string, env: NodeJS.ProcessEnv = process.env, deps: FontResolverDeps = {}, weight?: number): Promise<string> {
   const platform = deps.platform ?? process.platform;
+  const fontsDir = deps.fontsDir === undefined ? findFontsDir(env) : deps.fontsDir;
   const fcMatch = deps.fcMatch ?? defaultFcMatch;
   const exists = deps.exists ?? fileExists;
   const names = parseFontChain(family);
@@ -183,6 +266,8 @@ export async function resolveFontFile(family: string, env: NodeJS.ProcessEnv = p
   for (const name of names) {
     // A direct path is honoured as-is.
     if (FONT_EXT.test(name) && (await exists(name))) return name;
+    const bundled = bundledFontFile(name, weight, fontsDir);
+    if (bundled) return bundled;
     const out = await fcMatch(["-f", "%{family}\n%{file}", name], env);
     if (!out) continue;
     const [fams = "", file = ""] = out.trim().split("\n");
@@ -208,17 +293,18 @@ export async function resolveFontFile(family: string, env: NodeJS.ProcessEnv = p
   throw new FontNotFoundError(family);
 }
 
-export type FontResolver = (family: string) => Promise<string>;
+export type FontResolver = (family: string, weight?: number) => Promise<string>;
 
 /** A memoising FontResolver bound to `env`. */
 export function createFontResolver(env: NodeJS.ProcessEnv = process.env, deps: FontResolverDeps = {}): FontResolver {
   const cache = new Map<string, Promise<string>>();
-  return (family) => {
-    let p = cache.get(family);
+  return (family, weight) => {
+    const key = `${family}\u0000${bundledWeight(weight)}`;
+    let p = cache.get(key);
     if (!p) {
-      p = resolveFontFile(family, env, deps);
-      p.catch(() => cache.delete(family));
-      cache.set(family, p);
+      p = resolveFontFile(family, env, deps, weight);
+      p.catch(() => cache.delete(key));
+      cache.set(key, p);
     }
     return p;
   };

@@ -20,6 +20,7 @@ const expected = [
   "export",
   "ingest",
   "job_status",
+  "lint",
   "project_init",
   "qa_run",
   "render_submit",

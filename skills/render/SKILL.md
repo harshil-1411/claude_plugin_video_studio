@@ -39,7 +39,10 @@ submit again (all finished work is cached).
 From `result`:
 
 - **Files**: `dist/reel.mp4` (size, duration, resolution, preview/final) and
-  the other `dist/` files in one line.
+  the other `dist/` files in one line. When the spec has a `cover`, mention
+  `dist/cover.jpg` (the headline cover) and `dist/cover-square-preview.jpg`
+  (how it looks cropped to a square grid tile); open both with Read to check
+  the headline is legible.
 - **QA**: `pass`, or each finding as `id: detail` with its fix. With the
   silent voice, `silence` and `loudness` warnings are expected; frozen
   frames are expected for static motion-graphic scenes. Report `fail`

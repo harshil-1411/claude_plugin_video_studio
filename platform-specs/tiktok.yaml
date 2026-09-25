@@ -1,0 +1,57 @@
+# TikTok via the Content Posting API (Direct Post).
+id: tiktok
+name: TikTok (Content Posting API, Direct Post)
+contract_version: 1
+verified: "2026-09-25"
+sources:
+  - url: https://developers.tiktok.com/doc/content-posting-api-reference-direct-post
+    title: Content Posting API — Direct Post reference
+    note: title/caption up to 2,200 UTF-16 runes incl. hashtags and mentions; video_cover_timestamp_ms; creator-specific max_video_post_duration_sec; is_aigc
+  - url: https://developers.tiktok.com/doc/content-posting-api-media-transfer-guide
+    title: Content Posting API — Media Transfer Guide
+    note: MP4 + H.264 upload format
+platform: tiktok
+route: api
+video:
+  aspect_ratios: ["9:16", "1:1", "16:9"]
+  recommended: { width: 1080, height: 1920 }
+  min: { width: 540, height: 960 }
+  duration_sec: { max: 600 }
+  container: [mp4]
+  video_codecs: [h264]
+  audio_codecs: [aac]
+  note: >-
+    Direct Post limits the duration per creator: query creator_info max_video_post_duration_sec
+    before publishing. 600 s is the in-app recording ceiling from the v2 report, not a
+    guaranteed API limit.
+cover:
+  mode: frame
+  crops: []
+captions:
+  post_caption_max_chars: 2200
+  sidecar_formats: []
+  burn_in_recommended: true
+ai_disclosure:
+  supported: true
+  field: is_aigc
+ui_masks:
+  - id: header
+    label: status bar and Following / For You tabs, search, LIVE
+    aspect_ratio: "9:16"
+    rect: { x: 0, y: 0, w: 1, h: 0.08 }
+    severity: error
+  - id: action-rail
+    label: action rail (avatar, like, comment, bookmark, share, sound disc)
+    aspect_ratio: "9:16"
+    rect: { x: 0.86, y: 0.38, w: 0.14, h: 0.46 }
+    severity: error
+  - id: footer
+    label: username, post caption, hashtags, sound line and navigation bar
+    aspect_ratio: "9:16"
+    rect: { x: 0, y: 0.8, w: 1, h: 0.2 }
+    severity: error
+notes:
+  - "NOT re-verified: developers.tiktok.com returned HTTP 503 on 2026-09-25. Caption limit, cover-by-frame, 540x960 minimum, duration and the is_aigc field come from deep-research-report_v2.md (verified there on 2026-09-25; it cites TikTok's in-feed ad spec for 540x960 and TikTok Help for the 10/60-minute limits, whose URLs are not recorded here); MP4 + H.264 was confirmed from a search snippet of the Media Transfer Guide."
+  - "aspect_ratios beyond 9:16 (1:1, 16:9) are listed from general knowledge of the app, unverified; 9:16 is the only recommended ratio."
+  - "No fps or file-size limits are recorded because neither source in the v2 report states them; lint skips checks it has no data for."
+  - "ui_masks are approximations of the TikTok app UI, not official safe zones. TikTok says its safe zone changes with dimensions, caption length and UI format, so the footer mask is sized for a short (1–2 line) post caption."

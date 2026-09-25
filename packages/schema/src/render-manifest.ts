@@ -117,6 +117,18 @@ export const TimingAdjustment = z.strictObject({
   reason: z.string(),
 });
 
+export const CoverRender = z
+  .strictObject({
+    path: FilePath,
+    square_preview: FilePath.optional(),
+    at_ms: z.int().nonnegative().describe("Video time of the frame the cover was composed from."),
+    headline_box: TextBox.optional(),
+    crops: z
+      .array(z.strictObject({ id: Id, targets: z.array(Id), rect: PxBox }))
+      .describe("Regions of the cover that platforms crop to (e.g. a centre square); the headline must fit inside each."),
+  })
+  .describe("The compiled cover and where its headline landed, for lint.");
+
 export const RenderSettings = z.strictObject({
   quality: z.enum(["preview", "final"]),
   width: z.int().positive(),
@@ -138,6 +150,7 @@ export const RenderManifest = z
     renders: z.array(SceneRender),
     voice: VoiceRender.optional(),
     captions: CaptionsRender.optional(),
+    cover: CoverRender.optional(),
     outputs: z.array(FinalOutput),
     qa: QaSummary.optional(),
     settings: RenderSettings.optional(),
@@ -168,5 +181,6 @@ export type FinalOutput = z.infer<typeof FinalOutput>;
 export type QaStatus = z.infer<typeof QaStatus>;
 export type QaSummary = z.infer<typeof QaSummary>;
 export type TimingAdjustment = z.infer<typeof TimingAdjustment>;
+export type CoverRender = z.infer<typeof CoverRender>;
 export type RenderSettings = z.infer<typeof RenderSettings>;
 export type RenderManifest = z.infer<typeof RenderManifest>;

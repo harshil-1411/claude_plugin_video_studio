@@ -180,7 +180,8 @@ describe("render() with an injected producer", () => {
     const { r, seen, tmpRoot, project } = await setup({});
     const shot = { ...scene(1), deterministic: { kind: "screenshot" as const, props: { asset: "a1", callouts: ["Here"] } } };
     const res = await r.render(request(project, { scene: shot }));
-    expect(res).toEqual({ scene_id: "s01", out_path: join(project, "renders", "s01.mp4"), duration_ms: 1000, renderer: "hyperframes", renderer_version: "0.8.75", warnings: [] });
+    expect(res).toEqual({ scene_id: "s01", out_path: join(project, "renders", "s01.mp4"), duration_ms: 1000, renderer: "hyperframes", renderer_version: "0.8.75", warnings: [], text_boxes: expect.any(Array) });
+    expect(res.text_boxes!.length).toBeGreaterThan(0);
     expect(seen.html).toContain('data-composition-id="vs-s01"');
     expect(seen.files).toEqual(["assets", "assets/screenshot-1.png", "index.html"]);
     expect(seen.config).toMatchObject({ fps: 30, format: "mp4", quality: "standard", workers: 1, entryFile: "index.html", hdrMode: "force-sdr" });

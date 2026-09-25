@@ -7,7 +7,8 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { initProject } from "@video-studio/core";
 import { ffprobe, runFfmpeg } from "@video-studio/media";
-import { createFfmpegRenderer } from "@video-studio/renderer";
+import { layoutZones } from "@video-studio/platforms";
+import { FFMPEG_RENDERER_VERSION, createFfmpegRenderer } from "@video-studio/renderer";
 import { RenderManifest, type VideoSpec } from "@video-studio/schema";
 import { type VoiceBackend, tokenize } from "@video-studio/voice";
 import { type RenderProjectOptions, SpecInvalidError, exportProject, loadValidSpec, renderProject, runQa, socialCopy } from "./pipeline.js";
@@ -165,10 +166,24 @@ describe("renderProject (tiny, silent, ffmpeg)", () => {
       expect(manifest.voice?.provider).toBe("silent");
       expect(manifest.voice?.timing_source).toBe("none");
       expect(manifest.tool_versions.ffmpeg).toBeTruthy();
-      expect(manifest.tool_versions["ffmpeg-drawtext"]).toBe("0.1.0");
+      expect(manifest.tool_versions["ffmpeg-drawtext"]).toBe(FFMPEG_RENDERER_VERSION);
       expect(manifest.qa?.status).toBe(r.qa.status);
       expect(manifest.outputs.find((o) => o.kind === "final")?.path).toBe("dist/reel.mp4");
       expect(manifest.settings).toMatchObject({ quality: "preview", width: 180, height: 320, fps: 15 });
+      // Captions sit inside the caption zone; the manifest records where, for lint.
+      const zone = layoutZones({ width: 180, height: 320, aspect_ratio: "9:16" }).caption;
+      const box = manifest.captions!.box!;
+      expect(manifest.captions?.max_lines).toBe(2);
+      expect(box.x).toBeGreaterThanOrEqual(zone.x);
+      expect(box.y).toBeGreaterThanOrEqual(zone.y);
+      expect(box.x + box.w).toBeLessThanOrEqual(zone.x + zone.w);
+      expect(box.y + box.h).toBe(zone.y + zone.h);
+      const ass = await readFile(join(dir, "renders", "preview", "captions", "captions.ass"), "utf8");
+      expect(ass).toMatch(/,3,\d+,0,2,/); // plate (BorderStyle 3)
+      expect(ass).not.toContain("\\kf"); // no karaoke by default
+      expect(ass).toMatch(/Style: Default,Inter,/); // bundled font family
+      // No spec.cover: no cover files, thumbnail as before.
+      expect(manifest.outputs.filter((o) => o.kind === "thumbnail").map((o) => o.path)).toEqual(["dist/thumbnail.png"]);
 
       const qa = JSON.parse(await readFile(join(dir, "qa", "report.json"), "utf8"));
       expect(qa.checks.find((c: { id: string }) => c.id === "resolution").status).toBe("ok");
@@ -224,6 +239,49 @@ describe("renderProject (tiny, silent, ffmpeg)", () => {
     const d = await makeProject("explicit-fail");
     await expect(renderProject(d, opts({ voice: "system", voiceBackends: { system: failingSystem } }))).rejects.toThrow(/voice backend "system" failed: say exited.*silent/);
   });
+});
+
+describe("cover and caption styling", () => {
+  it(
+    "composes the cover from spec.cover, applies brand captions and position.y, and caches the cover",
+    async () => {
+      const dir = await makeProject("cover", { ...spec, cover: { headline: "Search by meaning", focal_time_sec: 0.5 }, captions: { preset: "bold", burn_in: true, position: { y: 0.5 } } });
+      await writeFile(join(dir, "brand.yaml"), "version: 2\nbrand:\n  name: Test\ncaptions:\n  active_word: true\n  plate_opacity: 0.7\n  max_lines: 1\n");
+      const r = await renderProject(dir, opts({ voice: "silent" }));
+      expect(r.dist.cover).toBe(join(dir, "dist", "cover.jpg"));
+      const cover = await ffprobe(r.dist.cover!);
+      expect([cover.width, cover.height, cover.video_codec]).toEqual([180, 320, "mjpeg"]);
+      const sq = await ffprobe(r.dist.cover_square_preview!);
+      expect([sq.width, sq.height]).toEqual([180, 180]);
+      const manifest = RenderManifest.parse(JSON.parse(await readFile(join(dir, "dist", "render-manifest.json"), "utf8")));
+      expect(manifest.outputs.filter((o) => o.kind === "thumbnail").map((o) => o.path)).toEqual(["dist/thumbnail.png", "dist/cover.jpg"]);
+      expect(manifest.outputs.find((o) => o.path === "dist/cover-square-preview.jpg")).toMatchObject({ kind: "other", width: 180, height: 180 });
+      expect(manifest.captions?.max_lines).toBe(1);
+      const box = manifest.captions!.box!;
+      expect(Math.abs(box.y + box.h / 2 - 160)).toBeLessThanOrEqual(1);
+      const ass = await readFile(join(dir, "renders", "preview", "captions", "captions.ass"), "utf8");
+      expect(ass).toContain("\\kf");
+      expect(ass).toMatch(/\{\\an5\\pos\(\d+,160\)\}/); // centred on position.y (x: the caption zone's centre)
+      expect(ass).toContain("&H4C000000"); // 70% plate
+      const state = JSON.parse(await readFile(join(dir, "renders", "preview", "render-state.json"), "utf8"));
+      expect(state.cover.headline_box).toMatchObject({ role: "headline", text: "Search by meaning" });
+      expect(state.cover.at_ms).toBe(500);
+      expect(state.caption_layout.max_lines).toBe(1);
+
+      const mtime = (await stat(join(dir, "renders", "preview", "cover.jpg"))).mtimeMs;
+      const again = await renderProject(dir, opts({ voice: "silent" }));
+      expect(again.cache.assembly).toBe("reused");
+      expect((await stat(join(dir, "renders", "preview", "cover.jpg"))).mtimeMs).toBe(mtime);
+
+      // Dropping spec.cover goes back to the plain thumbnail and removes the cover files.
+      await writeFile(join(dir, "project", "video-spec.json"), JSON.stringify({ ...spec, captions: { preset: "bold", burn_in: true, position: { y: 0.5 } } }, null, 2));
+      const plain = await renderProject(dir, opts({ voice: "silent" }));
+      expect(plain.dist.cover).toBeUndefined();
+      await expect(stat(join(dir, "dist", "cover.jpg"))).rejects.toThrow();
+      await expect(stat(join(dir, "renders", "preview", "cover.jpg"))).rejects.toThrow();
+    },
+    T,
+  );
 });
 
 describe("voice overrun", () => {

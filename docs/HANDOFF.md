@@ -13,10 +13,10 @@ Phases 0–3 are built. A planned project renders to a finished, captioned 9:16 
 | 0 Foundation | Done: pnpm/TS7 monorepo, zod schemas → `schemas/*.json`, core (cache, SQLite ledger, job runner), MCP server bundled to `dist/mcp.mjs` | tests, `claude plugin validate --strict` |
 | 1 Ingestion | Done: text/markdown/URL/PDF/DOCX/PPTX/repo → ContentIR, secret scanning, 10 golden fixtures | tests (golden snapshots) |
 | 2 Planning | Done: 5 templates, `plan`/`create` skills, `brief_validate`, strict-grounding `spec_validate`, `storyboard_render` | tests incl. `examples/readme-plan` end to end |
-| 4 Platform compiler | Step 1 done (schema M1/M2/M4, contract format, `packages/platforms`). Next: step 2 (agents A + B) | tests |
+| 4 Platform compiler | Steps 1–2 done (schema, contracts, zones, lint, captions, fonts, covers). Next: step 3 (per-target dist, video.lock, verify/test/diff, CI) | tests, smoke, visual check |
 | 3 Local render | Done: voice (`say`/silent/ElevenLabs), FFmpeg + HyperFrames renderers, captions, assembly, QA, `dist/` export, job tools | Sandbox: silent + FFmpeg. **User's machine: `say` + HyperFrames render `examples/text-to-motion-graphic` end to end.** |
 
-- **Tests:** 416 pass, 2 skipped. The skipped ones are env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1`, which must be run outside the sandbox.
+- **Tests:** 456 pass, 2 skipped. The skipped ones are env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1`, which must be run outside the sandbox.
 - **Smoke:** `pnpm smoke` passes, including a tiny render through the bundle.
 - **MCP tools (14):** doctor, project_init, ingest, schema_get, template_list, template_get, spec_scaffold, brief_validate, spec_validate, storyboard_render, render_submit, job_status, qa_run, export.
 - **Skills:** create, plan, ingest, validate, render, qa, export, doctor.
@@ -33,6 +33,18 @@ Phases 0–3 are built. A planned project renders to a finished, captioned 9:16 
 - **`spec_validate`** runs target checks (stage `platform`) once the registry has ≥ 1 contract; with the empty registry it skips them. **`spec_scaffold`** takes `targets`, emits `master` + `targets`, and notes to add `cover` and `publish`. The plan skill and `brief-and-spec-fields.md` document the four text channels.
 - Workspace symlinks for `@video-studio/platforms` were created by hand in `packages/{mcp,renderer}/node_modules/@video-studio/`; `pnpm install` recreates them.
 - Verified: `tsc -b`, 416 tests pass (2 env-gated skipped), smoke, `plugin validate --strict` (both), bundle rebuilt.
+
+**Phase 4 step 2: done** (agents A and B in parallel, integrated by the coordinator).
+- **Platform contracts (A):** `platform-specs/{instagram,tiktok,youtube-shorts,linkedin,facebook-page-api}.yaml`. Instagram, Facebook Page API, LinkedIn and YouTube Shorts re-verified against first-party pages on 2026-09-25; **TikTok not re-verified** (developers.tiktok.com returned 503), its values come from the v2 report and its notes say so. UI masks are approximations of the app UI, not official safe zones.
+- **Zones (A):** `layoutZones()` shrinks content/caption/hook away from error masks (`ZONES_VERSION = 2`). `safeArea(target, zones?)` returns `zones.content` (`LAYOUT_VERSION = 3`); both renderers lay out inside it and return `text_boxes` (HyperFrames too).
+- **Lint (A):** MCP tool `lint` + skill `lint` → `qa/lint.json`/`lint.md`. Checks envelopes, overflow, text/captions under masks (golden fixture `packages/mcp/src/__fixtures__/lint/tiktok-low-captions`), WCAG contrast, reading density, post-copy limits, cover (the compiled headline box against every crop, from render-state or manifest `cover`), banned phrases.
+- **Captions (B):** phrase-level 3–7 words, ≤ 2 rows (brand `max_lines`), punctuation-aware, plate (default 0.55), keyword emphasis; karaoke only with `active_word`. Placed in `zones.caption` or at `captions.position.y`; the manifest records `captions.box`. `captionReserveFraction`/`defaultMarginV` are deprecated and no longer used by the renderer: remove them.
+- **Fonts (B):** `fonts/` bundles Inter 4.1, Noto Sans 2.015, JetBrains Mono 2.304 (Regular+Bold, OFL, 2.5 MB, sha256 in `fonts/README.md`). `resolveFontFile` prefers them; `fontFaceCss` feeds HyperFrames (copied in as `assets/fonts/*`); libass gets `fontsdir`. FFmpeg headings use weight 700 (`FFMPEG_RENDERER_VERSION` 0.2.0).
+- **Cover (B + coordinator):** with `spec.cover`, `renders/<q>/cover.jpg` + `cover-square-preview.jpg` (blurred, dimmed frame + opaque headline plate; `COVER_VERSION` 2), exported to `dist/`; manifest `cover {path, square_preview, at_ms, headline_box, crops}`. Without a cover, the old hook-midpoint thumbnail.
+- Verified: 456 tests, smoke (15 tools incl. `lint`), both `plugin validate --strict`, bundle. Visual check on a copy of `vector-dbs-explainer` with 3 targets: captions on plates with emphasis above the bottom UI, bold Inter headings, a clean cover inside the square crop; lint passes for instagram, tiktok and youtube-shorts.
+- The dev CLI prints `ledger write failed … readonly database` inside the sandbox: its ledger is `~/.video-studio`, outside the sandbox's write area. Harmless; the render succeeds.
+
+**Next: Phase 4 step 3** (one agent, or the coordinator): per-platform `dist/<target>/{video.mp4, cover.jpg, captions.srt/vtt, post.json, qa.json}` (M7; `social-copy.md` → `post.json` from `publish.<target>`), `video.lock`, `verify`/`test`/`diff` tools + skills, golden-frame regression, GitHub Action, then the Phase 4 exit run (`/video-studio:create README.md` with three targets, outside the sandbox).
 
 ## Environment facts that shape everything
 

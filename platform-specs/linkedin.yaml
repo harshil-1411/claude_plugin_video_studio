@@ -1,0 +1,49 @@
+# LinkedIn via the Videos API (organization or member posts).
+id: linkedin
+name: LinkedIn (Videos API)
+contract_version: 1
+verified: "2026-09-25"
+sources:
+  - url: https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/videos-api
+    title: LinkedIn Videos API (li-lms-2026-09)
+    note: 3 s–30 min, 75 KB–500 MB, MP4; one English caption file per video (SRT shown); optional thumbnail, else system-generated
+platform: linkedin
+route: api
+video:
+  aspect_ratios: ["9:16", "4:5", "1:1", "16:9"]
+  recommended: { width: 1080, height: 1920 }
+  duration_sec: { min: 3, max: 1800 }
+  max_size_mb: 500
+  container: [mp4]
+  video_codecs: [h264]
+  audio_codecs: [aac]
+  note: >-
+    The Videos API reports aspect ratio as metadata and mandates none; 9:16 is the plugin default
+    for short-form. Minimum file size is 75 KB. Codecs are not listed by the API page; H.264/AAC
+    is the plugin's delivery format.
+cover:
+  mode: file_or_frame
+  formats: [jpeg, png]
+captions:
+  sidecar_formats: [srt]
+  burn_in_recommended: true
+ui_masks:
+  - id: header
+    label: status bar and close / menu controls of the full-screen video viewer
+    aspect_ratio: "9:16"
+    rect: { x: 0, y: 0, w: 1, h: 0.08 }
+    severity: warning
+  - id: action-rail
+    label: reactions, comment, repost and send buttons
+    aspect_ratio: "9:16"
+    rect: { x: 0.87, y: 0.5, w: 0.13, h: 0.35 }
+    severity: warning
+  - id: footer
+    label: author name, follow button and post text
+    aspect_ratio: "9:16"
+    rect: { x: 0, y: 0.84, w: 1, h: 0.16 }
+    severity: error
+notes:
+  - "Re-verified 2026-09-25 against the Videos API page: duration, file size, MP4, one English-only caption file, optional thumbnail."
+  - "Thumbnail formats (JPEG/PNG) are not stated on the API page; the example uploads a JPEG."
+  - "ui_masks are a best-effort approximation of LinkedIn's full-screen vertical video viewer, not official safe zones; the header and rail are warnings because the feed card layout differs."
