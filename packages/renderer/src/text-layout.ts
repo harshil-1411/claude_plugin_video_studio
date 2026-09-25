@@ -173,8 +173,9 @@ export function placeLines(
  * Bump whenever layout rules change the pixels of an existing scene (safe
  * areas, wrapping); it is part of every scene cache key so stale clips re-render.
  * v3: the safe area is the platform zones' content rect (design grid minus UI masks).
+ * v4: code panels show no language label for plain text (`text`, `txt`, `plaintext`).
  */
-export const LAYOUT_VERSION = 3;
+export const LAYOUT_VERSION = 4;
 
 /**
  * The content-safe rectangle of a target, in px (integers): `zones.content` when the pipeline

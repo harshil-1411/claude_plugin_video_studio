@@ -105,6 +105,15 @@ const ALIASES: Record<string, keyof typeof LANGS> = {
   sql: "sql", postgres: "sql", postgresql: "sql", mysql: "sql", sqlite: "sql",
 };
 
+/** Language tags that mean "no language": the code panel shows no label for them. */
+const PLAIN_TAGS = new Set(["", "text", "txt", "plain", "plaintext"]);
+
+/** The label a code panel shows for a language tag, or undefined for plain text. */
+export function codeLabel(language: string | undefined): string | undefined {
+  const tag = language?.trim() ?? "";
+  return PLAIN_TAGS.has(tag.toLowerCase()) ? undefined : tag;
+}
+
 /** The highlighter family used for a language tag (`plain` when unknown). */
 export function languageFamily(language: string): keyof typeof LANGS {
   return ALIASES[language.trim().toLowerCase()] ?? "plain";

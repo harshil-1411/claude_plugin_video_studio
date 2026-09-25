@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, isAbsolute, join } from "node:path";
+import { codeLabel } from "./hyperframes-highlight.js";
 import { projectPaths, resolveInsideProject } from "@video-studio/core";
 import {
   type FfmpegTools,
@@ -282,7 +283,7 @@ function typography(p: Record<string, unknown>, c: Ctx): Layout {
 function code(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
   const src = (asStr(p.code) ?? "").replace(/\r\n?/g, "\n").replace(/\t/g, "  ").replace(/\s+$/, "");
-  const lang = asStr(p.language) ?? "";
+  const lang = codeLabel(asStr(p.language)) ?? "";
   const highlights = Array.isArray(p.highlight_lines) ? p.highlight_lines.filter((n): n is number => Number.isInteger(n) && n > 0) : [];
   const codeLines = src.split("\n");
   const pad = r(c.u * 0.04);

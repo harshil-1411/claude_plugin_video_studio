@@ -1,7 +1,7 @@
 import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DeterministicKind, TextBox, TextRole } from "@video-studio/schema";
-import { escapeHtml, highlightLines, languageFamily } from "./hyperframes-highlight.js";
+import { codeLabel, escapeHtml, highlightLines, languageFamily } from "./hyperframes-highlight.js";
 import { safeArea } from "./text-layout.js";
 import { fontFaceCss } from "./tokens.js";
 import type { SceneRenderRequest, VisualTokens } from "./types.js";
@@ -316,7 +316,7 @@ function renderCode(ctx: KindCtx): string {
     .join("\n");
   return [
     `<div ${anim("scale-in", 0, 0.4, `vs-code-panel`)} data-language="${esc(language)}" data-family="${languageFamily(language)}">`,
-    `<div class="vs-code-bar"><span></span><span></span><span></span><em>${esc(language)}</em></div>`,
+    `<div class="vs-code-bar"><span></span><span></span><span></span>${codeLabel(language) ? `<em>${esc(codeLabel(language)!)}</em>` : ""}</div>`,
     `<div class="vs-code" style="font-size:${px(fs)}">`,
     rows,
     `</div>`,

@@ -3,7 +3,7 @@ import { DETERMINISTIC_PROPS_EXAMPLES, type DeterministicKind, type Scene } from
 import { layoutZones } from "@video-studio/platforms";
 import { describe, expect, it } from "vitest";
 import { buildComposition, compositionIdFor, fmtNumber, layerNodes, sanitizeFontChain } from "./hyperframes-compose.js";
-import { highlightLines, languageFamily, tokenize } from "./hyperframes-highlight.js";
+import { codeLabel, highlightLines, languageFamily, tokenize } from "./hyperframes-highlight.js";
 import type { RenderTarget, SceneRenderRequest, VisualTokens } from "./types.js";
 
 const TOKENS: VisualTokens = {
@@ -313,6 +313,12 @@ describe("syntax highlighting", () => {
     expect(tokenize("SELECT * FROM t", "sql").filter((t) => t.cls === "kw")).toHaveLength(2);
     expect(languageFamily("Rust")).toBe("c");
     expect(languageFamily("brainfuck")).toBe("plain");
+  });
+  it("labels code panels only with a real language", () => {
+    for (const tag of [undefined, "", "text", "TXT", " plaintext "]) expect(codeLabel(tag)).toBeUndefined();
+    expect(codeLabel("bash")).toBe("bash");
+    expect(buildComposition(req("code", { code: "npm i x", language: "text" })).html).not.toContain("<em>");
+    expect(buildComposition(req("code", { code: "npm i x", language: "bash" })).html).toContain("<em>bash</em>");
   });
   it("escapes code and splits lines", () => {
     const lines = highlightLines('a < b && "<x>"\n/* multi\nline */', "js");
