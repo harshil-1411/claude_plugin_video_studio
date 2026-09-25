@@ -141,7 +141,7 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 - **Bugs this found and fixed:**
   - Lint during export read the caption box from the previous export's manifest, so `dist/<target>/qa.json` was stale. It now prefers `RenderState.caption_layout.box`.
   - diff could not compare preview vs final locks. Export now also writes `renders/<q>/video.lock`, and diff prefers it.
-- **CI** (a GitHub Action) is deferred by the user. The repo has no remote yet.
+- **CI:** not wanted. The user removed the GitHub Actions workflow on 2026-09-26. The repo lives at https://github.com/harshil-1411/claude_plugin_video_studio (branch `main`). Verify locally instead: typecheck, tests, bundle, smoke, `plugin validate`, and `VS_TEST_GOLDEN=1` golden frames.
 
 ## Loop state (autonomous run; resume from here)
 
@@ -209,7 +209,6 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
   - HyperFrames install and renders of new kinds and styles
   - demo capture against a local app
   - a real interview mp4
-  - CI once there is a remote
 
 **Loop decisions** (defaults chosen without asking; revisit if needed):
 - Phase 4 Parts 3–6 were verified in the sandbox instead of interactively.

@@ -93,6 +93,6 @@ The skill asks before downloading the whisper model (about 148 MB); say yes.
 
 - **C2PA with your own certificate:** `export {sign: true}` uses c2patool's *test* certificate, which validators report as untrusted. For trusted credentials, configure c2patool with your own signing certificate and key.
 - **TikTok contract:** re-check `platform-specs/tiktok.yaml` against developers.tiktok.com, which returned 503 during the build, and bump `contract_version`/`verified`.
-- **CI:** once the repo has a GitHub remote, ask Claude to add the planned GitHub Action. It renders the examples with the silent voice and ffmpeg, lints them and runs `VS_TEST_GOLDEN=1` golden frames.
+- **CI:** removed at the user's request (2026-09-26). If it is ever wanted again, the old workflow is in git history (`.github/workflows/ci.yml`) and the plan was a GitHub Action. It renders the examples with the silent voice and ffmpeg, lints them and runs `VS_TEST_GOLDEN=1` golden frames.
 - **Marketplace:** replace `<owner>/<repo>` in the README install section and submit to the community marketplace.
 - **Hero video with narration:** re-render `docs/media/hero.mp4` from its project with `--voice system --quality final`. The committed one is a silent preview.

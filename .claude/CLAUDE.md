@@ -54,4 +54,4 @@ Pipeline: `ingest → ContentIR → CreativeBrief → VideoSpec → route → as
 - Build: pnpm workspaces, TypeScript, vitest, and tsdown (not tsup, which is unmaintained) producing a single-file ESM bundle. Requires Node >= 22.13. Apache-2.0.
 - Checks: `claude plugin validate --strict` on both the plugin dir and the marketplace root.
 - Local testing: `claude --plugin-dir .`.
-- CI and `examples/` must run without paid API keys, using mock providers.
+- `examples/` and tests must run without paid API keys, using mock providers. There is no CI (the user removed it); run the checks locally before committing.
