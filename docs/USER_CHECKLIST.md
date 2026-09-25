@@ -31,7 +31,7 @@ Then do the Japanese Whisper explainer. Copy it out of the scratchpad first, or 
 - **Japanese:** narration uses the Kyoko voice.
 - **Hindi:** there is no Hindi system voice, so it falls back to silent and says why.
 
-## 3. HyperFrames renders (10 min)
+## 3. HyperFrames renders — ✅ done 2026-09-26 (`examples/reel-grammar`: all 7 new kinds + energetic style match the ffmpeg render)
 
 Install the optional renderer (it also brings puppeteer-core, which `demo` needs):
 
