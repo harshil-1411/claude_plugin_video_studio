@@ -111,6 +111,7 @@ describe("MCP server (in-memory)", () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       "brief_validate",
+      "diff",
       "doctor",
       "export",
       "ingest",
@@ -125,6 +126,8 @@ describe("MCP server (in-memory)", () => {
       "storyboard_render",
       "template_get",
       "template_list",
+      "test",
+      "verify",
     ]);
     await close();
   });

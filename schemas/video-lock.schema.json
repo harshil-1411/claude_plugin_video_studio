@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:video-lock",
+  "title": "VideoLock",
+  "description": "dist/video.lock: versions, contract versions and hashes of everything a render depended on.",
+  "additionalProperties": false,
+  "properties": {
+    "assets": {
+      "description": "Project inputs the render read (sources, brand, assets), sorted by path.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "content_ir_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "engine": {
+      "description": "Engine component versions, e.g. {engine: \"0.1.0\", assembly: \"2\", cover: \"2\", target_package: \"1\"}.",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "propertyNames": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "fonts": {
+      "description": "Font files the render used, sorted by family then weight.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "family": {
+            "type": "string"
+          },
+          "file": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "weight": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "family",
+          "weight",
+          "file",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "outputs": {
+      "description": "dist/ files, sorted by path; excludes video.lock and render-manifest.json (which carries timestamps).",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "target": {
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "project_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "quality": {
+      "enum": [
+        "preview",
+        "final"
+      ],
+      "type": "string"
+    },
+    "scenes": {
+      "description": "Scene clips in spec order.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_key": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "clip_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "renderer": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "renderer_version": {
+            "type": "string"
+          },
+          "scene_id": {
+            "pattern": "^s\\d{2,}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scene_id",
+          "renderer",
+          "renderer_version",
+          "cache_key",
+          "clip_sha256"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    },
+    "spec_sha256": {
+      "description": "Canonical-JSON hash of the VideoSpec that was rendered.",
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "targets": {
+      "description": "Platform contracts the packages were compiled against, sorted by id.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "id": {
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "verified": {
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "contract_version",
+          "verified"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "tools": {
+      "description": "External tool and renderer versions (ffmpeg, ffmpeg-drawtext, hyperframes, voice backend).",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "propertyNames": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "voice": {
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+          "type": "string"
+        },
+        "request_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "voice_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend",
+        "request_hash"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "project_id",
+    "quality",
+    "spec_sha256",
+    "engine",
+    "tools",
+    "voice",
+    "fonts",
+    "targets",
+    "scenes",
+    "assets",
+    "outputs"
+  ],
+  "type": "object"
+}

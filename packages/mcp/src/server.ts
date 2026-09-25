@@ -9,12 +9,15 @@ import { AspectRatio, Platform, PlatformTargetId } from "@video-studio/schema";
 import { z } from "zod";
 import { type DoctorDeps, defaultDoctorDeps, formatDoctorReport, runDoctor } from "./doctor.js";
 import { SCHEMA_NAMES, findSchemasDir, resolveInputPath } from "./paths.js";
+import { diffProjects, formatDiff } from "./diff.js";
+import { formatGolden, testProject } from "./golden.js";
 import { formatLint, lintProject } from "./lint.js";
 import { formatIssues, renderStoryboard, scaffoldSpec, validateBrief } from "./plan.js";
 import { type RenderProjectOptions, SpecInvalidError, exportProject, loadValidSpec, runQa } from "./pipeline.js";
 import { type RenderJobView, RenderJobManager } from "./render-jobs.js";
 import { formatSpecValidation, projectSpecPaths, validateSpecFile } from "./spec-validate.js";
 import { findTemplatesDir, getTemplate, loadTemplates, requireTemplatesDir, summarizeTemplate } from "./templates.js";
+import { formatVerify, verifyProject } from "./verify.js";
 
 export const SERVER_NAME = "engine";
 export const SERVER_VERSION = "0.1.0";
@@ -460,6 +463,67 @@ export function createServer(options: ServerOptions = {}): McpServer {
       const r = await exportProject(resolveInputPath(project_dir, cwd()), quality ? { quality } : {});
       return jsonResult(`exported the ${r.quality} render to ${r.dist.dir}${r.qa_status ? ` (QA ${r.qa_status})` : ""}`, r as unknown as Record<string, unknown>);
     }),
+  );
+
+  server.registerTool(
+    "verify",
+    {
+      title: "Verify claim coverage",
+      description:
+        "Check that <project_dir>/project/video-spec.json is grounded in its ContentIR: which source claims each scene cites, which claims no scene covers, and which scenes state things without a claim_ref (an error under strict grounding). Reuses the spec's semantic validation. Writes qa/verify.{json,md}. Returns {status: pass|warn|fail, ...}; fix by adding claim_refs or rewording the voiceover/on-screen text to what the sources say.",
+      inputSchema: {
+        project_dir: z.string().min(1).describe("Project folder with project/video-spec.json and source/content-ir.json"),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async ({ project_dir }: { project_dir: string }) => {
+      const r = await verifyProject(resolveInputPath(project_dir, cwd()));
+      return jsonResult(formatVerify(r), r as unknown as Record<string, unknown>);
+    }),
+  );
+
+  server.registerTool(
+    "test",
+    {
+      title: "Golden-frame test",
+      description:
+        "Regression-test <project_dir>'s rendered reel against its golden frames: samples frames of the render of `quality` (default: latest) and compares each with the stored golden frame (SSIM). With update: true, (re)records the golden frames from the current render instead. Writes qa/test.{json,md}. Returns {status: pass|fail|updated|missing, ...}; status missing means no golden frames yet (run with update: true after checking the render by eye).",
+      inputSchema: {
+        project_dir: z.string().min(1).describe("Rendered project folder"),
+        quality: QUALITY.optional().describe("Which render to test (default: the latest)"),
+        update: z.boolean().optional().describe("Record the current render as the new golden frames"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async ({ project_dir, quality, update }: { project_dir: string; quality?: "preview" | "final"; update?: boolean }) => {
+      const r = await testProject(resolveInputPath(project_dir, cwd()), { ...(quality ? { quality } : {}), ...(update ? { update } : {}) });
+      return jsonResult(formatGolden(r), r as unknown as Record<string, unknown>);
+    }),
+  );
+
+  server.registerTool(
+    "diff",
+    {
+      title: "Diff two renders",
+      description:
+        "Compare two rendered projects (project_a → project_b; pass the same folder with quality_a/quality_b to compare preview and final): spec changes, dist/video.lock changes classified as creative | renderer | spec | asset | metadata, and a sampled frame diff (SSIM). Read-only apart from project_b's qa/diff.{json,md}. Returns {identical, ...}.",
+      inputSchema: {
+        project_a: z.string().min(1).describe("The earlier / reference render's project folder"),
+        project_b: z.string().min(1).describe("The later render's project folder (may equal project_a)"),
+        quality_a: QUALITY.optional(),
+        quality_b: QUALITY.optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(
+      async ({ project_a, project_b, quality_a, quality_b }: { project_a: string; project_b: string; quality_a?: "preview" | "final"; quality_b?: "preview" | "final" }) => {
+        const r = await diffProjects(resolveInputPath(project_a, cwd()), resolveInputPath(project_b, cwd()), {
+          ...(quality_a ? { quality_a } : {}),
+          ...(quality_b ? { quality_b } : {}),
+        });
+        return jsonResult(formatDiff(r), r as unknown as Record<string, unknown>);
+      },
+    ),
   );
 
   return server;

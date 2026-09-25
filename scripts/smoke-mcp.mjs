@@ -16,6 +16,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bundle = join(root, "dist/mcp.mjs");
 const expected = [
   "brief_validate",
+  "diff",
   "doctor",
   "export",
   "ingest",
@@ -30,6 +31,8 @@ const expected = [
   "storyboard_render",
   "template_get",
   "template_list",
+  "test",
+  "verify",
 ];
 const tmp = mkdtempSync(join(tmpdir(), "vs-smoke-"));
 const marker = join(tmp, "EXEC_MARKER");

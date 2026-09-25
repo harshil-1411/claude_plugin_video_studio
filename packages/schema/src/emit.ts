@@ -9,6 +9,7 @@ import { PlatformContract } from "./platform-contract.js";
 import { Policy } from "./policy.js";
 import { RenderManifest } from "./render-manifest.js";
 import { Template } from "./template.js";
+import { VideoLock } from "./video-lock.js";
 import { VideoSpec } from "./video-spec.js";
 
 /** Schemas published as `schemas/<name>.schema.json`. */
@@ -21,6 +22,7 @@ export const EMITTED_SCHEMAS = {
   policy: Policy,
   template: Template,
   "platform-contract": PlatformContract,
+  "video-lock": VideoLock,
 } as const satisfies Record<string, z.ZodType>;
 
 export type EmittedSchemaName = keyof typeof EMITTED_SCHEMAS;
