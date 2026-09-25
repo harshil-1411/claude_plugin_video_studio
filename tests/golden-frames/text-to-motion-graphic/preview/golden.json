@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "quality": "preview",
+  "width": 160,
+  "threshold": 0.97,
+  "reel_sha256": "19738ea5f0f28fef21c90787458ce61eb9926d2f55576ca8389a2e876a7337a6",
+  "spec_sha256": "943bbbd2212353e852524cb03a64874562d5fe97a46203250c552bf7f3c711d7",
+  "target": {
+    "width": 180,
+    "height": 320,
+    "fps": 15
+  },
+  "duration_ms": 3000,
+  "frames": [
+    {
+      "label": "first",
+      "at_sec": 0.033,
+      "file": "00-first.png"
+    },
+    {
+      "label": "s01",
+      "scene_id": "s01",
+      "at_sec": 0.233,
+      "file": "01-s01.png"
+    },
+    {
+      "label": "s02",
+      "scene_id": "s02",
+      "at_sec": 0.767,
+      "file": "02-s02.png"
+    },
+    {
+      "label": "s03",
+      "scene_id": "s03",
+      "at_sec": 1.233,
+      "file": "03-s03.png"
+    },
+    {
+      "label": "s04",
+      "scene_id": "s04",
+      "at_sec": 1.767,
+      "file": "04-s04.png"
+    },
+    {
+      "label": "s05",
+      "scene_id": "s05",
+      "at_sec": 2.233,
+      "file": "05-s05.png"
+    },
+    {
+      "label": "s06",
+      "scene_id": "s06",
+      "at_sec": 2.767,
+      "file": "06-s06.png"
+    },
+    {
+      "label": "last",
+      "at_sec": 2.9,
+      "file": "07-last.png"
+    }
+  ]
+}

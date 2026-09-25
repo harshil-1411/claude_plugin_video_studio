@@ -9,9 +9,10 @@ import { initProject } from "@video-studio/core";
 import { ffprobe, runFfmpeg } from "@video-studio/media";
 import { layoutZones } from "@video-studio/platforms";
 import { FFMPEG_RENDERER_VERSION, createFfmpegRenderer } from "@video-studio/renderer";
-import { RenderManifest, type VideoSpec } from "@video-studio/schema";
+import { RenderManifest, VideoLock, type VideoSpec } from "@video-studio/schema";
 import { type VoiceBackend, tokenize } from "@video-studio/voice";
 import { type RenderProjectOptions, SpecInvalidError, exportProject, loadValidSpec, renderProject, runQa, socialCopy } from "./pipeline.js";
+import { diffLocks, readLock } from "./lock.js";
 import { RenderJobManager } from "./render-jobs.js";
 import { createServer } from "./server.js";
 
@@ -132,6 +133,7 @@ afterAll(async () => {
 
 describe("renderProject (tiny, silent, ffmpeg)", () => {
   let dir: string;
+  let firstLock: VideoLock;
   const stages = new Set<string>();
 
   it(
@@ -215,6 +217,24 @@ describe("renderProject (tiny, silent, ffmpeg)", () => {
       expect(prov.sources[0].uri).toBe("input/notes.md");
       expect(prov.render.scenes.map((s: { scene_id: string }) => s.scene_id)).toEqual(["s01", "s02", "s03"]);
       expect(await readFile(join(dir, "dist", "social-copy.md"), "utf8")).toMatch(/# Vector databases, tiny[\s\S]*#Shorts/);
+
+      // video.lock: versions and hashes, relative paths only, listed in the manifest.
+      const lockText = await readFile(r.dist.lock, "utf8");
+      firstLock = (await readLock(r.dist.lock))!;
+      expect(firstLock).toMatchObject({ project_id: manifest.project_id, quality: "preview", spec_sha256: manifest.spec_sha256, voice: { backend: "silent" } });
+      expect(firstLock.engine).toMatchObject({ engine: "0.1.0", assembly: "2", target_package: "1" });
+      expect(firstLock.tools["ffmpeg-drawtext"]).toBe(FFMPEG_RENDERER_VERSION);
+      expect(firstLock.tools["video-studio-engine"]).toBeUndefined();
+      expect(firstLock.fonts).toContainEqual({ family: "Inter", weight: 700, file: "fonts/Inter/Inter-Bold.ttf", sha256: "288316099b1e0a47a4716d159098005eef7c0066921f34e3200393dbdb01947f" });
+      expect(firstLock.targets).toEqual([{ id: "youtube-shorts", contract_version: expect.any(Number), verified: expect.any(String) }]);
+      expect(firstLock.scenes.map((x) => [x.scene_id, x.clip_sha256])).toEqual(manifest.renders.map((x) => [x.scene_id, x.output_sha256]));
+      expect(firstLock.assets.map((a) => a.path)).toEqual(["source/provenance.json"]);
+      expect(firstLock.outputs.map((o) => o.path)).toContain("dist/youtube-shorts/video.mp4");
+      expect(firstLock.outputs.find((o) => o.path === "dist/youtube-shorts/post.json")?.target).toBe("youtube-shorts");
+      expect(firstLock.outputs.some((o) => /video\.lock|render-manifest/.test(o.path))).toBe(false);
+      expect(lockText).not.toContain(tmp);
+      expect(lockText).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
+      expect(manifest.outputs.find((o) => o.kind === "lock")?.path).toBe("dist/video.lock");
     },
     T,
   );
@@ -233,6 +253,9 @@ describe("renderProject (tiny, silent, ffmpeg)", () => {
       expect((await stat(join(dir, "renders", "preview", "reel.mp4"))).mtimeMs).toBe(reelBefore);
       const manifest = RenderManifest.parse(JSON.parse(await readFile(join(dir, "dist", "render-manifest.json"), "utf8")));
       expect(manifest.renders.every((x) => x.status === "cached")).toBe(true);
+      // Same inputs: only the provenance (which carries the render time) differs.
+      const changes = diffLocks(firstLock, (await readLock(r.dist.lock))!);
+      expect(changes.map((c) => [c.class, c.path])).toEqual([["metadata", "outputs.dist/provenance.json.sha256"]]);
     },
     T,
   );
@@ -246,6 +269,10 @@ describe("renderProject (tiny, silent, ffmpeg)", () => {
       await rm(join(dir, "dist"), { recursive: true, force: true });
       const e = await exportProject(dir);
       expect((await stat(e.dist.reel)).size).toBeGreaterThan(0);
+      // Re-exporting an unchanged render writes a byte-identical lock.
+      const lockBefore = await readFile(e.dist.lock);
+      await exportProject(dir);
+      expect(await readFile(e.dist.lock)).toEqual(lockBefore);
 
       // Retarget and re-export without re-rendering: new packages appear, the old one is removed.
       const specPath = join(dir, "project", "video-spec.json");
@@ -255,6 +282,12 @@ describe("renderProject (tiny, silent, ffmpeg)", () => {
       await writeFile(specPath, JSON.stringify(s, null, 2));
       const e2 = await exportProject(dir);
       expect(e2.dist.targets.map((t) => t.id)).toEqual(["instagram", "tiktok"]);
+      const retarget = diffLocks(VideoLock.parse(JSON.parse(lockBefore.toString("utf8"))), (await readLock(e2.dist.lock))!);
+      expect(retarget.filter((c) => c.path.startsWith("targets.")).map((c) => [c.class, c.path])).toEqual([
+        ["spec", "targets.instagram"],
+        ["spec", "targets.tiktok"],
+        ["spec", "targets.youtube-shorts"],
+      ]);
       await expect(stat(join(dir, "dist", "youtube-shorts"))).rejects.toThrow();
       const tk = JSON.parse(await readFile(join(dir, "dist", "tiktok", "post.json"), "utf8"));
       expect(tk).toMatchObject({

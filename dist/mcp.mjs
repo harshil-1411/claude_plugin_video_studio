@@ -140392,7 +140392,7 @@ function lineSpan(lineStart, lineEnd) {
 }
 /** `repo:<path>#L<a>-L<b>` (or `#L<a>` for a single line). Path uses `/` separators. */
 function repoRef(path, lineStart, lineEnd) {
-	const p = encodeRefPart(toPosix$2(path));
+	const p = encodeRefPart(toPosix$3(path));
 	return lineStart === void 0 ? `repo:${p}` : `repo:${p}#${lineSpan(lineStart, lineEnd)}`;
 }
 /** `url:<url-without-fragment>#<anchor>`; an existing fragment is replaced. */
@@ -140406,7 +140406,7 @@ function urlRef(url, anchor) {
 * `markdown:README.md#L4-L9`. A string locator is used verbatim.
 */
 function fileRef(kind, path, locator) {
-	const p = encodeRefPart(toPosix$2(path));
+	const p = encodeRefPart(toPosix$3(path));
 	let frag;
 	if (typeof locator === "string") frag = locator;
 	else if (locator) {
@@ -140437,11 +140437,11 @@ function inlineKey(content) {
 function displayPath(path, projectDir) {
 	if (projectDir && isAbsolute(path)) {
 		const rel = relative(projectDir, path);
-		if (rel && !rel.startsWith("..") && !isAbsolute(rel)) return toPosix$2(rel);
+		if (rel && !rel.startsWith("..") && !isAbsolute(rel)) return toPosix$3(rel);
 	}
-	return isAbsolute(path) ? basename(path) : toPosix$2(path);
+	return isAbsolute(path) ? basename(path) : toPosix$3(path);
 }
-function toPosix$2(p) {
+function toPosix$3(p) {
 	return sep === "\\" ? p.replaceAll("\\", "/") : p;
 }
 /**
@@ -230225,6 +230225,72 @@ const RenderManifest = strictObject({
 	description: "Exactly what happened: per-scene provider/model, prompts, seeds, task ids, hashes, cost, timestamps, retries, outputs, QA and tool versions."
 });
 //#endregion
+//#region ../schema/dist/video-lock.js
+/**
+* dist/video.lock: everything a render depended on, so two renders can be compared and a
+* render can be reproduced. Deterministic: no timestamps, arrays sorted by their key, so the
+* same inputs give a byte-identical lock.
+*/
+const VideoLock = strictObject({
+	schema_version: SchemaVersion,
+	project_id: Id,
+	quality: _enum(["preview", "final"]),
+	spec_sha256: Sha256.describe("Canonical-JSON hash of the VideoSpec that was rendered."),
+	content_ir_sha256: Sha256.optional(),
+	engine: record(string(), string()).describe("Engine component versions, e.g. {engine: \"0.1.0\", assembly: \"2\", cover: \"2\", target_package: \"1\"}."),
+	tools: record(string(), string()).describe("External tool and renderer versions (ffmpeg, ffmpeg-drawtext, hyperframes, voice backend)."),
+	voice: strictObject({
+		backend: Id,
+		voice_id: string().optional(),
+		request_hash: Sha256
+	}),
+	fonts: array(strictObject({
+		family: string(),
+		weight: int().positive(),
+		file: FilePath,
+		sha256: Sha256
+	})).describe("Font files the render used, sorted by family then weight."),
+	targets: array(strictObject({
+		id: PlatformTargetId,
+		contract_version: int().positive(),
+		verified: date()
+	})).describe("Platform contracts the packages were compiled against, sorted by id."),
+	scenes: array(strictObject({
+		scene_id: SceneId,
+		renderer: Id,
+		renderer_version: string(),
+		cache_key: Sha256,
+		clip_sha256: Sha256
+	})).describe("Scene clips in spec order."),
+	assets: array(strictObject({
+		path: FilePath,
+		sha256: Sha256
+	})).describe("Project inputs the render read (sources, brand, assets), sorted by path."),
+	outputs: array(strictObject({
+		path: FilePath,
+		sha256: Sha256,
+		target: PlatformTargetId.optional()
+	})).describe("dist/ files, sorted by path; excludes video.lock and render-manifest.json (which carries timestamps).")
+}).meta({
+	id: "VideoLock",
+	title: "VideoLock",
+	description: "dist/video.lock: versions, contract versions and hashes of everything a render depended on."
+});
+strictObject({
+	class: _enum([
+		"creative",
+		"renderer",
+		"spec",
+		"asset",
+		"metadata"
+	]),
+	/** Dotted path into the lock, e.g. `tools.ffmpeg` or `scenes.s02.clip_sha256`. */
+	path: string(),
+	before: string().optional(),
+	after: string().optional(),
+	message: string()
+});
+//#endregion
 //#region ../schema/dist/brand.js
 /** CSS font weight, 100–900 in steps of 100. */
 const FontWeight = int().min(100).max(900).multipleOf(100);
@@ -232721,6 +232787,105 @@ async function writeQaReport(dir, report) {
 	};
 }
 //#endregion
+//#region ../media/dist/frames.js
+/**
+* Frame sampling and perceptual comparison for golden-frame tests and render diffs. ffmpeg only
+* (ssim filter), no image libraries.
+*/
+/** Write the frame at `atSec` of `video` to `out` (PNG), scaled to `width` px wide (keeps aspect) when given. */
+async function extractFrame(video, atSec, out, opts = {}) {
+	if (!Number.isFinite(atSec) || atSec < 0) throw new Error(`extractFrame: invalid time ${atSec}`);
+	const vf = opts.width ? ["-vf", `scale=${Math.round(opts.width)}:-2:flags=bicubic`] : [];
+	await runFfmpeg([
+		"-y",
+		"-i",
+		video,
+		"-ss",
+		atSec.toFixed(3),
+		"-frames:v",
+		"1",
+		...vf,
+		"-pix_fmt",
+		"rgb24",
+		"-f",
+		"image2",
+		"-c:v",
+		"png",
+		out
+	], {
+		...opts.tools ? { tools: opts.tools } : {},
+		timeoutMs: 12e4
+	});
+	const s = await stat(out).catch(() => void 0);
+	if (!s || s.size === 0) throw new Error(`no frame at ${atSec.toFixed(3)}s in ${video} (past the end?)`);
+}
+/** SSIM (0–1, 1 = identical) of two same-size images. */
+async function frameSsim(a, b, opts = {}) {
+	const [sa, sb] = await Promise.all([pngSize(a), pngSize(b)]);
+	if (sa && sb && (sa.width !== sb.width || sa.height !== sb.height)) throw new Error(`frameSsim: size mismatch ${sa.width}x${sa.height} vs ${sb.width}x${sb.height}`);
+	const { stderr } = await runFfmpeg([
+		"-i",
+		a,
+		"-i",
+		b,
+		"-lavfi",
+		"[0:v][1:v]ssim",
+		"-f",
+		"null",
+		"-"
+	], {
+		...opts.tools ? { tools: opts.tools } : {},
+		timeoutMs: 6e4
+	});
+	return parseSsim(stderr);
+}
+/** The `All:` value of ffmpeg's ssim filter summary line. */
+function parseSsim(stderr) {
+	const m = /SSIM [^\n]*All:\s*([0-9.]+|inf)/.exec(stderr);
+	if (!m) throw new Error(`could not read SSIM from ffmpeg output:\n${stderr.slice(-400)}`);
+	const v = m[1] === "inf" ? 1 : Number(m[1]);
+	if (!Number.isFinite(v)) throw new Error(`bad SSIM value ${m[1]}`);
+	return Math.min(1, Math.max(0, v));
+}
+/**
+* Write a side-by-side comparison PNG to `out`: `a` | `b` | their absolute difference (brightened),
+* for a human to look at. The two images must be the same size.
+*/
+async function frameDiffImage(a, b, out, opts = {}) {
+	await runFfmpeg([
+		"-y",
+		"-i",
+		a,
+		"-i",
+		b,
+		"-filter_complex",
+		"[0:v]format=rgb24,split[a1][a2];[1:v]format=rgb24,split[b1][b2];[a2][b2]blend=all_mode=difference,lutrgb=r='min(val*4,255)':g='min(val*4,255)':b='min(val*4,255)'[d];[a1][b1][d]hstack=inputs=3",
+		"-frames:v",
+		"1",
+		"-c:v",
+		"png",
+		out
+	], {
+		...opts.tools ? { tools: opts.tools } : {},
+		timeoutMs: 6e4
+	});
+}
+/** Width and height from a PNG's IHDR chunk; undefined when the file is not a PNG. */
+async function pngSize(path) {
+	const fh = await open(path, "r");
+	try {
+		const buf = Buffer.alloc(24);
+		const { bytesRead } = await fh.read(buf, 0, 24, 0);
+		if (bytesRead < 24 || buf.readUInt32BE(0) !== 2303741511 || buf.toString("ascii", 12, 16) !== "IHDR") return void 0;
+		return {
+			width: buf.readUInt32BE(16),
+			height: buf.readUInt32BE(20)
+		};
+	} finally {
+		await fh.close();
+	}
+}
+//#endregion
 //#region ../renderer/dist/tokens.js
 /**
 * Visual tokens, font files and render targets shared by the deterministic renderers.
@@ -234505,11 +234670,11 @@ function f$1(name, opts) {
 function motionTiming(durationS, maxBeat) {
 	const fade = Math.min(.4, durationS * .2);
 	return {
-		step: round3(maxBeat > 0 ? Math.min(.15, durationS * .4 / maxBeat) : 0),
-		fade: round3(fade)
+		step: round3$1(maxBeat > 0 ? Math.min(.15, durationS * .4 / maxBeat) : 0),
+		fade: round3$1(fade)
 	};
 }
-function round3(n) {
+function round3$1(n) {
 	return Math.round(n * 1e3) / 1e3;
 }
 /** Build the filtergraph for a composition. `textDir` is where text files will be written. */
@@ -234530,7 +234695,7 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir) {
 		chain = [];
 	};
 	for (const el of comp.elements) {
-		const start = round3(el.beat * step);
+		const start = round3$1(el.beat * step);
 		const progress = `min(1,max(0,(t-${start})/${fade}))`;
 		if (el.type === "box") chain.push(f$1("drawbox", {
 			x: el.x,
@@ -235306,7 +235471,7 @@ function fmtNumber(n) {
 	const [int, frac] = (Number.isInteger(abs) ? String(abs) : String(Math.round(abs * 100) / 100)).split(".");
 	return sign + int.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (frac ? `.${frac}` : "");
 }
-function str(v) {
+function str$1(v) {
 	return typeof v === "string" && v.trim() !== "" ? v : typeof v === "number" && Number.isFinite(v) ? String(v) : void 0;
 }
 /** Sanitize a CSS font-family chain: named families are re-quoted, anything odd is dropped. */
@@ -235407,9 +235572,9 @@ function rec(ctx, role, text, box, fit, color, background = ctx.colors.bg, abs =
 }
 function renderTypography(ctx) {
 	const { stage, props, warnings } = ctx;
-	const lines = Array.isArray(props.lines) ? props.lines.map(str).filter((l) => Boolean(l)) : [];
+	const lines = Array.isArray(props.lines) ? props.lines.map(str$1).filter((l) => Boolean(l)) : [];
 	if (lines.length === 0) warnings.push("typography: no `lines` to show");
-	const emphasis = str(props.emphasis);
+	const emphasis = str$1(props.emphasis);
 	const { u, safe } = stage;
 	const fit = fitFontInfo(lines, safe.w, safe.h * .9, u * 11, u * 3.2, 1.15, .58);
 	const fs = fit.fs;
@@ -235436,8 +235601,8 @@ function renderTypography(ctx) {
 }
 function renderCode(ctx) {
 	const { stage, props, warnings } = ctx;
-	const language = str(props.language) ?? "text";
-	const raw = (str(props.code) ?? "").replace(/\r\n?/g, "\n").replace(/\t/g, "  ").replace(/\n+$/, "");
+	const language = str$1(props.language) ?? "text";
+	const raw = (str$1(props.code) ?? "").replace(/\r\n?/g, "\n").replace(/\t/g, "  ").replace(/\n+$/, "");
 	const highlight = new Set(Array.isArray(props.highlight_lines) ? props.highlight_lines.filter((n) => Number.isInteger(n)) : []);
 	const { u, safe } = stage;
 	const allLines = highlightLines(raw, language);
@@ -235486,20 +235651,20 @@ function renderCode(ctx) {
 }
 function renderChart(ctx) {
 	const { stage, props, warnings } = ctx;
-	const type = str(props.type) ?? "stat";
+	const type = str$1(props.type) ?? "stat";
 	const series = Array.isArray(props.series) ? props.series.map((p) => p && typeof p === "object" ? p : {}).filter((p) => typeof p.value === "number" && Number.isFinite(p.value)).map((p) => ({
 		label: typeof p.label === "string" ? p.label : "",
 		value: p.value
 	})) : [];
-	const unit = str(props.unit) ?? "";
-	const label = str(props.label);
+	const unit = str$1(props.unit) ?? "";
+	const label = str$1(props.label);
 	const { u, safe } = stage;
 	const title = label ? `<div ${anim("fade-up", .05, .5, `vs-chart-title`)}>${esc(label)}</div>` : "";
 	const titleFs = u * 5.5;
 	if (type === "stat" || series.length === 0) {
 		if (type !== "stat") warnings.push(`chart: type "${type}" needs \`series\`; showing the value as a stat`);
 		const raw = props.value ?? series[0]?.value;
-		const value = typeof raw === "number" ? fmtNumber(raw) : str(raw) ?? "";
+		const value = typeof raw === "number" ? fmtNumber(raw) : str$1(raw) ?? "";
 		const vfit = fitFontInfo([value + unit], safe.w, safe.h * .45, u * 30, u * 6, 1, .6);
 		const fs = vfit.fs;
 		const lfit = label ? fitFontInfo([label], safe.w, safe.h * .25, u * 7, u * 3) : void 0;
@@ -235658,7 +235823,7 @@ function layerNodes(n, edges) {
 }
 function renderDiagram(ctx) {
 	const { stage, props, warnings } = ctx;
-	const labels = Array.isArray(props.nodes) ? props.nodes.map(str).filter((s) => Boolean(s)) : [];
+	const labels = Array.isArray(props.nodes) ? props.nodes.map(str$1).filter((s) => Boolean(s)) : [];
 	const index = /* @__PURE__ */ new Map();
 	const nodes = [];
 	for (const l of labels) {
@@ -235769,15 +235934,15 @@ function renderDiagram(ctx) {
 function side(v) {
 	const o = v && typeof v === "object" ? v : {};
 	return {
-		label: str(o.label) ?? "",
-		text: str(o.text) ?? ""
+		label: str$1(o.label) ?? "",
+		text: str$1(o.text) ?? ""
 	};
 }
 function renderComparison(ctx) {
 	const { stage, props } = ctx;
 	const left = side(props.left);
 	const right = side(props.right);
-	const verdict = str(props.verdict);
+	const verdict = str$1(props.verdict);
 	const { u, safe } = stage;
 	const columns = !stage.portrait && stage.W > stage.H;
 	const cardW = columns ? (safe.w - u * 4) / 2 : safe.w;
@@ -235828,10 +235993,10 @@ function logoHtml(ctx, at) {
 }
 function renderCta(ctx) {
 	const { stage, props } = ctx;
-	const headline = str(props.headline) ?? "";
-	const action = str(props.action) ?? "";
-	const command = str(props.command);
-	const url = str(props.url);
+	const headline = str$1(props.headline) ?? "";
+	const action = str$1(props.action) ?? "";
+	const command = str$1(props.command);
+	const url = str$1(props.url);
 	const { u, safe } = stage;
 	const st = stagger(2 + (command ? 1 : 0) + (url ? 1 : 0), stage.dur);
 	let i = 0;
@@ -235879,8 +236044,8 @@ function renderCta(ctx) {
 }
 function renderEndCard(ctx) {
 	const { stage, props, warnings } = ctx;
-	const title = str(props.title);
-	const subtitle = str(props.subtitle);
+	const title = str$1(props.title);
+	const subtitle = str$1(props.subtitle);
 	const { u, safe } = stage;
 	if (!title && !subtitle && !ctx.logo) warnings.push("end_card: no title, subtitle or logo; card is empty");
 	const tf = title ? fitFontInfo([title], safe.w, safe.h * .3, u * 11, u * 4, 1.1) : void 0;
@@ -235912,7 +236077,7 @@ function pct(v) {
 function renderScreenshot(ctx) {
 	const { stage, props, warnings } = ctx;
 	const { u, safe } = stage;
-	const id = str(props.asset) ?? "";
+	const id = str$1(props.asset) ?? "";
 	const abs = id ? ctx.resolveAsset(id) : void 0;
 	let img;
 	if (abs) {
@@ -235935,7 +236100,7 @@ function renderScreenshot(ctx) {
 	const st = stagger(callouts.length, stage.dur, .5);
 	const fs = Math.max(9, u * 3.4);
 	callouts.forEach((c, i) => {
-		const text = typeof c === "string" ? c : c && typeof c === "object" ? str(c.text) : void 0;
+		const text = typeof c === "string" ? c : c && typeof c === "object" ? str$1(c.text) : void 0;
 		if (!text) return;
 		const o = c && typeof c === "object" ? c : {};
 		const x = pct(o.x);
@@ -237188,7 +237353,8 @@ const SCHEMA_NAMES = [
 	"brand",
 	"policy",
 	"template",
-	"platform-contract"
+	"platform-contract",
+	"video-lock"
 ];
 /**
 * Locate the bundled `schemas/` directory: `${CLAUDE_PLUGIN_ROOT}/schemas` first, then
@@ -237208,9 +237374,884 @@ function findSchemasDir(env = process.env, from) {
 	}
 	return null;
 }
+/**
+* A frame passes when its SSIM against the golden is at least this. Tolerant of encoder and
+* ffmpeg version noise (typically > 0.99) while catching layout, text and colour changes.
+*/
+const GOLDEN_SSIM_THRESHOLD = .97;
+const GOLDEN_DIR = "golden";
+const GOLDEN_FILE = "golden.json";
+const GOLDEN_VERSION = 1;
+async function readOptionalJson$1(path) {
+	if (!existsSync(path)) return void 0;
+	try {
+		return await readJson(path);
+	} catch {
+		return;
+	}
+}
+const round3 = (n) => Math.round(n * 1e3) / 1e3;
+const rel$2 = (root, p) => relative(root, p).split("\\").join("/");
+/** Time of the middle of frame `i` at `fps`, so seeks never land on a frame boundary. */
+const frameCentre = (i, fps) => round3((i + .5) / fps);
+/**
+* Deterministic sample times: the first frame, each scene's midpoint, and the last frame, each
+* snapped to a frame centre; times within a frame of each other are merged. Without scenes, the
+* reel is sampled at 25%, 50% and 75%.
+*/
+function sampleTimes(r) {
+	const fps = r.fps > 0 ? r.fps : 30;
+	const frames = Math.max(1, Math.floor(r.duration_ms / 1e3 * fps));
+	const snap = (sec) => frameCentre(Math.min(frames - 1, Math.max(0, Math.floor(sec * fps))), fps);
+	const out = [{
+		label: "first",
+		at_sec: frameCentre(0, fps)
+	}];
+	if (r.scenes && r.scenes.length > 0) {
+		let start = 0;
+		for (const s of r.scenes) {
+			out.push({
+				label: s.scene_id,
+				scene_id: s.scene_id,
+				at_sec: snap((start + s.duration_ms / 2) / 1e3)
+			});
+			start += s.duration_ms;
+		}
+	} else for (const f of [
+		.25,
+		.5,
+		.75
+	]) out.push({
+		label: `p${Math.round(f * 100)}`,
+		at_sec: snap(r.duration_ms / 1e3 * f)
+	});
+	out.push({
+		label: "last",
+		at_sec: frameCentre(Math.max(0, frames - 2), fps)
+	});
+	const merged = [];
+	for (const s of out) {
+		if (merged.some((m) => Math.abs(m.at_sec - s.at_sec) < 1 / fps / 2)) continue;
+		merged.push(s);
+	}
+	return merged;
+}
+/** File name of the n-th sample, e.g. `02-s02.png`. */
+function sampleFileName(i, s) {
+	return `${String(i).padStart(2, "0")}-${s.label.replace(/[^A-Za-z0-9_-]/g, "_")}.png`;
+}
+/**
+* Locate a render: `quality` (else renders/latest.json, else dist/render-manifest.json's quality,
+* else whichever renders/<q>/render-state.json exists). The reel is the state's reel, else
+* renders/<q>/reel.mp4, else dist/reel.mp4 when dist holds that quality (or says nothing).
+*/
+async function resolveRender(projectDir, quality) {
+	const paths = projectPaths(projectDir);
+	const root = paths.root;
+	const distQuality = (await readOptionalJson$1(join(paths.dist, "render-manifest.json")))?.settings?.quality;
+	let q = quality ?? (await readOptionalJson$1(join(paths.renders, "latest.json")))?.quality ?? distQuality;
+	if (!q) q = ["final", "preview"].find((c) => existsSync(join(paths.renders, c, "render-state.json")));
+	const state = q ? await readOptionalJson$1(join(paths.renders, q, "render-state.json")) : void 0;
+	const candidates = [];
+	if (state?.reel) candidates.push([join(root, state.reel), `renders/${q}`]);
+	if (q) candidates.push([join(paths.renders, q, "reel.mp4"), `renders/${q}`]);
+	if (!distQuality || distQuality === q) candidates.push([join(paths.dist, "reel.mp4"), "dist"]);
+	const found = candidates.find(([p]) => existsSync(p));
+	if (!found) throw new Error(q ? `no ${q} reel found in ${root} (looked for ${candidates.map(([p]) => rel$2(root, p)).join(", ") || "nothing"}); render it first (render_submit${quality ? ` with quality "${quality}"` : ""})` : `no render found in ${root}; render it first (render_submit)`);
+	const [reel, source] = found;
+	const probe = !state?.target || !state.duration_ms ? await ffprobe(reel) : void 0;
+	return {
+		root,
+		...q ? { quality: q } : {},
+		...state ? { state } : {},
+		reel,
+		duration_ms: state?.duration_ms ?? Math.round((probe?.duration_s ?? 0) * 1e3),
+		width: state?.target?.width ?? probe?.width ?? 0,
+		height: state?.target?.height ?? probe?.height ?? 0,
+		fps: state?.target?.fps ?? probe?.fps ?? 30,
+		source
+	};
+}
+/** Sample times for a resolved render (scene midpoints when the render state has scenes). */
+function renderSamples(r) {
+	return sampleTimes({
+		duration_ms: r.duration_ms,
+		fps: r.fps,
+		...r.state?.scenes ? { scenes: r.state.scenes } : {}
+	});
+}
+async function clearPngs(dir) {
+	if (!existsSync(dir)) return;
+	for (const f of await readdir(dir)) if (f.endsWith(".png")) await rm(join(dir, f), { force: true });
+}
+/**
+* Golden-frame test of the `quality` render (default: the latest). With `update`, records the
+* current frames as goldens. Writes qa/test.json and qa/test.md; failing frames get the current
+* frame and a golden | current | difference image under qa/test-frames/.
+*/
+async function testProject(projectDir, opts = {}) {
+	const paths = projectPaths(projectDir);
+	const root = paths.root;
+	const r = await resolveRender(root, opts.quality);
+	if (!r.quality) throw new Error(`cannot tell which quality the render in ${root} is; pass quality`);
+	const quality = r.quality;
+	const goldenDir = join(root, GOLDEN_DIR, quality);
+	const goldenPath = join(goldenDir, GOLDEN_FILE);
+	const framesDir = join(paths.qa, "test-frames");
+	const samples = renderSamples(r);
+	const reelSha = await hashFile(r.reel);
+	await rm(framesDir, {
+		recursive: true,
+		force: true
+	});
+	const base = {
+		quality,
+		golden_dir: rel$2(root, goldenDir)
+	};
+	const finish = async (res) => {
+		const out = {
+			...res,
+			report_json: "qa/test.json",
+			report_md: "qa/test.md"
+		};
+		await writeJsonAtomic(join(paths.qa, "test.json"), out);
+		await writeFileAtomic(join(paths.qa, "test.md"), goldenMarkdown(out));
+		return out;
+	};
+	if (opts.update) {
+		await mkdir(goldenDir, { recursive: true });
+		await clearPngs(goldenDir);
+		const frames = [];
+		for (const [i, s] of samples.entries()) {
+			const file = sampleFileName(i, s);
+			await extractFrame(r.reel, s.at_sec, join(goldenDir, file), { width: 160 });
+			frames.push({
+				...s,
+				file
+			});
+		}
+		await writeJsonAtomic(goldenPath, {
+			version: GOLDEN_VERSION,
+			quality,
+			width: 160,
+			threshold: GOLDEN_SSIM_THRESHOLD,
+			reel_sha256: reelSha,
+			...r.state?.spec_sha256 ? { spec_sha256: r.state.spec_sha256 } : {},
+			target: {
+				width: r.width,
+				height: r.height,
+				fps: r.fps
+			},
+			duration_ms: r.duration_ms,
+			frames
+		});
+		return finish({
+			...base,
+			status: "updated",
+			threshold: GOLDEN_SSIM_THRESHOLD,
+			reel_identical: true,
+			frames: frames.map((f) => ({
+				label: f.label,
+				...f.scene_id ? { scene_id: f.scene_id } : {},
+				at_sec: f.at_sec,
+				golden: rel$2(root, join(goldenDir, f.file)),
+				pass: true
+			})),
+			message: `recorded ${frames.length} golden frame(s) from ${rel$2(root, r.reel)}`
+		});
+	}
+	const golden = await readOptionalJson$1(goldenPath);
+	if (!golden) return finish({
+		...base,
+		status: "missing",
+		threshold: GOLDEN_SSIM_THRESHOLD,
+		frames: [],
+		message: `no golden frames in ${rel$2(root, goldenDir)}/`,
+		fix: `check the ${quality} render by eye (look at ${rel$2(root, r.reel)} or a few frames), then run test with update: true to record it as the golden`
+	});
+	const threshold = golden.threshold ?? .97;
+	const reelIdentical = golden.reel_sha256 === reelSha;
+	const goldenFrames = (golden.frames ?? []).map((f) => ({
+		label: f.label,
+		...f.scene_id ? { scene_id: f.scene_id } : {},
+		at_sec: f.at_sec,
+		golden: rel$2(root, join(goldenDir, f.file)),
+		pass: false
+	}));
+	const updateFix = `if the change is intended, check the ${quality} render by eye and run test with update: true to re-record the goldens; otherwise find what changed (diff against a known-good render)`;
+	if (golden.target && (golden.target.width !== r.width || golden.target.height !== r.height || golden.target.fps !== r.fps)) return finish({
+		...base,
+		status: "fail",
+		threshold,
+		reel_identical: false,
+		frames: goldenFrames,
+		message: `render size changed: golden ${golden.target.width}x${golden.target.height}@${golden.target.fps} vs current ${r.width}x${r.height}@${r.fps}`,
+		fix: updateFix
+	});
+	if (samples.length !== golden.frames.length || samples.some((s, i) => s.label !== golden.frames[i].label || Math.abs(s.at_sec - golden.frames[i].at_sec) > 5e-4)) return finish({
+		...base,
+		status: "fail",
+		threshold,
+		reel_identical: false,
+		frames: goldenFrames,
+		message: `sampled frames changed (scenes or durations differ): golden ${golden.frames.map((f) => `${f.label}@${f.at_sec}s`).join(", ")}; current ${samples.map((s) => `${s.label}@${s.at_sec}s`).join(", ")}`,
+		fix: updateFix
+	});
+	const frames = [];
+	for (const [i, s] of samples.entries()) {
+		const gf = golden.frames[i];
+		const goldenPng = join(goldenDir, gf.file);
+		const entry = {
+			...s,
+			golden: rel$2(root, goldenPng),
+			pass: false
+		};
+		if (!existsSync(goldenPng)) {
+			frames.push(entry);
+			continue;
+		}
+		await mkdir(framesDir, { recursive: true });
+		const actual = join(framesDir, gf.file.replace(/\.png$/, ".actual.png"));
+		await extractFrame(r.reel, s.at_sec, actual, { width: golden.width ?? 160 });
+		const [ga, aa] = await Promise.all([pngSize(goldenPng), pngSize(actual)]);
+		if (ga && aa && (ga.width !== aa.width || ga.height !== aa.height)) entry.actual = rel$2(root, actual);
+		else {
+			entry.ssim = round4(await frameSsim(goldenPng, actual));
+			entry.pass = entry.ssim >= threshold;
+			if (entry.pass) await rm(actual, { force: true });
+			else {
+				const diff = join(framesDir, gf.file.replace(/\.png$/, ".diff.png"));
+				await frameDiffImage(goldenPng, actual, diff);
+				entry.actual = rel$2(root, actual);
+				entry.diff = rel$2(root, diff);
+			}
+		}
+		frames.push(entry);
+	}
+	const failed = frames.filter((f) => !f.pass);
+	if (!failed.length) await rm(framesDir, {
+		recursive: true,
+		force: true
+	});
+	return finish({
+		...base,
+		status: failed.length ? "fail" : "pass",
+		threshold,
+		reel_identical: reelIdentical,
+		frames,
+		...failed.length ? {
+			message: `${failed.length} of ${frames.length} frame(s) differ from the golden (${failed.map((f) => f.ssim === void 0 ? `${f.label}: missing or wrong size` : `${f.label}: SSIM ${f.ssim}`).join(", ")}); compare images in qa/test-frames/`,
+			fix: updateFix
+		} : {}
+	});
+}
+const round4 = (n) => Math.round(n * 1e4) / 1e4;
+function goldenMarkdown(r) {
+	const lines = [
+		"# Golden-frame test",
+		"",
+		`- Status: **${r.status}**`,
+		`- Quality: ${r.quality ?? "?"}`,
+		`- Goldens: \`${r.golden_dir}/\``,
+		`- Threshold: SSIM >= ${r.threshold}`
+	];
+	if (r.reel_identical !== void 0) lines.push(`- Reel byte-identical to the golden's: ${r.reel_identical ? "yes" : "no"}`);
+	if (r.message) lines.push("", r.message);
+	if (r.fix) lines.push("", `Fix: ${r.fix}`);
+	if (r.frames.length) {
+		lines.push("", "| Frame | Time (s) | SSIM | Result | Images |", "|---|---|---|---|---|");
+		for (const f of r.frames) {
+			const imgs = [
+				`golden: \`${f.golden}\``,
+				...f.actual ? [`current: \`${f.actual}\``] : [],
+				...f.diff ? [`diff: \`${f.diff}\``] : []
+			].join("<br>");
+			lines.push(`| ${f.label} | ${f.at_sec} | ${f.ssim ?? "-"} | ${r.status === "updated" ? "recorded" : f.pass ? "pass" : "FAIL"} | ${imgs} |`);
+		}
+	}
+	return `${lines.join("\n")}\n`;
+}
+function formatGolden(r) {
+	const lines = [`test ${r.status}${r.quality ? ` (${r.quality})` : ""}: ${r.frames.length} frame(s), threshold SSIM ${r.threshold}; report ${r.report_md}`];
+	if (r.message) lines.push(r.message);
+	if (r.status === "fail") for (const f of r.frames.filter((x) => !x.pass)) lines.push(`- ${f.label} @ ${f.at_sec}s: ${f.ssim === void 0 ? "not compared" : `SSIM ${f.ssim}`}${f.diff ? ` (see ${f.diff})` : ""}`);
+	if (r.fix) lines.push(`fix: ${r.fix}`);
+	return lines.join("\n");
+}
+//#endregion
+//#region src/lock.ts
+/**
+* dist/video.lock: built at export from the render state (see VideoLock in @video-studio/schema),
+* and diffed to classify what changed between two renders.
+*
+* The lock is deterministic: no timestamps, every keyed array sorted, paths relative (to the
+* project root for assets and outputs, to the plugin root for bundled fonts), so re-exporting an
+* unchanged render writes a byte-identical file.
+*/
+const LOCK_FILE = "video.lock";
+const toPosix$2 = (p) => p.split(sep).join("/");
+const byKey = (key) => (a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0;
+const GENERIC_FAMILIES = /* @__PURE__ */ new Set([
+	"sans-serif",
+	"serif",
+	"monospace",
+	"system-ui",
+	"ui-monospace",
+	"ui-sans-serif",
+	"cursive",
+	"fantasy"
+]);
+/**
+* Resolve each request the way the renderers do (bundled fonts first, then host fonts) and hash
+* the file. Bundled files are recorded as `fonts/<family dir>/<file>` (relative to the plugin
+* root); host files as `host/<basename>`, so the lock never holds a machine-specific path.
+* Requests that resolve to no file are skipped (the render reported that already).
+*/
+async function lockFonts(requests, opts) {
+	const resolve = opts.resolver ?? createFontResolver(opts.env ?? process.env, { fontsDir: opts.fontsDir });
+	const out = /* @__PURE__ */ new Map();
+	for (const r of requests) {
+		let file;
+		try {
+			file = await resolve(r.chain, r.weight);
+		} catch {
+			continue;
+		}
+		const weight = r.weight >= 600 ? 700 : 400;
+		const inBundle = opts.fontsDir ? toPosix$2(relative(opts.fontsDir, file)) : "";
+		const bundled = inBundle && !inBundle.startsWith("..") && !isAbsolute(inBundle) ? BUNDLED_FONTS.find((f) => f.file === inBundle) : void 0;
+		const entry = {
+			family: bundled?.family ?? parseFontChain(r.chain).find((n) => !GENERIC_FAMILIES.has(n.toLowerCase())) ?? basename(file, extname(file)),
+			weight,
+			file: bundled ? `fonts/${bundled.file}` : `host/${basename(file)}`,
+			sha256: await hashFile(file)
+		};
+		out.set(`${entry.family}\u0000${entry.weight}\u0000${entry.file}`, entry);
+	}
+	return [...out.values()];
+}
+/** Hash project-relative input files that exist; missing ones are skipped. */
+async function lockAssets(root, relPaths) {
+	const out = /* @__PURE__ */ new Map();
+	for (const p of relPaths) try {
+		out.set(toPosix$2(p), await hashFile(join(root, p)));
+	} catch {}
+	return [...out].map(([path, sha256]) => ({
+		path,
+		sha256
+	}));
+}
+/** Files under `dir` (project-relative, posix), recursively, skipping dotfiles and `skip` subtrees. */
+async function listFiles(root, dir, skip = []) {
+	const out = [];
+	const walk = async (rel) => {
+		let entries;
+		try {
+			entries = await readdir(join(root, rel), { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const e of entries) {
+			if (e.name.startsWith(".")) continue;
+			const child = rel ? `${rel}/${e.name}` : e.name;
+			if (skip.includes(child)) continue;
+			if (e.isDirectory()) await walk(child);
+			else if (e.isFile()) out.push(child);
+		}
+	};
+	await walk(toPosix$2(dir));
+	return out.sort();
+}
+/**
+* Normalise and validate a lock: sort every keyed array (scenes keep spec order), drop duplicate
+* outputs, and parse with VideoLock. Throws when the input does not match the schema.
+*/
+function buildLock(input) {
+	const sortedRecord = (r) => Object.fromEntries(Object.entries(r).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+	const outputs = new Map(input.outputs.map((o) => [o.path, o]));
+	const lock = {
+		schema_version: input.schema_version,
+		project_id: input.project_id,
+		quality: input.quality,
+		spec_sha256: input.spec_sha256,
+		...input.content_ir_sha256 ? { content_ir_sha256: input.content_ir_sha256 } : {},
+		engine: sortedRecord(input.engine),
+		tools: sortedRecord(input.tools),
+		voice: {
+			backend: input.voice.backend,
+			...input.voice.voice_id ? { voice_id: input.voice.voice_id } : {},
+			request_hash: input.voice.request_hash
+		},
+		fonts: [...input.fonts].sort((a, b) => byKey((f) => f.family)(a, b) || a.weight - b.weight || byKey((f) => f.file)(a, b)),
+		targets: [...input.targets].sort(byKey((t) => t.id)),
+		scenes: input.scenes.map((s) => ({
+			scene_id: s.scene_id,
+			renderer: s.renderer,
+			renderer_version: s.renderer_version,
+			cache_key: s.cache_key,
+			clip_sha256: s.clip_sha256
+		})),
+		assets: [...input.assets].sort(byKey((a) => a.path)),
+		outputs: [...outputs.values()].filter((o) => !/(^|\/)dist\/(video\.lock|render-manifest\.json)$/.test(o.path)).map((o) => ({
+			path: o.path,
+			sha256: o.sha256,
+			...o.target ? { target: o.target } : {}
+		})).sort(byKey((o) => o.path))
+	};
+	return VideoLock.parse(lock);
+}
+/** The lock file's text: pretty JSON with a trailing newline. */
+function serializeLock(lock) {
+	return `${JSON.stringify(lock, null, 2)}\n`;
+}
+/** Read and validate a lock file; undefined when it does not exist. Throws on an invalid lock. */
+async function readLock(path) {
+	let text;
+	try {
+		text = await readFile(path, "utf8");
+	} catch (err) {
+		if (err.code === "ENOENT") return void 0;
+		throw err;
+	}
+	let json;
+	try {
+		json = JSON.parse(text);
+	} catch (e) {
+		throw new Error(`${path} is not valid JSON (${e instanceof Error ? e.message : String(e)}); re-export the project to rewrite it`);
+	}
+	const parsed = VideoLock.safeParse(json);
+	if (!parsed.success) {
+		const issues = parsed.error.issues.slice(0, 5).map((i) => `${i.path.map(String).join(".") || "(root)"}: ${i.message}`);
+		throw new Error(`${path} is not a valid video.lock: ${issues.join("; ")}; re-export the project to rewrite it`);
+	}
+	return parsed.data;
+}
+const CLASS_ORDER = [
+	"creative",
+	"renderer",
+	"spec",
+	"asset",
+	"metadata"
+];
+/**
+* Changes from `before` to `after`, each classified; empty when the locks are equal. Sorted by
+* class then path.
+*
+* - spec hash, voice request hash, scene list/order → creative.
+* - engine.*, tools.*, voice backend/voice id, fonts, a scene's renderer or renderer_version → renderer.
+* - targets (contract_version, verified, added/removed) → spec.
+* - content_ir_sha256 and assets.* → asset.
+* - a scene's cache_key/clip_sha256 → creative when the spec changed; otherwise the class of the
+*   cause (that scene's renderer, then any renderer, spec or asset change); with no cause at all,
+*   renderer (the same inputs gave a different clip).
+* - outputs.* → metadata when nothing above changed; otherwise the first cause class in
+*   creative, asset, spec, renderer order.
+* - schema_version, project_id, quality → metadata.
+*/
+function diffLocks(before, after) {
+	const changes = [];
+	const add = (cls, path, b, a, message) => {
+		changes.push({
+			class: cls,
+			path,
+			...b !== void 0 ? { before: b } : {},
+			...a !== void 0 ? { after: a } : {},
+			message
+		});
+	};
+	const field = (cls, path, b, a, what) => {
+		if (b === a) return;
+		const message = b === void 0 ? `${what} added` : a === void 0 ? `${what} removed` : `${what} changed`;
+		add(cls, path, b, a, message);
+	};
+	const record = (cls, prefix, b, a, what) => {
+		for (const k of /* @__PURE__ */ new Set([...Object.keys(b), ...Object.keys(a)])) field(cls, `${prefix}.${k}`, b[k], a[k], `${what} ${k}`);
+	};
+	/** Keyed list diff: added/removed entries and per-field changes. */
+	const keyed = (prefix, b, a, key, classOf, what) => {
+		const bm = new Map(b.map((x) => [key(x), x]));
+		const am = new Map(a.map((x) => [key(x), x]));
+		for (const k of /* @__PURE__ */ new Set([...bm.keys(), ...am.keys()])) {
+			const x = bm.get(k);
+			const y = am.get(k);
+			if (!x || !y) {
+				add(classOf(""), `${prefix}.${k}`, x ? summary(x) : void 0, y ? summary(y) : void 0, `${what} ${k} ${x ? "removed" : "added"}`);
+				continue;
+			}
+			const xr = x;
+			const yr = y;
+			for (const f of /* @__PURE__ */ new Set([...Object.keys(xr), ...Object.keys(yr)])) field(classOf(f), `${prefix}.${k}.${f}`, str(xr[f]), str(yr[f]), `${what} ${k} ${f}`);
+		}
+	};
+	field("metadata", "schema_version", before.schema_version, after.schema_version, "lock schema version");
+	field("metadata", "project_id", before.project_id, after.project_id, "project id");
+	field("metadata", "quality", before.quality, after.quality, "render quality");
+	field("creative", "spec_sha256", before.spec_sha256, after.spec_sha256, "video spec");
+	field("asset", "content_ir_sha256", before.content_ir_sha256, after.content_ir_sha256, "ContentIR");
+	record("renderer", "engine", before.engine, after.engine, "engine component");
+	record("renderer", "tools", before.tools, after.tools, "tool");
+	field("renderer", "voice.backend", before.voice.backend, after.voice.backend, "voice backend");
+	field("renderer", "voice.voice_id", before.voice.voice_id, after.voice.voice_id, "voice id");
+	field("creative", "voice.request_hash", before.voice.request_hash, after.voice.request_hash, "voiceover request");
+	keyed("fonts", before.fonts, after.fonts, (f) => `${f.family}@${f.weight}`, () => "renderer", "font");
+	keyed("targets", before.targets, after.targets, (t) => t.id, () => "spec", "platform contract");
+	keyed("assets", before.assets, after.assets, (x) => x.path, () => "asset", "input");
+	const bIds = before.scenes.map((s) => s.scene_id).join(",");
+	const aIds = after.scenes.map((s) => s.scene_id).join(",");
+	if (bIds !== aIds) add("creative", "scenes", bIds, aIds, "scene list or order changed");
+	const specChanged = before.spec_sha256 !== after.spec_sha256;
+	const causes = new Set(changes.map((c) => c.class));
+	const bScenes = new Map(before.scenes.map((s) => [s.scene_id, s]));
+	for (const s of after.scenes) {
+		const p = bScenes.get(s.scene_id);
+		if (!p) continue;
+		field("renderer", `scenes.${s.scene_id}.renderer`, p.renderer, s.renderer, `scene ${s.scene_id} renderer`);
+		field("renderer", `scenes.${s.scene_id}.renderer_version`, p.renderer_version, s.renderer_version, `scene ${s.scene_id} renderer version`);
+		const ownRenderer = p.renderer !== s.renderer || p.renderer_version !== s.renderer_version;
+		const cls = specChanged ? "creative" : ownRenderer || causes.has("renderer") ? "renderer" : causes.has("spec") ? "spec" : causes.has("asset") ? "asset" : "renderer";
+		const why = specChanged ? "" : cls === "renderer" && !ownRenderer && !causes.has("renderer") ? " with unchanged inputs (non-deterministic render?)" : ` (follows a ${cls} change)`;
+		for (const f of ["cache_key", "clip_sha256"]) if (p[f] !== s[f]) add(cls, `scenes.${s.scene_id}.${f}`, p[f], s[f], `scene ${s.scene_id} ${f === "cache_key" ? "inputs" : "clip"} changed${why}`);
+	}
+	const upstream = new Set(changes.filter((c) => c.class !== "metadata").map((c) => c.class));
+	const outCls = [
+		"creative",
+		"asset",
+		"spec",
+		"renderer"
+	].find((c) => upstream.has(c)) ?? "metadata";
+	keyed("outputs", before.outputs, after.outputs, (o) => o.path, () => outCls, "output");
+	if (outCls !== "metadata") {
+		for (const c of changes) if (c.path.startsWith("outputs.")) c.message += ` (follows a ${outCls} change)`;
+	}
+	return changes.sort((a, b) => CLASS_ORDER.indexOf(a.class) - CLASS_ORDER.indexOf(b.class) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+function str(v) {
+	if (v === void 0 || v === null) return void 0;
+	return typeof v === "string" ? v : JSON.stringify(v);
+}
+function summary(x) {
+	return Object.entries(x).map(([k, v]) => `${k}=${str(v)}`).join(" ");
+}
+const short = (v) => v === void 0 ? "(none)" : /^[a-f0-9]{64}$/.test(v) ? `${v.slice(0, 12)}…` : v;
+/** Short markdown list of changes grouped by class. */
+function formatLockChanges(changes) {
+	if (changes.length === 0) return "No changes: the locks are identical.";
+	const lines = [];
+	for (const cls of CLASS_ORDER) {
+		const group = changes.filter((c) => c.class === cls);
+		if (!group.length) continue;
+		if (lines.length) lines.push("");
+		lines.push(`**${cls}** (${group.length})`);
+		for (const c of group) lines.push(`- \`${c.path}\`: ${short(c.before)} → ${short(c.after)} (${c.message})`);
+	}
+	return lines.join("\n");
+}
+/** A frame pair below this SSIM is flagged (same threshold as the golden-frame test). */
+const DIFF_SSIM_THRESHOLD = GOLDEN_SSIM_THRESHOLD;
+/** Long values in the spec diff are cut to this many characters. */
+const MAX_VALUE_CHARS = 120;
+/** At most this many spec changes are listed in the markdown report (the JSON has all). */
+const MAX_MD_CHANGES = 60;
+function fmt(v) {
+	const s = typeof v === "string" ? JSON.stringify(v) : JSON.stringify(v) ?? String(v);
+	return s.length > MAX_VALUE_CHARS ? `${s.slice(0, 119)}…` : s;
+}
+const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+const keyedById = (arr) => arr.length > 0 && arr.every((x) => isObj(x) && typeof x.id === "string") && new Set(arr.map((x) => x.id)).size === arr.length;
+const join_ = (path, key) => path ? `${path}.${key}` : key;
+/** Structural diff of two JSON values; arrays of objects with unique `id`s are matched by id. */
+function diffJson(a, b, path = "", out = []) {
+	if (a === b) return out;
+	if (a === void 0) {
+		out.push({
+			kind: "added",
+			path,
+			after: fmt(b)
+		});
+		return out;
+	}
+	if (b === void 0) {
+		out.push({
+			kind: "removed",
+			path,
+			before: fmt(a)
+		});
+		return out;
+	}
+	if (isObj(a) && isObj(b)) {
+		const keys = [.../* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b)])].sort();
+		for (const k of keys) diffJson(a[k], b[k], join_(path, k), out);
+		return out;
+	}
+	if (Array.isArray(a) && Array.isArray(b)) {
+		if ((keyedById(a) || a.length === 0) && (keyedById(b) || b.length === 0) && (a.length > 0 || b.length > 0)) {
+			const ma = new Map(a.map((x) => [x.id, x]));
+			const mb = new Map(b.map((x) => [x.id, x]));
+			for (const [id, x] of ma) diffJson(x, mb.get(id), `${path}[${id}]`, out);
+			for (const [id, x] of mb) if (!ma.has(id)) diffJson(void 0, x, `${path}[${id}]`, out);
+			const common = (ids, other) => ids.filter((id) => other.has(id));
+			const oa = common([...ma.keys()], mb);
+			const ob = common([...mb.keys()], ma);
+			if (oa.join("\0") !== ob.join("\0")) out.push({
+				kind: "reordered",
+				path,
+				before: fmt(oa),
+				after: fmt(ob)
+			});
+			return out;
+		}
+		if (a.every((x) => !isObj(x) && !Array.isArray(x)) && b.every((x) => !isObj(x) && !Array.isArray(x))) {
+			if (JSON.stringify(a) !== JSON.stringify(b)) out.push({
+				kind: "changed",
+				path,
+				before: fmt(a),
+				after: fmt(b)
+			});
+			return out;
+		}
+		for (let i = 0; i < Math.max(a.length, b.length); i++) diffJson(a[i], b[i], `${path}[${i}]`, out);
+		return out;
+	}
+	if (JSON.stringify(a) !== JSON.stringify(b)) out.push({
+		kind: "changed",
+		path,
+		before: fmt(a),
+		after: fmt(b)
+	});
+	return out;
+}
+function summariseScenes(changes) {
+	const added = [];
+	const removed = [];
+	const changed = /* @__PURE__ */ new Set();
+	for (const c of changes) {
+		const m = /^scenes\[([^\]]+)\](.*)$/.exec(c.path);
+		if (!m) continue;
+		if (!m[2] && c.kind === "added") added.push(m[1]);
+		else if (!m[2] && c.kind === "removed") removed.push(m[1]);
+		else changed.add(m[1]);
+	}
+	return {
+		scenes_added: added,
+		scenes_removed: removed,
+		scenes_changed: [...changed]
+	};
+}
+const rel$1 = (root, p) => relative(root, p).split("\\").join("/") || ".";
+/** The spec a render used: dist/video-spec.json when dist holds that render, else project/video-spec.json. */
+async function specPathFor(r) {
+	const paths = projectPaths(r.root);
+	const distSpec = join(paths.dist, "video-spec.json");
+	let distQuality;
+	try {
+		distQuality = JSON.parse(await readFile(join(paths.dist, "render-manifest.json"), "utf8")).settings?.quality;
+	} catch {
+		distQuality = void 0;
+	}
+	if (existsSync(distSpec) && (r.source === "dist" || !distQuality || distQuality === r.quality)) return distSpec;
+	const projSpec = join(paths.project, "video-spec.json");
+	return existsSync(projSpec) ? projSpec : void 0;
+}
+async function readJsonFile(path) {
+	return JSON.parse(await readFile(path, "utf8"));
+}
+/**
+* Compare render a with render b. Same-folder comparisons pick renders/<quality_a> and
+* renders/<quality_b>. Writes b's qa/diff.json and qa/diff.md, and a | b | difference images of
+* flagged frames under b's qa/diff-frames/.
+*/
+async function diffProjects(a, b, opts = {}) {
+	const ra = await resolveRender(a, opts.quality_a);
+	const rb = await resolveRender(b, opts.quality_b);
+	const pb = projectPaths(rb.root);
+	const [specA, specB] = await Promise.all([specPathFor(ra), specPathFor(rb)]);
+	const side = (r, spec) => ({
+		project: r.root,
+		...r.quality ? { quality: r.quality } : {},
+		source: r.source,
+		reel: rel$1(r.root, r.reel),
+		...spec ? { spec: rel$1(r.root, spec) } : {},
+		width: r.width,
+		height: r.height,
+		fps: r.fps,
+		duration_ms: r.duration_ms
+	});
+	let spec;
+	if (!specA || !specB) spec = {
+		compared: false,
+		reason: `no video-spec.json in ${!specA ? ra.root : rb.root}`,
+		changes: [],
+		scenes_added: [],
+		scenes_removed: [],
+		scenes_changed: []
+	};
+	else {
+		const changes = diffJson(await readJsonFile(specA), await readJsonFile(specB));
+		spec = {
+			compared: true,
+			changes,
+			...summariseScenes(changes)
+		};
+	}
+	let lock;
+	const lockPath = (r) => join(projectPaths(r.root).dist, LOCK_FILE);
+	try {
+		const [la, lb] = await Promise.all([readLock(lockPath(ra)), readLock(lockPath(rb))]);
+		if (!la || !lb) lock = {
+			compared: false,
+			reason: `no dist/${LOCK_FILE} in ${[!la ? ra.root : "", !lb ? rb.root : ""].filter(Boolean).join(" and ")} (re-export to write one)`,
+			changes: []
+		};
+		else if (ra.quality && la.quality !== ra.quality || rb.quality && lb.quality !== rb.quality) lock = {
+			compared: false,
+			reason: `dist/${LOCK_FILE} is for a different quality than the render compared (export that quality to refresh it)`,
+			changes: []
+		};
+		else lock = {
+			compared: true,
+			changes: diffLocks(la, lb)
+		};
+	} catch (err) {
+		lock = {
+			compared: false,
+			reason: `could not read dist/${LOCK_FILE}: ${err.message}`,
+			changes: []
+		};
+	}
+	const width = Math.min(320, ra.width || 320, rb.width || 320);
+	const framesOut = join(pb.qa, "diff-frames");
+	await rm(framesOut, {
+		recursive: true,
+		force: true
+	});
+	let frames;
+	const aspectA = ra.height ? ra.width / ra.height : 0;
+	const aspectB = rb.height ? rb.width / rb.height : 0;
+	if (!aspectA || !aspectB || Math.abs(aspectA - aspectB) > .01) frames = {
+		compared: false,
+		reason: `aspect ratios differ (${ra.width}x${ra.height} vs ${rb.width}x${rb.height}); frames not compared`,
+		threshold: DIFF_SSIM_THRESHOLD,
+		width,
+		samples: []
+	};
+	else {
+		await mkdir(pb.qa, { recursive: true });
+		const work = await mkdtemp(join(pb.qa, ".diff-work-"));
+		try {
+			const durA = ra.duration_ms / 1e3;
+			const durB = rb.duration_ms / 1e3;
+			const lastB = Math.max(0, durB - 1 / (rb.fps || 30));
+			const samples = [];
+			for (const [i, s] of renderSamples(ra).entries()) {
+				const atB = Math.round(Math.min(lastB, durA > 0 ? s.at_sec / durA * durB : s.at_sec) * 1e3) / 1e3;
+				const name = `${String(i).padStart(2, "0")}-${s.label.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+				const fa = join(work, `${name}.a.png`);
+				const fb = join(work, `${name}.b.png`);
+				const entry = {
+					label: s.label,
+					at_sec_a: s.at_sec,
+					at_sec_b: atB,
+					pass: false
+				};
+				try {
+					await extractFrame(ra.reel, s.at_sec, fa, { width });
+					await extractFrame(rb.reel, atB, fb, { width });
+					entry.ssim = Math.round(await frameSsim(fa, fb) * 1e4) / 1e4;
+					entry.pass = entry.ssim >= DIFF_SSIM_THRESHOLD;
+					if (!entry.pass) {
+						await mkdir(framesOut, { recursive: true });
+						const img = join(framesOut, `${name}.png`);
+						await frameDiffImage(fa, fb, img);
+						entry.image = rel$1(pb.root, img);
+					}
+				} catch (err) {
+					entry.error = err.message.split("\n")[0];
+				}
+				samples.push(entry);
+			}
+			frames = {
+				compared: true,
+				threshold: DIFF_SSIM_THRESHOLD,
+				width,
+				samples
+			};
+		} finally {
+			await rm(work, {
+				recursive: true,
+				force: true
+			});
+		}
+	}
+	const result = {
+		identical: spec.compared && spec.changes.length === 0 && lock.changes.length === 0 && frames.compared && frames.samples.every((f) => f.pass),
+		a: side(ra, specA),
+		b: side(rb, specB),
+		spec,
+		lock,
+		frames,
+		report_json: "qa/diff.json",
+		report_md: "qa/diff.md"
+	};
+	await writeJsonAtomic(join(pb.qa, "diff.json"), result);
+	await writeFileAtomic(join(pb.qa, "diff.md"), diffMarkdown(result));
+	return result;
+}
+function lockList(changes) {
+	try {
+		return formatLockChanges(changes);
+	} catch {
+		return changes.map((c) => `- ${c.class} \`${c.path}\`: ${c.message}`).join("\n");
+	}
+}
+const sideLabel = (s) => `${s.project} (${s.quality ?? "?"}, ${s.source}, ${s.width}x${s.height}@${s.fps}, ${s.duration_ms / 1e3}s)`;
+function diffMarkdown(r) {
+	const lines = [
+		"# Render diff",
+		"",
+		`- A: ${sideLabel(r.a)}`,
+		`- B: ${sideLabel(r.b)}`,
+		`- Identical: **${r.identical ? "yes" : "no"}**`,
+		"",
+		"## Spec",
+		""
+	];
+	if (!r.spec.compared) lines.push(`Not compared: ${r.spec.reason}`);
+	else if (!r.spec.changes.length) lines.push("No changes.");
+	else {
+		if (r.spec.scenes_added.length) lines.push(`- Scenes added: ${r.spec.scenes_added.join(", ")}`);
+		if (r.spec.scenes_removed.length) lines.push(`- Scenes removed: ${r.spec.scenes_removed.join(", ")}`);
+		if (r.spec.scenes_changed.length) lines.push(`- Scenes changed: ${r.spec.scenes_changed.join(", ")}`);
+		lines.push("", "| Change | Path | Before | After |", "|---|---|---|---|");
+		const cell = (s) => s === void 0 ? "" : `\`${s.replace(/\|/g, "\\|").replace(/`/g, "'")}\``;
+		for (const c of r.spec.changes.slice(0, MAX_MD_CHANGES)) lines.push(`| ${c.kind} | \`${c.path || "(root)"}\` | ${cell(c.before)} | ${cell(c.after)} |`);
+		if (r.spec.changes.length > MAX_MD_CHANGES) lines.push("", `…and ${r.spec.changes.length - MAX_MD_CHANGES} more (see qa/diff.json).`);
+	}
+	lines.push("", "## Lock", "");
+	if (!r.lock.compared) lines.push(`Not compared: ${r.lock.reason}`);
+	else lines.push(r.lock.changes.length ? lockList(r.lock.changes) : "No changes.");
+	lines.push("", "## Frames", "");
+	if (!r.frames.compared) lines.push(`Not compared: ${r.frames.reason}`);
+	else {
+		lines.push(`SSIM threshold ${r.frames.threshold}, compared ${r.frames.width} px wide.`, "", "| Frame | A (s) | B (s) | SSIM | Result | Image |", "|---|---|---|---|---|---|");
+		for (const f of r.frames.samples) lines.push(`| ${f.label} | ${f.at_sec_a} | ${f.at_sec_b} | ${f.ssim ?? "-"} | ${f.pass ? "same" : f.error ? `error: ${f.error.replace(/\|/g, "\\|")}` : "DIFFERS"} | ${f.image ? `\`${f.image}\`` : ""} |`);
+	}
+	return `${lines.join("\n")}\n`;
+}
+function formatDiff(r) {
+	const flagged = r.frames.samples.filter((f) => !f.pass);
+	const lines = [
+		`diff: ${r.identical ? "identical" : "different"} (${r.a.quality ?? "?"} ${r.a.project} → ${r.b.quality ?? "?"} ${r.b.project}); report ${r.report_md}`,
+		r.spec.compared ? `- spec: ${r.spec.changes.length} change(s)${r.spec.scenes_added.length ? `; added ${r.spec.scenes_added.join(", ")}` : ""}${r.spec.scenes_removed.length ? `; removed ${r.spec.scenes_removed.join(", ")}` : ""}${r.spec.scenes_changed.length ? `; changed ${r.spec.scenes_changed.join(", ")}` : ""}` : `- spec: not compared (${r.spec.reason})`,
+		r.lock.compared ? `- lock: ${r.lock.changes.length} change(s)${r.lock.changes.length ? ` (${[...new Set(r.lock.changes.map((c) => c.class))].join(", ")})` : ""}` : `- lock: not compared (${r.lock.reason})`,
+		r.frames.compared ? `- frames: ${r.frames.samples.length - flagged.length}/${r.frames.samples.length} above SSIM ${r.frames.threshold}${flagged.length ? `; differ: ${flagged.map((f) => `${f.label}${f.ssim !== void 0 ? ` (${f.ssim})` : ""}`).join(", ")}` : ""}` : `- frames: not compared (${r.frames.reason})`
+	];
+	for (const c of r.spec.changes.slice(0, 10)) lines.push(`  - ${c.kind} ${c.path || "(root)"}${c.before !== void 0 ? `: ${c.before}` : ""}${c.after !== void 0 ? ` → ${c.after}` : ""}`);
+	if (r.spec.changes.length > 10) lines.push(`  - …${r.spec.changes.length - 10} more in ${r.report_md}`);
+	return lines.join("\n");
+}
 //#endregion
 //#region src/spec-validate.ts
-async function readIfExists$1(path) {
+async function readIfExists$2(path) {
 	try {
 		return await readFile(path, "utf8");
 	} catch (err) {
@@ -237237,7 +238278,7 @@ async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = find
 		errors: [],
 		warnings: []
 	};
-	const text = await readIfExists$1(specPath);
+	const text = await readIfExists$2(specPath);
 	if (text === null) throw new Error(`spec file not found: ${specPath}`);
 	const parsed = parseYamlOrJson(VideoSpec, text);
 	if (!parsed.ok) {
@@ -237253,7 +238294,7 @@ async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = find
 	}
 	let ir;
 	if (contentIrPath) {
-		const irText = await readIfExists$1(contentIrPath);
+		const irText = await readIfExists$2(contentIrPath);
 		if (irText !== null) {
 			result.content_ir_path = contentIrPath;
 			const irParsed = parseYamlOrJson(ContentIR, irText);
@@ -237373,7 +238414,7 @@ function strings(v, out = []) {
 	else if (v && typeof v === "object") for (const x of Object.values(v)) strings(x, out);
 	return out;
 }
-function snippet(text, max = 40) {
+function snippet$1(text, max = 40) {
 	const one = text.replace(/\s+/g, " ").trim();
 	return one.length > max ? `${one.slice(0, max - 1)}…` : one;
 }
@@ -237459,7 +238500,7 @@ function checkOverflow(boxes, out) {
 			id: "text_overflow",
 			severity: CRITICAL_ROLES.has(box.role) ? "error" : "warning",
 			scene_id,
-			message: `${box.role} text "${snippet(box.text)}" does not fit its box at the minimum size and is cut off`,
+			message: `${box.role} text "${snippet$1(box.text)}" does not fit its box at the minimum size and is cut off`,
 			fix: `shorten that text in scene ${scene_id} (deterministic.props) to about two thirds of its length, or split it across two scenes`
 		});
 	}
@@ -237470,7 +238511,7 @@ function checkTextMasks(boxes, masks, W, H, out) {
 		severity: box.role === "decorative" ? "warning" : worst(hits),
 		target,
 		scene_id,
-		message: `${box.role} text "${snippet(box.text)}" sits under ${target}'s ${hits.map((m) => m.label).join("; ")}`,
+		message: `${box.role} text "${snippet$1(box.text)}" sits under ${target}'s ${hits.map((m) => m.label).join("; ")}`,
 		fix: `re-render so the layout uses the target zones (remove any manual positions), or shorten the text in scene ${scene_id} so it fits the content zone`
 	});
 }
@@ -237557,7 +238598,7 @@ function checkContrast(boxes, H, out) {
 			id: "contrast",
 			severity: CRITICAL_ROLES.has(box.role) ? "error" : "warning",
 			scene_id,
-			message: `${box.role} text "${snippet(box.text)}" has contrast ${round2(ratio)}:1 (${box.color} on ${box.background}); WCAG needs ${need}:1 for ${large ? "large" : "normal"} text`,
+			message: `${box.role} text "${snippet$1(box.text)}" has contrast ${round2(ratio)}:1 (${box.color} on ${box.background}); WCAG needs ${need}:1 for ${large ? "large" : "normal"} text`,
 			fix: `change the brand palette (visual.palette text/background/primary) so ${box.color} vs ${box.background} reaches ${need}:1, or enlarge the text`
 		});
 	}
@@ -237625,7 +238666,7 @@ function checkCover(spec, contracts, rendered, out) {
 	if (words > 7 || spec.cover.headline.length > 40) out.push({
 		id: "cover_headline",
 		severity: "warning",
-		message: `cover headline "${snippet(spec.cover.headline)}" has ${words} words / ${spec.cover.headline.length} characters; covers read best at ≤ 7 words and ≤ 40 characters`,
+		message: `cover headline "${snippet$1(spec.cover.headline)}" has ${words} words / ${spec.cover.headline.length} characters; covers read best at ≤ 7 words and ≤ 40 characters`,
 		fix: `shorten cover.headline to at most 7 words`
 	});
 	const box = rendered?.headline_box;
@@ -237633,7 +238674,7 @@ function checkCover(spec, contracts, rendered, out) {
 		if (box.truncated) out.push({
 			id: "cover_overflow",
 			severity: "error",
-			message: `cover headline "${snippet(spec.cover.headline)}" does not fit the cover frame and was cut`,
+			message: `cover headline "${snippet$1(spec.cover.headline)}" does not fit the cover frame and was cut`,
 			fix: `shorten cover.headline to at most 7 words`
 		});
 		for (const crop of rendered.crops) {
@@ -237700,7 +238741,7 @@ function checkBanned(spec, brand, out) {
 		}
 	}
 }
-function formatMarkdown(r) {
+function formatMarkdown$1(r) {
 	const lines = [
 		`# Lint: ${r.status}`,
 		"",
@@ -237792,7 +238833,7 @@ async function lintProject(projectDir, opts = {}) {
 	const reportJson = join(paths.qa, "lint.json");
 	const reportMd = join(paths.qa, "lint.md");
 	await writeJsonAtomic(reportJson, core);
-	await writeFileAtomic(reportMd, formatMarkdown(core));
+	await writeFileAtomic(reportMd, formatMarkdown$1(core));
 	return {
 		...core,
 		findings: [...findings],
@@ -237869,7 +238910,7 @@ function summarizeTemplate(t) {
 }
 //#endregion
 //#region src/plan.ts
-async function readIfExists(path) {
+async function readIfExists$1(path) {
 	try {
 		return await readFile(path, "utf8");
 	} catch (err) {
@@ -237893,7 +238934,7 @@ function planPaths(projectDir) {
 async function findBrief(projectDir) {
 	for (const name of BRIEF_NAMES) {
 		const path = join(projectDir, "project", name);
-		const text = await readIfExists(path);
+		const text = await readIfExists$1(path);
 		if (text !== null) return {
 			path,
 			text
@@ -237902,7 +238943,7 @@ async function findBrief(projectDir) {
 	return null;
 }
 async function loadContentIr(path) {
-	const text = await readIfExists(path);
+	const text = await readIfExists$1(path);
 	if (text === null) return null;
 	const r = parseYamlOrJson(ContentIR, text);
 	return r.ok ? r.data : null;
@@ -238175,7 +239216,7 @@ function renderStoryboardMarkdown(spec, ir) {
 /** Render `<project>/project/storyboard.md` from the project's VideoSpec (and ContentIR when present). */
 async function renderStoryboard(projectDir) {
 	const paths = planPaths(projectDir);
-	const text = await readIfExists(paths.spec);
+	const text = await readIfExists$1(paths.spec);
 	if (text === null) throw new Error(`spec file not found: ${paths.spec}`);
 	const parsed = parseYamlOrJson(VideoSpec, text);
 	if (!parsed.ok) throw new Error(`video-spec.json does not match the schema; run spec_validate first. ${parsed.errors.slice(0, 5).map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
@@ -239665,10 +240706,43 @@ async function loadBrand(projectDir, brandPath) {
 		}
 		const parsed = parseYamlOrJson(Brand, await readFile(p, "utf8"));
 		if (!parsed.ok) throw new Error(`invalid brand file ${p}: ${parsed.errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`);
-		return parsed.data;
+		return {
+			brand: parsed.data,
+			path: p
+		};
 	}
 }
-async function loadBrief(projectDir) {
+/** Font chains and weights the renderers, captions and cover ask for (see lockFonts). */
+function fontRequests(tokens, captionFamily, burnIn) {
+	const reqs = [
+		{
+			chain: tokens.font_heading,
+			weight: 700
+		},
+		{
+			chain: tokens.font_body,
+			weight: 400
+		},
+		{
+			chain: tokens.font_mono,
+			weight: 400
+		}
+	];
+	if (burnIn && captionFamily) reqs.push({
+		chain: captionFamily,
+		weight: 400
+	}, {
+		chain: captionFamily,
+		weight: 700
+	});
+	return reqs;
+}
+/** Brand path as recorded in the render state: project-relative, or `external/<name>`. */
+function brandRel(root, p) {
+	const r = rel(root, p);
+	return r.startsWith("../") || r.startsWith("/") ? `external/${basename(p)}` : r;
+}
+async function loadBrief$1(projectDir) {
 	for (const name of [
 		"creative-brief.yaml",
 		"creative-brief.yml",
@@ -239748,7 +240822,8 @@ async function renderProject(projectDir, o = {}) {
 	});
 	const { spec, warnings: specWarnings, irPath } = await loadValidSpec(root);
 	for (const w of specWarnings) warnings.push(`spec: ${w.path || "(root)"}: ${w.message}`);
-	const brand = await loadBrand(root, o.brandPath);
+	const brandFile = await loadBrand(root, o.brandPath);
+	const brand = brandFile?.brand;
 	const tokens = resolveTokens$1(brand);
 	const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
 	const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
@@ -240091,6 +241166,10 @@ async function renderProject(projectDir, o = {}) {
 	}
 	for (const e of ordered) if (e.renderer && e.renderer_version) tool_versions[e.renderer] = e.renderer_version;
 	tool_versions[`voice:${voice.backend}`] = voice.backend === "silent" ? "n/a" : "local";
+	const lockedFonts = await lockFonts(fontRequests(tokens, assOpts.font, burn), {
+		fontsDir,
+		env
+	});
 	const specSha = sha256Hex(canonicalJson(spec));
 	const irSha = await exists(irPath) ? await hashFile(irPath) : void 0;
 	const state = {
@@ -240155,7 +241234,9 @@ async function renderProject(projectDir, o = {}) {
 		...reuse && prev?.qa ? { qa: prev.qa } : {},
 		timing_adjustments,
 		warnings,
-		tool_versions
+		tool_versions,
+		...brandFile ? { brand_path: brandRel(root, brandFile.path) } : {},
+		fonts: lockedFonts
 	};
 	const reelSha = await hashFile(reel);
 	let qa;
@@ -240362,7 +241443,7 @@ async function exportFromState(root, state, now) {
 	const distDir = paths.dist;
 	await ensureDir(distDir);
 	const { spec } = await loadSpecLoose(root);
-	const brief = await loadBrief(root);
+	const brief = await loadBrief$1(root);
 	const d = (name) => join(distDir, name);
 	const out = {
 		dir: distDir,
@@ -240371,6 +241452,7 @@ async function exportFromState(root, state, now) {
 		thumbnail: d("thumbnail.png"),
 		social_copy: d("social-copy.md"),
 		render_manifest: d("render-manifest.json"),
+		lock: d(LOCK_FILE),
 		provenance: d("provenance.json"),
 		video_spec: d("video-spec.json"),
 		targets: []
@@ -240636,9 +241718,10 @@ async function exportFromState(root, state, now) {
 		});
 	}
 	const tracksAbs = join(root, state.voice.tracks_path);
+	const projectId = (await readJson(paths.projectFile).catch(() => void 0))?.id ?? spec.id ?? (basename(root).replace(/[^A-Za-z0-9_.@:-]/g, "-").replace(/^[^A-Za-z0-9]+/, "") || "project");
 	const manifest = {
 		schema_version: "1.0",
-		project_id: (await readJson(paths.projectFile).catch(() => void 0))?.id ?? spec.id ?? (basename(root).replace(/[^A-Za-z0-9_.@:-]/g, "-").replace(/^[^A-Za-z0-9]+/, "") || "project"),
+		project_id: projectId,
 		spec_sha256: state.spec_sha256,
 		...state.content_ir_sha256 ? { content_ir_sha256: state.content_ir_sha256 } : {},
 		created_at: state.started_at,
@@ -240703,10 +241786,88 @@ async function exportFromState(root, state, now) {
 		...state.warnings.length ? { warnings: state.warnings } : {},
 		tool_versions: state.tool_versions
 	};
+	const lock = await lockFromState(root, state, projectId, outputs);
+	await writeFile(out.lock, serializeLock(lock));
+	manifest.outputs.push({
+		kind: "lock",
+		path: rel(root, out.lock),
+		sha256: await sha(out.lock)
+	});
 	const parsed = RenderManifest.safeParse(manifest);
 	if (!parsed.success) throw new Error(`internal: render manifest failed schema validation: ${parsed.error.message}`);
 	await writeJsonAtomic(out.render_manifest, parsed.data);
 	return out;
+}
+/**
+* The lock for an exported render. Assets are the project inputs the render and export read:
+* the ContentIR and source provenance, the brand file, the brief and storyboard, and files under
+* assets/ (except assets/voice/, which the render writes; the voice request hash covers it).
+*/
+async function lockFromState(root, state, projectId, outputs) {
+	const paths = projectPaths(root);
+	const brand = state.brand_path && !state.brand_path.startsWith("external/") ? [state.brand_path] : state.brand_path ? [] : ["brand.yaml", "project/brand.yaml"];
+	const inputs = [
+		rel(root, projectSpecPaths(root).contentIr),
+		rel(root, join(paths.source, "provenance.json")),
+		...brand,
+		...[
+			"creative-brief.yaml",
+			"creative-brief.yml",
+			"creative-brief.json",
+			"storyboard.md"
+		].map((n) => `project/${n}`),
+		...await listFiles(root, "assets", ["assets/voice"])
+	];
+	let fonts = state.fonts;
+	if (!fonts) {
+		const brandFile = await loadBrand(root).catch(() => void 0);
+		const tokens = resolveTokens$1(brandFile?.brand);
+		fonts = await lockFonts(fontRequests(tokens, brandFile?.brand.captions?.family ?? parseFontChain(tokens.font_body)[0], state.burn_in), { fontsDir: findFontsDir(process.env) });
+	}
+	const specsDir = findPlatformSpecsDir();
+	const contracts = specsDir ? await loadContracts(specsDir) : [];
+	const targetIds = new Set(outputs.flatMap((o) => o.target ? [o.target] : []));
+	const { "video-studio-engine": _e, ...tools } = state.tool_versions;
+	return buildLock({
+		schema_version: "1.0",
+		project_id: projectId,
+		quality: state.quality,
+		spec_sha256: state.spec_sha256,
+		...state.content_ir_sha256 ? { content_ir_sha256: state.content_ir_sha256 } : {},
+		engine: {
+			engine: ENGINE_VERSION,
+			assembly: String(2),
+			cover: String(2),
+			target_package: String(1),
+			zones: String(2),
+			layout: String(3)
+		},
+		tools,
+		voice: {
+			backend: state.voice.backend,
+			...state.voice.voice_id ? { voice_id: state.voice.voice_id } : {},
+			request_hash: state.voice.request_hash
+		},
+		fonts,
+		targets: contracts.filter((c) => targetIds.has(c.id)).map((c) => ({
+			id: c.id,
+			contract_version: c.contract_version,
+			verified: c.verified
+		})),
+		scenes: state.scenes.map((s) => ({
+			scene_id: s.scene_id,
+			renderer: s.renderer,
+			renderer_version: s.renderer_version,
+			cache_key: s.cache_key,
+			clip_sha256: s.clip_sha256
+		})),
+		assets: await lockAssets(root, inputs),
+		outputs: outputs.map((o) => ({
+			path: o.path,
+			sha256: o.sha256,
+			...o.target ? { target: o.target } : {}
+		}))
+	});
 }
 /** Spec for export: parsed without re-running semantic validation (the render already did). */
 async function loadSpecLoose(root) {
@@ -240888,6 +242049,284 @@ var RenderJobManager = class {
 		this.ledger = null;
 	}
 };
+//#endregion
+//#region src/verify.ts
+/**
+* verify: claim-coverage report for a planned project. Which ContentIR claims each scene cites,
+* which claims no scene covers, and which scenes make statements without grounding, reusing
+* validateVideoSpecSemantics. Read-only apart from qa/verify.{json,md}. Every finding carries an
+* actionable `fix` that the verify skill applies to the spec.
+*
+* A scene "covers" a claim when its claim_refs name the claim id or one of the claim's evidence
+* refs; it "cites" an evidence span when it names the span's ref or a claim backed by it. Key
+* claims are the claims a brief key message restates (word overlap), since the brief says what
+* the video must get across.
+*/
+/** Scene purposes that make no statement of fact and so need no claim_refs. */
+const UNGROUNDED_OK = /* @__PURE__ */ new Set(["cta", "end_card"]);
+async function readIfExists(path) {
+	try {
+		return await readFile(path, "utf8");
+	} catch (err) {
+		if (err.code === "ENOENT") return null;
+		throw err;
+	}
+}
+async function loadBrief(projectDir) {
+	for (const name of [
+		"creative-brief.yaml",
+		"creative-brief.yml",
+		"creative-brief.json"
+	]) {
+		const text = await readIfExists(join(projectDir, "project", name));
+		if (text === null) continue;
+		const parsed = parseYamlOrJson(CreativeBrief, text);
+		return parsed.ok ? parsed.data : void 0;
+	}
+}
+const contentWords = (text) => new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
+/** A key message restates a claim when it shares at least half of the claim's content words (and at least 2). */
+function restates(message, claim) {
+	const c = contentWords(claim);
+	if (c.size === 0) return false;
+	const m = contentWords(message);
+	return [...c].filter((w) => m.has(w)).length >= Math.min(c.size, Math.max(2, Math.ceil(c.size / 2)));
+}
+async function verifyProject(projectDir) {
+	const paths = projectPaths(projectDir);
+	const { spec: specPath, contentIr: irPath } = projectSpecPaths(paths.root);
+	const reportJson = join(paths.qa, "verify.json");
+	const reportMd = join(paths.qa, "verify.md");
+	const findings = [];
+	const result = {
+		status: "pass",
+		grounding: null,
+		content_ir: null,
+		counts: {
+			errors: 0,
+			warnings: 0,
+			claims: 0,
+			claims_covered: 0,
+			key_claims: 0,
+			evidence: 0,
+			evidence_cited: 0
+		},
+		claims: [],
+		evidence: [],
+		scenes: [],
+		uncovered_claims: [],
+		ungrounded_scenes: [],
+		findings,
+		report_json: reportJson,
+		report_md: reportMd
+	};
+	const specText = await readIfExists(specPath);
+	if (specText === null) throw new Error(`no spec at ${specPath}; plan the video first (the plan skill writes project/video-spec.json)`);
+	const parsed = parseYamlOrJson(VideoSpec, specText);
+	if (!parsed.ok) {
+		for (const e of parsed.errors) findings.push({
+			id: "invalid_spec",
+			severity: "error",
+			path: e.path,
+			message: e.message,
+			fix: "fix the spec so it matches the VideoSpec schema (run spec_validate for details), then verify again"
+		});
+		return finish(result);
+	}
+	const spec = parsed.data;
+	result.grounding = spec.grounding;
+	let ir;
+	const irText = await readIfExists(irPath);
+	if (irText !== null) {
+		const irParsed = parseYamlOrJson(ContentIR, irText);
+		if (irParsed.ok) {
+			ir = irParsed.data;
+			result.content_ir = "source/content-ir.json";
+		} else findings.push({
+			id: "invalid_content_ir",
+			severity: spec.grounding === "strict" ? "error" : "warning",
+			message: `source/content-ir.json is invalid (${irParsed.errors.slice(0, 2).map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}), so claim_refs cannot be checked`,
+			fix: "re-run ingest on the project's sources to regenerate source/content-ir.json"
+		});
+	} else findings.push({
+		id: "no_content_ir",
+		severity: spec.grounding === "strict" ? "error" : "warning",
+		message: `no source/content-ir.json, so claim_refs cannot be checked${spec.grounding === "strict" ? " (grounding is strict)" : ""}`,
+		fix: "run ingest on the sources this video is based on, then point each scene's claim_refs at the evidence refs it produces"
+	});
+	const semantic = validateVideoSpecSemantics(spec, ir);
+	for (const e of semantic.errors) findings.push({
+		id: "semantic",
+		severity: "error",
+		path: e.path,
+		...sceneAt(spec, e.path),
+		message: e.message,
+		fix: e.fix
+	});
+	for (const w of semantic.warnings) findings.push({
+		id: "semantic",
+		severity: "warning",
+		path: w.path,
+		...sceneAt(spec, w.path),
+		message: w.message,
+		fix: w.fix
+	});
+	const semanticRefPaths = new Set([...semantic.errors, ...semantic.warnings].map((i) => i.path));
+	const claimIds = new Set(ir?.claims.map((c) => c.id) ?? []);
+	const evidenceRefs = new Set(ir?.evidence.map((e) => e.ref) ?? []);
+	const claimsByEvidence = /* @__PURE__ */ new Map();
+	for (const c of ir?.claims ?? []) for (const r of c.evidence_refs) claimsByEvidence.set(r, [...claimsByEvidence.get(r) ?? [], c.id]);
+	const evidenceOfClaim = new Map(ir?.claims.map((c) => [c.id, c.evidence_refs]) ?? []);
+	const claimScenes = /* @__PURE__ */ new Map();
+	const evidenceScenes = /* @__PURE__ */ new Map();
+	const push = (m, k, sid) => {
+		const list = m.get(k) ?? [];
+		if (!list.includes(sid)) list.push(sid);
+		m.set(k, list);
+	};
+	spec.scenes.forEach((s, i) => {
+		const covered = /* @__PURE__ */ new Set();
+		for (const ref of s.claim_refs) {
+			if (claimIds.has(ref)) {
+				covered.add(ref);
+				for (const e of evidenceOfClaim.get(ref) ?? []) push(evidenceScenes, e, s.id);
+			}
+			if (evidenceRefs.has(ref)) {
+				push(evidenceScenes, ref, s.id);
+				for (const c of claimsByEvidence.get(ref) ?? []) covered.add(c);
+			}
+		}
+		for (const c of covered) push(claimScenes, c, s.id);
+		const hasText = !!(s.voiceover.trim() || s.on_screen_text?.trim());
+		const ungrounded = s.claim_refs.length === 0 && hasText && !UNGROUNDED_OK.has(s.purpose);
+		result.scenes.push({
+			scene_id: s.id,
+			purpose: s.purpose,
+			claim_refs: s.claim_refs,
+			claims: [...covered].sort(),
+			unknown_refs: ir ? s.claim_refs.filter((r) => !claimIds.has(r) && !evidenceRefs.has(r)) : [],
+			ungrounded
+		});
+		if (!ungrounded) return;
+		result.ungrounded_scenes.push(s.id);
+		const path = `scenes.${i}.claim_refs`;
+		if (spec.grounding === "off" || semanticRefPaths.has(path)) return;
+		findings.push({
+			id: "ungrounded_scene",
+			severity: spec.grounding === "strict" && s.purpose !== "hook" ? "error" : "warning",
+			path,
+			scene_id: s.id,
+			message: `scene ${s.id} (${s.purpose}) makes statements but cites no evidence (grounding: ${spec.grounding})`,
+			fix: ir?.evidence.length ? `add the evidence ref(s) that support "${snippet(s.voiceover || s.on_screen_text || "")}" to claim_refs (e.g. ${nearestEvidence(s.voiceover || s.on_screen_text || "", ir).map((r) => `"${r}"`).join(", ")}), or reword the scene to what the sources say` : "ingest a source that supports this scene and add its evidence ref to claim_refs, or reword the scene"
+		});
+	});
+	const keyMessages = (await loadBrief(paths.root))?.key_messages ?? [];
+	for (const c of ir?.claims ?? []) {
+		const key = keyMessages.some((m) => restates(m, c.text));
+		const scenes = claimScenes.get(c.id) ?? [];
+		result.claims.push({
+			id: c.id,
+			text: c.text,
+			kind: c.kind,
+			evidence_refs: c.evidence_refs,
+			key,
+			scenes
+		});
+		if (scenes.length) continue;
+		result.uncovered_claims.push(c.id);
+		if (key) findings.push({
+			id: "uncovered_key_claim",
+			severity: "warning",
+			claim_id: c.id,
+			message: `key claim ${c.id} ("${snippet(c.text)}") is restated in the brief's key messages but no scene cites it`,
+			fix: `add "${c.id}" (or one of its evidence refs ${c.evidence_refs.map((r) => `"${r}"`).join(", ") || "(none)"}) to the claim_refs of the scene that says it, or add a scene for it, or drop the key message from the brief`
+		});
+	}
+	for (const e of ir?.evidence ?? []) result.evidence.push({
+		ref: e.ref,
+		text: e.text,
+		scenes: evidenceScenes.get(e.ref) ?? []
+	});
+	return finish(result);
+}
+/** Scene id for a `scenes.<i>...` path. */
+function sceneAt(spec, path) {
+	const m = /^scenes\.(\d+)/.exec(path);
+	const s = m ? spec.scenes[Number(m[1])] : void 0;
+	return s ? { scene_id: s.id } : {};
+}
+function snippet(text, max = 60) {
+	const t = text.replace(/\s+/g, " ").trim();
+	return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+/** Up to 2 evidence refs whose text shares the most content words with `text`. */
+function nearestEvidence(text, ir) {
+	const words = contentWords(text);
+	return ir.evidence.map((e) => ({
+		ref: e.ref,
+		score: [...contentWords(e.text)].filter((w) => words.has(w)).length
+	})).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 2).map((x) => x.ref);
+}
+async function finish(r) {
+	const errors = r.findings.filter((f) => f.severity === "error").length;
+	const warnings = r.findings.length - errors;
+	r.status = errors ? "fail" : warnings ? "warn" : "pass";
+	r.counts = {
+		errors,
+		warnings,
+		claims: r.claims.length,
+		claims_covered: r.claims.filter((c) => c.scenes.length).length,
+		key_claims: r.claims.filter((c) => c.key).length,
+		evidence: r.evidence.length,
+		evidence_cited: r.evidence.filter((e) => e.scenes.length).length
+	};
+	const { report_json: _j, report_md: _m, ...core } = r;
+	await writeJsonAtomic(r.report_json, core);
+	await writeFileAtomic(r.report_md, formatMarkdown(r));
+	return r;
+}
+function formatMarkdown(r) {
+	const lines = [
+		`# Claim coverage: ${r.status}`,
+		"",
+		`Grounding: ${r.grounding ?? "unknown"}. ContentIR: ${r.content_ir ?? "none"}. ${r.counts.errors} error(s), ${r.counts.warnings} warning(s).`,
+		`Claims covered: ${r.counts.claims_covered}/${r.counts.claims} (key: ${r.counts.key_claims}). Evidence spans cited: ${r.counts.evidence_cited}/${r.counts.evidence}.`,
+		""
+	];
+	if (r.findings.length) {
+		lines.push("## Findings", "");
+		for (const f of r.findings) lines.push(`- **${f.severity}** \`${f.id}\`${f.scene_id ? ` ${f.scene_id}` : ""}${f.claim_id ? ` ${f.claim_id}` : ""}: ${f.message}`, `  - fix: ${f.fix}`);
+		lines.push("");
+	}
+	if (r.scenes.length) {
+		lines.push("## Scenes", "", "| Scene | Purpose | claim_refs | Claims | Note |", "|---|---|---|---|---|");
+		for (const s of r.scenes) {
+			const note = [s.ungrounded ? "ungrounded" : "", s.unknown_refs.length ? `unknown: ${s.unknown_refs.join(", ")}` : ""].filter(Boolean).join("; ");
+			lines.push(`| ${s.scene_id} | ${s.purpose} | ${s.claim_refs.map((x) => `\`${x}\``).join(", ") || "none"} | ${s.claims.join(", ") || "-"} | ${note || "-"} |`);
+		}
+		lines.push("");
+	}
+	if (r.claims.length) {
+		lines.push("## Claims", "", "| Claim | Key | Scenes | Text |", "|---|---|---|---|");
+		for (const c of r.claims) lines.push(`| ${c.id} | ${c.key ? "yes" : ""} | ${c.scenes.join(", ") || "**uncovered**"} | ${snippet(c.text, 80).replace(/\|/g, "\\|")} |`);
+		lines.push("");
+	}
+	if (r.evidence.length) {
+		lines.push("## Evidence", "", "| Ref | Scenes | Text |", "|---|---|---|");
+		for (const e of r.evidence) lines.push(`| \`${e.ref}\` | ${e.scenes.join(", ") || "-"} | ${snippet(e.text, 80).replace(/\|/g, "\\|")} |`);
+		lines.push("");
+	}
+	return lines.join("\n");
+}
+/** One-screen summary for the tool result. */
+function formatVerify(r) {
+	return [
+		`verify ${r.status}: ${r.counts.errors} error(s), ${r.counts.warnings} warning(s); claims covered ${r.counts.claims_covered}/${r.counts.claims}, evidence cited ${r.counts.evidence_cited}/${r.counts.evidence} (grounding ${r.grounding ?? "unknown"}); report ${r.report_md}`,
+		...r.uncovered_claims.length ? [`uncovered claims: ${r.uncovered_claims.join(", ")}`] : [],
+		...r.ungrounded_scenes.length ? [`scenes without claim_refs: ${r.ungrounded_scenes.join(", ")}`] : [],
+		...r.findings.map((f) => `- ${f.severity === "error" ? "error" : "warning"} ${f.id}${f.scene_id ? ` ${f.scene_id}` : ""}${f.claim_id ? ` ${f.claim_id}` : ""}: ${f.message} (fix: ${f.fix})`)
+	].join("\n");
+}
 //#endregion
 //#region src/server.ts
 const SERVER_NAME = "engine";
@@ -241260,6 +242699,63 @@ function createServer(options = {}) {
 	}, safe(async ({ project_dir, quality }) => {
 		const r = await exportProject(resolveInputPath(project_dir, cwd()), quality ? { quality } : {});
 		return jsonResult(`exported the ${r.quality} render to ${r.dist.dir}${r.qa_status ? ` (QA ${r.qa_status})` : ""}`, r);
+	}));
+	server.registerTool("verify", {
+		title: "Verify claim coverage",
+		description: "Check that <project_dir>/project/video-spec.json is grounded in its ContentIR: which source claims each scene cites, which claims no scene covers, and which scenes state things without a claim_ref (an error under strict grounding). Reuses the spec's semantic validation. Writes qa/verify.{json,md}. Returns {status: pass|warn|fail, ...}; fix by adding claim_refs or rewording the voiceover/on-screen text to what the sources say.",
+		inputSchema: { project_dir: string().min(1).describe("Project folder with project/video-spec.json and source/content-ir.json") },
+		annotations: {
+			readOnlyHint: true,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async ({ project_dir }) => {
+		const r = await verifyProject(resolveInputPath(project_dir, cwd()));
+		return jsonResult(formatVerify(r), r);
+	}));
+	server.registerTool("test", {
+		title: "Golden-frame test",
+		description: "Regression-test <project_dir>'s rendered reel against its golden frames: samples frames of the render of `quality` (default: latest) and compares each with the stored golden frame (SSIM). With update: true, (re)records the golden frames from the current render instead. Writes qa/test.{json,md}. Returns {status: pass|fail|updated|missing, ...}; status missing means no golden frames yet (run with update: true after checking the render by eye).",
+		inputSchema: {
+			project_dir: string().min(1).describe("Rendered project folder"),
+			quality: QUALITY.optional().describe("Which render to test (default: the latest)"),
+			update: boolean().optional().describe("Record the current render as the new golden frames")
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async ({ project_dir, quality, update }) => {
+		const r = await testProject(resolveInputPath(project_dir, cwd()), {
+			...quality ? { quality } : {},
+			...update ? { update } : {}
+		});
+		return jsonResult(formatGolden(r), r);
+	}));
+	server.registerTool("diff", {
+		title: "Diff two renders",
+		description: "Compare two rendered projects (project_a → project_b; pass the same folder with quality_a/quality_b to compare preview and final): spec changes, dist/video.lock changes classified as creative | renderer | spec | asset | metadata, and a sampled frame diff (SSIM). Read-only apart from project_b's qa/diff.{json,md}. Returns {identical, ...}.",
+		inputSchema: {
+			project_a: string().min(1).describe("The earlier / reference render's project folder"),
+			project_b: string().min(1).describe("The later render's project folder (may equal project_a)"),
+			quality_a: QUALITY.optional(),
+			quality_b: QUALITY.optional()
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async ({ project_a, project_b, quality_a, quality_b }) => {
+		const r = await diffProjects(resolveInputPath(project_a, cwd()), resolveInputPath(project_b, cwd()), {
+			...quality_a ? { quality_a } : {},
+			...quality_b ? { quality_b } : {}
+		});
+		return jsonResult(formatDiff(r), r);
 	}));
 	return server;
 }

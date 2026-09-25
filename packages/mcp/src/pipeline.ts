@@ -23,6 +23,7 @@ import {
   createFfmpegRenderer,
   findFontsDir,
   createHyperframesRenderer,
+  LAYOUT_VERSION,
   parseFontChain,
   rendererFamily,
   renderScenes,
@@ -45,12 +46,13 @@ import {
   resolveMaster,
   resolveTargets,
 } from "@video-studio/schema";
-import { findPlatformSpecsDir, layoutZones, loadContracts } from "@video-studio/platforms";
+import { ZONES_VERSION, findPlatformSpecsDir, layoutZones, loadContracts } from "@video-studio/platforms";
 import { type BackendChoice, type BackendSet, type SynthesizeSpecResult, defaultBackends, selectBackend, synthesizeSpec } from "@video-studio/voice";
 import { COVER_VERSION, renderCover } from "./cover.js";
+import { type FontRequest, type LockFont, LOCK_FILE, buildLock, listFiles, lockAssets, lockFonts, serializeLock } from "./lock.js";
 import { hyperframesOptions } from "./hyperframes.js";
 import { type LintResult, lintProject } from "./lint.js";
-import { type TargetDist, packageTargets } from "./targets.js";
+import { TARGET_PACKAGE_VERSION, type TargetDist, packageTargets } from "./targets.js";
 import { type ValidationIssue, projectSpecPaths, validateSpecFile } from "./spec-validate.js";
 
 type Env = Record<string, string | undefined>;
@@ -140,6 +142,8 @@ export interface DistFiles {
   cover_square_preview?: string;
   social_copy: string;
   render_manifest: string;
+  /** dist/video.lock: versions and hashes of everything the render depended on. */
+  lock: string;
   provenance: string;
   /** Copy of project/video-spec.json as rendered. */
   video_spec: string;
@@ -230,6 +234,10 @@ interface RenderState {
   timing_adjustments: TimingAdjustment[];
   warnings: string[];
   tool_versions: Record<string, string>;
+  /** Brand file the render read, project-relative (`external/<name>` when outside the project). */
+  brand_path?: string;
+  /** Font files the render resolved (for video.lock). */
+  fonts?: LockFont[];
 }
 
 const toPosix = (p: string) => p.split(sep).join("/");
@@ -249,7 +257,7 @@ function renderDir(projectDir: string, quality: Quality): string {
   return join(projectPaths(projectDir).renders, quality);
 }
 
-async function loadBrand(projectDir: string, brandPath?: string): Promise<Brand | undefined> {
+async function loadBrand(projectDir: string, brandPath?: string): Promise<{ brand: Brand; path: string } | undefined> {
   const candidates = brandPath ? [brandPath] : [join(projectDir, "brand.yaml"), join(projectDir, "project", "brand.yaml")];
   for (const p of candidates) {
     if (!(await exists(p))) {
@@ -258,9 +266,27 @@ async function loadBrand(projectDir: string, brandPath?: string): Promise<Brand 
     }
     const parsed = parseYamlOrJson(Brand, await readFile(p, "utf8"));
     if (!parsed.ok) throw new Error(`invalid brand file ${p}: ${parsed.errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`);
-    return parsed.data;
+    return { brand: parsed.data, path: p };
   }
   return undefined;
+}
+
+/** Font chains and weights the renderers, captions and cover ask for (see lockFonts). */
+function fontRequests(tokens: VisualTokens, captionFamily: string | undefined, burnIn: boolean): FontRequest[] {
+  const reqs: FontRequest[] = [
+    { chain: tokens.font_heading, weight: 700 },
+    { chain: tokens.font_body, weight: 400 },
+    { chain: tokens.font_mono, weight: 400 },
+  ];
+  // Burned-in captions use both weights (emphasis toggles bold).
+  if (burnIn && captionFamily) reqs.push({ chain: captionFamily, weight: 400 }, { chain: captionFamily, weight: 700 });
+  return reqs;
+}
+
+/** Brand path as recorded in the render state: project-relative, or `external/<name>`. */
+function brandRel(root: string, p: string): string {
+  const r = rel(root, p);
+  return r.startsWith("../") || r.startsWith("/") ? `external/${basename(p)}` : r;
 }
 
 async function loadBrief(projectDir: string): Promise<CreativeBrief | undefined> {
@@ -334,7 +360,8 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   progress({ stage: "validate", message: "validating project/video-spec.json" });
   const { spec, warnings: specWarnings, irPath } = await loadValidSpec(root);
   for (const w of specWarnings) warnings.push(`spec: ${w.path || "(root)"}: ${w.message}`);
-  const brand = await loadBrand(root, o.brandPath);
+  const brandFile = await loadBrand(root, o.brandPath);
+  const brand = brandFile?.brand;
   const tokens: VisualTokens = resolveTokens(brand);
   const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
   const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
@@ -591,6 +618,8 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   for (const e of ordered) if (e.renderer && e.renderer_version) tool_versions[e.renderer] = e.renderer_version;
   tool_versions[`voice:${voice.backend}`] = voice.backend === "silent" ? "n/a" : "local";
 
+  const lockedFonts = await lockFonts(fontRequests(tokens, assOpts.font, burn), { fontsDir, env: env as NodeJS.ProcessEnv });
+
   const specSha = sha256Hex(canonicalJson(spec));
   const irSha = (await exists(irPath)) ? await hashFile(irPath) : undefined;
   const state: RenderState = {
@@ -645,6 +674,8 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     timing_adjustments,
     warnings,
     tool_versions,
+    ...(brandFile ? { brand_path: brandRel(root, brandFile.path) } : {}),
+    fonts: lockedFonts,
   };
 
   // f'. technical QA on the reel (reused when the reel is unchanged)
@@ -838,6 +869,7 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
     thumbnail: d("thumbnail.png"),
     social_copy: d("social-copy.md"),
     render_manifest: d("render-manifest.json"),
+    lock: d(LOCK_FILE),
     provenance: d("provenance.json"),
     video_spec: d("video-spec.json"),
     targets: [],
@@ -1067,10 +1099,66 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
     ...(state.warnings.length ? { warnings: state.warnings } : {}),
     tool_versions: state.tool_versions,
   };
+  // video.lock (before the manifest, which lists it)
+  const lock = await lockFromState(root, state, projectId, outputs);
+  await writeFile(out.lock, serializeLock(lock));
+  manifest.outputs.push({ kind: "lock", path: rel(root, out.lock), sha256: await sha(out.lock) });
+
   const parsed = RenderManifest.safeParse(manifest);
   if (!parsed.success) throw new Error(`internal: render manifest failed schema validation: ${parsed.error.message}`);
   await writeJsonAtomic(out.render_manifest, parsed.data);
   return out;
+}
+
+/**
+ * The lock for an exported render. Assets are the project inputs the render and export read:
+ * the ContentIR and source provenance, the brand file, the brief and storyboard, and files under
+ * assets/ (except assets/voice/, which the render writes; the voice request hash covers it).
+ */
+async function lockFromState(root: string, state: RenderState, projectId: string, outputs: RenderManifest["outputs"]) {
+  const paths = projectPaths(root);
+  const brand = state.brand_path && !state.brand_path.startsWith("external/") ? [state.brand_path] : state.brand_path ? [] : ["brand.yaml", "project/brand.yaml"];
+  const inputs = [
+    rel(root, projectSpecPaths(root).contentIr),
+    rel(root, join(paths.source, "provenance.json")),
+    ...brand,
+    ...["creative-brief.yaml", "creative-brief.yml", "creative-brief.json", "storyboard.md"].map((n) => `project/${n}`),
+    ...(await listFiles(root, "assets", ["assets/voice"])),
+  ];
+  // Fonts: recorded at render time; older render states are resolved now.
+  let fonts = state.fonts;
+  if (!fonts) {
+    const brandFile = await loadBrand(root).catch(() => undefined);
+    const tokens = resolveTokens(brandFile?.brand);
+    const captionFamily = brandFile?.brand.captions?.family ?? parseFontChain(tokens.font_body)[0];
+    fonts = await lockFonts(fontRequests(tokens, captionFamily, state.burn_in), { fontsDir: findFontsDir(process.env) });
+  }
+  const specsDir = findPlatformSpecsDir();
+  const contracts = specsDir ? await loadContracts(specsDir) : [];
+  const targetIds = new Set(outputs.flatMap((o) => (o.target ? [o.target] : [])));
+  const { "video-studio-engine": _e, ...tools } = state.tool_versions;
+  return buildLock({
+    schema_version: "1.0",
+    project_id: projectId,
+    quality: state.quality,
+    spec_sha256: state.spec_sha256,
+    ...(state.content_ir_sha256 ? { content_ir_sha256: state.content_ir_sha256 } : {}),
+    engine: {
+      engine: ENGINE_VERSION,
+      assembly: String(ASSEMBLY_VERSION),
+      cover: String(COVER_VERSION),
+      target_package: String(TARGET_PACKAGE_VERSION),
+      zones: String(ZONES_VERSION),
+      layout: String(LAYOUT_VERSION),
+    },
+    tools,
+    voice: { backend: state.voice.backend, ...(state.voice.voice_id ? { voice_id: state.voice.voice_id } : {}), request_hash: state.voice.request_hash },
+    fonts,
+    targets: contracts.filter((c) => targetIds.has(c.id)).map((c) => ({ id: c.id, contract_version: c.contract_version, verified: c.verified })),
+    scenes: state.scenes.map((s) => ({ scene_id: s.scene_id, renderer: s.renderer, renderer_version: s.renderer_version, cache_key: s.cache_key, clip_sha256: s.clip_sha256 })),
+    assets: await lockAssets(root, inputs),
+    outputs: outputs.map((o) => ({ path: o.path, sha256: o.sha256, ...(o.target ? { target: o.target } : {}) })),
+  });
 }
 
 /** Spec for export: parsed without re-running semantic validation (the render already did). */

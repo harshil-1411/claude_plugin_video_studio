@@ -17,12 +17,12 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 | 1 Ingestion | Done: text/markdown/URL/PDF/DOCX/PPTX/repo → ContentIR, secret scanning, 10 golden fixtures | golden snapshots |
 | 2 Planning | Done: 5 templates, `plan`/`create` skills, `brief_validate`, strict-grounding `spec_validate`, `storyboard_render` | `examples/readme-plan` end to end |
 | 3 Local render | Done: voice (`say`/silent/ElevenLabs), FFmpeg + HyperFrames renderers, captions, assembly, QA, `dist/` export, job tools | User's machine: `/video-studio:create "Explain vector DBs in 30s"` → `vector-dbs-explainer/dist/reel.mp4` |
-| 4 Platform compiler | **Steps 1–2 done; step 3 item 1 (per-platform dist) done.** `video.lock` next | tests, smoke, 3-target render check |
+| 4 Platform compiler | **Steps 1–3 done except CI (deferred).** Exit run next (`docs/PHASE4_EXIT.md`) | tests, smoke, 3-target bundle check, example goldens |
 
-- **Tests:** 460 pass, 2 skipped. The skipped ones are env-gated (`VS_TEST_SAY=1`, `VS_TEST_RENDER=1`) and must run outside the sandbox.
+- **Tests:** 494 pass, 3 skipped. The skipped ones are env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1` must run outside the sandbox; `VS_TEST_GOLDEN=1` runs anywhere.
 - **Smoke:** `node scripts/smoke-mcp.mjs` passes: 15 tools, ingest, templates, and a tiny render.
-- **MCP tools (15):** doctor, project_init, ingest, schema_get, template_list, template_get, spec_scaffold, brief_validate, spec_validate, storyboard_render, render_submit, job_status, qa_run, export, **lint**.
-- **Skills:** create, plan, ingest, validate, render, qa, export, doctor, **lint**.
+- **MCP tools (18):** doctor, project_init, ingest, schema_get, template_list, template_get, spec_scaffold, brief_validate, spec_validate, storyboard_render, render_submit, job_status, qa_run, export, lint, **verify, test, diff**.
+- **Skills:** create, plan, ingest, validate, render, qa, export, doctor, lint, **verify, test, diff**.
 - **Agents:** source-researcher, creative-director.
 
 ## What Phase 4 has built so far
@@ -88,23 +88,58 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 - **Manifest:** `FinalOutput` gained optional `target` and `transcoded`; `OutputKind` gained `post`, `qa`, `spec`, `lock`.
 - **Skills:** render/export/create now refine post copy by editing `publish.<target>` in the spec and re-exporting (durable), not by editing `dist/social-copy.md`.
 
-## Next: Phase 4 step 3, remaining items (all local, no keys)
+## Step 3 items 2–4: lock, verify, test, diff (done)
 
-Suggested as one agent or the coordinator alone, because it all runs through `packages/mcp/src/pipeline.ts` export:
-1. ~~**Per-platform dist (M7):**~~ done (see above). Original notes: `dist/<target>/{video.mp4, cover.jpg, captions.srt, captions.vtt, post.json, qa.json}`, plus top-level `video-spec.json`, `video.lock`, `provenance.json` and `storyboard.md`.
-   - `post.json` comes from `publish.<target>` and replaces `social-copy.md`; keep `social-copy.md` for a transition period.
-   - `qa.json` is the lint findings filtered to that target.
-   - Re-mux or copy by default; transcode only where a contract envelope differs (fps, size, bitrate).
-   - The manifest lists outputs per target (it may need a `target` field on `FinalOutput`: a schema change the coordinator makes first).
-2. **`video.lock`:** renderer, ffmpeg, voice and font versions (the sha256 values in `fonts/README.md`), each target contract's `contract_version` and `verified` date, and asset hashes. Built from `render-manifest.json` and the scene sidecars. A diff classifies changes as creative, renderer, spec, asset or metadata.
-3. **Tools and skills:**
-   - `verify`: a claim-coverage report reusing `validateVideoSpecSemantics`.
-   - `test`: golden frames per example, sampled and perceptually diffed.
-   - `diff`: a spec diff plus a frame diff between two renders.
-4. **CI:** a GitHub Action that renders the examples with the silent voice and FFmpeg, runs lint and golden frames, and uploads artifacts. No paid keys.
-5. **Phase 4 exit (the user runs this, outside the sandbox):** `claude --plugin-dir .` → `/video-studio:create README.md` with targets instagram, tiktok and youtube-shorts should produce three packages. A caption deliberately placed under the TikTok mask must be caught by lint, the fix loop must clear it, and the CI golden test must pass.
+- **`dist/video.lock`** (`packages/mcp/src/lock.ts`, schema `VideoLock` in `packages/schema/src/video-lock.ts`, `schemas/video-lock.schema.json`). It is deterministic (an unchanged re-export gives a byte-identical lock) and records:
+  - `engine` versions and `tools`
+  - the voice backend and request hash
+  - `fonts` actually used: repo-relative paths for bundled fonts, `host/<basename>` for host fonts
+  - each target's `contract_version`/`verified`
+  - scene cache keys and clip hashes
+  - `assets` (the ContentIR, provenance, brand, brief, storyboard, `assets/` minus `assets/voice/`)
+  - `outputs` (the `dist/` files, excluding the lock and the manifest)
 
-Then Phase 5 (reel grammar, archetypes, style packs, variants; see `docs/PLAN.md`).
+  `RenderState` gained `brand_path` and `fonts`.
+- **`diffLocks` classes:**
+  - creative: spec hash, voice request, scene list
+  - renderer: engine, tools, fonts, scene renderer
+  - spec: target contracts
+  - asset: the ContentIR and assets
+  - metadata: quality, project id, and output-only changes
+
+  Changed scene clips and outputs take the class of their cause; a changed clip with no cause is reported as renderer "(non-deterministic render?)". A cache-hit re-render changes only `provenance.json` (metadata), because provenance has `rendered_at`.
+- **`verify`** (`verify.ts`, skill `verify`) writes `qa/verify.{json,md}` and reports:
+  - claim coverage (claim ids or evidence refs in `claim_refs`)
+  - `ungrounded_scene`: an error under strict grounding, a warning under loose; cta/end_card scenes are exempt
+  - `uncovered_key_claim`: a warning when a brief `key_messages` entry restates the claim
+  - the semantic errors and warnings
+
+  An uncited hook is only a warning, even under strict.
+- **`test`** (`golden.ts`, skill `test`): golden frames in `<project>/golden/<quality>/NN-<label>.png` plus `golden.json`, 160 px wide, SSIM ≥ 0.97 (ffmpeg `ssim` filter, `packages/media/src/frames.ts`).
+  - Frames are sampled at the first frame, each scene's midpoint and the last frame.
+  - Statuses are missing, updated, pass and fail. Failing frames go to `qa/test-frames/`.
+- **`diff`** (`diff.ts`, skill `diff`) compares:
+  - the specs, with id-matched JSON paths
+  - the locks, skipped with a reason when either is missing or the qualities differ
+  - frames at matching relative times, skipped when the aspect ratios differ
+
+  It writes b's `qa/diff.{json,md}` and `qa/diff-frames/`. Its work files go under b's `qa/`, not the OS tmp dir, because the MCP server may not inherit `TMPDIR`.
+- **Example golden test:** `tests/golden-frames/examples.test.ts` renders a tiny `examples/text-to-motion-graphic` (6 × 0.5 s, 180×320, 15 fps, silent voice, ffmpeg renderer).
+  - It is gated by `VS_TEST_GOLDEN=1`, and `VS_UPDATE_GOLDEN=1` records new goldens.
+  - The goldens are committed in `tests/golden-frames/text-to-motion-graphic/preview/`; they were recorded in the sandbox on 2026-09-25 and checked by eye.
+- **Verified through the bundle** on a 3-target project: export (writes the lock), verify, test (missing → updated → pass) and diff (identical).
+
+## Next
+
+1. **Phase 4 exit run** (the user, outside the sandbox): follow `docs/PHASE4_EXIT.md`.
+2. **CI (step 3 item 4, deferred by the user):** a GitHub Action that renders the examples with the silent voice and FFmpeg, runs lint and `VS_TEST_GOLDEN=1` golden frames, and uploads artifacts. No paid keys. The repo has no remote yet.
+3. Then Phase 5 (reel grammar, archetypes, style packs, variants; see `docs/PLAN.md`).
+
+**Open decisions from step 3** (defaults chosen; revisit if needed):
+- "Key claims" means claims restated by the brief's `key_messages`.
+- A ContentIR change appears twice in a lock diff (`content_ir_sha256` and `assets.source/content-ir.json`).
+- The lock's `spec_sha256` is the rendered spec, while its targets and outputs follow the spec at export time.
+- `lockFonts` re-hashes host fonts on every export; cache it if it gets slow.
 
 ## Environment facts that shape everything
 
