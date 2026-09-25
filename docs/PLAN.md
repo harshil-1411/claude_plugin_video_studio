@@ -47,7 +47,7 @@ The user added `deep-research-report_v2.md` and asked three things: what gaps th
 - **Repo demo safety.** v2's "launch the app" contradicts v1's "never execute repo code". Resolved: the user starts the app.
 - **Missing layers:**
   - **Fonts:** determinism needs shipped OFL fonts (Inter, Noto Sans, JetBrains Mono). Today, "Inter" silently falls back to other fonts.
-  - **Audio:** no licensing story for music or SFX, and no ducking.
+  - **Audio:** no licensing story for music or SFX, and no ducking. Addressed by the audio-first track in Phase 5 (music bed, `voice: none`) and Phase 6 (native sound, beat sync).
   - **Creative quality:** no evaluation method beyond technical QA.
   - **Platforms:** Windows support is not addressed.
   - **Unverified facts:** v2's platform numbers are unverified by us (Kling, HeyGen pricing). Treat them as data with a source URL and verified date, never as hard-coded prose.
@@ -99,7 +99,18 @@ Phases 0–3 are done. The Phase 3 exit (interactive `/video-studio:create`) is 
 - **Archetypes** (templates become grammar): carousel-story, animated-explainer, product-demo, product-UI, faceless-listicle, case-study, before-after, talking-head (needs footage; lands in Phase 6).
 - **Style packs** (`styles/`): minimal, editorial, technical, energetic. Motion-personality tokens map to easing and durations in both renderers.
 - **`variants` tool and skill:** N hooks × M covers from one spec, with an experiment manifest (hypothesis, variant ids). `adapt` handles target, aspect and duration changes.
-- **Exit:** one README compiles into 3 archetypes × 2 styles, and `variants --hooks 3 --covers 2` produces 6 packages.
+- **Audio-first, no-speech reels (local):** music-only and text-over-music formats, with no voiceover.
+  - **Audio bed:** a `spec.audio.music {file, volume_db, fade_in_ms, fade_out_ms, loop}` track mixed under the voice.
+    - It ducks under speech (sidechain compress) and is loudness-normalised with the rest.
+    - Allowed sources: a file the user supplies, or a small bundled set of CC0 / royalty-free tracks with licence and source URL recorded like `fonts/README.md`. No downloads without asking.
+  - **`voice: none` mode:** scene timing comes from `duration_sec` and on-screen text reading time instead of speech.
+    - Captions are off or on-screen text only.
+    - QA stops reporting intended silence, lint checks on-screen text reading speed instead of words per second of speech, and the brief/plan skills write for text-over-music.
+  - **Rights:** each audio file's licence is recorded in the manifest, `video.lock` and provenance. "Trending sounds" live inside each platform's app and cannot be added by the plugin; `post.json` notes that the user picks one when posting.
+  - **Archetype:** `text-over-music` (kinetic text, stat and quote cards, product UI stills on a music bed), including a music-only product-demo variant.
+- **Exit:**
+  - One README compiles into 3 archetypes × 2 styles, and `variants --hooks 3 --covers 2` produces 6 packages.
+  - The same README also compiles as a `voice: none` text-over-music reel with a bundled track. Lint and QA pass without silence warnings, and the track's licence is in the lock and provenance.
 
 ### Phase 6: Real footage and repo demo capture (local)
 - **Demo capture** (the user starts the app and gives a URL):
@@ -114,10 +125,21 @@ Phases 0–3 are done. The Phase 3 exit (interactive `/video-studio:create`) is 
   - Local ASR via whisper.cpp, which is already installed. Its model download (~150 MB base.en) is **opt-in, asked first**. Fallback: user-supplied SRT.
   - Talking-head archetype.
   - Long-to-short candidate extraction.
+- **Audio-first footage reels** (from the user's own clips; builds on the Phase 5 music bed and `voice: none`):
+  - Keep each clip's native sound (ambient, ASMR/Foley), with per-scene `audio: native | music | mute | mix` and crossfades between clips.
+  - Optional user-supplied SFX files placed on scene beats.
+  - Beat sync: detect beats and onsets in the music track locally (ffmpeg audio filters, no model download) and snap cuts to them.
+  - Archetypes:
+    - `aesthetic-broll`: mood clips on a music bed
+    - `silent-vlog`: daily-life footage with native sound and minimal text
+    - `oddly-satisfying`: close-up loops, crisp native sound
+    - `ambient-slice-of-life`: long takes with natural sound
+  - Lint and QA: text-only captions, no speech checks, loudness targets for music-led audio.
 - **Clean-room `analyze`:** reference video → format grammar (hook type, shot lengths from ffmpeg scene detection, caption density and position). Structure only; it never copies words or assets.
 - **Exit:**
   - A running local app URL becomes a product-demo reel.
   - A founder-interview mp4 becomes 3 candidate shorts.
+  - A folder of the user's clips plus a music file becomes a beat-synced `aesthetic-broll` reel. A second reel keeps native sound only (`silent-vlog`).
 
 ### Phase 7: Providers, policy and provenance (keys required)
 - **Provider SDK:** adapter interface + capability matrix + mock conformance suite.
