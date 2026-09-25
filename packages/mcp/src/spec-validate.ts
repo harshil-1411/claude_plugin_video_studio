@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { checkSpecTargets, findPlatformSpecsDir, loadContracts } from "@video-studio/platforms";
 import { ContentIR, VideoSpec, parseYamlOrJson, validateVideoSpecSemantics } from "@video-studio/schema";
 
 export interface ValidationIssue {
@@ -8,7 +9,7 @@ export interface ValidationIssue {
   /** Concrete instruction for resolving the issue. */
   fix: string;
   /** Which stage found it. */
-  stage: "syntax" | "schema" | "semantic" | "content-ir";
+  stage: "syntax" | "schema" | "semantic" | "content-ir" | "platform";
 }
 
 export interface SpecValidationResult {
@@ -37,7 +38,11 @@ export function projectSpecPaths(projectDir: string): { spec: string; contentIr:
  * Validate a VideoSpec file: schema first, then semantic rules. If a ContentIR path
  * is given and exists, evidence refs and asset ids are cross-checked against it.
  */
-export async function validateSpecFile(specPath: string, contentIrPath: string | null): Promise<SpecValidationResult> {
+export async function validateSpecFile(
+  specPath: string,
+  contentIrPath: string | null,
+  platformSpecsDir: string | null = findPlatformSpecsDir(),
+): Promise<SpecValidationResult> {
   const result: SpecValidationResult = {
     ok: false,
     spec_path: specPath,
@@ -96,6 +101,14 @@ export async function validateSpecFile(specPath: string, contentIrPath: string |
   const semantic = validateVideoSpecSemantics(parsed.data, ir);
   result.errors.push(...semantic.errors.map((e) => ({ ...e, stage: "semantic" as const })));
   result.warnings.push(...semantic.warnings.map((e) => ({ ...e, stage: "semantic" as const })));
+
+  // Targets are checked once the registry has contracts; an empty registry means none are published yet.
+  const contracts = platformSpecsDir ? await loadContracts(platformSpecsDir) : [];
+  if (contracts.length > 0) {
+    const t = checkSpecTargets(parsed.data, contracts);
+    result.errors.push(...t.errors.map((e) => ({ ...e, stage: "platform" as const })));
+    result.warnings.push(...t.warnings.map((e) => ({ ...e, stage: "platform" as const })));
+  }
   result.ok = result.errors.length === 0;
   return result;
 }

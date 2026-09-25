@@ -44,19 +44,33 @@ function fontChain(brandFont: string | undefined, fallback: string): string {
   return `${quoted}, ${fallback}`;
 }
 
+/** Insert brand fallback families (e.g. Noto Sans JP) before the chain's generic family, skipping duplicates. */
+function withFallbacks(chain: string, extra: readonly string[]): string {
+  if (extra.length === 0) return chain;
+  const names = parseFontChain(chain);
+  const add = extra.filter((f) => !names.includes(f)).map((f) => (/\s/.test(f) ? `"${f}"` : f));
+  if (add.length === 0) return chain;
+  const parts = chain.split(",").map((p) => p.trim());
+  const at = parts.findIndex((p) => GENERIC.has(p.replace(/^["']|["']$/g, "")));
+  parts.splice(at === -1 ? parts.length : at, 0, ...add);
+  return parts.join(", ");
+}
+
 /**
  * Resolve visual tokens: brand.yaml values where given (palette keys `background|bg`,
  * `text|foreground|fg`, `primary|accent`, `secondary`), else `defaults`, else DEFAULT_TOKENS.
+ * `visual.font_fallbacks` are added to every chain before its generic family.
  * `logo_path` is the brand's logo path as written (project-relative); renderers resolve it.
  */
 export function resolveTokens(brand?: Brand, defaults: Partial<VisualTokens> = {}): VisualTokens {
   const base: VisualTokens = { ...DEFAULT_TOKENS, ...defaults };
   const visual = brand?.visual;
+  const extra = visual?.font_fallbacks ?? [];
   const out: VisualTokens = {
     ...base,
-    font_heading: fontChain(visual?.fonts.heading, base.font_heading),
-    font_body: fontChain(visual?.fonts.body, base.font_body),
-    font_mono: fontChain(visual?.fonts.mono, base.font_mono),
+    font_heading: withFallbacks(fontChain(visual?.fonts.heading, base.font_heading), extra),
+    font_body: withFallbacks(fontChain(visual?.fonts.body, base.font_body), extra),
+    font_mono: withFallbacks(fontChain(visual?.fonts.mono, base.font_mono), extra),
   };
   const palette = visual?.palette ?? {};
   for (const [token, keys] of Object.entries(PALETTE_KEYS) as [keyof typeof PALETTE_KEYS, readonly string[]][]) {

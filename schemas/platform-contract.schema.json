@@ -1,0 +1,484 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:platform-contract",
+  "title": "PlatformContract",
+  "description": "platform-specs/<id>.yaml: one platform publishing route's verified limits, cover spec, caption limits and UI masks, with sources and a verified date.",
+  "additionalProperties": false,
+  "properties": {
+    "ai_disclosure": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "description": "API field name, e.g. is_aigc.",
+          "type": "string"
+        },
+        "supported": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "supported"
+      ],
+      "type": "object"
+    },
+    "captions": {
+      "additionalProperties": false,
+      "properties": {
+        "burn_in_recommended": {
+          "type": "boolean"
+        },
+        "hashtags_max": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mentions_max": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "post_caption_max_chars": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "sidecar_formats": {
+          "description": "Caption files the publishing route accepts; empty means burn in.",
+          "items": {
+            "enum": [
+              "srt",
+              "vtt"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sidecar_formats",
+        "burn_in_recommended"
+      ],
+      "type": "object"
+    },
+    "contract_version": {
+      "description": "Bumped whenever any value changes.",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991,
+      "type": "integer"
+    },
+    "cover": {
+      "additionalProperties": false,
+      "properties": {
+        "crops": {
+          "description": "Other shapes the platform cuts the cover to; key text must survive them.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "anchor": {
+                "enum": [
+                  "center",
+                  "top",
+                  "bottom"
+                ],
+                "type": "string"
+              },
+              "aspect_ratio": {
+                "enum": [
+                  "9:16",
+                  "16:9",
+                  "1:1",
+                  "4:5"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                "type": "string"
+              },
+              "note": {
+                "description": "Where the platform shows this crop, e.g. the profile grid.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "aspect_ratio",
+              "anchor"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "formats": {
+          "items": {
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_size_mb": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "min_height": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "mode": {
+          "description": "Upload an image, pick a video frame, either, or unsupported.",
+          "enum": [
+            "file",
+            "frame",
+            "file_or_frame",
+            "none"
+          ],
+          "type": "string"
+        },
+        "recommended": {
+          "additionalProperties": false,
+          "properties": {
+            "height": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "width": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "id": {
+      "description": "Must equal the file name: platform-specs/<id>.yaml.",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "type": "string"
+    },
+    "name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "platform": {
+      "description": "The VideoSpec `platform` this contract serves as primary target for.",
+      "enum": [
+        "instagram_reels",
+        "tiktok",
+        "youtube_shorts",
+        "youtube",
+        "linkedin",
+        "x",
+        "generic"
+      ],
+      "type": "string"
+    },
+    "route": {
+      "description": "Publishing route the envelope applies to; API limits often differ from the app.",
+      "enum": [
+        "app_upload",
+        "api"
+      ],
+      "type": "string"
+    },
+    "sources": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "description": "Which numbers this source backs.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "ui_masks": {
+      "description": "Measured UI overlays; may be empty when unknown (lint then warns).",
+      "items": {
+        "description": "A region the platform's UI covers, in normalized coordinates of a frame of `aspect_ratio`.",
+        "additionalProperties": false,
+        "properties": {
+          "aspect_ratio": {
+            "description": "Frame shape the rect is measured on.",
+            "enum": [
+              "9:16",
+              "16:9",
+              "1:1",
+              "4:5"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "label": {
+            "description": "What the platform draws here, e.g. \"action rail (like, comment, share)\".",
+            "minLength": 1,
+            "type": "string"
+          },
+          "rect": {
+            "additionalProperties": false,
+            "properties": {
+              "h": {
+                "exclusiveMinimum": 0,
+                "maximum": 1,
+                "type": "number"
+              },
+              "w": {
+                "exclusiveMinimum": 0,
+                "maximum": 1,
+                "type": "number"
+              },
+              "x": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "y": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "w",
+              "h"
+            ],
+            "type": "object"
+          },
+          "severity": {
+            "description": "error: captions and key text must not overlap; warning: avoid.",
+            "enum": [
+              "error",
+              "warning"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "aspect_ratio",
+          "rect",
+          "severity"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "verified": {
+      "description": "Date the values were last checked against the sources.",
+      "format": "date",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+      "type": "string"
+    },
+    "video": {
+      "additionalProperties": false,
+      "properties": {
+        "aspect_ratios": {
+          "description": "Accepted aspect ratios, preferred first.",
+          "items": {
+            "enum": [
+              "9:16",
+              "16:9",
+              "1:1",
+              "4:5"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "audio_codecs": {
+          "items": {
+            "enum": [
+              "aac",
+              "opus",
+              "mp3"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "audio_sample_rate_hz": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "container": {
+          "items": {
+            "enum": [
+              "mp4",
+              "mov",
+              "webm"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "duration_sec": {
+          "additionalProperties": false,
+          "properties": {
+            "max": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "min": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "type": "object"
+        },
+        "fps": {
+          "additionalProperties": false,
+          "properties": {
+            "max": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "min": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "type": "object"
+        },
+        "max_bitrate_mbps": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "max_long_side": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "max_size_mb": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "min": {
+          "additionalProperties": false,
+          "properties": {
+            "height": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "width": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "type": "object"
+        },
+        "min_audio_bitrate_kbps": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "note": {
+          "description": "Caveats, e.g. a creator-specific duration limit queried at publish time.",
+          "type": "string"
+        },
+        "recommended": {
+          "additionalProperties": false,
+          "properties": {
+            "height": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "width": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "type": "object"
+        },
+        "video_codecs": {
+          "items": {
+            "enum": [
+              "h264",
+              "h265",
+              "vp9",
+              "av1"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "aspect_ratios",
+        "recommended",
+        "duration_sec",
+        "container",
+        "video_codecs",
+        "audio_codecs"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "contract_version",
+    "verified",
+    "sources",
+    "route",
+    "video",
+    "cover",
+    "captions",
+    "ui_masks"
+  ],
+  "type": "object"
+}

@@ -1109,7 +1109,7 @@ const dateSource = `(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468
 function anchor(source) {
 	return new RegExp(`^${source}$`);
 }
-const date = /*@__PURE__*/ anchor(dateSource);
+const date$1 = /*@__PURE__*/ anchor(dateSource);
 function timeSource(args) {
 	const hhmm = `(?:[01]\\d|2[0-3]):[0-5]\\d`;
 	return typeof args.precision === "number" ? args.precision === -1 ? `${hhmm}` : args.precision === 0 ? `${hhmm}:[0-5]\\d` : `${hhmm}:[0-5]\\d\\.\\d{${args.precision}}` : args.seconds ? `${hhmm}:[0-5]\\d(?:\\.\\d+)?` : `${hhmm}(?::[0-5]\\d(?:\\.\\d+)?)?`;
@@ -1772,7 +1772,7 @@ const $ZodISODateTime = /*@__PURE__*/ $constructor("$ZodISODateTime", (inst, def
 	$ZodStringFormat.init(inst, def);
 });
 const $ZodISODate = /*@__PURE__*/ $constructor("$ZodISODate", (inst, def) => {
-	def.pattern ?? (def.pattern = date);
+	def.pattern ?? (def.pattern = date$1);
 	$ZodStringFormat.init(inst, def);
 });
 const $ZodISOTime = /*@__PURE__*/ $constructor("$ZodISOTime", (inst, def) => {
@@ -5476,6 +5476,9 @@ const ZodURL = /*@__PURE__*/ $constructor("ZodURL", (inst, def) => {
 	$ZodURL.init(inst, def);
 	ZodStringFormat.init(inst, def);
 });
+function url$1(params) {
+	return /* @__PURE__ */ _url(ZodURL, params);
+}
 const ZodEmoji = /*@__PURE__*/ $constructor("ZodEmoji", (inst, def) => {
 	$ZodEmoji.init(inst, def);
 	ZodStringFormat.init(inst, def);
@@ -6078,6 +6081,9 @@ function preprocess(fn, schema) {
 //#region ../../node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/iso.js
 function datetime(params) {
 	return /* @__PURE__ */ _isoDateTime(ZodISODateTime, params);
+}
+function date(params) {
+	return /* @__PURE__ */ _isoDate(ZodISODate, params);
 }
 //#endregion
 //#region ../../node_modules/.pnpm/@modelcontextprotocol+sdk@1.30.1_supports-color@10.2.2_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
@@ -120980,7 +120986,7 @@ const deleteContents = ({ [START]: start, [END]: end }, fragment = null) => {
 /**
 * @implements globalThis.Range
 */
-var Range$1 = class Range$1 {
+var Range$2 = class Range$2 {
 	constructor() {
 		this[START] = null;
 		this[END] = null;
@@ -121049,7 +121055,7 @@ var Range$1 = class Range$1 {
 		return content;
 	}
 	cloneRange() {
-		const range = new Range$1();
+		const range = new Range$2();
 		range[START] = this[START];
 		range[END] = this[END];
 		return range;
@@ -121232,7 +121238,7 @@ var Document$1 = class extends NonElementParentNode {
 		return new Element$1(this, localName);
 	}
 	createRange() {
-		const range = new Range$1();
+		const range = new Range$2();
 		range.commonAncestorContainer = this;
 		return range;
 	}
@@ -229119,6 +229125,37 @@ const AspectRatio = _enum([
 	"1:1",
 	"4:5"
 ]);
+/**
+* Platform contract id: the file name of a `platform-specs/<id>.yaml` contract,
+* e.g. `instagram`, `tiktok`, `youtube-shorts`, `facebook-page-api`.
+*/
+const PlatformTargetId = string().regex(/^[a-z0-9][a-z0-9-]*$/, "expected a platform contract id like tiktok or youtube-shorts");
+/**
+* Default contract id for each primary `platform`, used when a spec has no `targets`.
+* Null means no contract applies (plain 16:9 YouTube, X and generic output).
+*/
+const PRIMARY_TARGET = {
+	instagram_reels: "instagram",
+	tiktok: "tiktok",
+	youtube_shorts: "youtube-shorts",
+	youtube: null,
+	linkedin: "linkedin",
+	x: null,
+	generic: null
+};
+/** Frame rates every renderer supports (HyperFrames draws only 24, 30 or 60). */
+const Fps = union([
+	literal(24),
+	literal(30),
+	literal(60)
+]);
+/** A rectangle in normalized frame coordinates: 0–1 from the top-left corner. */
+const NormalizedRect = strictObject({
+	x: number().min(0).max(1),
+	y: number().min(0).max(1),
+	w: number().positive().max(1),
+	h: number().positive().max(1)
+}).refine((r) => r.x + r.w <= 1.0001 && r.y + r.h <= 1.0001, { message: "rect must lie inside the frame (x+w ≤ 1, y+h ≤ 1)" });
 const Grounding = _enum([
 	"strict",
 	"loose",
@@ -229266,6 +229303,7 @@ const CreativeBrief = strictObject({
 	audience: NonEmptyString,
 	platform: Platform,
 	aspect_ratio: AspectRatio,
+	targets: array(PlatformTargetId).optional().describe("Platform contract ids to compile for; copied to the VideoSpec. Defaults to the primary platform's contract."),
 	target_duration_sec: number().positive().max(600),
 	language: LanguageTag,
 	tone: array(NonEmptyString),
@@ -229484,6 +229522,21 @@ const CaptionSettings = strictObject({
 	preset: Id,
 	burn_in: boolean()
 });
+const MasterCanvas = strictObject({
+	width: int().min(2).max(7680),
+	height: int().min(2).max(7680),
+	fps: Fps
+}).describe("Production master canvas every target is compiled from. Defaults to 1080 px on the short side at 30 fps.");
+const Cover = strictObject({
+	headline: NonEmptyString.describe("Cover/thumbnail text; separate from on-screen text, captions and post captions."),
+	focal_time_sec: number().nonnegative().describe("Video time of the frame the cover is composed from (TikTok uses it as the cover timestamp).")
+}).describe("Cover (thumbnail) text and focal frame.");
+const Hashtag = string().regex(/^#[\p{L}\p{N}_]+$/u, "expected a hashtag like #devtools (no spaces)");
+const PublishSettings = strictObject({
+	post_caption: string().describe("Text posted with the video on the platform; separate from speech captions."),
+	hashtags: array(Hashtag).optional(),
+	ai_disclosure: boolean().optional().describe("Mark the post as AI-generated where the platform supports it.")
+}).describe("Per-target post copy.");
 const VideoSpec = strictObject({
 	schema_version: SchemaVersion,
 	id: Id.optional(),
@@ -229492,8 +229545,10 @@ const VideoSpec = strictObject({
 	brief_id: Id.optional(),
 	goal: Goal,
 	audience: NonEmptyString,
-	platform: Platform,
+	platform: Platform.describe("Primary platform; with `aspect_ratio` it defines the primary target."),
 	aspect_ratio: AspectRatio,
+	master: MasterCanvas.optional(),
+	targets: array(PlatformTargetId).optional().describe("Platform contract ids to compile for. Defaults to the primary platform's contract."),
 	target_duration_sec: number().positive().max(600),
 	language: LanguageTag,
 	brand_profile: string().optional().describe("Brand profile reference, e.g. `acme@3`."),
@@ -229501,12 +229556,38 @@ const VideoSpec = strictObject({
 	grounding: Grounding,
 	voice: VoiceSettings,
 	captions: CaptionSettings,
+	cover: Cover.optional(),
+	publish: record(PlatformTargetId, PublishSettings).optional().describe("Post copy keyed by target id."),
 	scenes: array(Scene).min(1)
 }).meta({
 	id: "VideoSpec",
 	title: "VideoSpec",
 	description: "What we are making: a provider-independent scene graph that declares capability requirements, never model names."
 });
+/** Default master for an aspect ratio: 1080 px on the short side, even dimensions, 30 fps. */
+function defaultMaster(aspect) {
+	const [aw, ah] = aspect.split(":").map(Number);
+	const even = (n) => Math.round(n / 2) * 2;
+	return aw <= ah ? {
+		width: 1080,
+		height: even(1080 * ah / aw),
+		fps: 30
+	} : {
+		width: even(1080 * aw / ah),
+		height: 1080,
+		fps: 30
+	};
+}
+/** The spec's master canvas, or the default for its aspect ratio. */
+function resolveMaster(spec) {
+	return spec.master ?? defaultMaster(spec.aspect_ratio);
+}
+/** Target contract ids: `targets` when given, else the primary platform's contract (possibly none). */
+function resolveTargets(spec) {
+	if (spec.targets?.length) return [...new Set(spec.targets)];
+	const primary = PRIMARY_TARGET[spec.platform];
+	return primary ? [primary] : [];
+}
 const Side = strictObject({
 	label: NonEmptyString,
 	text: NonEmptyString
@@ -229868,6 +229949,47 @@ function validateVideoSpecSemantics(spec, ir) {
 			}
 		}
 	});
+	if (spec.master) {
+		const { width, height } = spec.master;
+		const [aw, ah] = spec.aspect_ratio.split(":").map(Number);
+		if (Math.abs(width / height - aw / ah) > .01 * (aw / ah)) {
+			const d = defaultMaster(spec.aspect_ratio);
+			errors.push({
+				path: "master",
+				message: `master ${width}×${height} does not match aspect_ratio ${spec.aspect_ratio}`,
+				fix: `use ${d.width}×${d.height} (or another size with ratio ${spec.aspect_ratio}), or change aspect_ratio`
+			});
+		}
+		if (width % 2 !== 0 || height % 2 !== 0) errors.push({
+			path: "master",
+			message: `master ${width}×${height} has an odd dimension; H.264 needs even width and height`,
+			fix: `use ${width + width % 2}×${height + height % 2}`
+		});
+	}
+	if (spec.targets) {
+		const seenTargets = /* @__PURE__ */ new Set();
+		spec.targets.forEach((t, i) => {
+			if (seenTargets.has(t)) errors.push({
+				path: `targets.${i}`,
+				message: `duplicate target "${t}"`,
+				fix: `remove the second "${t}"`
+			});
+			seenTargets.add(t);
+		});
+	}
+	if (spec.cover && spec.cover.focal_time_sec > total) errors.push({
+		path: "cover.focal_time_sec",
+		message: `cover focal time ${spec.cover.focal_time_sec}s is after the end of the video (${round(total)}s)`,
+		fix: "pick a moment inside the hook scene, where the cover headline is on screen"
+	});
+	if (spec.publish) {
+		const targets = resolveTargets(spec);
+		for (const key of Object.keys(spec.publish)) if (!targets.includes(key)) warnings.push({
+			path: `publish.${key}`,
+			message: `publish copy for "${key}", which is not a target (${targets.length ? targets.join(", ") : "none"})`,
+			fix: targets.length ? `add "${key}" to targets, or rename the key to one of ${targets.join(", ")}` : `add "${key}" to targets or remove it`
+		});
+	}
 	const firstScene = spec.scenes[0];
 	if (firstScene && firstScene.purpose !== "hook") warnings.push({
 		path: "scenes.0.purpose",
@@ -230058,15 +230180,44 @@ const RenderManifest = strictObject({
 });
 //#endregion
 //#region ../schema/dist/brand.js
+/** CSS font weight, 100–900 in steps of 100. */
+const FontWeight = int().min(100).max(900).multipleOf(100);
+const LogoPosition = _enum([
+	"top_left",
+	"top_right",
+	"bottom_left",
+	"bottom_right",
+	"end_card_only",
+	"none"
+]);
+const MotionPersonality = _enum([
+	"calm",
+	"precise",
+	"friendly",
+	"energetic",
+	"playful"
+]);
+const BrandCaptions = strictObject({
+	family: NonEmptyString.optional().describe("Caption font family; defaults to the body font."),
+	weight: FontWeight.optional(),
+	active_word: boolean().optional().describe("Karaoke-style active-word highlight. Off by default: keyword emphasis only."),
+	plate_opacity: number().min(0).max(1).optional().describe("Opacity of the plate behind caption text (0 = no plate)."),
+	max_lines: int().min(1).max(3).optional()
+}).describe("Burned-in caption styling.");
+const BrandMotion = strictObject({
+	personality: MotionPersonality.optional().describe("Maps to easing curves and durations in the renderers."),
+	transition_ms: int().min(0).max(2e3).optional()
+}).describe("Motion tokens.");
 const Brand = strictObject({
-	version: literal(1).optional().describe("brand.yaml format version."),
+	version: union([literal(1), literal(2)]).optional().describe("brand.yaml format version. 2 adds captions, motion, weights, logo placement and banned phrases; 1 files stay valid."),
 	brand: strictObject({
 		name: NonEmptyString,
 		id: Id.optional()
 	}),
 	voice: strictObject({
 		personality: array(NonEmptyString),
-		avoid: array(NonEmptyString).describe("Words and phrases the script must not use.")
+		avoid: array(NonEmptyString).describe("Words and phrases the script should avoid (warning)."),
+		banned_phrases: array(NonEmptyString).optional().describe("Phrases that must never appear in voiceover, on-screen text, cover or post copy (error).")
 	}).optional(),
 	visual: strictObject({
 		fonts: strictObject({
@@ -230074,9 +230225,21 @@ const Brand = strictObject({
 			body: NonEmptyString,
 			mono: NonEmptyString.optional()
 		}),
+		weights: strictObject({
+			heading: FontWeight.optional(),
+			body: FontWeight.optional()
+		}).optional(),
+		font_fallbacks: array(NonEmptyString).optional().describe("Families appended to every font chain for scripts the brand fonts lack, e.g. Noto Sans JP."),
 		palette: record(string(), HexColor).describe("Named colour tokens, e.g. primary, secondary, background, text."),
-		logo: FilePath.optional()
+		logo: FilePath.optional(),
+		logo_placement: strictObject({
+			position: LogoPosition,
+			max_fraction: number().positive().max(.5).optional().describe("Largest logo width as a fraction of frame width.")
+		}).optional(),
+		forbidden: array(NonEmptyString).optional().describe("Visual treatments the brand never uses, e.g. \"drop shadows\", \"gradients on logo\".")
 	}).optional(),
+	captions: BrandCaptions.optional(),
+	motion: BrandMotion.optional(),
 	video: strictObject({
 		caption_preset: Id.optional(),
 		transition_style: _enum([
@@ -230100,7 +230263,109 @@ const Brand = strictObject({
 }).meta({
 	id: "Brand",
 	title: "Brand",
-	description: "brand.yaml: brand voice, visual tokens, video defaults, terminology, prohibited claims and allowed CTAs."
+	description: "brand.yaml: brand voice, visual tokens, caption and motion styling, video defaults, terminology, prohibited claims and allowed CTAs."
+});
+//#endregion
+//#region ../schema/dist/platform-contract.js
+/** Calendar date `YYYY-MM-DD`. */
+const IsoDate = date();
+const Range$1 = (unit) => strictObject({
+	min: number().nonnegative().optional(),
+	max: number().positive().optional()
+}).refine((r) => r.min === void 0 || r.max === void 0 || r.min <= r.max, { message: `min must be ≤ max (${unit})` });
+const Size = strictObject({
+	width: int().positive(),
+	height: int().positive()
+});
+const ContractSource = strictObject({
+	url: url$1(),
+	title: string().optional(),
+	note: string().optional().describe("Which numbers this source backs.")
+});
+const UiMask = strictObject({
+	id: string().regex(/^[a-z0-9][a-z0-9_-]*$/),
+	label: NonEmptyString.describe("What the platform draws here, e.g. \"action rail (like, comment, share)\"."),
+	aspect_ratio: AspectRatio.describe("Frame shape the rect is measured on."),
+	rect: NormalizedRect,
+	severity: _enum(["error", "warning"]).describe("error: captions and key text must not overlap; warning: avoid.")
+}).describe("A region the platform's UI covers, in normalized coordinates of a frame of `aspect_ratio`.");
+const CoverCrop = strictObject({
+	id: string().regex(/^[a-z0-9][a-z0-9_-]*$/),
+	aspect_ratio: AspectRatio,
+	anchor: _enum([
+		"center",
+		"top",
+		"bottom"
+	]),
+	note: string().optional().describe("Where the platform shows this crop, e.g. the profile grid.")
+});
+const PlatformContract = strictObject({
+	id: PlatformTargetId.describe("Must equal the file name: platform-specs/<id>.yaml."),
+	name: NonEmptyString,
+	contract_version: int().positive().describe("Bumped whenever any value changes."),
+	verified: IsoDate.describe("Date the values were last checked against the sources."),
+	sources: array(ContractSource).min(1),
+	platform: Platform.optional().describe("The VideoSpec `platform` this contract serves as primary target for."),
+	route: _enum(["app_upload", "api"]).describe("Publishing route the envelope applies to; API limits often differ from the app."),
+	video: strictObject({
+		aspect_ratios: array(AspectRatio).min(1).describe("Accepted aspect ratios, preferred first."),
+		recommended: Size,
+		min: Size.optional(),
+		max_long_side: int().positive().optional(),
+		duration_sec: Range$1("seconds"),
+		fps: Range$1("fps").optional(),
+		max_size_mb: number().positive().optional(),
+		max_bitrate_mbps: number().positive().optional(),
+		container: array(_enum([
+			"mp4",
+			"mov",
+			"webm"
+		])).min(1),
+		video_codecs: array(_enum([
+			"h264",
+			"h265",
+			"vp9",
+			"av1"
+		])).min(1),
+		audio_codecs: array(_enum([
+			"aac",
+			"opus",
+			"mp3"
+		])).min(1),
+		audio_sample_rate_hz: int().positive().optional(),
+		min_audio_bitrate_kbps: int().positive().optional(),
+		note: string().optional().describe("Caveats, e.g. a creator-specific duration limit queried at publish time.")
+	}),
+	cover: strictObject({
+		mode: _enum([
+			"file",
+			"frame",
+			"file_or_frame",
+			"none"
+		]).describe("Upload an image, pick a video frame, either, or unsupported."),
+		formats: array(_enum(["jpeg", "png"])).optional(),
+		max_size_mb: number().positive().optional(),
+		recommended: Size.optional(),
+		min_height: int().positive().optional(),
+		crops: array(CoverCrop).optional().describe("Other shapes the platform cuts the cover to; key text must survive them.")
+	}),
+	captions: strictObject({
+		post_caption_max_chars: int().positive().optional(),
+		hashtags_max: int().nonnegative().optional(),
+		mentions_max: int().nonnegative().optional(),
+		sidecar_formats: array(_enum(["srt", "vtt"])).describe("Caption files the publishing route accepts; empty means burn in."),
+		burn_in_recommended: boolean()
+	}),
+	ai_disclosure: strictObject({
+		supported: boolean(),
+		field: string().optional().describe("API field name, e.g. is_aigc.")
+	}).optional(),
+	ui_masks: array(UiMask).describe("Measured UI overlays; may be empty when unknown (lint then warns)."),
+	notes: array(string()).optional()
+}).meta({
+	id: "PlatformContract",
+	title: "PlatformContract",
+	description: "platform-specs/<id>.yaml: one platform publishing route's verified limits, cover spec, caption limits and UI masks, with sources and a verified date."
 });
 //#endregion
 //#region ../schema/dist/policy.js
@@ -232152,9 +232417,21 @@ function fontChain(brandFont, fallback) {
 	if (brandFont.includes(",")) return brandFont;
 	return `${/\s/.test(brandFont) && !/^["']/.test(brandFont) ? `"${brandFont}"` : brandFont}, ${fallback}`;
 }
+/** Insert brand fallback families (e.g. Noto Sans JP) before the chain's generic family, skipping duplicates. */
+function withFallbacks(chain, extra) {
+	if (extra.length === 0) return chain;
+	const names = parseFontChain(chain);
+	const add = extra.filter((f) => !names.includes(f)).map((f) => /\s/.test(f) ? `"${f}"` : f);
+	if (add.length === 0) return chain;
+	const parts = chain.split(",").map((p) => p.trim());
+	const at = parts.findIndex((p) => GENERIC.has(p.replace(/^["']|["']$/g, "")));
+	parts.splice(at === -1 ? parts.length : at, 0, ...add);
+	return parts.join(", ");
+}
 /**
 * Resolve visual tokens: brand.yaml values where given (palette keys `background|bg`,
 * `text|foreground|fg`, `primary|accent`, `secondary`), else `defaults`, else DEFAULT_TOKENS.
+* `visual.font_fallbacks` are added to every chain before its generic family.
 * `logo_path` is the brand's logo path as written (project-relative); renderers resolve it.
 */
 function resolveTokens$1(brand, defaults = {}) {
@@ -232163,11 +232440,12 @@ function resolveTokens$1(brand, defaults = {}) {
 		...defaults
 	};
 	const visual = brand?.visual;
+	const extra = visual?.font_fallbacks ?? [];
 	const out = {
 		...base,
-		font_heading: fontChain(visual?.fonts.heading, base.font_heading),
-		font_body: fontChain(visual?.fonts.body, base.font_body),
-		font_mono: fontChain(visual?.fonts.mono, base.font_mono)
+		font_heading: withFallbacks(fontChain(visual?.fonts.heading, base.font_heading), extra),
+		font_body: withFallbacks(fontChain(visual?.fonts.body, base.font_body), extra),
+		font_mono: withFallbacks(fontChain(visual?.fonts.mono, base.font_mono), extra)
 	};
 	const palette = visual?.palette ?? {};
 	for (const [token, keys] of Object.entries(PALETTE_KEYS)) {
@@ -235955,7 +236233,8 @@ const SCHEMA_NAMES = [
 	"render-manifest",
 	"brand",
 	"policy",
-	"template"
+	"template",
+	"platform-contract"
 ];
 /**
 * Locate the bundled `schemas/` directory: `${CLAUDE_PLUGIN_ROOT}/schemas` first, then
@@ -235977,18 +236256,18 @@ function findSchemasDir(env = process.env, from) {
 }
 //#endregion
 //#region src/templates.ts
-const MARKER = join("explain", "template.yaml");
+const MARKER$1 = join("explain", "template.yaml");
 /**
 * Locate the bundled `templates/` directory: `${CLAUDE_PLUGIN_ROOT}/templates` first, then
 * walk up from this module (works from `packages/mcp/src`, `packages/mcp/dist` and `dist/mcp.mjs`).
 */
 function findTemplatesDir(env = process.env, from) {
 	const root = env.CLAUDE_PLUGIN_ROOT;
-	if (root && existsSync(join(root, "templates", MARKER))) return join(root, "templates");
+	if (root && existsSync(join(root, "templates", MARKER$1))) return join(root, "templates");
 	let dir = from ?? dirname(fileURLToPath(import.meta.url));
 	for (let i = 0; i < 6; i++) {
 		const candidate = join(dir, "templates");
-		if (existsSync(join(candidate, MARKER))) return candidate;
+		if (existsSync(join(candidate, MARKER$1))) return candidate;
 		const parent = dirname(dir);
 		if (parent === dir) break;
 		dir = parent;
@@ -236178,11 +236457,16 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 	const target = opts.target_duration_sec ?? brief?.target_duration_sec ?? tpl.default_duration_sec;
 	const platform = opts.platform ?? brief?.platform ?? tpl.platforms[0];
 	const aspect = opts.aspect_ratio ?? brief?.aspect_ratio ?? tpl.default_aspect_ratio ?? PLATFORM_NORMS[platform].aspect_ratios[0];
+	const targets = resolveTargets({
+		platform,
+		targets: opts.targets ?? brief?.targets
+	});
 	const { min_sec, max_sec } = tpl.duration_range;
 	if (target < min_sec || target > max_sec) notes.push(`target ${target}s is outside template range ${min_sec}–${max_sec}s`);
 	const includeOptional = opts.include_optional ?? target >= tpl.default_duration_sec;
 	const beats = tpl.beats.filter((b) => includeOptional || !b.optional);
 	const dropped = tpl.beats.length - beats.length;
+	notes.push("add cover {headline, focal_time_sec}: a short headline (≤ 6 words) and a moment inside the hook scene", targets.length ? `add publish.<target> {post_caption, hashtags} for ${targets.join(", ")}; post copy is separate from voiceover and captions` : "no platform targets: publish copy is optional");
 	if (dropped > 0) notes.push(`dropped ${dropped} optional beat(s) because target ${target}s < template default ${tpl.default_duration_sec}s`);
 	const durations = allocateDurations(beats.map((b) => b.share), target);
 	const scenes = beats.map((b, i) => {
@@ -236214,6 +236498,8 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 		audience: brief?.audience ?? "TODO: audience",
 		platform,
 		aspect_ratio: aspect,
+		master: defaultMaster(aspect),
+		...targets.length ? { targets } : {},
 		target_duration_sec: target,
 		language: brief?.language ?? "en-US",
 		grounding: "strict",
@@ -236305,6 +236591,11 @@ function renderStoryboardMarkdown(spec, ir) {
 	lines.push(`# Storyboard: ${spec.title ?? spec.id ?? "untitled"}`, "");
 	lines.push("_Generated by storyboard_render from project/video-spec.json. Edit the spec, not this file._", "");
 	lines.push(`Goal: ${spec.goal} · Audience: ${spec.audience} · Platform: ${spec.platform} (${spec.aspect_ratio}) · Target: ${spec.target_duration_sec}s · Scenes total: ${total}s · Grounding: ${spec.grounding} · Captions: ${spec.captions.preset}`, "");
+	const master = resolveMaster(spec);
+	const targets = resolveTargets(spec);
+	lines.push(`Master: ${master.width}×${master.height} @ ${master.fps} fps · Targets: ${targets.join(", ") || "none"}`, "");
+	if (spec.cover) lines.push(`Cover: "${spec.cover.headline}" at ${spec.cover.focal_time_sec}s`, "");
+	for (const [id, p] of Object.entries(spec.publish ?? {})) lines.push(`Post (${id}): ${truncate(p.post_caption, 200)}${p.hashtags?.length ? ` ${p.hashtags.join(" ")}` : ""}`, "");
 	lines.push("| Scene | Time | Purpose | Voiceover | On-screen text | Visual | Refs |");
 	lines.push("|---|---|---|---|---|---|---|");
 	spec.scenes.forEach((s, i) => {
@@ -237344,6 +237635,75 @@ async function synthesizeSpec(spec, options) {
 	};
 }
 //#endregion
+//#region ../platforms/dist/registry.js
+/** Present in every `platform-specs/` directory, so it can be found before any contract exists. */
+const MARKER = "README.md";
+/**
+* Locate the bundled `platform-specs/` directory: `${CLAUDE_PLUGIN_ROOT}/platform-specs` first, then
+* walk up from this module (works from `packages/*\/src`, `packages/*\/dist` and `dist/mcp.mjs`).
+*/
+function findPlatformSpecsDir(env = process.env, from) {
+	const root = env.CLAUDE_PLUGIN_ROOT;
+	if (root && existsSync(join(root, "platform-specs", MARKER))) return join(root, "platform-specs");
+	let dir = from ?? dirname(fileURLToPath(import.meta.url));
+	for (let i = 0; i < 6; i++) {
+		const candidate = join(dir, "platform-specs");
+		if (existsSync(join(candidate, MARKER))) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+function parseContract(text, file, fileId) {
+	const parsed = parseYamlOrJson(PlatformContract, text);
+	if (!parsed.ok) throw new Error(`invalid platform contract ${file}: ${parsed.errors.map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
+	if (parsed.data.id !== fileId) throw new Error(`platform contract ${file} has id "${parsed.data.id}" but is named "${fileId}.yaml"`);
+	return parsed.data;
+}
+/** Load and validate every `<dir>/<id>.yaml`, sorted by id. Throws on any invalid contract. */
+async function loadContracts(dir) {
+	const names = (await readdir(dir)).filter((n) => n.endsWith(".yaml")).sort();
+	const out = [];
+	for (const name of names) {
+		const file = join(dir, name);
+		out.push(parseContract(await readFile(file, "utf8"), file, name.slice(0, -5)));
+	}
+	return out;
+}
+/**
+* Check a spec's targets against the contract registry: every target must exist (error) and accept
+* the spec's aspect ratio (warning; the per-target compiler would have to crop or pad).
+*/
+function checkSpecTargets(spec, contracts) {
+	const errors = [];
+	const warnings = [];
+	const byId = new Map(contracts.map((c) => [c.id, c]));
+	const explicit = Boolean(spec.targets?.length);
+	resolveTargets(spec).forEach((id, i) => {
+		const path = explicit ? `targets.${i}` : "platform";
+		const contract = byId.get(id);
+		if (!contract) {
+			const near = closestMatches(id, byId.keys());
+			errors.push({
+				path,
+				message: `no platform contract "${id}" in platform-specs/`,
+				fix: near.length ? `use one of ${near.map((n) => `"${n}"`).join(", ")}` : "add platform-specs/" + id + ".yaml or remove the target"
+			});
+			return;
+		}
+		if (!contract.video.aspect_ratios.includes(spec.aspect_ratio)) warnings.push({
+			path,
+			message: `${contract.name} expects ${contract.video.aspect_ratios.join(" or ")}, but the spec is ${spec.aspect_ratio}`,
+			fix: `use aspect_ratio ${contract.video.aspect_ratios[0]} or drop "${id}" from targets`
+		});
+	});
+	return {
+		errors,
+		warnings
+	};
+}
+//#endregion
 //#region src/spec-validate.ts
 async function readIfExists(path) {
 	try {
@@ -237364,7 +237724,7 @@ function projectSpecPaths(projectDir) {
 * Validate a VideoSpec file: schema first, then semantic rules. If a ContentIR path
 * is given and exists, evidence refs and asset ids are cross-checked against it.
 */
-async function validateSpecFile(specPath, contentIrPath) {
+async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = findPlatformSpecsDir()) {
 	const result = {
 		ok: false,
 		spec_path: specPath,
@@ -237416,6 +237776,18 @@ async function validateSpecFile(specPath, contentIrPath) {
 		...e,
 		stage: "semantic"
 	})));
+	const contracts = platformSpecsDir ? await loadContracts(platformSpecsDir) : [];
+	if (contracts.length > 0) {
+		const t = checkSpecTargets(parsed.data, contracts);
+		result.errors.push(...t.errors.map((e) => ({
+			...e,
+			stage: "platform"
+		})));
+		result.warnings.push(...t.warnings.map((e) => ({
+			...e,
+			stage: "platform"
+		})));
+	}
 	result.ok = result.errors.length === 0;
 	return result;
 }
@@ -237496,10 +237868,12 @@ async function loadValidSpec(projectDir) {
 		irPath: contentIr
 	};
 }
-/** Frame size / fps for a quality. Preview: half resolution, 15 fps (24 when HyperFrames draws, it needs 24/30/60). */
+/** Frame size / fps for a quality. Final: the spec's master canvas. Preview: half resolution, 15 fps (24 when HyperFrames draws, it needs 24/30/60). */
 function targetFor(spec, quality, hyperframes, override = {}) {
-	const shortSide = override.shortSide ?? (quality === "preview" ? 540 : 1080);
-	const fps = override.fps ?? (quality === "preview" ? hyperframes ? 24 : 15 : 30);
+	const master = resolveMaster(spec);
+	const masterShort = Math.min(master.width, master.height);
+	const shortSide = override.shortSide ?? (quality === "preview" ? Math.round(masterShort / 2) : masterShort);
+	const fps = override.fps ?? (quality === "preview" ? hyperframes ? 24 : 15 : master.fps);
 	return targetForAspect(spec.aspect_ratio, {
 		shortSide,
 		fps
@@ -238648,6 +239022,7 @@ function createServer(options = {}) {
 			target_duration_sec: number().positive().max(600).optional().describe("Overrides the brief/template duration"),
 			aspect_ratio: AspectRatio.optional().describe("Overrides the brief/template aspect ratio"),
 			platform: Platform.optional().describe("Overrides the brief/template platform"),
+			targets: array(PlatformTargetId).optional().describe("Platform contract ids to compile for, e.g. [\"instagram\", \"tiktok\", \"youtube-shorts\"]; overrides the brief. Default: the platform's own contract"),
 			include_optional: boolean().optional().describe("Include optional beats (default: only when target >= the template's default duration)")
 		},
 		annotations: {
@@ -238658,7 +239033,7 @@ function createServer(options = {}) {
 		const { project_dir, ...opts } = args;
 		const r = await scaffoldSpec(resolveInputPath(project_dir, cwd()), requireTemplatesDir(env), opts);
 		return jsonResult([
-			`scaffolded ${r.spec.scenes.length} scenes from template "${r.template_id}" (${r.spec.target_duration_sec}s, ${r.spec.platform}, ${r.spec.aspect_ratio}); not written`,
+			`scaffolded ${r.spec.scenes.length} scenes from template "${r.template_id}" (${r.spec.target_duration_sec}s, ${r.spec.platform}, ${r.spec.aspect_ratio}, targets: ${r.spec.targets?.join(", ") || "none"}); not written`,
 			...r.scene_guidance.map((g) => `${g.scene_id} ${g.purpose} ${g.duration_sec}s (<= ${g.word_budget} words): ${g.guidance}`),
 			...r.notes.map((n) => `note: ${n}`)
 		].join("\n"), r);

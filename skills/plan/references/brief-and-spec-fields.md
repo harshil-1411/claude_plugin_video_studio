@@ -13,6 +13,11 @@ are strict: unknown keys are errors.
   `linkedin`, `x`, `generic`
 - `aspect_ratio`: `9:16`, `16:9`, `1:1`, `4:5`
 - `grounding`: `strict`, `loose`, `off`
+- `targets`: platform contract ids (the files in `platform-specs/`):
+  `instagram`, `tiktok`, `youtube-shorts`, `linkedin`, `facebook-page-api`.
+  Omitted → the primary `platform`'s contract (`instagram_reels` →
+  `instagram`, `tiktok` → `tiktok`, `youtube_shorts` → `youtube-shorts`,
+  `linkedin` → `linkedin`; `youtube`, `x`, `generic` → none).
 - `language`: BCP-47 tag, e.g. `en`, `en-US`
 - Ids (`id`, `template`, `content_ir_id`, `brief_id`, caption `preset`):
   letters, digits, `_ - . @ :`, starting with a letter or digit.
@@ -25,6 +30,7 @@ are strict: unknown keys are errors.
 | `audience` | who the source is written for (jargon, install steps → developers). Be specific: role + what they already know |
 | `platform` | named by user; "reel" → `instagram_reels`; "short" → `youtube_shorts`; developer audience + vertical → `youtube_shorts`; B2B → `linkedin`; else `generic` |
 | `aspect_ratio` | reels/tiktok/shorts → `9:16`; youtube → `16:9`; linkedin/x feed → `1:1` or `4:5`; unknown → `9:16` |
+| `targets` | only when the user names several platforms ("for reels, tiktok and shorts" → `[instagram, tiktok, youtube-shorts]`); else omit |
 | `target_duration_sec` | user value; else short-form 30-45; explainer/tutorial 45-60; youtube 60-120 |
 | `tone` | from source register + brand `voice.personality`; 2-4 adjectives |
 | `desired_action` | the source's own next step (install command, docs link, sign-up); else "Follow for more" is a weak last resort worth asking about |
@@ -42,6 +48,7 @@ are strict: unknown keys are errors.
 | `audience` | yes | non-empty |
 | `platform` | yes | enum |
 | `aspect_ratio` | yes | enum |
+| `targets` | no | contract ids; copied to the spec |
 | `target_duration_sec` | yes | > 0, ≤ 600 |
 | `language` | yes | BCP-47 |
 | `tone` | yes | list of strings |
@@ -63,11 +70,15 @@ Top level:
 | `schema_version` | yes | `"1.0"` |
 | `id`, `title`, `content_ir_id`, `brief_id` | no | `brief_id` = the brief's `id` |
 | `goal`, `audience`, `platform`, `aspect_ratio`, `target_duration_sec`, `language` | yes | copy from the brief |
+| `master` | no | `{width, height, fps}`; production canvas, ratio must equal `aspect_ratio`, even sides, fps `24`/`30`/`60`. Default 1080 px short side @ 30 (`1080×1920` for 9:16); keep what `spec_scaffold` returns |
+| `targets` | no | copy from the brief or `spec_scaffold`; unknown ids are errors |
 | `brand_profile` | no | e.g. `acme@3` |
 | `policy_profile` | no | string |
 | `grounding` | yes | `strict` by default |
 | `voice` | yes | `{provider_preference?, voice_id?, style?}`; leave `provider_preference` out unless the user asked; `style` in plain words ("calm, precise") |
 | `captions` | yes | `{preset, burn_in}`; preset from brand `video.caption_preset` or the template, else `minimal`; `burn_in: true` for short-form |
+| `cover` | no (write it) | `{headline, focal_time_sec}`: thumbnail text ≤ 6 words, different from the hook voiceover; `focal_time_sec` inside the hook scene |
+| `publish` | no (write it) | map target id → `{post_caption, hashtags?, ai_disclosure?}`; one entry per target; hashtags look like `#devtools`; the post caption is not the voiceover |
 | `scenes` | yes, ≥ 1 | see below |
 
 Scene:

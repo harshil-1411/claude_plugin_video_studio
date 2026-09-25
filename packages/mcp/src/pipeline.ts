@@ -37,6 +37,7 @@ import {
   type TimingAdjustment,
   VideoSpec,
   parseYamlOrJson,
+  resolveMaster,
 } from "@video-studio/schema";
 import { type BackendChoice, type BackendSet, type SynthesizeSpecResult, defaultBackends, selectBackend, synthesizeSpec } from "@video-studio/voice";
 import { hyperframesOptions } from "./hyperframes.js";
@@ -248,10 +249,12 @@ export async function loadValidSpec(projectDir: string): Promise<{ spec: VideoSp
   return { spec: parsed.data, warnings: v.warnings, specPath, irPath: contentIr };
 }
 
-/** Frame size / fps for a quality. Preview: half resolution, 15 fps (24 when HyperFrames draws, it needs 24/30/60). */
-export function targetFor(spec: Pick<VideoSpec, "aspect_ratio">, quality: Quality, hyperframes: boolean, override: RenderProjectOptions["target"] = {}): RenderTarget {
-  const shortSide = override.shortSide ?? (quality === "preview" ? 540 : 1080);
-  const fps = override.fps ?? (quality === "preview" ? (hyperframes ? 24 : 15) : 30);
+/** Frame size / fps for a quality. Final: the spec's master canvas. Preview: half resolution, 15 fps (24 when HyperFrames draws, it needs 24/30/60). */
+export function targetFor(spec: Pick<VideoSpec, "aspect_ratio" | "master">, quality: Quality, hyperframes: boolean, override: RenderProjectOptions["target"] = {}): RenderTarget {
+  const master = resolveMaster(spec);
+  const masterShort = Math.min(master.width, master.height);
+  const shortSide = override.shortSide ?? (quality === "preview" ? Math.round(masterShort / 2) : masterShort);
+  const fps = override.fps ?? (quality === "preview" ? (hyperframes ? 24 : 15) : master.fps);
   return targetForAspect(spec.aspect_ratio, { shortSide, fps });
 }
 

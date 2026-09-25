@@ -3,5 +3,5 @@
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../schema" }, { "path": "../core" }, { "path": "../ingestion" }, { "path": "../media" }, { "path": "../voice" }, { "path": "../renderer" }]
+  "references": [{ "path": "../schema" }, { "path": "../core" }, { "path": "../ingestion" }, { "path": "../media" }, { "path": "../platforms" }, { "path": "../voice" }, { "path": "../renderer" }]
 }

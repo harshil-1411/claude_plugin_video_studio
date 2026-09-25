@@ -13,15 +13,26 @@ Phases 0–3 are built. A planned project renders to a finished, captioned 9:16 
 | 0 Foundation | Done: pnpm/TS7 monorepo, zod schemas → `schemas/*.json`, core (cache, SQLite ledger, job runner), MCP server bundled to `dist/mcp.mjs` | tests, `claude plugin validate --strict` |
 | 1 Ingestion | Done: text/markdown/URL/PDF/DOCX/PPTX/repo → ContentIR, secret scanning, 10 golden fixtures | tests (golden snapshots) |
 | 2 Planning | Done: 5 templates, `plan`/`create` skills, `brief_validate`, strict-grounding `spec_validate`, `storyboard_render` | tests incl. `examples/readme-plan` end to end |
+| 4 Platform compiler | Step 1 done (schema M1/M2/M4, contract format, `packages/platforms`). Next: step 2 (agents A + B) | tests |
 | 3 Local render | Done: voice (`say`/silent/ElevenLabs), FFmpeg + HyperFrames renderers, captions, assembly, QA, `dist/` export, job tools | Sandbox: silent + FFmpeg. **User's machine: `say` + HyperFrames render `examples/text-to-motion-graphic` end to end.** |
 
-- **Tests:** 391 pass, 2 skipped. The skipped ones are env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1`, which must be run outside the sandbox.
+- **Tests:** 416 pass, 2 skipped. The skipped ones are env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1`, which must be run outside the sandbox.
 - **Smoke:** `pnpm smoke` passes, including a tiny render through the bundle.
 - **MCP tools (14):** doctor, project_init, ingest, schema_get, template_list, template_get, spec_scaffold, brief_validate, spec_validate, storyboard_render, render_submit, job_status, qa_run, export.
 - **Skills:** create, plan, ingest, validate, render, qa, export, doctor.
 - **Agents:** source-researcher, creative-director.
 
-**Phase 3 exit check:** the plugin loads in Claude Code, and its tools resolve as `mcp__plugin_video-studio_engine__*`. Still to confirm: a full interactive `/video-studio:create "Explain vector DBs in 30s"` run ending in `dist/reel.mp4`. A first attempt created `vector-dbs-explainer/` (untracked, not committed) but stopped after ingest: there is no brief, spec or `dist/` yet. Resume it with `/video-studio:plan` then `/video-studio:render` on that folder, or delete it and re-run `create`.
+**Phase 3 exit check: done.** `/video-studio:create "Explain vector DBs in 30s"` produced `vector-dbs-explainer/dist/reel.mp4` (plus clean master, captions, thumbnail, manifest). The folder is left untracked as a sample output.
+
+**Phase 4 step 1 (schema foundation): done.**
+- **M1:** `VideoSpec.master {width, height, fps: 24|30|60}` and `targets[]` (contract ids). Both optional; `resolveMaster(spec)` defaults to 1080 px short side @ 30, and `resolveTargets(spec)` defaults to `PRIMARY_TARGET[platform]` (`instagram_reels`→`instagram`, `youtube_shorts`→`youtube-shorts`; `youtube`/`x`/`generic`→none). The brief has optional `targets` too. Semantic checks: master ratio ≠ aspect, odd sides, duplicate targets. The pipeline's final render size/fps now come from `master` (preview = half).
+- **M2:** `cover {headline, focal_time_sec}` and `publish.<target> {post_caption, hashtags[], ai_disclosure}`. Checks: focal time after the end (error), publish key not a target (warning). The storyboard shows master, targets, cover and post copy.
+- **M4:** Brand `version: 2` adds `visual.weights`, `visual.font_fallbacks` (wired: inserted before the generic family in every font chain), `visual.logo_placement`, `visual.forbidden`, `captions {family, weight, active_word, plate_opacity, max_lines}`, `motion {personality, transition_ms}`, `voice.banned_phrases`. v1 files stay valid. **Not yet consumed:** captions/motion/logo_placement/weights (agent B and Phase 5), banned_phrases/forbidden (lint, agent A).
+- **Contract format:** `PlatformContract` zod in `packages/schema/src/platform-contract.ts` → `schemas/platform-contract.schema.json` (`schema_get name=platform-contract`). Fields: id (= file name), contract_version, verified date, sources, route (`app_upload`/`api`), video envelope, cover (mode, formats, size, crops), captions (post caption/hashtag limits, sidecar formats), ai_disclosure, `ui_masks[]` (normalized rects per aspect ratio, severity).
+- **`packages/platforms`:** `findPlatformSpecsDir`, `loadContracts`, `getContract`, `checkSpecTargets` (unknown target → error with closest ids; aspect not accepted → warning), geometry `toPx`/`intersect`/`masksFor`/`maskCollisions`. Fixture registry in `src/__fixtures__/specs/` (made-up values). `platform-specs/` holds only `README.md` so far.
+- **`spec_validate`** runs target checks (stage `platform`) once the registry has ≥ 1 contract; with the empty registry it skips them. **`spec_scaffold`** takes `targets`, emits `master` + `targets`, and notes to add `cover` and `publish`. The plan skill and `brief-and-spec-fields.md` document the four text channels.
+- Workspace symlinks for `@video-studio/platforms` were created by hand in `packages/{mcp,renderer}/node_modules/@video-studio/`; `pnpm install` recreates them.
+- Verified: `tsc -b`, 416 tests pass (2 env-gated skipped), smoke, `plugin validate --strict` (both), bundle rebuilt.
 
 ## Environment facts that shape everything
 
@@ -59,7 +70,7 @@ Phases 0–3 are built. A planned project renders to a finished, captioned 9:16 
 The full spec is in `docs/PLAN.md` (items M1–M9 plus lint/verify/test/`video.lock`). M9, the Chrome probe fix, is already done.
 
 Dependency order:
-1. **Coordinator, sequential and small.** These are schema changes that everything else builds on:
+1. **Done (see above).** Coordinator, sequential and small. These are schema changes that everything else builds on:
    - **M1:** `VideoSpec` gains `master {width,height,fps}` (default 1080×1920@30) and `targets[]` (platform ids). Keep `platform`/`aspect_ratio` as the primary target for back-compat.
    - **M2:** add `cover {headline, focal_time_sec}` and `publish.<platform> {post_caption, hashtags[], ai_disclosure}`.
    - **M4:** Brand v2 fields (captions, motion, logo placement, forbidden, banned_phrases). Back-compatible.

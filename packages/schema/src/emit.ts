@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Brand } from "./brand.js";
 import { ContentIR } from "./content-ir.js";
 import { CreativeBrief } from "./creative-brief.js";
+import { PlatformContract } from "./platform-contract.js";
 import { Policy } from "./policy.js";
 import { RenderManifest } from "./render-manifest.js";
 import { Template } from "./template.js";
@@ -19,6 +20,7 @@ export const EMITTED_SCHEMAS = {
   brand: Brand,
   policy: Policy,
   template: Template,
+  "platform-contract": PlatformContract,
 } as const satisfies Record<string, z.ZodType>;
 
 export type EmittedSchemaName = keyof typeof EMITTED_SCHEMAS;

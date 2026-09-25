@@ -7,7 +7,10 @@ import {
   Id,
   LanguageTag,
   NonEmptyString,
+  Fps,
   Platform,
+  PlatformTargetId,
+  PRIMARY_TARGET,
   SchemaVersion,
   UsdAmount,
 } from "./common.js";
@@ -98,6 +101,31 @@ export const CaptionSettings = z.strictObject({
   burn_in: z.boolean(),
 });
 
+export const MasterCanvas = z
+  .strictObject({
+    width: z.int().min(2).max(7680),
+    height: z.int().min(2).max(7680),
+    fps: Fps,
+  })
+  .describe("Production master canvas every target is compiled from. Defaults to 1080 px on the short side at 30 fps.");
+
+export const Cover = z
+  .strictObject({
+    headline: NonEmptyString.describe("Cover/thumbnail text; separate from on-screen text, captions and post captions."),
+    focal_time_sec: z.number().nonnegative().describe("Video time of the frame the cover is composed from (TikTok uses it as the cover timestamp)."),
+  })
+  .describe("Cover (thumbnail) text and focal frame.");
+
+export const Hashtag = z.string().regex(/^#[\p{L}\p{N}_]+$/u, "expected a hashtag like #devtools (no spaces)");
+
+export const PublishSettings = z
+  .strictObject({
+    post_caption: z.string().describe("Text posted with the video on the platform; separate from speech captions."),
+    hashtags: z.array(Hashtag).optional(),
+    ai_disclosure: z.boolean().optional().describe("Mark the post as AI-generated where the platform supports it."),
+  })
+  .describe("Per-target post copy.");
+
 export const VideoSpec = z
   .strictObject({
     schema_version: SchemaVersion,
@@ -107,8 +135,13 @@ export const VideoSpec = z
     brief_id: Id.optional(),
     goal: Goal,
     audience: NonEmptyString,
-    platform: Platform,
+    platform: Platform.describe("Primary platform; with `aspect_ratio` it defines the primary target."),
     aspect_ratio: AspectRatio,
+    master: MasterCanvas.optional(),
+    targets: z
+      .array(PlatformTargetId)
+      .optional()
+      .describe("Platform contract ids to compile for. Defaults to the primary platform's contract."),
     target_duration_sec: z.number().positive().max(600),
     language: LanguageTag,
     brand_profile: z.string().optional().describe("Brand profile reference, e.g. `acme@3`."),
@@ -116,6 +149,8 @@ export const VideoSpec = z
     grounding: Grounding,
     voice: VoiceSettings,
     captions: CaptionSettings,
+    cover: Cover.optional(),
+    publish: z.record(PlatformTargetId, PublishSettings).optional().describe("Post copy keyed by target id."),
     scenes: z.array(Scene).min(1),
   })
   .meta({
@@ -135,7 +170,29 @@ export type Transition = z.infer<typeof Transition>;
 export type Scene = z.infer<typeof Scene>;
 export type VoiceSettings = z.infer<typeof VoiceSettings>;
 export type CaptionSettings = z.infer<typeof CaptionSettings>;
+export type MasterCanvas = z.infer<typeof MasterCanvas>;
+export type Cover = z.infer<typeof Cover>;
+export type PublishSettings = z.infer<typeof PublishSettings>;
 export type VideoSpec = z.infer<typeof VideoSpec>;
+
+/** Default master for an aspect ratio: 1080 px on the short side, even dimensions, 30 fps. */
+export function defaultMaster(aspect: AspectRatio): MasterCanvas {
+  const [aw, ah] = aspect.split(":").map(Number) as [number, number];
+  const even = (n: number) => Math.round(n / 2) * 2;
+  return aw <= ah ? { width: 1080, height: even((1080 * ah) / aw), fps: 30 } : { width: even((1080 * aw) / ah), height: 1080, fps: 30 };
+}
+
+/** The spec's master canvas, or the default for its aspect ratio. */
+export function resolveMaster(spec: Pick<VideoSpec, "aspect_ratio" | "master">): MasterCanvas {
+  return spec.master ?? defaultMaster(spec.aspect_ratio);
+}
+
+/** Target contract ids: `targets` when given, else the primary platform's contract (possibly none). */
+export function resolveTargets(spec: Pick<VideoSpec, "platform" | "targets">): string[] {
+  if (spec.targets?.length) return [...new Set(spec.targets)];
+  const primary = PRIMARY_TARGET[spec.platform];
+  return primary ? [primary] : [];
+}
 
 
 // ---------------------------------------------------------------- deterministic props per kind
@@ -505,6 +562,57 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
       }
     }
   });
+
+  if (spec.master) {
+    const { width, height } = spec.master;
+    const [aw, ah] = spec.aspect_ratio.split(":").map(Number) as [number, number];
+    if (Math.abs(width / height - aw / ah) > 0.01 * (aw / ah)) {
+      const d = defaultMaster(spec.aspect_ratio);
+      errors.push({
+        path: "master",
+        message: `master ${width}×${height} does not match aspect_ratio ${spec.aspect_ratio}`,
+        fix: `use ${d.width}×${d.height} (or another size with ratio ${spec.aspect_ratio}), or change aspect_ratio`,
+      });
+    }
+    if (width % 2 !== 0 || height % 2 !== 0) {
+      errors.push({
+        path: "master",
+        message: `master ${width}×${height} has an odd dimension; H.264 needs even width and height`,
+        fix: `use ${width + (width % 2)}×${height + (height % 2)}`,
+      });
+    }
+  }
+
+  if (spec.targets) {
+    const seenTargets = new Set<string>();
+    spec.targets.forEach((t, i) => {
+      if (seenTargets.has(t)) {
+        errors.push({ path: `targets.${i}`, message: `duplicate target "${t}"`, fix: `remove the second "${t}"` });
+      }
+      seenTargets.add(t);
+    });
+  }
+
+  if (spec.cover && spec.cover.focal_time_sec > total) {
+    errors.push({
+      path: "cover.focal_time_sec",
+      message: `cover focal time ${spec.cover.focal_time_sec}s is after the end of the video (${round(total)}s)`,
+      fix: "pick a moment inside the hook scene, where the cover headline is on screen",
+    });
+  }
+
+  if (spec.publish) {
+    const targets = resolveTargets(spec);
+    for (const key of Object.keys(spec.publish)) {
+      if (!targets.includes(key)) {
+        warnings.push({
+          path: `publish.${key}`,
+          message: `publish copy for "${key}", which is not a target (${targets.length ? targets.join(", ") : "none"})`,
+          fix: targets.length ? `add "${key}" to targets, or rename the key to one of ${targets.join(", ")}` : `add "${key}" to targets or remove it`,
+        });
+      }
+    }
+  }
 
   const firstScene = spec.scenes[0];
   if (firstScene && firstScene.purpose !== "hook") {

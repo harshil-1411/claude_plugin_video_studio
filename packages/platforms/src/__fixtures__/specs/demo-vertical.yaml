@@ -1,0 +1,41 @@
+id: demo-vertical
+name: Demo Vertical
+contract_version: 1
+verified: "2026-09-25"
+sources:
+  - url: https://example.com/specs
+    note: fixture only
+platform: tiktok
+route: api
+video:
+  aspect_ratios: ["9:16"]
+  recommended: { width: 1080, height: 1920 }
+  min: { width: 540, height: 960 }
+  duration_sec: { min: 3, max: 600 }
+  fps: { min: 24, max: 60 }
+  max_size_mb: 300
+  container: [mp4]
+  video_codecs: [h264]
+  audio_codecs: [aac]
+cover:
+  mode: file
+  formats: [jpeg]
+  max_size_mb: 8
+  crops:
+    - { id: grid, aspect_ratio: "1:1", anchor: center }
+captions:
+  post_caption_max_chars: 2200
+  hashtags_max: 30
+  sidecar_formats: []
+  burn_in_recommended: true
+ui_masks:
+  - id: rail
+    label: action rail
+    aspect_ratio: "9:16"
+    rect: { x: 0.85, y: 0.4, w: 0.15, h: 0.45 }
+    severity: error
+  - id: caption
+    label: post caption and username
+    aspect_ratio: "9:16"
+    rect: { x: 0, y: 0.8, w: 0.85, h: 0.2 }
+    severity: error

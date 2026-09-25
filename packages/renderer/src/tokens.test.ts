@@ -47,6 +47,17 @@ describe("resolveTokens", () => {
   });
 });
 
+describe("brand font fallbacks", () => {
+  it("inserts fallbacks before the generic family, once", () => {
+    const t = resolveTokens({
+      brand: { name: "X" },
+      visual: { fonts: { heading: "Space Grotesk", body: "Inter" }, palette: {}, font_fallbacks: ["Noto Sans JP", "Arial"] },
+    });
+    expect(parseFontChain(t.font_heading)).toEqual(["Space Grotesk", "Inter", "Helvetica", "Arial", "Noto Sans JP", "sans-serif"]);
+    expect(t.font_mono).toBe('Menlo, "DejaVu Sans Mono", "Noto Sans JP", Arial, monospace');
+  });
+});
+
 describe("targetForAspect", () => {
   it("maps aspects to frame sizes at 30 fps", () => {
     expect(targetForAspect("9:16")).toEqual({ width: 1080, height: 1920, fps: 30, aspect_ratio: "9:16" });

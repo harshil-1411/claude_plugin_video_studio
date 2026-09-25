@@ -90,8 +90,10 @@ points). Call `brief_validate {project_dir}` and fix every error before going on
 ### 6. Spec
 
 1. Call `spec_scaffold {project_dir, template_id, target_duration_sec,
-   aspect_ratio, platform}`. It returns a skeleton (not written to disk) with
-   one scene per beat and timing. Keep its structure unless the story needs a
+   aspect_ratio, platform, targets?}`. It returns a skeleton (not written to
+   disk) with one scene per beat and timing, plus `master` (the production
+   canvas) and `targets` (platform contract ids, e.g. `instagram`, `tiktok`,
+   `youtube-shorts`). Keep its structure unless the story needs a
    beat split or merged; keep ids `s01`, `s02`, ... in order.
 2. Fill every scene following `references/script-writing.md` and
    `references/visual-strategy.md`:
@@ -107,6 +109,11 @@ points). Call `brief_validate {project_dir}` and fix every error before going on
    - `claim_refs`: every factual or numeric line cites evidence refs copied
      exactly from the ContentIR (`evidence[].ref` or a `claims[].id`).
    - `grounding: "strict"` unless the user chose otherwise.
+   - **Four separate text channels.** `voiceover` (spoken, becomes the
+     captions), `on_screen_text` (visual), `cover.headline` (thumbnail, ≤ 6
+     words, `focal_time_sec` inside the hook), and `publish.<target>.post_caption`
+     + `hashtags` (the post copy, one entry per target). Never copy one into
+     another verbatim.
 3. Keep scene durations summing to within ±10% of `target_duration_sec`.
 4. Write `<project_dir>/project/video-spec.json`.
 

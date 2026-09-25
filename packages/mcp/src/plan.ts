@@ -12,6 +12,9 @@ import {
   type Template,
   VideoSpec,
   parseYamlOrJson,
+  defaultMaster,
+  resolveMaster,
+  resolveTargets,
   validateCreativeBriefSemantics,
   validateVideoSpecSemantics,
 } from "@video-studio/schema";
@@ -144,6 +147,8 @@ export interface ScaffoldOptions {
   target_duration_sec?: number;
   aspect_ratio?: AspectRatio;
   platform?: Platform;
+  /** Platform contract ids; default: the brief's, else the platform's own contract. */
+  targets?: string[];
   include_optional?: boolean;
 }
 
@@ -211,12 +216,19 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
   const target = opts.target_duration_sec ?? brief?.target_duration_sec ?? tpl.default_duration_sec;
   const platform = opts.platform ?? brief?.platform ?? tpl.platforms[0]!;
   const aspect = opts.aspect_ratio ?? brief?.aspect_ratio ?? tpl.default_aspect_ratio ?? PLATFORM_NORMS[platform].aspect_ratios[0]!;
+  const targets = resolveTargets({ platform, targets: opts.targets ?? brief?.targets });
   const { min_sec, max_sec } = tpl.duration_range;
   if (target < min_sec || target > max_sec) notes.push(`target ${target}s is outside template range ${min_sec}–${max_sec}s`);
 
   const includeOptional = opts.include_optional ?? target >= tpl.default_duration_sec;
   const beats = tpl.beats.filter((b) => includeOptional || !b.optional);
   const dropped = tpl.beats.length - beats.length;
+  notes.push(
+    "add cover {headline, focal_time_sec}: a short headline (≤ 6 words) and a moment inside the hook scene",
+    targets.length
+      ? `add publish.<target> {post_caption, hashtags} for ${targets.join(", ")}; post copy is separate from voiceover and captions`
+      : "no platform targets: publish copy is optional",
+  );
   if (dropped > 0) notes.push(`dropped ${dropped} optional beat(s) because target ${target}s < template default ${tpl.default_duration_sec}s`);
   const durations = allocateDurations(
     beats.map((b) => b.share),
@@ -247,6 +259,8 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
     audience: brief?.audience ?? "TODO: audience",
     platform,
     aspect_ratio: aspect,
+    master: defaultMaster(aspect),
+    ...(targets.length ? { targets } : {}),
     target_duration_sec: target,
     language: brief?.language ?? "en-US",
     grounding: "strict",
@@ -356,6 +370,13 @@ export function renderStoryboardMarkdown(spec: VideoSpec, ir: ContentIR | null):
     `Goal: ${spec.goal} · Audience: ${spec.audience} · Platform: ${spec.platform} (${spec.aspect_ratio}) · Target: ${spec.target_duration_sec}s · Scenes total: ${total}s · Grounding: ${spec.grounding} · Captions: ${spec.captions.preset}`,
     "",
   );
+  const master = resolveMaster(spec);
+  const targets = resolveTargets(spec);
+  lines.push(`Master: ${master.width}×${master.height} @ ${master.fps} fps · Targets: ${targets.join(", ") || "none"}`, "");
+  if (spec.cover) lines.push(`Cover: "${spec.cover.headline}" at ${spec.cover.focal_time_sec}s`, "");
+  for (const [id, p] of Object.entries(spec.publish ?? {})) {
+    lines.push(`Post (${id}): ${truncate(p.post_caption, 200)}${p.hashtags?.length ? ` ${p.hashtags.join(" ")}` : ""}`, "");
+  }
   lines.push("| Scene | Time | Purpose | Voiceover | On-screen text | Visual | Refs |");
   lines.push("|---|---|---|---|---|---|---|");
   spec.scenes.forEach((s, i) => {

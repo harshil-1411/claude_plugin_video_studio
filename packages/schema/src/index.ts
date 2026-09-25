@@ -4,6 +4,7 @@ export * from "./creative-brief.js";
 export * from "./video-spec.js";
 export * from "./render-manifest.js";
 export * from "./brand.js";
+export * from "./platform-contract.js";
 export * from "./policy.js";
 export * from "./capabilities.js";
 export * from "./parse.js";

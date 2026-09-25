@@ -23,6 +23,9 @@ import {
   parseYamlOrJson,
   validateCreativeBriefSemantics,
   validateVideoSpecSemantics,
+  defaultMaster,
+  resolveMaster,
+  resolveTargets,
   type VideoSpec as VideoSpecT,
 } from "./index.js";
 
@@ -38,6 +41,7 @@ const FIXTURES: Record<EmittedSchemaName, string> = {
   brand: "acme.brand.yaml",
   policy: "enterprise.policy.yaml",
   template: "../../../templates/explain/template.yaml",
+  "platform-contract": "../../platforms/src/__fixtures__/specs/demo-vertical.yaml",
 };
 
 function loadSpec(): VideoSpecT {
@@ -283,6 +287,100 @@ describe("validateVideoSpecSemantics", () => {
       "scenes.5.purpose",
     ]);
     for (const issue of [...res.errors, ...res.warnings]) expect(issue.fix.length).toBeGreaterThan(5);
+  });
+});
+
+describe("master, targets, cover and publish (M1/M2)", () => {
+  const issues = (spec: VideoSpecT) => {
+    const r = validateVideoSpecSemantics(spec);
+    return { errors: r.errors.map((e) => e.path), warnings: r.warnings.map((e) => e.path) };
+  };
+
+  it("defaults the master to 1080 on the short side at 30 fps", () => {
+    expect(defaultMaster("9:16")).toEqual({ width: 1080, height: 1920, fps: 30 });
+    expect(defaultMaster("16:9")).toEqual({ width: 1920, height: 1080, fps: 30 });
+    expect(defaultMaster("4:5")).toEqual({ width: 1080, height: 1350, fps: 30 });
+    expect(resolveMaster({ aspect_ratio: "1:1" })).toEqual({ width: 1080, height: 1080, fps: 30 });
+  });
+
+  it("defaults targets to the primary platform's contract", () => {
+    expect(resolveTargets({ platform: "instagram_reels" })).toEqual(["instagram"]);
+    expect(resolveTargets({ platform: "youtube_shorts" })).toEqual(["youtube-shorts"]);
+    expect(resolveTargets({ platform: "generic" })).toEqual([]);
+    expect(resolveTargets({ platform: "tiktok", targets: ["tiktok", "instagram", "tiktok"] })).toEqual(["tiktok", "instagram"]);
+  });
+
+  it("existing specs without the new fields stay valid", () => {
+    expect(validateVideoSpecSemantics(loadSpec()).ok).toBe(true);
+  });
+
+  it("accepts a multi-target spec with cover and publish copy", () => {
+    const spec = clone(loadSpec());
+    Object.assign(spec, {
+      master: { width: 1080, height: 1920, fps: 30 },
+      targets: ["instagram", "tiktok", "youtube-shorts"],
+      cover: { headline: "Search by meaning", focal_time_sec: 1.5 },
+      publish: { tiktok: { post_caption: "Vector DBs in 30s", hashtags: ["#ai", "#databases"], ai_disclosure: true } },
+    });
+    const r = VideoSpec.safeParse(spec);
+    expect(r.success).toBe(true);
+    expect(issues(spec)).toEqual({ errors: [], warnings: [] });
+  });
+
+  it("schema rejects bad fps, hashtags and target ids", () => {
+    const spec = loadSpec() as unknown as Record<string, any>;
+    spec.master = { width: 1080, height: 1920, fps: 25 };
+    spec.targets = ["TikTok"];
+    spec.publish = { tiktok: { post_caption: "x", hashtags: ["no hash", "#ok"] } };
+    const r = parseYamlOrJson(VideoSpec, JSON.stringify(spec));
+    expect(r.ok ? [] : r.errors.map((e) => e.path)).toEqual(expect.arrayContaining(["master.fps", "targets.0", "publish.tiktok.hashtags.0"]));
+  });
+
+  it("flags a master that mismatches the aspect ratio or has odd sides", () => {
+    const spec = clone(loadSpec());
+    spec.master = { width: 1920, height: 1080, fps: 30 };
+    expect(issues(spec).errors).toEqual(["master"]);
+    spec.master = { width: 1081, height: 1922, fps: 30 };
+    expect(validateVideoSpecSemantics(spec).errors.map((e) => e.message).join(" ")).toMatch(/odd dimension/);
+  });
+
+  it("flags duplicate targets, a cover after the end, and publish copy for a non-target", () => {
+    const spec = clone(loadSpec());
+    spec.targets = ["tiktok", "tiktok"];
+    spec.cover = { headline: "x", focal_time_sec: 99 };
+    spec.publish = { instagram: { post_caption: "x" } };
+    expect(issues(spec)).toEqual({ errors: ["targets.1", "cover.focal_time_sec"], warnings: ["publish.instagram"] });
+  });
+});
+
+describe("Brand v2 (M4)", () => {
+  it("parses the v2 blocks and keeps v1 files valid", () => {
+    expect(parseYamlOrJson(Brand, read(FIXTURES.brand)).ok).toBe(true);
+    const v2 = parseYaml(read(FIXTURES.brand));
+    Object.assign(v2, {
+      version: 2,
+      captions: { family: "Inter", weight: 700, active_word: false, plate_opacity: 0.6, max_lines: 2 },
+      motion: { personality: "precise", transition_ms: 250 },
+    });
+    v2.voice.banned_phrases = ["guaranteed results"];
+    Object.assign(v2.visual, {
+      weights: { heading: 800, body: 400 },
+      font_fallbacks: ["Noto Sans JP"],
+      logo_placement: { position: "top_right", max_fraction: 0.12 },
+      forbidden: ["drop shadows"],
+    });
+    const r = Brand.safeParse(v2);
+    expect(r.success ? [] : r.error.issues).toEqual([]);
+  });
+
+  it("rejects out-of-range v2 values with paths", () => {
+    const b = parseYaml(read(FIXTURES.brand));
+    b.captions = { weight: 750, plate_opacity: 1.5, max_lines: 4 };
+    b.motion = { personality: "wild" };
+    const r = parseYamlOrJson(Brand, JSON.stringify(b));
+    expect(r.ok ? [] : r.errors.map((e) => e.path)).toEqual(
+      expect.arrayContaining(["captions.weight", "captions.plate_opacity", "captions.max_lines", "motion.personality"]),
+    );
   });
 });
 

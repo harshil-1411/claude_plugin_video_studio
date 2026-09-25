@@ -160,6 +160,14 @@
       "maximum": 600,
       "type": "number"
     },
+    "targets": {
+      "description": "Platform contract ids to compile for; copied to the VideoSpec. Defaults to the primary platform's contract.",
+      "items": {
+        "pattern": "^[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "type": "array"
+    },
     "template": {
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
       "type": "string"

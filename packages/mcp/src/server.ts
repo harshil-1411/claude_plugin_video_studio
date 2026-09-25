@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { initProject, projectPaths } from "@video-studio/core";
 import { type IngestOptions, formatIngestSummary, ingest } from "@video-studio/ingestion";
-import { AspectRatio, Platform } from "@video-studio/schema";
+import { AspectRatio, Platform, PlatformTargetId } from "@video-studio/schema";
 import { z } from "zod";
 import { type DoctorDeps, defaultDoctorDeps, formatDoctorReport, runDoctor } from "./doctor.js";
 import { SCHEMA_NAMES, findSchemasDir, resolveInputPath } from "./paths.js";
@@ -272,6 +272,10 @@ export function createServer(options: ServerOptions = {}): McpServer {
         target_duration_sec: z.number().positive().max(600).optional().describe("Overrides the brief/template duration"),
         aspect_ratio: AspectRatio.optional().describe("Overrides the brief/template aspect ratio"),
         platform: Platform.optional().describe("Overrides the brief/template platform"),
+        targets: z
+          .array(PlatformTargetId)
+          .optional()
+          .describe("Platform contract ids to compile for, e.g. [\"instagram\", \"tiktok\", \"youtube-shorts\"]; overrides the brief. Default: the platform's own contract"),
         include_optional: z
           .boolean()
           .optional()
@@ -286,12 +290,13 @@ export function createServer(options: ServerOptions = {}): McpServer {
         target_duration_sec?: number;
         aspect_ratio?: AspectRatio;
         platform?: Platform;
+        targets?: string[];
         include_optional?: boolean;
       }) => {
         const { project_dir, ...opts } = args;
         const r = await scaffoldSpec(resolveInputPath(project_dir, cwd()), requireTemplatesDir(env), opts);
         const summary = [
-          `scaffolded ${r.spec.scenes.length} scenes from template "${r.template_id}" (${r.spec.target_duration_sec}s, ${r.spec.platform}, ${r.spec.aspect_ratio}); not written`,
+          `scaffolded ${r.spec.scenes.length} scenes from template "${r.template_id}" (${r.spec.target_duration_sec}s, ${r.spec.platform}, ${r.spec.aspect_ratio}, targets: ${r.spec.targets?.join(", ") || "none"}); not written`,
           ...r.scene_guidance.map((g) => `${g.scene_id} ${g.purpose} ${g.duration_sec}s (<= ${g.word_budget} words): ${g.guidance}`),
           ...r.notes.map((n) => `note: ${n}`),
         ].join("\n");

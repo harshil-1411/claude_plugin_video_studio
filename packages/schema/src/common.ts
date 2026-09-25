@@ -50,6 +50,41 @@ export const Platform = z.enum([
 
 export const AspectRatio = z.enum(["9:16", "16:9", "1:1", "4:5"]);
 
+/**
+ * Platform contract id: the file name of a `platform-specs/<id>.yaml` contract,
+ * e.g. `instagram`, `tiktok`, `youtube-shorts`, `facebook-page-api`.
+ */
+export const PlatformTargetId = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9-]*$/, "expected a platform contract id like tiktok or youtube-shorts");
+
+/**
+ * Default contract id for each primary `platform`, used when a spec has no `targets`.
+ * Null means no contract applies (plain 16:9 YouTube, X and generic output).
+ */
+export const PRIMARY_TARGET: Readonly<Record<Platform, string | null>> = {
+  instagram_reels: "instagram",
+  tiktok: "tiktok",
+  youtube_shorts: "youtube-shorts",
+  youtube: null,
+  linkedin: "linkedin",
+  x: null,
+  generic: null,
+};
+
+/** Frame rates every renderer supports (HyperFrames draws only 24, 30 or 60). */
+export const Fps = z.union([z.literal(24), z.literal(30), z.literal(60)]);
+
+/** A rectangle in normalized frame coordinates: 0–1 from the top-left corner. */
+export const NormalizedRect = z
+  .strictObject({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    w: z.number().positive().max(1),
+    h: z.number().positive().max(1),
+  })
+  .refine((r) => r.x + r.w <= 1.0001 && r.y + r.h <= 1.0001, { message: "rect must lie inside the frame (x+w ≤ 1, y+h ≤ 1)" });
+
 export const Grounding = z.enum(["strict", "loose", "off"]);
 
 export const DataClass = z.enum(["public", "internal", "confidential", "restricted"]);
@@ -72,6 +107,9 @@ export type SourceRef = z.infer<typeof SourceRef>;
 export type Goal = z.infer<typeof Goal>;
 export type Platform = z.infer<typeof Platform>;
 export type AspectRatio = z.infer<typeof AspectRatio>;
+export type PlatformTargetId = z.infer<typeof PlatformTargetId>;
+export type Fps = z.infer<typeof Fps>;
+export type NormalizedRect = z.infer<typeof NormalizedRect>;
 export type Grounding = z.infer<typeof Grounding>;
 export type DataClass = z.infer<typeof DataClass>;
 export type DataPolicy = z.infer<typeof DataPolicy>;

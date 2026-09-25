@@ -7,6 +7,7 @@ import {
   LanguageTag,
   NonEmptyString,
   Platform,
+  PlatformTargetId,
   SchemaVersion,
 } from "./common.js";
 
@@ -51,6 +52,10 @@ export const CreativeBrief = z
     audience: NonEmptyString,
     platform: Platform,
     aspect_ratio: AspectRatio,
+    targets: z
+      .array(PlatformTargetId)
+      .optional()
+      .describe("Platform contract ids to compile for; copied to the VideoSpec. Defaults to the primary platform's contract."),
     target_duration_sec: z.number().positive().max(600),
     language: LanguageTag,
     tone: z.array(NonEmptyString),

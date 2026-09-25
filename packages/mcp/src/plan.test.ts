@@ -116,6 +116,17 @@ describe("spec_scaffold", () => {
     expect(short.spec.scenes.map((s) => s.purpose)).not.toContain("proof");
     expect(short.spec).toMatchObject({ platform: "youtube", aspect_ratio: "16:9" });
     expect(short.notes.join(" ")).toMatch(/dropped 1 optional beat/);
+    expect(r.spec).toMatchObject({ master: { width: 1080, height: 1920, fps: 30 }, targets: ["instagram"] });
+    expect(short.spec.master).toEqual({ width: 1920, height: 1080, fps: 30 });
+    expect(short.spec.targets).toBeUndefined();
+    expect(r.notes.join(" ")).toMatch(/add cover \{headline, focal_time_sec\}/);
+  });
+
+  it("takes explicit targets over the brief", async () => {
+    const root = await exampleProject("scaffold-targets");
+    const r = await scaffoldSpec(root, templatesDir, { template_id: "explain", targets: ["instagram", "tiktok", "youtube-shorts"] });
+    expect(r.spec.targets).toEqual(["instagram", "tiktok", "youtube-shorts"]);
+    expect(r.notes.join(" ")).toMatch(/publish\.<target>.*instagram, tiktok, youtube-shorts/);
   });
 });
 
@@ -212,6 +223,37 @@ describe("strict grounding via spec_validate", () => {
     expect(byPath["scenes.0.claim_refs"]!.message).toMatch(/scene s01.*"40%"/);
     expect(byPath["scenes.1.claim_refs.0"]!.fix).toContain('"url:https://example.com/vector-db-guide#keyword-limits"');
     expect(r.errors.every((e) => e.fix && e.stage === "semantic")).toBe(true);
+  });
+});
+
+describe("platform targets via spec_validate", () => {
+  const registry = resolve(here, "../../platforms/src/__fixtures__/specs");
+
+  it("errors on an unknown target and warns on an aspect the contract does not accept", async () => {
+    const root = await exampleProject("targets");
+    const specPath = join(root, "project/video-spec.json");
+    const spec = JSON.parse(await readFile(specPath, "utf8"));
+    spec.targets = ["demo-vertical", "demo-vertcal"];
+    await writeFile(specPath, JSON.stringify(spec));
+    const r = await validateSpecFile(specPath, join(root, "source/content-ir.json"), registry);
+    expect(r.errors).toEqual([expect.objectContaining({ path: "targets.1", stage: "platform", fix: 'use one of "demo-vertical"' })]);
+
+    spec.targets = ["demo-vertical"];
+    spec.aspect_ratio = "1:1";
+    spec.platform = "generic";
+    await writeFile(specPath, JSON.stringify(spec));
+    const w = await validateSpecFile(specPath, join(root, "source/content-ir.json"), registry);
+    expect(w.ok).toBe(true);
+    expect(w.warnings.filter((x) => x.stage === "platform").map((x) => x.message)).toEqual([expect.stringMatching(/Demo Vertical expects 9:16/)]);
+  });
+
+  it("skips target checks while the registry has no contracts", async () => {
+    const root = await exampleProject("targets-empty");
+    const empty = join(tmp, "empty-registry");
+    await mkdir(empty, { recursive: true });
+    const r = await validateSpecFile(join(root, "project/video-spec.json"), join(root, "source/content-ir.json"), empty);
+    expect(r.ok).toBe(true);
+    expect(r.errors.concat(r.warnings).some((i) => i.stage === "platform")).toBe(false);
   });
 });
 

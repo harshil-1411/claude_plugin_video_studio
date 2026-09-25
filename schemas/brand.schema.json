@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:video-studio:schema:brand",
   "title": "Brand",
-  "description": "brand.yaml: brand voice, visual tokens, video defaults, terminology, prohibited claims and allowed CTAs.",
+  "description": "brand.yaml: brand voice, visual tokens, caption and motion styling, video defaults, terminology, prohibited claims and allowed CTAs.",
   "additionalProperties": false,
   "properties": {
     "brand": {
@@ -20,6 +20,39 @@
       "required": [
         "name"
       ],
+      "type": "object"
+    },
+    "captions": {
+      "description": "Burned-in caption styling.",
+      "additionalProperties": false,
+      "properties": {
+        "active_word": {
+          "description": "Karaoke-style active-word highlight. Off by default: keyword emphasis only.",
+          "type": "boolean"
+        },
+        "family": {
+          "description": "Caption font family; defaults to the body font.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "max_lines": {
+          "maximum": 3,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "plate_opacity": {
+          "description": "Opacity of the plate behind caption text (0 = no plate).",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "weight": {
+          "maximum": 900,
+          "minimum": 100,
+          "multipleOf": 100,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "claims": {
@@ -77,10 +110,41 @@
       ],
       "type": "object"
     },
+    "motion": {
+      "description": "Motion tokens.",
+      "additionalProperties": false,
+      "properties": {
+        "personality": {
+          "description": "Maps to easing curves and durations in the renderers.",
+          "enum": [
+            "calm",
+            "precise",
+            "friendly",
+            "energetic",
+            "playful"
+          ],
+          "type": "string"
+        },
+        "transition_ms": {
+          "maximum": 2000,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "version": {
-      "description": "brand.yaml format version.",
-      "const": 1,
-      "type": "number"
+      "description": "brand.yaml format version. 2 adds captions, motion, weights, logo placement and banned phrases; 1 files stay valid.",
+      "anyOf": [
+        {
+          "const": 1,
+          "type": "number"
+        },
+        {
+          "const": 2,
+          "type": "number"
+        }
+      ]
     },
     "video": {
       "additionalProperties": false,
@@ -115,6 +179,14 @@
     "visual": {
       "additionalProperties": false,
       "properties": {
+        "font_fallbacks": {
+          "description": "Families appended to every font chain for scripts the brand fonts lack, e.g. Noto Sans JP.",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
         "fonts": {
           "additionalProperties": false,
           "properties": {
@@ -137,9 +209,43 @@
           ],
           "type": "object"
         },
+        "forbidden": {
+          "description": "Visual treatments the brand never uses, e.g. \"drop shadows\", \"gradients on logo\".",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
         "logo": {
           "minLength": 1,
           "type": "string"
+        },
+        "logo_placement": {
+          "additionalProperties": false,
+          "properties": {
+            "max_fraction": {
+              "description": "Largest logo width as a fraction of frame width.",
+              "exclusiveMinimum": 0,
+              "maximum": 0.5,
+              "type": "number"
+            },
+            "position": {
+              "enum": [
+                "top_left",
+                "top_right",
+                "bottom_left",
+                "bottom_right",
+                "end_card_only",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "position"
+          ],
+          "type": "object"
         },
         "palette": {
           "description": "Named colour tokens, e.g. primary, secondary, background, text.",
@@ -149,6 +255,24 @@
           },
           "propertyNames": {
             "type": "string"
+          },
+          "type": "object"
+        },
+        "weights": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "maximum": 900,
+              "minimum": 100,
+              "multipleOf": 100,
+              "type": "integer"
+            },
+            "heading": {
+              "maximum": 900,
+              "minimum": 100,
+              "multipleOf": 100,
+              "type": "integer"
+            }
           },
           "type": "object"
         }
@@ -163,7 +287,15 @@
       "additionalProperties": false,
       "properties": {
         "avoid": {
-          "description": "Words and phrases the script must not use.",
+          "description": "Words and phrases the script should avoid (warning).",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "banned_phrases": {
+          "description": "Phrases that must never appear in voiceover, on-screen text, cover or post copy (error).",
           "items": {
             "minLength": 1,
             "type": "string"

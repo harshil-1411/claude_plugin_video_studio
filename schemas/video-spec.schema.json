@@ -47,6 +47,27 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
       "type": "string"
     },
+    "cover": {
+      "description": "Cover (thumbnail) text and focal frame.",
+      "additionalProperties": false,
+      "properties": {
+        "focal_time_sec": {
+          "description": "Video time of the frame the cover is composed from (TikTok uses it as the cover timestamp).",
+          "minimum": 0,
+          "type": "number"
+        },
+        "headline": {
+          "description": "Cover/thumbnail text; separate from on-screen text, captions and post captions.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "headline",
+        "focal_time_sec"
+      ],
+      "type": "object"
+    },
     "goal": {
       "enum": [
         "explain",
@@ -74,7 +95,46 @@
       "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
       "type": "string"
     },
+    "master": {
+      "description": "Production master canvas every target is compiled from. Defaults to 1080 px on the short side at 30 fps.",
+      "additionalProperties": false,
+      "properties": {
+        "fps": {
+          "anyOf": [
+            {
+              "const": 24,
+              "type": "number"
+            },
+            {
+              "const": 30,
+              "type": "number"
+            },
+            {
+              "const": 60,
+              "type": "number"
+            }
+          ]
+        },
+        "height": {
+          "maximum": 7680,
+          "minimum": 2,
+          "type": "integer"
+        },
+        "width": {
+          "maximum": 7680,
+          "minimum": 2,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "fps"
+      ],
+      "type": "object"
+    },
     "platform": {
+      "description": "Primary platform; with `aspect_ratio` it defines the primary target.",
       "enum": [
         "instagram_reels",
         "tiktok",
@@ -88,6 +148,39 @@
     },
     "policy_profile": {
       "type": "string"
+    },
+    "publish": {
+      "description": "Post copy keyed by target id.",
+      "additionalProperties": {
+        "description": "Per-target post copy.",
+        "additionalProperties": false,
+        "properties": {
+          "ai_disclosure": {
+            "description": "Mark the post as AI-generated where the platform supports it.",
+            "type": "boolean"
+          },
+          "hashtags": {
+            "items": {
+              "pattern": "^#[\\p{L}\\p{N}_]+$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "post_caption": {
+            "description": "Text posted with the video on the platform; separate from speech captions.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "post_caption"
+        ],
+        "type": "object"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "type": "object"
     },
     "scenes": {
       "items": {
@@ -292,6 +385,14 @@
       "exclusiveMinimum": 0,
       "maximum": 600,
       "type": "number"
+    },
+    "targets": {
+      "description": "Platform contract ids to compile for. Defaults to the primary platform's contract.",
+      "items": {
+        "pattern": "^[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "type": "array"
     },
     "title": {
       "type": "string"

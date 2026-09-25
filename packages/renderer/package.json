@@ -17,6 +17,7 @@
     "@hyperframes/producer": "0.8.75",
     "@video-studio/core": "workspace:*",
     "@video-studio/schema": "workspace:*",
-    "@video-studio/media": "workspace:*"
+    "@video-studio/media": "workspace:*",
+    "@video-studio/platforms": "workspace:*"
   }
 }
