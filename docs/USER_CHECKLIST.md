@@ -17,7 +17,7 @@ pnpm typecheck && pnpm test && pnpm bundle && pnpm smoke
 
 **Pass:** the tests pass, and smoke lists 25 tools and 18 templates.
 
-## 2. Real narration (5 min)
+## 2. Real narration — ✅ done 2026-09-26 (`say` voice and captions verified)
 
 ```
 node scripts/render-project.mjs examples/text-to-motion-graphic --voice system --renderer ffmpeg
