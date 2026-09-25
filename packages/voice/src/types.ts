@@ -16,6 +16,8 @@ export interface SynthesisInput {
   voice?: string;
   /** Scene duration; used by the silent backend to time words. */
   duration_ms?: number;
+  /** Spec language (BCP-47): backends pick a voice that speaks it, or fail rather than read it with another language's voice. */
+  language?: string;
 }
 
 export interface SynthesisContext {
@@ -39,7 +41,7 @@ export interface VoiceBackend {
   available(env: Env): Promise<Availability> | Availability;
   synthesize(input: SynthesisInput, ctx: SynthesisContext): Promise<SceneVoiceTrack>;
   /** Resolve the voice that will actually be used (for cache keys). Optional. */
-  resolveVoice?(requested: string | undefined, env: Env): Promise<string | undefined>;
+  resolveVoice?(requested: string | undefined, env: Env, language?: string): Promise<string | undefined>;
   /** Options that change the output, folded into the cache key (rate, model, ...). */
   cacheOptions?(): Record<string, unknown>;
 }

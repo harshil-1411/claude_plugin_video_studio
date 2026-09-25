@@ -35,11 +35,24 @@ const GENERIC_FAMILIES = new Set(["sans-serif", "serif", "monospace", "system-ui
  * the file. Bundled files are recorded as `fonts/<family dir>/<file>` (relative to the plugin
  * root); host files as `host/<basename>`, so the lock never holds a machine-specific path.
  * Requests that resolve to no file are skipped (the render reported that already).
+ *
+ * Script fonts: a chain that names a bundled script family (Noto Sans JP / Devanagari / Arabic,
+ * added by `withLanguage` for a non-Latin spec language) also locks that family's file at the
+ * request's weight, because the renderers and captions draw that script's text with it even
+ * though the chain's first family resolves to a Latin font.
  */
 export async function lockFonts(requests: readonly FontRequest[], opts: { fontsDir: string | null; env?: NodeJS.ProcessEnv; resolver?: FontResolver }): Promise<LockFont[]> {
   const resolve = opts.resolver ?? createFontResolver(opts.env ?? process.env, { fontsDir: opts.fontsDir });
   const out = new Map<string, LockFont>();
+  const scriptFamilies = new Set(BUNDLED_FONTS.filter((f) => f.script).map((f) => f.family.toLowerCase()));
+  const expanded: FontRequest[] = [];
   for (const r of requests) {
+    expanded.push(r);
+    for (const name of parseFontChain(r.chain)) {
+      if (scriptFamilies.has(name.toLowerCase())) expanded.push({ chain: `"${name}"`, weight: r.weight });
+    }
+  }
+  for (const r of expanded) {
     let file: string;
     try {
       file = await resolve(r.chain, r.weight);

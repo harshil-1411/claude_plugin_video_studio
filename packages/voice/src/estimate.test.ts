@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WordTiming } from "@video-studio/schema";
-import { estimateSyllables, estimateWordTimings, pauseWeight, tokenize } from "./estimate.js";
+import { SPEECH_RATES, estimateSpeechSec, estimateSyllables, estimateWordTimings, pauseWeight, speechUnits, tokenize } from "./estimate.js";
 import { parseEdgeSilence } from "./ffmpeg.js";
 
 function assertWellFormed(words: WordTiming[]) {
@@ -108,5 +108,37 @@ describe("parseEdgeSilence", () => {
     expect(parseEdgeSilence("", 2000)).toEqual({ leadMs: 0, trailMs: 0 });
     // a single silence covering nearly everything is ignored
     expect(parseEdgeSilence("silence_start: 0\nsilence_end: 1.9", 2000)).toEqual({ leadMs: 0, trailMs: 0 });
+  });
+});
+
+describe("scripts", () => {
+  it("tokenizes CJK per character with kinsoku, keeping Latin words and ASCII numbers whole", () => {
+    expect(tokenize("ベクトルデータベースは、意味で検索します。")).toEqual(["ベ", "ク", "ト", "ル", "デー", "タ", "ベー", "ス", "は、", "意", "味", "で", "検", "索", "し", "ま", "す。"]);
+    expect(tokenize("Whisperは（2022年）の モデル")).toEqual(["Whisper", "は", "（2022", "年）", "の", "モ", "デ", "ル"]);
+    expect(tokenize("しょうがっこう")).toEqual(["しょ", "う", "がっ", "こ", "う"]);
+    expect(tokenize("「本」です")).toEqual(["「本」", "で", "す"]);
+    expect(tokenize("नमस्ते दुनिया")).toEqual(["नमस्ते", "दुनिया"]);
+  });
+
+  it("weights CJK by morae and Devanagari by syllables", () => {
+    expect(estimateSyllables("か")).toBe(1);
+    expect(estimateSyllables("しょ")).toBe(1);
+    expect(estimateSyllables("デー")).toBe(2);
+    expect(estimateSyllables("意")).toBeCloseTo(1.6);
+    expect(estimateSyllables("नमस्ते")).toBe(3); // न म स्ते
+    expect(estimateSyllables("क्षत्रिय")).toBe(3); // क्ष त्रि य
+    expect(estimateSyllables("مرحبا")).toBe(3);
+    expect(estimateSyllables("database")).toBe(3); // Latin unchanged
+  });
+
+  it("estimates narration time: CJK by characters, others by words (design rates)", () => {
+    expect(speechUnits("意味で検索します。")).toEqual({ script: "cjk", unit: "chars", count: 8 });
+    expect(estimateSpeechSec("意味で検索します。意味で検索します。")).toBeCloseTo(16 / SPEECH_RATES.cjk_chars_per_sec, 2);
+    expect(speechUnits("वेक्टर डेटाबेस अर्थ से खोजते हैं")).toEqual({ script: "devanagari", unit: "words", count: 6 });
+    expect(estimateSpeechSec("वेक्टर डेटाबेस अर्थ से खोजते हैं")).toBeCloseTo(6 / 2.5, 2);
+    expect(estimateSpeechSec("قواعد البيانات المتجهة تبحث")).toBeCloseTo(4 / 2.2, 2);
+    expect(estimateSpeechSec("one two three four five six")).toBeCloseTo(2, 2);
+    expect(SPEECH_RATES.cjk_chars_per_sec).toBeGreaterThanOrEqual(7);
+    expect(SPEECH_RATES.cjk_chars_per_sec).toBeLessThanOrEqual(8);
   });
 });

@@ -1,7 +1,9 @@
 import type { SceneVoiceTrack } from "@video-studio/schema";
 import { describe, expect, it } from "vitest";
 import {
+  CJK_ROW_MAX_CHARS,
   type CaptionWord,
+  SCRIPT_SIZE_CAP,
   assColor,
   assKaraokeText,
   assTimeCs,
@@ -10,6 +12,7 @@ import {
   captionLayout,
   captionRows,
   groupCaptionLines,
+  joinWords,
   pickEmphasis,
   toAss,
   toCaptionJson,
@@ -309,5 +312,84 @@ describe("ASS", () => {
   it("neutralises override braces and backslashes in words", () => {
     const [line] = groupCaptionLines([w("{\\b1}x", 0, 100)]);
     expect(assKaraokeText(line!)).toBe("{\\kf10}(/b1)x");
+  });
+});
+
+describe("CJK, Devanagari and Arabic captions", () => {
+  /** Per-character words (as voice `tokenize` produces for CJK), 130 ms each. */
+  function jaWords(text: string, scene = "s01"): CaptionWord[] {
+    const units: string[] = [];
+    for (const ch of text) {
+      if (/[、。！？」』）]/u.test(ch) && units.length) units[units.length - 1] += ch;
+      else units.push(ch);
+    }
+    return units.map((word, i) => ({ word, start_ms: i * 130, end_ms: i * 130 + 120, scene_id: scene }));
+  }
+  const JA = "ベクトルデータベースは、埋め込みを保存して、意味の近いものを素早く見つけます。検索が速くなります。";
+
+  it("joins CJK words without spaces and others with spaces", () => {
+    expect(joinWords(["意", "味", "です。"])).toBe("意味です。");
+    expect(joinWords(["Whisper", "は", "音", "声"])).toBe("Whisperは音声");
+    expect(joinWords(["नमस्ते", "दुनिया"])).toBe("नमस्ते दुनिया");
+  });
+
+  it("groups Japanese by characters: ≤ 16 per row, breaks after punctuation, sentences never merge", () => {
+    const lines = groupCaptionLines(jaWords(JA), { maxChars: 32, maxLines: 2 });
+    expect(lines.map((l) => l.text).join("")).toBe(JA);
+    for (const l of lines) {
+      for (const row of captionRows(l)) expect(Array.from(row).length).toBeLessThanOrEqual(CJK_ROW_MAX_CHARS + 1);
+      expect(captionRows(l).length).toBeLessThanOrEqual(2);
+      expect(l.text).not.toContain(" ");
+    }
+    // A sentence end closes a caption: "見つけます。" ends one, "検索…" starts the next.
+    expect(lines.some((l) => l.text.endsWith("見つけます。"))).toBe(true);
+    expect(lines.some((l) => l.text.startsWith("検索"))).toBe(true);
+    // Rows prefer clause breaks: some row ends with "、".
+    expect(lines.flatMap((l) => captionRows(l)).some((r) => r.endsWith("、"))).toBe(true);
+    // No row starts with closing punctuation (kinsoku, from the tokens).
+    for (const r of lines.flatMap((l) => captionRows(l))) expect(r).not.toMatch(/^[、。）」]/u);
+    expect(toSrt(lines)).toContain("ベクトルデータベースは、");
+    expect(toTranscript(jaWords(JA))).toBe(`${JA}\n`);
+  });
+
+  it("narrow frames get fewer characters per row", () => {
+    const lines = groupCaptionLines(jaWords(JA), { maxChars: 16, maxLines: 2 });
+    for (const row of lines.flatMap((l) => captionRows(l))) expect(Array.from(row.replace(/[、。]/gu, "")).length).toBeLessThanOrEqual(8);
+  });
+
+  it("measures CJK caption rows at 1 em per character", () => {
+    const layout = captionLayout({ width: 360, height: 640 });
+    const lines = groupCaptionLines(jaWords("意味で検索します。"), { maxChars: layout.maxChars });
+    const box = captionBlockBox(lines, layout, { width: 360, height: 640 });
+    expect(box.w).toBeGreaterThanOrEqual(Math.ceil(9 * layout.fontSize));
+  });
+
+  it("switches ASS fonts per script and lets libass pick the direction for Arabic", () => {
+    const ja = toAss(groupCaptionLines(jaWords("意味です。")), { width: 360, height: 640, font: "Inter" });
+    expect(ja).toMatch(/Dialogue: .*\{\\fnNoto Sans JP\\fs[\d.]+\}意/);
+    expect(ja).toMatch(/Style: Default,Inter,.*,1$/m);
+
+    const hiWords: CaptionWord[] = ["मॉडल", "Whisper", "है।"].map((word, i) => ({ word, start_ms: i * 400, end_ms: i * 400 + 350 }));
+    const hi = toAss(groupCaptionLines(hiWords), { width: 360, height: 640, font: "Inter" });
+    const ev = hi.split("\n").find((l) => l.startsWith("Dialogue"))!;
+    expect(ev).toContain("{\\fnNoto Sans Devanagari\\fs");
+    expect(ev).toMatch(/\{\\fnInter\\fs\d+\}(\{[^}]*\})?Whisper/);
+    // Devanagari's tall metrics are compensated, capped at SCRIPT_SIZE_CAP.
+    const size = Number(/\\fnNoto Sans Devanagari\\fs([\d.]+)/.exec(ev)![1]);
+    const base = captionLayout({ width: 360, height: 640 }).fontSize;
+    expect(size).toBeGreaterThan(base);
+    expect(size).toBeLessThanOrEqual(base * SCRIPT_SIZE_CAP + 0.05);
+
+    const arWords: CaptionWord[] = ["قواعد", "البيانات", "المتجهة"].map((word, i) => ({ word, start_ms: i * 400, end_ms: i * 400 + 350 }));
+    const ar = toAss(groupCaptionLines(arWords), { width: 360, height: 640, font: "Inter", activeWord: true });
+    expect(ar).toMatch(/Style: Default,Inter,.*,-1$/m);
+    expect(ar).toContain("\\fnNoto Sans Arabic");
+  });
+
+  it("leaves Latin captions byte-identical (no font switches)", () => {
+    const words: CaptionWord[] = ["Vector", "databases", "find", "meaning."].map((word, i) => ({ word, start_ms: i * 300, end_ms: i * 300 + 250 }));
+    const ass = toAss(groupCaptionLines(words), { width: 360, height: 640, font: "Inter" });
+    expect(ass).not.toContain("\\fn");
+    expect(ass).toMatch(/,,Vector .*databases.* find meaning\.$/m);
   });
 });

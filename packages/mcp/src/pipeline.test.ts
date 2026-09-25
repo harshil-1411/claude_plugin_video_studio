@@ -11,7 +11,7 @@ import { layoutZones } from "@video-studio/platforms";
 import { FFMPEG_RENDERER_VERSION, createFfmpegRenderer } from "@video-studio/renderer";
 import { RenderManifest, VideoLock, type VideoSpec } from "@video-studio/schema";
 import { type VoiceBackend, tokenize } from "@video-studio/voice";
-import { type RenderProjectOptions, SpecInvalidError, exportProject, loadValidSpec, renderProject, runQa, socialCopy } from "./pipeline.js";
+import { ASSEMBLY_VERSION, type RenderProjectOptions, SpecInvalidError, bracketCue, exportProject, isSoundCue, loadValidSpec, renderProject, runQa, socialCopy, soundEventCues } from "./pipeline.js";
 import { diffLocks, readLock } from "./lock.js";
 import { validateSpecFile } from "./spec-validate.js";
 import { RenderJobManager } from "./render-jobs.js";
@@ -223,7 +223,7 @@ describe("renderProject (tiny, silent, ffmpeg)", () => {
       const lockText = await readFile(r.dist.lock, "utf8");
       firstLock = (await readLock(r.dist.lock))!;
       expect(firstLock).toMatchObject({ project_id: manifest.project_id, quality: "preview", spec_sha256: manifest.spec_sha256, voice: { backend: "silent" } });
-      expect(firstLock.engine).toMatchObject({ engine: "0.1.0", assembly: "2", target_package: "1" });
+      expect(firstLock.engine).toMatchObject({ engine: "0.1.0", assembly: String(ASSEMBLY_VERSION), target_package: "1" });
       expect(firstLock.tools["ffmpeg-drawtext"]).toBe(FFMPEG_RENDERER_VERSION);
       expect(firstLock.tools["video-studio-engine"]).toBeUndefined();
       expect(firstLock.fonts).toContainEqual({ family: "Inter", weight: 700, file: "fonts/Inter/Inter-Bold.ttf", sha256: "288316099b1e0a47a4716d159098005eef7c0066921f34e3200393dbdb01947f" });
@@ -785,4 +785,68 @@ describe("footage scenes, scene audio, native voice and beat sync", () => {
     },
     T,
   );
+});
+
+describe("sound-event cues (pure)", () => {
+  const w = (start_ms: number, end_ms: number) => ({ start_ms, end_ms });
+  const scenes = [
+    { id: "s01", start_ms: 0, end_ms: 3000 },
+    { id: "s02", start_ms: 3000, end_ms: 8000 },
+  ];
+
+  it("[music] only where the bed plays alone for 2 s or more, after a settle, capped", () => {
+    const cues = soundEventCues({ scenes, speech: [w(0, 1000), w(1000, 2500), w(7000, 7800)], music: true, total_ms: 8000 });
+    // gap 2500–7000 (4.5 s): cue from 2800, at most 3 s
+    expect(cues).toEqual([{ word: "[music]", start_ms: 2800, end_ms: 5800, scene_id: "sound:s01" }]);
+    // no bed, no cue; short gaps, no cue
+    expect(soundEventCues({ scenes, speech: [w(0, 2500), w(7000, 7800)], music: false, total_ms: 8000 })).toEqual([]);
+    expect(soundEventCues({ scenes, speech: [w(0, 3000), w(4500, 8000)], music: true, total_ms: 8000 })).toEqual([]);
+  });
+
+  it("voice.mode none with a bed: [music] from the start", () => {
+    const cues = soundEventCues({ scenes, speech: [], music: true, total_ms: 8000 });
+    expect(cues).toEqual([{ word: "[music]", start_ms: 0, end_ms: 3000, scene_id: "sound:s01" }]);
+  });
+
+  it("sfx captions at their time, never over speech; they split music stretches", () => {
+    const warnings: string[] = [];
+    const cues = soundEventCues(
+      {
+        scenes: [
+          { id: "s01", start_ms: 0, end_ms: 3000, sfx: [{ at_ms: 500, caption: "applause" }] },
+          { id: "s02", start_ms: 3000, end_ms: 8000, sfx: [{ at_ms: 3200, caption: "[whoosh]" }] },
+        ],
+        speech: [w(3000, 4000)],
+        music: true,
+        total_ms: 8000,
+      },
+      warnings,
+    );
+    expect(cues[0]).toEqual({ word: "[applause]", start_ms: 500, end_ms: 2000, scene_id: "sound:s01" });
+    expect(cues.some((c) => c.word === "[whoosh]")).toBe(false);
+    expect(warnings[0]).toMatch(/\[whoosh\] in s02 starts during speech/);
+    // music after the speech (4000–8000), none in 0–500 or 2000–3000 (under 2 s)
+    expect(cues.filter((c) => c.word === "[music]")).toEqual([{ word: "[music]", start_ms: 4300, end_ms: 7300, scene_id: "sound:s02" }]);
+    for (const c of cues) expect(c.end_ms <= 3000 || c.start_ms >= 4000).toBe(true);
+  });
+
+  it("[ambient sound] for footage with its own sound and no speech; no [music] where the bed is muted", () => {
+    const cues = soundEventCues({
+      scenes: [
+        { id: "s01", start_ms: 0, end_ms: 4000, footage_sound: true, bed_muted: true },
+        { id: "s02", start_ms: 4000, end_ms: 8000, footage_sound: true, bed_muted: true },
+      ],
+      speech: [w(4200, 7000)],
+      music: true,
+      total_ms: 8000,
+    });
+    expect(cues).toEqual([{ word: "[ambient sound]", start_ms: 0, end_ms: 3000, scene_id: "sound:s01" }]);
+  });
+
+  it("cue helpers", () => {
+    expect(bracketCue(" door slams ")).toBe("[door slams]");
+    expect(bracketCue("[laughter]")).toBe("[laughter]");
+    expect(isSoundCue({ word: "[music]", scene_id: "sound:s01" })).toBe(true);
+    expect(isSoundCue({ word: "hello", scene_id: "s01" })).toBe(false);
+  });
 });

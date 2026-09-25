@@ -88,8 +88,55 @@ export interface GroupOptions {
   emphasis?: boolean;
 }
 
-const SENTENCE_END = /[.!?…]["'”’)\]]*$/;
-const CLAUSE_END = /[,;:—–-]["'”’)\]]*$/;
+const SENTENCE_END = /[.!?…。！？]["'”’)\]」』）]*$/;
+const CLAUSE_END = /[,;:—–\-、，；：]["'”’)\]」』）]*$/;
+
+// ---------------------------------------------------------------------------------- scripts
+
+/**
+ * CJK characters (ideographs, kana, CJK punctuation, full-width forms): captions in these
+ * scripts have no spaces and are grouped by characters. Mirrors `isWideChar` in
+ * packages/renderer/src/script.ts (media cannot depend on the renderer).
+ */
+const CJK_CHAR = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Bopomofo}\u3000-\u303F\uFF01-\uFF60\u30FB\u30FC]/u;
+const RTL_CHAR = /[\p{Script=Arabic}\p{Script=Hebrew}]/u;
+
+export function isCjkText(text: string): boolean {
+  return CJK_CHAR.test(text);
+}
+
+/** Join caption words: a space between words, none where either side is CJK. */
+export function joinWords(words: readonly string[]): string {
+  let out = "";
+  words.forEach((w, i) => {
+    out += i === 0 ? w : `${wordSep(words[i - 1]!, w)}${w}`;
+  });
+  return out;
+}
+
+function wordSep(prev: string, next: string): string {
+  const a = Array.from(prev).at(-1) ?? "";
+  const b = Array.from(next)[0] ?? "";
+  return CJK_CHAR.test(a) || CJK_CHAR.test(b) ? "" : " ";
+}
+
+/**
+ * Caption rows for CJK text (design rules): at most CJK_ROW_MAX_CHARS characters per row (never
+ * more than the row width allows), phrases broken after 、。！？ when the caption already has
+ * CJK_MIN_CUE_CHARS characters. A CJK character counts as one unit, other characters as
+ * CJK_OTHER_UNITS (half-width).
+ */
+export const CJK_ROW_MAX_CHARS = 16;
+export const CJK_ROW_MIN_CHARS = 8;
+export const CJK_MIN_CUE_CHARS = 6;
+const CJK_OTHER_UNITS = 0.55;
+
+/** Width of a word in CJK units (1 per CJK character, 0.55 per other character). */
+function cjkUnits(word: string): number {
+  let n = 0;
+  for (const ch of word) n += CJK_CHAR.test(ch) ? 1 : CJK_OTHER_UNITS;
+  return n;
+}
 /** A caption or row may start with these (a clause boundary). */
 const CONJUNCTIONS = new Set(
   "and but or nor so yet because since although though while whereas when whenever where which who whom whose that then unless until if instead".split(" "),
@@ -105,7 +152,7 @@ const STOPWORDS = new Set(
 const core = (word: string) => word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
 const charsOf = (ws: readonly CaptionWord[], from: number, to: number) => {
   let n = 0;
-  for (let i = from; i < to; i++) n += Array.from(ws[i]!.word).length + (i > from ? 1 : 0);
+  for (let i = from; i < to; i++) n += Array.from(ws[i]!.word).length + (i > from ? wordSep(ws[i - 1]!.word, ws[i]!.word).length : 0);
   return n;
 };
 
@@ -162,6 +209,8 @@ function planRows(ws: readonly CaptionWord[], from: number, to: number, maxChars
 export function pickEmphasis(words: readonly CaptionWord[], prevWord?: string): number[] {
   const scored: { i: number; score: number }[] = [];
   words.forEach((w, i) => {
+    // Sound-event cues ([music], [applause]) are never emphasised.
+    if (/^\[.*\]$/.test(w.word.trim())) return;
     const c = core(w.word);
     if (!c) return;
     const lower = c.toLowerCase();
@@ -211,9 +260,13 @@ export function groupCaptionLines(words: readonly CaptionWord[], opts: GroupOpti
   }
   if (run.length) runs.push(run);
 
-  // 2. best partition of each run (DP over cue ends)
+  // 2. best partition of each run (DP over cue ends); CJK runs are grouped by characters
   const lines: CaptionLine[] = [];
   for (const ws of runs) {
+    if (ws.filter((w) => isCjkText(w.word)).length * 2 >= ws.length) {
+      lines.push(...groupCjkRun(ws, maxChars, maxLines));
+      continue;
+    }
     const n = ws.length;
     const best: { cost: number; from: number; rows: number[] }[] = [{ cost: 0, from: -1, rows: [] }];
     for (let i = 1; i <= n; i++) {
@@ -238,7 +291,7 @@ export function groupCaptionLines(words: readonly CaptionWord[], opts: GroupOpti
       cues.unshift({
         start_ms: cw[0]!.start_ms,
         end_ms: cw[cw.length - 1]!.end_ms,
-        text: cw.map((w) => w.word).join(" "),
+        text: joinWords(cw.map((w) => w.word)),
         words: cw,
         ...(rows.length > 1 ? { row_sizes: rows } : {}),
       });
@@ -264,13 +317,89 @@ export function groupCaptionLines(words: readonly CaptionWord[], opts: GroupOpti
   return lines;
 }
 
+/**
+ * CJK grouping: captions of up to `rowMax × maxLines` units, cut after sentence or clause
+ * punctuation once a caption has CJK_MIN_CUE_CHARS units (else at the capacity), each split into
+ * balanced rows of at most `rowMax` units, preferring row breaks after punctuation. `rowMax`
+ * converts the Latin row width (`maxChars` at ~0.54 em) to square CJK characters, capped at
+ * CJK_ROW_MAX_CHARS. Kinsoku is already in the tokens (punctuation is glued to the character
+ * before it, see voice `tokenize`).
+ */
+function groupCjkRun(ws: readonly CaptionWord[], maxChars: number, maxLines: number): CaptionLine[] {
+  const rowMax = Math.max(4, Math.min(CJK_ROW_MAX_CHARS, Math.floor(maxChars * 0.54)));
+  const cap = rowMax * maxLines;
+  const units = ws.map((w) => cjkUnits(w.word));
+  const out: CaptionLine[] = [];
+  let i = 0;
+  while (i < ws.length) {
+    let acc = 0;
+    let end = i;
+    let lastPunct = -1;
+    while (end < ws.length && (end === i || acc + units[end]! <= cap + 1e-9)) {
+      acc += units[end]!;
+      end++;
+      if ((SENTENCE_END.test(ws[end - 1]!.word) || CLAUSE_END.test(ws[end - 1]!.word)) && acc >= CJK_MIN_CUE_CHARS) lastPunct = end;
+    }
+    // Prefer a clause break unless it leaves most of a full caption unused.
+    if (end < ws.length && lastPunct > i && lastPunct < end) {
+      const used = units.slice(i, lastPunct).reduce((a, b) => a + b, 0);
+      if (used >= Math.min(CJK_ROW_MIN_CHARS, cap / 2)) end = lastPunct;
+    }
+    const cw = ws.slice(i, end);
+    const rows = cjkRows(cw, units.slice(i, end), rowMax, maxLines);
+    out.push({
+      start_ms: cw[0]!.start_ms,
+      end_ms: cw[cw.length - 1]!.end_ms,
+      text: joinWords(cw.map((w) => w.word)),
+      words: cw,
+      ...(rows.length > 1 ? { row_sizes: rows } : {}),
+    });
+    i = end;
+  }
+  return out;
+}
+
+/** Balanced row sizes (in words) for a CJK caption: ≤ rowMax units per row, breaks after punctuation preferred. */
+function cjkRows(ws: readonly CaptionWord[], units: readonly number[], rowMax: number, maxLines: number): number[] {
+  const total = units.reduce((a, b) => a + b, 0);
+  if (total <= rowMax + 1e-9 || ws.length < 2) return [ws.length];
+  const nRows = Math.min(maxLines, Math.ceil(total / rowMax - 1e-9));
+  const sizes: number[] = [];
+  let at = 0;
+  let used = 0;
+  for (let r = 1; r < nRows; r++) {
+    const target = (total * r) / nRows;
+    let best = -1;
+    let bestCost = Infinity;
+    let acc = used;
+    for (let k = at + 1; k < ws.length; k++) {
+      acc += units[k - 1]!;
+      if (acc - used > rowMax + 1e-9) break;
+      const rest = total - acc;
+      if (rest > rowMax * (nRows - r) + 1e-9) continue;
+      const punct = SENTENCE_END.test(ws[k - 1]!.word) || CLAUSE_END.test(ws[k - 1]!.word);
+      const cost = Math.abs(acc - target) - (punct ? 2 : 0);
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = k;
+      }
+    }
+    if (best < 0) break;
+    sizes.push(best - at);
+    used = units.slice(0, best).reduce((a, b) => a + b, 0);
+    at = best;
+  }
+  sizes.push(ws.length - at);
+  return sizes;
+}
+
 /** The caption's display rows (words joined per row). */
 export function captionRows(line: CaptionLine): string[] {
   const sizes = line.row_sizes ?? [line.words.length];
   const rows: string[] = [];
   let at = 0;
   for (const n of sizes) {
-    rows.push(line.words.slice(at, at + n).map((w) => w.word).join(" "));
+    rows.push(joinWords(line.words.slice(at, at + n).map((w) => w.word)));
     at += n;
   }
   return line.words.length ? rows : [line.text];
@@ -331,7 +460,7 @@ export function toTranscript(words: readonly CaptionWord[]): string {
     scene = w.scene_id;
     paras[paras.length - 1]!.push(w.word);
   }
-  return paras.map((p) => p.join(" ")).join("\n\n") + (paras.length ? "\n" : "");
+  return paras.map((p) => joinWords(p)).join("\n\n") + (paras.length ? "\n" : "");
 }
 
 // ---------------------------------------------------------------------------------- canonical JSON
@@ -417,6 +546,8 @@ export interface AssOptions {
   emphasis?: boolean;
   /** Rows per caption the layout reserves space for. Default 2. */
   maxLines?: number;
+  /** Families for caption words in CJK, Devanagari, Arabic, Hebrew (default CAPTION_SCRIPT_FONTS). */
+  scriptFonts?: Partial<Record<CaptionScript, string>>;
 }
 
 /** `#RRGGBB` (or `#RRGGBBAA`, AA = opacity) → ASS `&HAABBGGRR` (ASS alpha: 00 = opaque). */
@@ -531,7 +662,7 @@ export function captionBlockBox(lines: readonly CaptionLine[], layout: CaptionLa
   for (const l of lines) {
     const r = captionRows(l);
     rows = Math.max(rows, r.length);
-    for (const row of r) w = Math.max(w, Array.from(row).length * layout.fontSize * em);
+    for (const row of r) w = Math.max(w, isCjkText(row) ? cjkUnits(row) * layout.fontSize : Array.from(row).length * layout.fontSize * em);
   }
   if (!lines.length) {
     rows = layout.maxLines;
@@ -546,8 +677,71 @@ export function captionBlockBox(lines: readonly CaptionLine[], layout: CaptionLa
   return { x, y, w: Math.min(bw, frame.width - x), h: Math.min(bh, frame.height - y) };
 }
 
+// ---------------------------------------------------------------------------------- script fonts in ASS
+
+export type CaptionScript = "cjk" | "devanagari" | "arabic" | "hebrew";
+
+/** Bundled families libass uses for caption words in these scripts (fonts/, via `fontsdir`). */
+export const CAPTION_SCRIPT_FONTS: Readonly<Record<CaptionScript, string>> = Object.freeze({
+  cjk: "Noto Sans JP",
+  devanagari: "Noto Sans Devanagari",
+  arabic: "Noto Sans Arabic",
+  hebrew: "Noto Sans Hebrew",
+});
+
+/**
+ * OS/2 win height (ascent + descent) per em of fonts captions use. libass sizes a font so its
+ * win height equals the ASS size, so tall-metric script fonts would come out small next to the
+ * caption font; their size is scaled by win(script) / win(caption font), capped at
+ * SCRIPT_SIZE_CAP so rows stay close to the layout's line advance. Unknown fonts: 1.2.
+ */
+export const FONT_WIN_HEIGHT: Readonly<Record<string, number>> = Object.freeze({
+  Inter: 1.21,
+  "Noto Sans": 1.519,
+  "JetBrains Mono": 1.32,
+  Arial: 1.117,
+  "Noto Sans JP": 1.448,
+  "Noto Sans Devanagari": 1.906,
+  "Noto Sans Arabic": 2.169,
+});
+export const SCRIPT_SIZE_CAP = 1.4;
+
+function wordScript(word: string): CaptionScript | null {
+  if (CJK_CHAR.test(word)) return "cjk";
+  if (/\p{Script=Devanagari}/u.test(word)) return "devanagari";
+  if (/\p{Script=Arabic}/u.test(word)) return "arabic";
+  if (/\p{Script=Hebrew}/u.test(word)) return "hebrew";
+  return null;
+}
+
+/** Per-word font switches for captions: `{\fn…\fs…}` where a word's script differs from the one before. */
+export interface AssScriptFonts {
+  /** The caption font (style Fontname) and size. */
+  font: string;
+  size: number;
+  /** Script → family; default CAPTION_SCRIPT_FONTS. */
+  families?: Partial<Record<CaptionScript, string>>;
+}
+
+function fontSwitcher(line: CaptionLine, f?: AssScriptFonts): (i: number) => string {
+  if (!f) return () => "";
+  const keys = line.words.map((w) => wordScript(w.word));
+  if (keys.every((k) => k === null)) return () => "";
+  const baseWin = FONT_WIN_HEIGHT[f.font] ?? 1.2;
+  return (i) => {
+    const k = keys[i]!;
+    const prev = i === 0 ? null : keys[i - 1]!;
+    if (k === prev) return "";
+    if (k === null) return `{\\fn${f.font}\\fs${f.size}}`;
+    const family = f.families?.[k] ?? CAPTION_SCRIPT_FONTS[k];
+    const scale = Math.min(SCRIPT_SIZE_CAP, (FONT_WIN_HEIGHT[family] ?? baseWin) / baseWin);
+    return `{\\fn${family}\\fs${Math.round(f.size * scale * 10) / 10}}`;
+  };
+}
+
 /** Karaoke text for one caption: `{\kf<cs>}word` per word, `{\k<cs>}` for pauses, rows joined with `\N`. */
-export function assKaraokeText(line: CaptionLine, emphasis?: { on: string; off: string }): string {
+export function assKaraokeText(line: CaptionLine, emphasis?: { on: string; off: string }, fonts?: AssScriptFonts): string {
+  const fontSwitch = fontSwitcher(line, fonts);
   const base = cs(line.start_ms);
   let cursor = base;
   const parts: string[] = [];
@@ -558,7 +752,8 @@ export function assKaraokeText(line: CaptionLine, emphasis?: { on: string; off: 
     const e = Math.max(cs(w.end_ms), s);
     if (s > cursor) parts.push(`{\\k${s - cursor}}`);
     const word = em.has(i) ? emphasize(w.word, emphasis!) : assEscape(w.word);
-    parts.push(`{\\kf${e - s}}${word}${i < line.words.length - 1 ? (breaks.has(i + 1) ? "\\N" : " ") : ""}`);
+    const next = line.words[i + 1];
+    parts.push(`{\\kf${e - s}}${fontSwitch(i)}${word}${next ? (breaks.has(i + 1) ? "\\N" : wordSep(w.word, next.word)) : ""}`);
     cursor = e;
   });
   return parts.join("");
@@ -580,13 +775,14 @@ function rowBreaks(line: CaptionLine): Set<number> {
 }
 
 /** Static caption text: rows joined with `\N`, emphasised words wrapped in `on`/`off` overrides. */
-export function assStaticText(line: CaptionLine, emphasis?: { on: string; off: string }): string {
+export function assStaticText(line: CaptionLine, emphasis?: { on: string; off: string }, fonts?: AssScriptFonts): string {
   const breaks = rowBreaks(line);
   const em = new Set(emphasis ? (line.emphasis ?? []) : []);
+  const fontSwitch = fontSwitcher(line, fonts);
   return line.words
     .map((w, i) => {
       const word = em.has(i) ? emphasize(w.word, emphasis!) : assEscape(w.word);
-      return `${i > 0 ? (breaks.has(i) ? "\\N" : " ") : ""}${word}`;
+      return `${i > 0 ? (breaks.has(i) ? "\\N" : wordSep(line.words[i - 1]!.word, w.word)) : ""}${fontSwitch(i)}${word}`;
     })
     .join("");
 }
@@ -633,7 +829,8 @@ export function toAss(lines: readonly CaptionLine[], o: AssOptions): string {
     region.x,
     Math.max(0, o.width - region.x - region.w),
     Math.max(0, o.height - region.y - region.h + layout.pad),
-    1,
+    // -1: libass picks each line's base direction (Arabic/Hebrew captions read right to left).
+    lines.some((l) => RTL_CHAR.test(l.text)) ? -1 : 1,
   ].join(",");
   const header = [
     "[Script Info]",
@@ -661,8 +858,10 @@ export function toAss(lines: readonly CaptionLine[], o: AssOptions): string {
       ? { on: "\\b1", off: "\\b0" }
       : { on: `\\c${assTagColor(hiHex)}${layout.bold ? "" : "\\b1"}`, off: `\\c${assTagColor(baseHex)}${layout.bold ? "" : "\\b0"}` };
   const pos = layout.anchor.kind === "center" ? `{\\an5\\pos(${Math.round(region.x + region.w / 2)},${layout.anchor.y})}` : "";
+  const scriptFonts: AssScriptFonts = { font, size: layout.fontSize, ...(o.scriptFonts ? { families: o.scriptFonts } : {}) };
   const events = lines.map(
-    (l) => `Dialogue: 0,${assTimeCs(cs(l.start_ms))},${assTimeCs(cs(l.end_ms))},Default,,0,0,0,,${pos}${karaoke ? assKaraokeText(l, em) : assStaticText(l, em)}`,
+    (l) =>
+      `Dialogue: 0,${assTimeCs(cs(l.start_ms))},${assTimeCs(cs(l.end_ms))},Default,,0,0,0,,${pos}${karaoke ? assKaraokeText(l, em, scriptFonts) : assStaticText(l, em, scriptFonts)}`,
   );
   return `${[...header, ...events].join("\n")}\n`;
 }

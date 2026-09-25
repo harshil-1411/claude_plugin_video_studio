@@ -1,8 +1,8 @@
 import { createRequire } from "node:module";
 import process$1 from "node:process";
-import fs, { accessSync, constants, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import fs, { accessSync, closeSync, constants, createReadStream, createWriteStream, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import * as fs$1 from "node:fs/promises";
-import fsPromises, { access, chmod, copyFile, cp, link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import fsPromises, { access, chmod, copyFile, cp, link, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path, { basename, delimiter, dirname, extname, isAbsolute, join, normalize, posix, relative, resolve, sep } from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import os, { homedir, platform, tmpdir } from "node:os";
@@ -109186,7 +109186,7 @@ const NEXT = Symbol("next");
 const OWNER_ELEMENT = Symbol("ownerElement");
 const PREV = Symbol("prev");
 const PRIVATE = Symbol("private");
-const SHEET = Symbol("sheet");
+const SHEET$1 = Symbol("sheet");
 const START = Symbol("start");
 const STYLE = Symbol("style");
 const UPGRADE = Symbol("upgrade");
@@ -116746,9 +116746,9 @@ var DOMStringMap = class {
 setPrototypeOf(DOMStringMap.prototype, null);
 //#endregion
 //#region ../../node_modules/.pnpm/linkedom@0.18.13/node_modules/linkedom/esm/dom/token-list.js
-const { add } = Set.prototype;
+const { add: add$1 } = Set.prototype;
 const addTokens = (self, tokens) => {
-	for (const token of tokens) if (token) add.call(self, token);
+	for (const token of tokens) if (token) add$1.call(self, token);
 };
 const update = ({ [OWNER_ELEMENT]: ownerElement, value }) => {
 	const attribute = ownerElement.getAttributeNode("class");
@@ -119800,33 +119800,33 @@ const tagName$14 = "style";
 var HTMLStyleElement = class extends TextElement {
 	constructor(ownerDocument, localName = tagName$14) {
 		super(ownerDocument, localName);
-		this[SHEET] = null;
+		this[SHEET$1] = null;
 	}
 	get sheet() {
-		const sheet = this[SHEET];
+		const sheet = this[SHEET$1];
 		if (sheet !== null) return sheet;
-		return this[SHEET] = (0, import_lib$1.parse)(this.textContent);
+		return this[SHEET$1] = (0, import_lib$1.parse)(this.textContent);
 	}
 	get innerHTML() {
 		return super.innerHTML || "";
 	}
 	set innerHTML(value) {
 		super.textContent = value;
-		this[SHEET] = null;
+		this[SHEET$1] = null;
 	}
 	get innerText() {
 		return super.innerText || "";
 	}
 	set innerText(value) {
 		super.textContent = value;
-		this[SHEET] = null;
+		this[SHEET$1] = null;
 	}
 	get textContent() {
 		return super.textContent || "";
 	}
 	set textContent(value) {
 		super.textContent = value;
-		this[SHEET] = null;
+		this[SHEET$1] = null;
 	}
 };
 registerHTMLClass(tagName$14, HTMLStyleElement);
@@ -229879,8 +229879,38 @@ function buildWordTimeline(scenes) {
 	}
 	return out;
 }
-const SENTENCE_END$1 = /[.!?…]["'”’)\]]*$/;
-const CLAUSE_END$1 = /[,;:—–-]["'”’)\]]*$/;
+const SENTENCE_END$1 = /[.!?…。！？]["'”’)\]」』）]*$/;
+const CLAUSE_END$1 = /[,;:—–\-、，；：]["'”’)\]」』）]*$/;
+/**
+* CJK characters (ideographs, kana, CJK punctuation, full-width forms): captions in these
+* scripts have no spaces and are grouped by characters. Mirrors `isWideChar` in
+* packages/renderer/src/script.ts (media cannot depend on the renderer).
+*/
+const CJK_CHAR = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Bopomofo}\u3000-\u303F\uFF01-\uFF60\u30FB\u30FC]/u;
+const RTL_CHAR = /[\p{Script=Arabic}\p{Script=Hebrew}]/u;
+function isCjkText(text) {
+	return CJK_CHAR.test(text);
+}
+/** Join caption words: a space between words, none where either side is CJK. */
+function joinWords(words) {
+	let out = "";
+	words.forEach((w, i) => {
+		out += i === 0 ? w : `${wordSep(words[i - 1], w)}${w}`;
+	});
+	return out;
+}
+function wordSep(prev, next) {
+	const a = Array.from(prev).at(-1) ?? "";
+	const b = Array.from(next)[0] ?? "";
+	return CJK_CHAR.test(a) || CJK_CHAR.test(b) ? "" : " ";
+}
+const CJK_OTHER_UNITS = .55;
+/** Width of a word in CJK units (1 per CJK character, 0.55 per other character). */
+function cjkUnits(word) {
+	let n = 0;
+	for (const ch of word) n += CJK_CHAR.test(ch) ? 1 : CJK_OTHER_UNITS;
+	return n;
+}
 /** A caption or row may start with these (a clause boundary). */
 const CONJUNCTIONS = new Set("and but or nor so yet because since although though while whereas when whenever where which who whom whose that then unless until if instead".split(" "));
 /** Never end a caption or row on these: they belong to the next word. */
@@ -229889,7 +229919,7 @@ const STOPWORDS$1 = new Set("a an and are as at be been being but by can could d
 const core$1 = (word) => word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
 const charsOf = (ws, from, to) => {
 	let n = 0;
-	for (let i = from; i < to; i++) n += Array.from(ws[i].word).length + (i > from ? 1 : 0);
+	for (let i = from; i < to; i++) n += Array.from(ws[i].word).length + (i > from ? wordSep(ws[i - 1].word, ws[i].word).length : 0);
 	return n;
 };
 /** Cost of a break between `ws[i-1]` and `ws[i]` (0 = natural). */
@@ -229942,6 +229972,7 @@ function planRows(ws, from, to, maxChars, maxLines) {
 function pickEmphasis(words, prevWord) {
 	const scored = [];
 	words.forEach((w, i) => {
+		if (/^\[.*\]$/.test(w.word.trim())) return;
 		const c = core$1(w.word);
 		if (!c) return;
 		const lower = c.toLowerCase();
@@ -229992,6 +230023,10 @@ function groupCaptionLines(words, opts = {}) {
 	if (run.length) runs.push(run);
 	const lines = [];
 	for (const ws of runs) {
+		if (ws.filter((w) => isCjkText(w.word)).length * 2 >= ws.length) {
+			lines.push(...groupCjkRun(ws, maxChars, maxLines));
+			continue;
+		}
 		const n = ws.length;
 		const best = [{
 			cost: 0,
@@ -230027,7 +230062,7 @@ function groupCaptionLines(words, opts = {}) {
 			cues.unshift({
 				start_ms: cw[0].start_ms,
 				end_ms: cw[cw.length - 1].end_ms,
-				text: cw.map((w) => w.word).join(" "),
+				text: joinWords(cw.map((w) => w.word)),
 				words: cw,
 				...rows.length > 1 ? { row_sizes: rows } : {}
 			});
@@ -230050,13 +230085,84 @@ function groupCaptionLines(words, opts = {}) {
 	});
 	return lines;
 }
+/**
+* CJK grouping: captions of up to `rowMax × maxLines` units, cut after sentence or clause
+* punctuation once a caption has CJK_MIN_CUE_CHARS units (else at the capacity), each split into
+* balanced rows of at most `rowMax` units, preferring row breaks after punctuation. `rowMax`
+* converts the Latin row width (`maxChars` at ~0.54 em) to square CJK characters, capped at
+* CJK_ROW_MAX_CHARS. Kinsoku is already in the tokens (punctuation is glued to the character
+* before it, see voice `tokenize`).
+*/
+function groupCjkRun(ws, maxChars, maxLines) {
+	const rowMax = Math.max(4, Math.min(16, Math.floor(maxChars * .54)));
+	const cap = rowMax * maxLines;
+	const units = ws.map((w) => cjkUnits(w.word));
+	const out = [];
+	let i = 0;
+	while (i < ws.length) {
+		let acc = 0;
+		let end = i;
+		let lastPunct = -1;
+		while (end < ws.length && (end === i || acc + units[end] <= cap + 1e-9)) {
+			acc += units[end];
+			end++;
+			if ((SENTENCE_END$1.test(ws[end - 1].word) || CLAUSE_END$1.test(ws[end - 1].word)) && acc >= 6) lastPunct = end;
+		}
+		if (end < ws.length && lastPunct > i && lastPunct < end) {
+			if (units.slice(i, lastPunct).reduce((a, b) => a + b, 0) >= Math.min(8, cap / 2)) end = lastPunct;
+		}
+		const cw = ws.slice(i, end);
+		const rows = cjkRows(cw, units.slice(i, end), rowMax, maxLines);
+		out.push({
+			start_ms: cw[0].start_ms,
+			end_ms: cw[cw.length - 1].end_ms,
+			text: joinWords(cw.map((w) => w.word)),
+			words: cw,
+			...rows.length > 1 ? { row_sizes: rows } : {}
+		});
+		i = end;
+	}
+	return out;
+}
+/** Balanced row sizes (in words) for a CJK caption: ≤ rowMax units per row, breaks after punctuation preferred. */
+function cjkRows(ws, units, rowMax, maxLines) {
+	const total = units.reduce((a, b) => a + b, 0);
+	if (total <= rowMax + 1e-9 || ws.length < 2) return [ws.length];
+	const nRows = Math.min(maxLines, Math.ceil(total / rowMax - 1e-9));
+	const sizes = [];
+	let at = 0;
+	let used = 0;
+	for (let r = 1; r < nRows; r++) {
+		const target = total * r / nRows;
+		let best = -1;
+		let bestCost = Infinity;
+		let acc = used;
+		for (let k = at + 1; k < ws.length; k++) {
+			acc += units[k - 1];
+			if (acc - used > rowMax + 1e-9) break;
+			if (total - acc > rowMax * (nRows - r) + 1e-9) continue;
+			const punct = SENTENCE_END$1.test(ws[k - 1].word) || CLAUSE_END$1.test(ws[k - 1].word);
+			const cost = Math.abs(acc - target) - (punct ? 2 : 0);
+			if (cost < bestCost) {
+				bestCost = cost;
+				best = k;
+			}
+		}
+		if (best < 0) break;
+		sizes.push(best - at);
+		used = units.slice(0, best).reduce((a, b) => a + b, 0);
+		at = best;
+	}
+	sizes.push(ws.length - at);
+	return sizes;
+}
 /** The caption's display rows (words joined per row). */
 function captionRows(line) {
 	const sizes = line.row_sizes ?? [line.words.length];
 	const rows = [];
 	let at = 0;
 	for (const n of sizes) {
-		rows.push(line.words.slice(at, at + n).map((w) => w.word).join(" "));
+		rows.push(joinWords(line.words.slice(at, at + n).map((w) => w.word)));
 		at += n;
 	}
 	return line.words.length ? rows : [line.text];
@@ -230107,7 +230213,7 @@ function toTranscript(words) {
 		scene = w.scene_id;
 		paras[paras.length - 1].push(w.word);
 	}
-	return paras.map((p) => p.join(" ")).join("\n\n") + (paras.length ? "\n" : "");
+	return paras.map((p) => joinWords(p)).join("\n\n") + (paras.length ? "\n" : "");
 }
 /** Canonical word timeline plus caption grouping, for the HTML (HyperFrames) captions. */
 function toCaptionJson(words, lines = groupCaptionLines(words)) {
@@ -230224,7 +230330,7 @@ function captionBlockBox(lines, layout, frame) {
 	for (const l of lines) {
 		const r = captionRows(l);
 		rows = Math.max(rows, r.length);
-		for (const row of r) w = Math.max(w, Array.from(row).length * layout.fontSize * em);
+		for (const row of r) w = Math.max(w, isCjkText(row) ? cjkUnits(row) * layout.fontSize : Array.from(row).length * layout.fontSize * em);
 	}
 	if (!lines.length) {
 		rows = layout.maxLines;
@@ -230243,8 +230349,53 @@ function captionBlockBox(lines, layout, frame) {
 		h: Math.min(bh, frame.height - y)
 	};
 }
+/** Bundled families libass uses for caption words in these scripts (fonts/, via `fontsdir`). */
+const CAPTION_SCRIPT_FONTS = Object.freeze({
+	cjk: "Noto Sans JP",
+	devanagari: "Noto Sans Devanagari",
+	arabic: "Noto Sans Arabic",
+	hebrew: "Noto Sans Hebrew"
+});
+/**
+* OS/2 win height (ascent + descent) per em of fonts captions use. libass sizes a font so its
+* win height equals the ASS size, so tall-metric script fonts would come out small next to the
+* caption font; their size is scaled by win(script) / win(caption font), capped at
+* SCRIPT_SIZE_CAP so rows stay close to the layout's line advance. Unknown fonts: 1.2.
+*/
+const FONT_WIN_HEIGHT = Object.freeze({
+	Inter: 1.21,
+	"Noto Sans": 1.519,
+	"JetBrains Mono": 1.32,
+	Arial: 1.117,
+	"Noto Sans JP": 1.448,
+	"Noto Sans Devanagari": 1.906,
+	"Noto Sans Arabic": 2.169
+});
+const SCRIPT_SIZE_CAP = 1.4;
+function wordScript(word) {
+	if (CJK_CHAR.test(word)) return "cjk";
+	if (/\p{Script=Devanagari}/u.test(word)) return "devanagari";
+	if (/\p{Script=Arabic}/u.test(word)) return "arabic";
+	if (/\p{Script=Hebrew}/u.test(word)) return "hebrew";
+	return null;
+}
+function fontSwitcher(line, f) {
+	if (!f) return () => "";
+	const keys = line.words.map((w) => wordScript(w.word));
+	if (keys.every((k) => k === null)) return () => "";
+	const baseWin = FONT_WIN_HEIGHT[f.font] ?? 1.2;
+	return (i) => {
+		const k = keys[i];
+		if (k === (i === 0 ? null : keys[i - 1])) return "";
+		if (k === null) return `{\\fn${f.font}\\fs${f.size}}`;
+		const family = f.families?.[k] ?? CAPTION_SCRIPT_FONTS[k];
+		const scale = Math.min(SCRIPT_SIZE_CAP, (FONT_WIN_HEIGHT[family] ?? baseWin) / baseWin);
+		return `{\\fn${family}\\fs${Math.round(f.size * scale * 10) / 10}}`;
+	};
+}
 /** Karaoke text for one caption: `{\kf<cs>}word` per word, `{\k<cs>}` for pauses, rows joined with `\N`. */
-function assKaraokeText(line, emphasis) {
+function assKaraokeText(line, emphasis, fonts) {
+	const fontSwitch = fontSwitcher(line, fonts);
 	let cursor = cs(line.start_ms);
 	const parts = [];
 	const breaks = rowBreaks(line);
@@ -230254,7 +230405,8 @@ function assKaraokeText(line, emphasis) {
 		const e = Math.max(cs(w.end_ms), s);
 		if (s > cursor) parts.push(`{\\k${s - cursor}}`);
 		const word = em.has(i) ? emphasize(w.word, emphasis) : assEscape(w.word);
-		parts.push(`{\\kf${e - s}}${word}${i < line.words.length - 1 ? breaks.has(i + 1) ? "\\N" : " " : ""}`);
+		const next = line.words[i + 1];
+		parts.push(`{\\kf${e - s}}${fontSwitch(i)}${word}${next ? breaks.has(i + 1) ? "\\N" : wordSep(w.word, next.word) : ""}`);
 		cursor = e;
 	});
 	return parts.join("");
@@ -230273,12 +230425,13 @@ function rowBreaks(line) {
 	return out;
 }
 /** Static caption text: rows joined with `\N`, emphasised words wrapped in `on`/`off` overrides. */
-function assStaticText(line, emphasis) {
+function assStaticText(line, emphasis, fonts) {
 	const breaks = rowBreaks(line);
 	const em = new Set(emphasis ? line.emphasis ?? [] : []);
+	const fontSwitch = fontSwitcher(line, fonts);
 	return line.words.map((w, i) => {
 		const word = em.has(i) ? emphasize(w.word, emphasis) : assEscape(w.word);
-		return `${i > 0 ? breaks.has(i) ? "\\N" : " " : ""}${word}`;
+		return `${i > 0 ? breaks.has(i) ? "\\N" : wordSep(line.words[i - 1].word, w.word) : ""}${fontSwitch(i)}${word}`;
 	}).join("");
 }
 /**
@@ -230323,7 +230476,7 @@ function toAss(lines, o) {
 		region.x,
 		Math.max(0, o.width - region.x - region.w),
 		Math.max(0, o.height - region.y - region.h + layout.pad),
-		1
+		lines.some((l) => RTL_CHAR.test(l.text)) ? -1 : 1
 	].join(",");
 	const header = [
 		"[Script Info]",
@@ -230350,7 +230503,12 @@ function toAss(lines, o) {
 		off: `\\c${assTagColor(baseHex)}${layout.bold ? "" : "\\b0"}`
 	};
 	const pos = layout.anchor.kind === "center" ? `{\\an5\\pos(${Math.round(region.x + region.w / 2)},${layout.anchor.y})}` : "";
-	const events = lines.map((l) => `Dialogue: 0,${assTimeCs(cs(l.start_ms))},${assTimeCs(cs(l.end_ms))},Default,,0,0,0,,${pos}${karaoke ? assKaraokeText(l, em) : assStaticText(l, em)}`);
+	const scriptFonts = {
+		font,
+		size: layout.fontSize,
+		...o.scriptFonts ? { families: o.scriptFonts } : {}
+	};
+	const events = lines.map((l) => `Dialogue: 0,${assTimeCs(cs(l.start_ms))},${assTimeCs(cs(l.end_ms))},Default,,0,0,0,,${pos}${karaoke ? assKaraokeText(l, em, scriptFonts) : assStaticText(l, em, scriptFonts)}`);
 	return `${[...header, ...events].join("\n")}\n`;
 }
 /** Write `<base>.json|.srt|.vtt|.txt` (and `.ass` when `ass` options are given) into `dir`. */
@@ -232137,7 +232295,8 @@ const SoundEffect = strictObject({
 	file: NonEmptyString.describe("Project-relative audio file."),
 	at_sec: number().min(0).describe("Offset inside the scene."),
 	volume_db: number().min(-60).max(6).optional(),
-	license: AudioLicense.optional()
+	license: AudioLicense.optional(),
+	caption: string().optional().describe("Sound-event caption shown while it plays, e.g. \"[applause]\" (accessibility).")
 }).describe("A one-shot sound effect.");
 const Scene = strictObject({
 	id: SceneId,
@@ -232168,7 +232327,8 @@ const VoiceSettings = strictObject({
 const CaptionSettings = strictObject({
 	preset: Id,
 	burn_in: boolean(),
-	position: strictObject({ y: number().min(0).max(1).describe("Vertical centre of the caption block as a fraction of frame height.") }).optional().describe("Manual caption placement. Omit to let the caption engine place captions in the platforms' caption zone.")
+	position: strictObject({ y: number().min(0).max(1).describe("Vertical centre of the caption block as a fraction of frame height.") }).optional().describe("Manual caption placement. Omit to let the caption engine place captions in the platforms' caption zone."),
+	sound_events: boolean().optional().describe("Caption non-speech sound too (accessibility): [music] while only music plays, sfx captions, [ambient sound] for native clips without speech. Default true when captions are burned in.")
 });
 const AudioSettings = strictObject({
 	music: strictObject({
@@ -232460,7 +232620,7 @@ const DETERMINISTIC_PROPS_EXAMPLES = {
 	}
 };
 /** Allowed deviation of summed scene durations from `target_duration_sec`. */
-const DURATION_TOLERANCE = .1;
+const DURATION_TOLERANCE$1 = .1;
 /** Recommended per-scene duration range (warning outside). */
 const SCENE_DURATION_SOFT = {
 	min: 1,
@@ -232576,7 +232736,7 @@ function validateVideoSpecSemantics(spec, ir) {
 		const diff = round(spec.target_duration_sec - total);
 		errors.push({
 			path: "scenes",
-			message: `scene durations sum to ${round(total)}s, outside ±${DURATION_TOLERANCE * 100}% of target_duration_sec ${spec.target_duration_sec}s (${round(lo)}–${round(hi)}s)`,
+			message: `scene durations sum to ${round(total)}s, outside ±${DURATION_TOLERANCE$1 * 100}% of target_duration_sec ${spec.target_duration_sec}s (${round(lo)}–${round(hi)}s)`,
 			fix: `${diff > 0 ? "add" : "remove"} about ${Math.abs(diff)}s across scenes (or add/remove a scene), or change target_duration_sec to ${round(total)}`
 		});
 	}
@@ -233003,6 +233163,7 @@ const CaptionsRender = strictObject({
 	burn_in: boolean(),
 	box: PxBox.optional().describe("Region the burned-in captions occupy, in output pixels, for lint."),
 	max_lines: int().positive().optional(),
+	sound_events: int().nonnegative().optional().describe("Sound-event cues ([music], sfx captions, [ambient sound]) in the captions."),
 	files: array(strictObject({
 		format: CaptionFormat,
 		path: FilePath,
@@ -233030,8 +233191,17 @@ const FinalOutput = strictObject({
 	width: int().positive().optional(),
 	height: int().positive().optional(),
 	duration_sec: number().nonnegative().optional(),
-	transcoded: boolean().optional().describe("True when the file was re-encoded to fit the target's envelope rather than copied.")
+	transcoded: boolean().optional().describe("True when the file was re-encoded to fit the target's envelope rather than copied."),
+	c2pa: boolean().optional().describe("True when the file carries a signed C2PA manifest.")
 });
+const C2paRecord = strictObject({
+	tool: string().describe("Signer, e.g. c2patool 0.26.68."),
+	certificate: _enum(["test", "user"]).describe("test: the tool's built-in test certificate (not trusted by validators); user: the user's own certificate."),
+	claim_generator: string(),
+	assertions: array(string()).describe("Assertion labels written, e.g. c2pa.actions, stds.schema-org.CreativeWork."),
+	signed: array(FilePath),
+	ai_generated: boolean().describe("Whether the manifest declares AI-generated content (trainedAlgorithmicMedia).")
+}).describe("C2PA content credentials written at export.");
 const QaStatus = _enum([
 	"pass",
 	"warn",
@@ -233092,6 +233262,7 @@ const RenderManifest = strictObject({
 		license: AudioLicense.optional()
 	}).optional().describe("The music bed mixed into the audio, with its rights."),
 	outputs: array(FinalOutput),
+	c2pa: C2paRecord.optional(),
 	qa: QaSummary.optional(),
 	settings: RenderSettings.optional(),
 	timing_adjustments: array(TimingAdjustment).optional(),
@@ -233355,6 +233526,39 @@ const ShortCandidates = strictObject({
 	id: "ShortCandidates",
 	title: "ShortCandidates",
 	description: "Scored spans of a long recording that could stand alone as shorts."
+});
+//#endregion
+//#region ../schema/dist/localization.js
+/**
+* localized/<lang>/project/translation.json: every viewer-facing string of a spec (voiceover,
+* on-screen text, text props, cover headline, post copy), keyed by its JSON path. The localize tool
+* writes it with `source` filled; Claude fills `target`; localize with apply writes the
+* translations into the localized spec and re-times it for the language.
+*/
+const TranslationEntry = strictObject({
+	path: string().describe("JSON path into the spec, e.g. scenes.2.voiceover or scenes.0.deterministic.props.lines.1."),
+	kind: _enum([
+		"voiceover",
+		"on_screen_text",
+		"props",
+		"cover",
+		"post",
+		"title"
+	]),
+	source: string(),
+	target: string().optional().describe("The translation; empty keeps the source text (names, code, URLs)."),
+	note: string().optional().describe("Context for the translator, e.g. 'keep under 6 words', 'code: do not translate'.")
+});
+const TranslationSheet = strictObject({
+	schema_version: SchemaVersion,
+	source_language: LanguageTag,
+	target_language: LanguageTag,
+	source_spec_sha256: Sha256.describe("The spec the sheet was made from; applying to a changed spec is refused."),
+	entries: array(TranslationEntry)
+}).meta({
+	id: "TranslationSheet",
+	title: "TranslationSheet",
+	description: "localized/<lang>/project/translation.json: the strings of a spec to translate, and their translations."
 });
 //#endregion
 //#region ../schema/dist/brand.js
@@ -234426,6 +234630,341 @@ function formatIngestSummary(s) {
 	return lines.join("\n");
 }
 //#endregion
+//#region ../renderer/dist/script.js
+/**
+* Writing-system detection for layout, fonts, direction and timing.
+*
+* Scripts are grouped by what the renderers must do differently, not by Unicode's full list:
+* - `latin`: Latin, Greek and Cyrillic (the bundled Inter / Noto Sans cover them; spaces separate words)
+* - `cjk`: Han, Hiragana, Katakana, Bopomofo and full-width forms (no spaces; ~1 em per character)
+* - `hangul`: Korean (full-width syllables, but words are separated by spaces)
+* - `devanagari`: Hindi, Marathi, Nepali, Sanskrit (needs shaping: conjuncts, reordered vowel signs)
+* - `arabic`, `hebrew`: right-to-left (Arabic also joins letters)
+* - `other`: any other letters (Thai, Bengali, Tamil, …): shaped by libass/Chrome with host fonts
+*
+* Digits, punctuation, symbols and spaces are neutral: they take the script of the text around them.
+* `packages/media/src/captions.ts` and `packages/voice/src/estimate.ts` keep small copies of the
+* CJK and RTL tests below (those packages cannot depend on the renderer); keep them in step.
+*/
+const SCRIPTS = [
+	"latin",
+	"cjk",
+	"hangul",
+	"devanagari",
+	"arabic",
+	"hebrew",
+	"other"
+];
+const RE = {
+	latin: /[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}]/u,
+	cjk: /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Bopomofo}]/u,
+	hangul: /\p{Script=Hangul}/u,
+	devanagari: /\p{Script=Devanagari}/u,
+	arabic: /\p{Script=Arabic}/u,
+	hebrew: /\p{Script=Hebrew}/u
+};
+const LETTER = /[\p{L}\p{M}]/u;
+/** CJK punctuation, full-width forms and the prolonged sound mark: neutral, but 1 em wide. */
+const WIDE_NEUTRAL = /[　-〿！-｠￠-￦・ー]/u;
+/** Script of one character (a code point), or null for neutral characters (digits, punctuation, spaces). */
+function charScript(ch) {
+	if (!LETTER.test(ch)) return null;
+	if (RE.latin.test(ch)) return "latin";
+	if (RE.cjk.test(ch)) return "cjk";
+	if (RE.hangul.test(ch)) return "hangul";
+	if (RE.devanagari.test(ch)) return "devanagari";
+	if (RE.arabic.test(ch)) return "arabic";
+	if (RE.hebrew.test(ch)) return "hebrew";
+	if (/\p{Script=Inherited}|\p{Script=Common}/u.test(ch)) return null;
+	return "other";
+}
+/** Letters per script in `text`. */
+function scriptCounts(text) {
+	const out = {
+		latin: 0,
+		cjk: 0,
+		hangul: 0,
+		devanagari: 0,
+		arabic: 0,
+		hebrew: 0,
+		other: 0
+	};
+	for (const ch of text) {
+		const s = charScript(ch);
+		if (s) out[s]++;
+	}
+	return out;
+}
+/** Scripts with at least one letter in `text`. */
+function scriptsIn(text) {
+	const c = scriptCounts(text);
+	return SCRIPTS.filter((s) => c[s] > 0);
+}
+/**
+* The script with the most letters (ties go to the non-Latin script, so "API का उपयोग" is
+* Devanagari). Text without letters is `latin`.
+*/
+function dominantScript(text) {
+	const c = scriptCounts(text);
+	let best = "latin";
+	for (const s of SCRIPTS) if (c[s] > c[best] || c[s] === c[best] && c[s] > 0 && best === "latin") best = s;
+	return best;
+}
+/** True for characters drawn about 1 em wide: CJK ideographs, kana, Hangul, full-width forms and CJK punctuation. */
+function isWideChar(ch) {
+	if (WIDE_NEUTRAL.test(ch)) return true;
+	const s = charScript(ch);
+	if (s === "cjk") return !/[ｦ-ﾟ]/u.test(ch);
+	return s === "hangul";
+}
+/** True when `text` contains CJK characters (ideographs, kana or CJK punctuation), which break between characters. */
+function hasCjk(text) {
+	for (const ch of text) if (charScript(ch) === "cjk" || WIDE_NEUTRAL.test(ch)) return true;
+	return false;
+}
+const RTL_SCRIPTS = /* @__PURE__ */ new Set(["arabic", "hebrew"]);
+/** Scripts FFmpeg drawtext cannot shape without FriBidi (reordering, joining, conjuncts). */
+const COMPLEX_SCRIPTS = /* @__PURE__ */ new Set([
+	"devanagari",
+	"arabic",
+	"hebrew",
+	"other"
+]);
+function isRtlScript(s) {
+	return RTL_SCRIPTS.has(s);
+}
+/** True when `text` has letters of a script that needs shaping or bidi (Devanagari, Arabic, Hebrew, other). */
+function needsShaping(text) {
+	return scriptsIn(text).some((s) => COMPLEX_SCRIPTS.has(s));
+}
+/**
+* Direction of a line from its strong letters: `rtl` when all are Arabic/Hebrew, `ltr` when none
+* are, `mixed` when both occur. Lines without letters are `ltr`.
+*/
+function textDirection(text) {
+	let rtl = 0;
+	let ltr = 0;
+	for (const ch of text) {
+		const s = charScript(ch);
+		if (!s) continue;
+		if (isRtlScript(s)) rtl++;
+		else ltr++;
+	}
+	return rtl === 0 ? "ltr" : ltr === 0 ? "rtl" : "mixed";
+}
+/**
+* Base direction of a paragraph, as the Unicode bidi algorithm (rules P2–P3) and libass /
+* `unicode-bidi: plaintext` pick it: the direction of the first strong letter; the language's
+* direction when there is none.
+*/
+function baseDirection(text, language) {
+	for (const ch of text) {
+		const s = charScript(ch);
+		if (s) return isRtlScript(s) ? "rtl" : "ltr";
+	}
+	const langScript = languageScript(language);
+	return langScript && isRtlScript(langScript) ? "rtl" : "ltr";
+}
+const LANGUAGE_SCRIPTS = {
+	ja: "cjk",
+	zh: "cjk",
+	yue: "cjk",
+	ko: "hangul",
+	hi: "devanagari",
+	mr: "devanagari",
+	ne: "devanagari",
+	sa: "devanagari",
+	kok: "devanagari",
+	mai: "devanagari",
+	ar: "arabic",
+	fa: "arabic",
+	ur: "arabic",
+	ps: "arabic",
+	ckb: "arabic",
+	he: "hebrew",
+	iw: "hebrew",
+	yi: "hebrew",
+	th: "other",
+	lo: "other",
+	km: "other",
+	my: "other",
+	bn: "other",
+	pa: "other",
+	gu: "other",
+	or: "other",
+	ta: "other",
+	te: "other",
+	kn: "other",
+	ml: "other",
+	si: "other",
+	am: "other",
+	ka: "other",
+	hy: "other"
+};
+/** Primary subtag of a BCP-47 tag, lower case (`pt-BR` → `pt`). */
+function baseLanguage(language) {
+	return language?.trim().split(/[-_]/)[0]?.toLowerCase() || void 0;
+}
+/** The script a language is normally written in (Latin for unknown or Latin-script languages); undefined without a language. */
+function languageScript(language) {
+	const base = baseLanguage(language);
+	if (!base) return void 0;
+	const sub = language.split(/[-_]/).slice(1).find((p) => p.length === 4)?.toLowerCase();
+	if (sub) {
+		const bySub = {
+			latn: "latin",
+			cyrl: "latin",
+			grek: "latin",
+			hans: "cjk",
+			hant: "cjk",
+			jpan: "cjk",
+			hani: "cjk",
+			kore: "hangul",
+			hang: "hangul",
+			deva: "devanagari",
+			arab: "arabic",
+			hebr: "hebrew"
+		};
+		if (bySub[sub]) return bySub[sub];
+	}
+	return LANGUAGE_SCRIPTS[base] ?? "latin";
+}
+/** A `lang` attribute for HTML: the spec language, else a guess from the script (undefined for Latin). */
+function htmlLang(language, script) {
+	if (language && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(language)) return language;
+	return {
+		cjk: "ja",
+		hangul: "ko",
+		devanagari: "hi",
+		arabic: "ar",
+		hebrew: "he"
+	}[script];
+}
+/**
+* Font families that cover a script, best first. Bundled families (fonts/) come first; the host
+* families after them are only reached when the bundled files are missing. Latin needs none
+* (the token chains already cover it); `other` has no bundled font and relies on host fonts.
+*/
+function scriptFontFamilies(script, language) {
+	const base = baseLanguage(language);
+	switch (script) {
+		case "cjk":
+			if (base === "zh") return /hant|tw|hk|mo/i.test(language ?? "") ? [
+				"Noto Sans TC",
+				"PingFang TC",
+				"Noto Sans JP"
+			] : [
+				"Noto Sans SC",
+				"PingFang SC",
+				"Noto Sans JP"
+			];
+			if (base === "ko") return [
+				"Noto Sans KR",
+				"Apple SD Gothic Neo",
+				"Noto Sans JP"
+			];
+			return [
+				"Noto Sans JP",
+				"Hiragino Sans",
+				"Yu Gothic"
+			];
+		case "hangul": return [
+			"Noto Sans KR",
+			"Apple SD Gothic Neo",
+			"Malgun Gothic"
+		];
+		case "devanagari": return [
+			"Noto Sans Devanagari",
+			"Kohinoor Devanagari",
+			"Nirmala UI"
+		];
+		case "arabic": return [
+			"Noto Sans Arabic",
+			"Geeza Pro",
+			"Segoe UI"
+		];
+		case "hebrew": return [
+			"Noto Sans Hebrew",
+			"Arial Hebrew",
+			"Arial"
+		];
+		default: return [];
+	}
+}
+/**
+* Kinsoku shori (Japanese line-breaking rules, JIS X 4051 basic set): characters that may not
+* start a line (closing brackets, small kana, prolonged sound mark, sentence and clause
+* punctuation) and characters that may not end one (opening brackets).
+*/
+const KINSOKU_NO_START = new Set(Array.from("、。，．,.!?！？)）]］}｝〕〉》」』】〙〗〟’”»ー―‐〜～…‥・:;：；/々〻ゝゞヽヾぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ%％"));
+const KINSOKU_NO_END = new Set(Array.from("(（[［{｛〔〈《「『【〘〖〝‘“«"));
+/**
+* Split text into line-break units. Spaced scripts break at spaces only; CJK characters are
+* each a unit, with kinsoku applied (no-start characters glue to the unit before them, no-end
+* characters to the unit after them). Latin words inside CJK text stay whole.
+*/
+function breakUnits(text) {
+	const units = [];
+	let word = "";
+	let space = false;
+	let prefix = "";
+	const flushWord = () => {
+		if (!word) return;
+		units.push({
+			text: prefix + word,
+			space
+		});
+		prefix = "";
+		word = "";
+		space = false;
+	};
+	for (const ch of text) {
+		if (/\s/u.test(ch)) {
+			flushWord();
+			if (units.length || prefix) space = true;
+			continue;
+		}
+		const wide = charScript(ch) === "cjk" || WIDE_NEUTRAL.test(ch);
+		if (KINSOKU_NO_START.has(ch) && !word && !prefix && units.length && !space) {
+			units[units.length - 1].text += ch;
+			continue;
+		}
+		if (KINSOKU_NO_START.has(ch) && word) {
+			word += ch;
+			continue;
+		}
+		if (KINSOKU_NO_END.has(ch)) {
+			if (word && !wide) {
+				word += ch;
+				continue;
+			}
+			flushWord();
+			prefix += ch;
+			continue;
+		}
+		if (wide) {
+			flushWord();
+			units.push({
+				text: prefix + ch,
+				space
+			});
+			prefix = "";
+			space = false;
+			continue;
+		}
+		word += ch;
+	}
+	flushWord();
+	if (prefix) {
+		if (units.length && !space) units[units.length - 1].text += prefix;
+		else units.push({
+			text: prefix,
+			space
+		});
+	}
+	return units;
+}
+//#endregion
 //#region ../renderer/dist/tokens.js
 /**
 * Visual tokens, font files and render targets shared by the deterministic renderers.
@@ -234541,7 +235080,42 @@ const PERSONALITY_MOTION = Object.freeze({
 * `logo_path` is the brand's logo path as written (project-relative); renderers resolve it.
 * Without a style and without brand weights or motion, the tokens are exactly the v1 tokens.
 */
-function resolveTokens$1(brand, defaults = {}, style) {
+function resolveTokens$1(brand, defaults = {}, style, opts = {}) {
+	const out = resolveTokensBase(brand, defaults, style);
+	return opts.language ? withLanguage(out, opts.language) : out;
+}
+/**
+* Tokens for a spec language: when the language is written in a non-Latin script (ja, hi, ar, …)
+* the script's font families (Noto Sans JP / Devanagari / Arabic first) are added to every chain
+* before its generic family, and `language` is recorded. Latin-script languages (en, fr, …)
+* return the tokens unchanged, so English renders and their cache keys do not move.
+*/
+function withLanguage(tokens, language) {
+	const script = languageScript(language);
+	if (!script || script === "latin") return tokens;
+	return {
+		...tokens,
+		language,
+		font_heading: withScriptFonts(tokens.font_heading, [script], language),
+		font_body: withScriptFonts(tokens.font_body, [script], language),
+		font_mono: withScriptFonts(tokens.font_mono, [script], language)
+	};
+}
+/** Add the families covering `scripts` to a chain, before its generic family (skipping families already there). */
+function withScriptFonts(chain, scripts, language) {
+	return withFallbacks(chain, scripts.flatMap((s) => scriptFontFamilies(s, language)));
+}
+/**
+* A chain for drawing one line of `script` text with a single font file (FFmpeg drawtext has no
+* per-glyph fallback): the script's families first, then the original chain. Latin: unchanged.
+*/
+function scriptFirstChain(chain, script, language) {
+	const fams = scriptFontFamilies(script, language);
+	if (fams.length === 0) return chain;
+	const rest = chain.split(",").map((p) => p.trim()).filter((p) => p && !fams.some((f) => f.toLowerCase() === p.replace(/^["']|["']$/g, "").toLowerCase()));
+	return [...fams.map((f) => /\s/.test(f) ? `"${f}"` : f), ...rest].join(", ");
+}
+function resolveTokensBase(brand, defaults = {}, style) {
 	const base = {
 		...DEFAULT_TOKENS,
 		...defaults
@@ -234632,6 +235206,42 @@ const BUNDLED_FONTS = Object.freeze([
 		family: "JetBrains Mono",
 		weight: 700,
 		file: "JetBrainsMono/JetBrainsMono-Bold.ttf"
+	},
+	{
+		family: "Noto Sans JP",
+		weight: 400,
+		file: "NotoSansJP/NotoSansJP-Regular.otf",
+		script: "cjk"
+	},
+	{
+		family: "Noto Sans JP",
+		weight: 700,
+		file: "NotoSansJP/NotoSansJP-Bold.otf",
+		script: "cjk"
+	},
+	{
+		family: "Noto Sans Devanagari",
+		weight: 400,
+		file: "NotoSansDevanagari/NotoSansDevanagari-Regular.ttf",
+		script: "devanagari"
+	},
+	{
+		family: "Noto Sans Devanagari",
+		weight: 700,
+		file: "NotoSansDevanagari/NotoSansDevanagari-Bold.ttf",
+		script: "devanagari"
+	},
+	{
+		family: "Noto Sans Arabic",
+		weight: 400,
+		file: "NotoSansArabic/NotoSansArabic-Regular.ttf",
+		script: "arabic"
+	},
+	{
+		family: "Noto Sans Arabic",
+		weight: 700,
+		file: "NotoSansArabic/NotoSansArabic-Bold.ttf",
+		script: "arabic"
 	}
 ]);
 const FONTS_MARKER = "README.md";
@@ -234654,15 +235264,27 @@ function findFontsDir(env = process.env, from) {
 	}
 	return null;
 }
-/** Which bundled font files are present in `dir` (null dir: none). */
-function bundledFontsStatus(dir) {
+/**
+* Which bundled font files are present in `dir` (null dir: none). Script fonts (Noto Sans JP,
+* Devanagari, Arabic) count in `present`/`missing` only for the `scripts` a render uses, so a
+* missing Japanese font only matters for videos with Japanese text.
+*/
+function bundledFontsStatus(dir, opts = {}) {
 	const present = [];
 	const missing = [];
-	for (const f of BUNDLED_FONTS) (dir && existsSync(join(dir, f.file)) ? present : missing).push(f.file);
+	const scriptMissing = [];
+	const want = new Set(opts.scripts ?? []);
+	for (const f of BUNDLED_FONTS) {
+		const ok = Boolean(dir && existsSync(join(dir, f.file)));
+		if (f.script && !ok) scriptMissing.push(f.file);
+		if (f.script && !want.has(f.script)) continue;
+		(ok ? present : missing).push(f.file);
+	}
 	return {
 		dir,
 		present,
-		missing
+		missing,
+		script_missing: scriptMissing
 	};
 }
 /** Nearest bundled weight: 600 and up map to Bold, anything lighter to Regular. */
@@ -234697,7 +235319,8 @@ function fontFaceCss(tokens, opts = {}) {
 		if (!used.has(f.family.toLowerCase())) continue;
 		const p = join(dir, f.file);
 		if (!existsSync(p)) continue;
-		rules.push(`@font-face { font-family: "${f.family}"; src: url("${pathToFileURL(p).href}") format("truetype"); font-weight: ${f.weight}; font-style: normal; font-display: block; }`);
+		const format = f.file.endsWith(".otf") ? "opentype" : "truetype";
+		rules.push(`@font-face { font-family: "${f.family}"; src: url("${pathToFileURL(p).href}") format("${format}"); font-weight: ${f.weight}; font-style: normal; font-display: block; }`);
 	}
 	return rules.join("\n");
 }
@@ -234832,6 +235455,79 @@ function createFontResolver(env = process.env, deps = {}) {
 		}
 		return p;
 	};
+}
+const metricsCache = /* @__PURE__ */ new Map();
+/**
+* Vertical metrics from a TTF/OTF (first face of a TTC), read from the `head`, `hhea` and `OS/2`
+* tables. Null when the file cannot be read or parsed. Memoised per path.
+*/
+function readFontMetrics(file) {
+	if (metricsCache.has(file)) return metricsCache.get(file);
+	let out = null;
+	let fd;
+	try {
+		fd = openSync(file, "r");
+		const read = (pos, len) => {
+			const b = Buffer.alloc(len);
+			readSync(fd, b, 0, len, pos);
+			return b;
+		};
+		let base = 0;
+		if (read(0, 4).toString("latin1") === "ttcf") base = read(12, 4).readUInt32BE(0);
+		const n = read(base, 12).readUInt16BE(4);
+		const dir = read(base + 12, n * 16);
+		const tables = {};
+		for (let i = 0; i < n; i++) tables[dir.toString("latin1", i * 16, i * 16 + 4)] = dir.readUInt32BE(i * 16 + 8);
+		if (tables.head !== void 0 && tables.hhea !== void 0 && tables["OS/2"] !== void 0) {
+			const head = read(tables.head, 54);
+			const hhea = read(tables.hhea, 8);
+			const os2 = read(tables["OS/2"], 78);
+			out = {
+				unitsPerEm: head.readUInt16BE(18),
+				winHeight: os2.readUInt16BE(74) + os2.readUInt16BE(76),
+				winAscent: os2.readUInt16BE(74),
+				hheaAscent: hhea.readInt16BE(4),
+				hheaDescent: hhea.readInt16BE(6)
+			};
+			if (!(out.unitsPerEm > 0 && out.winHeight > 0)) out = null;
+		}
+	} catch {
+		out = null;
+	} finally {
+		if (fd !== void 0) closeSync(fd);
+	}
+	metricsCache.set(file, out);
+	return out;
+}
+/**
+* libass font size for a wanted em size: libass scales a font so that its OS/2 win height
+* (usWinAscent + usWinDescent) equals the ASS font size, while FFmpeg drawtext sizes the em.
+* Tall-metric fonts (Noto Sans Devanagari 1.906, Arabic 2.169) would otherwise come out small.
+*/
+function assFontSize(emPx, metrics) {
+	if (!metrics) return emPx;
+	return Math.round(emPx * metrics.winHeight / metrics.unitsPerEm * 100) / 100;
+}
+/**
+* libass only reads font files directly inside its `fontsdir` (not sub-directories), while
+* `fonts/` keeps one directory per family. Link the given font files (default: every bundled
+* font present) flat into `destDir` and return it, for `subtitles=…:fontsdir=` / `ass=…:fontsdir=`.
+* Symlinks, so nothing is copied; existing links are replaced.
+*/
+async function prepareLibassFontsDir(destDir, files, fontsDir = findFontsDir()) {
+	await mkdir(destDir, { recursive: true });
+	const list = files ?? (fontsDir ? BUNDLED_FONTS.map((f) => join(fontsDir, f.file)).filter((p) => existsSync(p)) : []);
+	for (const src of list) {
+		const dest = join(destDir, basename(src));
+		try {
+			if (await readlink(dest) === src) continue;
+			await unlink(dest);
+		} catch {}
+		try {
+			await symlink(src, dest);
+		} catch {}
+	}
+	return destDir;
 }
 /** Frame size for an aspect ratio, keeping the short side at `shortSide` (even dimensions). */
 function targetForAspect(aspect, opts = {}) {
@@ -235060,10 +235756,88 @@ const CHAR_EM_UPPER = .68;
 function charEm(opts) {
 	return opts.em ?? (opts.mono ? CHAR_EM.mono : CHAR_EM.proportional);
 }
-/** Estimated rendered width in px. */
+/**
+* Average advances of non-Latin characters in em (design estimates, a little generous so wrapped
+* lines fit): CJK ideographs, kana, Hangul and full-width punctuation are square (1 em);
+* Devanagari consonants and vowels 0.6 em, spacing vowel signs 0.28 em, marks above/below 0;
+* joined Arabic letters 0.48 em, harakat 0; Hebrew letters 0.55 em, points 0.
+*/
+const SCRIPT_EM = {
+	wide: 1,
+	devanagari: .6,
+	devanagari_sign: .28,
+	arabic: .48,
+	hebrew: .55,
+	other: .6
+};
+/** Text made only of Latin-1/Latin Extended letters, general punctuation and ASCII: the original estimates apply unchanged. */
+const SIMPLE = /^[\u0000-\u024F\u2000-\u206F\u20A0-\u20CF\u2100-\u214F]*$/u;
+/** True when `text` needs the script-aware estimates (CJK, Hangul, Devanagari, Arabic, Hebrew, other scripts). */
+function isComplexText(text) {
+	if (SIMPLE.test(text)) return false;
+	for (const ch of text) if (scriptEm(ch) !== null) return true;
+	return false;
+}
+/** Advance of one character in em, or null when it takes the base (Latin/neutral) estimate. */
+function scriptEm(ch) {
+	if (isWideChar(ch)) return SCRIPT_EM.wide;
+	const s = charScript(ch);
+	if (s === null || s === "latin") return null;
+	if (/\p{Mn}|\p{Me}/u.test(ch)) return 0;
+	if (s === "devanagari") return /\p{Mc}/u.test(ch) ? SCRIPT_EM.devanagari_sign : SCRIPT_EM.devanagari;
+	if (s === "arabic") return SCRIPT_EM.arabic;
+	if (s === "hebrew") return SCRIPT_EM.hebrew;
+	return /\p{Mc}/u.test(ch) ? SCRIPT_EM.devanagari_sign : SCRIPT_EM.other;
+}
+/**
+* Estimated rendered width in px. Latin and neutral characters use the base advance (`em`, or
+* CHAR_EM); CJK, Devanagari, Arabic and Hebrew characters use SCRIPT_EM.
+*/
 function estimateTextWidth(text, fontSize, opts = {}) {
 	const em = charEm(opts);
-	return Array.from(text).length * fontSize * em;
+	if (SIMPLE.test(text)) return Array.from(text).length * fontSize * em;
+	let n = 0;
+	let extra = 0;
+	for (const ch of text) {
+		const e = scriptEm(ch);
+		if (e === null) n++;
+		else extra += e;
+	}
+	return n * fontSize * em + extra * fontSize;
+}
+/** Break a unit wider than `maxWidth` into character pieces that each fit (at least one character each). */
+function hardBreakWidth(unit, fontSize, maxWidth, opts) {
+	const out = [];
+	let cur = "";
+	for (const ch of unit) if (cur && estimateTextWidth(cur + ch, fontSize, opts) > maxWidth + .01) {
+		out.push(cur);
+		cur = ch;
+	} else cur += ch;
+	if (cur) out.push(cur);
+	return out;
+}
+/**
+* Width-based wrap for script-aware text: spaced scripts break at spaces, CJK between
+* characters with kinsoku (see `breakUnits`). Units wider than the line are hard-broken.
+*/
+function wrapComplex(para, fontSize, maxWidth, opts) {
+	const lines = [];
+	let cur = "";
+	for (const u of breakUnits(para)) (estimateTextWidth(u.text, fontSize, opts) > maxWidth + .01 ? hardBreakWidth(u.text, fontSize, maxWidth, opts) : [u.text]).forEach((piece, k) => {
+		const cand = cur ? `${cur}${u.space && k === 0 ? " " : ""}${piece}` : piece;
+		if (!cur || estimateTextWidth(cand, fontSize, opts) <= maxWidth + .01) cur = cand;
+		else {
+			lines.push(cur);
+			cur = piece;
+		}
+	});
+	if (cur) lines.push(cur);
+	return lines;
+}
+/** The units that must stay whole on a line: words for spaced scripts, characters (with glued punctuation) for CJK. */
+function lineUnits(text) {
+	if (!isComplexText(text)) return text.split(/\s+/).filter(Boolean);
+	return breakUnits(text).map((u) => u.text);
 }
 /** Break a single word that is wider than `maxWidth` into pieces that fit. */
 function hardBreak(word, maxChars) {
@@ -235078,6 +235852,11 @@ function wrapText(text, fontSize, maxWidth, opts = {}) {
 	const maxChars = Math.max(1, Math.floor(maxWidth / (fontSize * em)));
 	const lines = [];
 	for (const para of text.replace(/\r\n?/g, "\n").split("\n")) {
+		if (isComplexText(para)) {
+			const wrapped = wrapComplex(para, fontSize, maxWidth, opts);
+			lines.push(...wrapped.length ? wrapped : [""]);
+			continue;
+		}
 		const words = para.split(/[ \t]+/).filter(Boolean);
 		if (words.length === 0) {
 			lines.push("");
@@ -235118,7 +235897,7 @@ function fitText(text, box, opts) {
 	const lh = opts.lineHeight ?? 1.25;
 	const paras = typeof text === "string" ? [text] : [...text];
 	const layout = (size) => opts.noWrap ? paras.flatMap((p) => p.split("\n")) : paras.flatMap((p) => wrapText(p, size, box.w, opts));
-	const words = opts.noWrap ? [] : [...new Set(paras.flatMap((p) => p.split(/\s+/)).filter(Boolean))];
+	const words = opts.noWrap ? [] : [...new Set(paras.flatMap((p) => lineUnits(p)))];
 	const wordsFit = (size) => words.every((w) => blockSize([w], size, lh, opts).width <= box.w + .01);
 	const fits = (lines, size) => {
 		const b = blockSize(lines, size, lh, opts);
@@ -235142,11 +235921,27 @@ function fitText(text, box, opts) {
 	const em = charEm(opts);
 	const maxChars = Math.max(1, Math.floor(box.w / (size * em)));
 	const maxLines = Math.max(1, Math.min(opts.maxLines ?? Infinity, Math.floor((box.h - size) / (size * lh)) + 1));
-	let lines = layout(size).map((l) => ellipsize(l, maxChars));
-	if (lines.length > maxLines) {
-		lines = lines.slice(0, maxLines);
-		const last = lines[maxLines - 1];
-		lines[maxLines - 1] = Array.from(last).length >= maxChars ? ellipsize(`${last}…`, maxChars) : `${last}…`;
+	let lines;
+	if (paras.some((p) => isComplexText(p))) {
+		const fitW = (l) => {
+			if (estimateTextWidth(l, size, opts) <= box.w + .01) return l;
+			const chars = Array.from(l);
+			while (chars.length > 1 && estimateTextWidth(`${chars.join("").trimEnd()}…`, size, opts) > box.w + .01) chars.pop();
+			return `${chars.join("").trimEnd()}…`;
+		};
+		lines = layout(size).map(fitW);
+		if (lines.length > maxLines) {
+			lines = lines.slice(0, maxLines);
+			const last = lines[maxLines - 1];
+			lines[maxLines - 1] = last.endsWith("…") ? last : fitW(`${last}…`);
+		}
+	} else {
+		lines = layout(size).map((l) => ellipsize(l, maxChars));
+		if (lines.length > maxLines) {
+			lines = lines.slice(0, maxLines);
+			const last = lines[maxLines - 1];
+			lines[maxLines - 1] = Array.from(last).length >= maxChars ? ellipsize(`${last}…`, maxChars) : `${last}…`;
+		}
 	}
 	return {
 		fontSize: size,
@@ -235558,7 +236353,8 @@ function highlightLines(code, language) {
 * tokens, not the host toolchain.
 */
 const FFMPEG_RENDERER_ID = "ffmpeg-drawtext";
-const FFMPEG_RENDERER_VERSION = "0.3.0";
+/** 0.4.0: script fonts for CJK lines; Devanagari/Arabic/Hebrew lines drawn through libass (shaping + bidi). */
+const FFMPEG_RENDERER_VERSION = "0.4.0";
 const FFMPEG_RENDERER_KINDS = [
 	"typography",
 	"code",
@@ -235621,14 +236417,15 @@ function palette(t) {
 const r = Math.round;
 function textLines(fit, box, o) {
 	const mono = o.font === "mono";
+	const rtl = o.align === "left" && !mono && baseDirection(fit.lines.join(" ")) === "rtl";
 	return placeLines(fit, box, o.align ?? "center", o.valign ?? "middle", { mono }).filter((l) => l.text.trim().length > 0).map((l, i) => ({
 		type: "text",
 		text: l.text,
 		font: o.font,
 		size: l.fontSize,
 		color: typeof o.color === "function" ? o.color(l.text, i) : o.color,
-		x: l.x,
-		...o.align === "left" ? {} : { cx: r(l.cx) },
+		x: rtl ? r(box.x + box.w - l.width) : l.x,
+		...rtl ? { rx: r(box.x + box.w) } : o.align === "left" ? {} : { cx: r(l.cx) },
 		y: l.y,
 		beat: typeof o.beat === "function" ? o.beat(i) : o.beat,
 		slide: o.slide ?? true
@@ -236678,7 +237475,7 @@ function glyphWidth(text, size) {
 	else if (/[frt()]/.test(ch)) em += .44;
 	else if (/[MWmw@%]/.test(ch)) em += .9;
 	else if (/[A-Z0-9]/.test(ch)) em += .7;
-	else em += .6;
+	else em += scriptEm(ch) ?? .6;
 	return em * size;
 }
 function imageIn(image, box, beat) {
@@ -237392,17 +238189,20 @@ function kineticText(p, c) {
 	let k = 0;
 	let acc = "";
 	let hit = false;
+	const rtl = baseDirection(text) === "rtl";
 	for (const line of placeLines(fit, box, "center", "middle")) {
 		const parts = line.text.split(" ").filter(Boolean);
 		const space = glyphWidth(" ", fit.fontSize);
 		const widths = parts.map((w) => glyphWidth(w, fit.fontSize));
 		const lineW = widths.reduce((a, b) => a + b, 0) + space * Math.max(0, parts.length - 1);
 		const scale = lineW > box.w ? box.w / lineW : 1;
-		let x = c.align === "left" ? box.x : box.x + (box.w - lineW * scale) / 2;
+		let x = c.align === "left" ? rtl ? box.x + box.w - lineW * scale : box.x : box.x + (box.w - lineW * scale) / 2;
+		if (rtl) x += lineW * scale;
 		parts.forEach((w, j) => {
 			const beat = chunkOf[Math.min(k, chunkOf.length - 1)] ?? 0;
 			const em = emSet.has(norm(w)) && norm(w) !== "";
 			if (em) hit = true;
+			if (rtl) x -= widths[j] * scale;
 			els.push({
 				type: "text",
 				text: w,
@@ -237410,11 +238210,12 @@ function kineticText(p, c) {
 				size: fit.fontSize,
 				color: em ? c.colors.primary : c.colors.text,
 				x: r(x),
+				...rtl ? { rx: r(x + widths[j] * scale) } : {},
 				y: line.y,
 				beat,
 				slide: true
 			});
-			x += (widths[j] + space) * scale;
+			x += rtl ? -space * scale : (widths[j] + space) * scale;
 			acc += w;
 			if (acc.length >= (words[k]?.length ?? 0)) {
 				k++;
@@ -237694,6 +238495,30 @@ function easingExpr(easing, p) {
 function round3$1(n) {
 	return Math.round(n * 1e3) / 1e3;
 }
+/**
+* Route a line: lines with Devanagari, Arabic, Hebrew or other complex-script letters go through
+* libass; CJK and Hangul lines use drawtext with the script's font (which also covers Latin);
+* everything else keeps the role font.
+*/
+function textRoute(text) {
+	if (needsShaping(text)) {
+		const counts = scriptsIn(text).filter((s) => s !== "latin" && s !== "cjk" && s !== "hangul");
+		const dom = dominantScript(text);
+		return {
+			kind: "ass",
+			script: counts.includes(dom) ? dom : counts[0] ?? "other"
+		};
+	}
+	if (hasCjk(text)) return {
+		kind: "drawtext",
+		script: "cjk"
+	};
+	if (scriptsIn(text).includes("hangul")) return {
+		kind: "drawtext",
+		script: "hangul"
+	};
+	return { kind: "drawtext" };
+}
 /** Build the filtergraph for a composition. `textDir` is where text files will be written. */
 function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 	const maxBeat = Math.max(0, ...comp.elements.map((e) => e.beat));
@@ -237702,40 +238527,78 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 	const slide = Math.max(2, r(Math.min(target.width, target.height) * .025));
 	const inputs = [];
 	const textFiles = /* @__PURE__ */ new Map();
+	const warnings = [];
 	const chains = [];
 	let chain = [];
 	let cur = gm.base ?? "[0:v]";
 	let label = 0;
 	const flush = () => {
+		flushAss();
 		if (!chain.length) return;
 		const out = `[b${label++}]`;
 		chains.push(`${cur}${chain.join(",")}${out}`);
 		cur = out;
 		chain = [];
 	};
+	let assEvents = [];
+	let assFiles = 0;
+	const flushAss = () => {
+		if (!assEvents.length || !fonts.ass) return;
+		const name = `a${assFiles++}.ass`;
+		textFiles.set(name, assScript(target, assEvents));
+		chain.push(f$1("ass", {
+			filename: join(textDir, name),
+			fontsdir: fonts.ass.fontsDir
+		}));
+		assEvents = [];
+	};
+	const noted = /* @__PURE__ */ new Set();
+	const warnOnce = (w) => {
+		if (noted.has(w)) return;
+		noted.add(w);
+		warnings.push(w);
+	};
 	for (const el of comp.elements) {
 		const start = round3$1(el.beat * step);
 		const progress = `min(1,max(0,(t-${start})/${fade}))`;
 		const ease = easingExpr(motion?.easing, progress);
-		if (el.type === "box") chain.push(f$1("drawbox", {
-			x: el.x,
-			y: el.y,
-			w: Math.max(1, el.w),
-			h: Math.max(1, el.h),
-			color: el.color.startsWith("0x") ? el.color : ffColor(el.color),
-			t: el.thickness ?? "fill",
-			enable: start > 0 ? `gte(t,${start})` : void 0
-		}));
-		else if (el.type === "text") {
+		const route = el.type === "text" ? textRoute(el.text) : void 0;
+		if (route?.kind === "ass" && el.type === "text") {
+			const a = fonts.ass;
+			if (a) {
+				assEvents.push(assEvent(el, a, a.scripts[route.script]?.[el.font], {
+					start,
+					fade,
+					end: durationS + 1,
+					slide: el.slide ? slide : 0
+				}));
+				continue;
+			}
+			warnOnce(textDirection(el.text) === "ltr" ? `text: "${el.text.slice(0, 24)}" needs complex shaping (${route.script}), but this FFmpeg has no libass \`ass\` filter and drawtext has no FriBidi/script shaping; conjuncts and vowel signs may be wrong. Use the HyperFrames renderer or an FFmpeg built with libass.` : `text: "${el.text.slice(0, 24)}" is right-to-left${textDirection(el.text) === "mixed" ? " mixed with left-to-right runs" : ""}; FFmpeg drawtext has no FriBidi here and this FFmpeg has no libass \`ass\` filter, so letters are not joined or reordered. Use the HyperFrames renderer or an FFmpeg built with libass.`);
+		}
+		if (el.type === "box") {
+			flushAss();
+			chain.push(f$1("drawbox", {
+				x: el.x,
+				y: el.y,
+				w: Math.max(1, el.w),
+				h: Math.max(1, el.h),
+				color: el.color.startsWith("0x") ? el.color : ffColor(el.color),
+				t: el.thickness ?? "fill",
+				enable: start > 0 ? `gte(t,${start})` : void 0
+			}));
+		} else if (el.type === "text") {
+			flushAss();
 			const name = `t${textFiles.size}.txt`;
 			textFiles.set(name, el.text);
+			const scriptFile = route?.kind === "drawtext" && route.script ? fonts.scripts?.[route.script]?.[el.font] : void 0;
 			chain.push(f$1("drawtext", {
-				fontfile: fonts[el.font],
+				fontfile: scriptFile ?? fonts[el.font],
 				textfile: join(textDir, name),
 				expansion: "none",
 				fontsize: el.size,
 				fontcolor: ffColor(el.color),
-				x: el.cx !== void 0 ? `${el.cx}-text_w/2` : el.x,
+				x: el.cx !== void 0 ? `${el.cx}-text_w/2` : el.rx !== void 0 ? `${el.rx}-text_w` : el.x,
 				y: el.slide ? `${el.y}+${slide}*${ease.offset}` : el.y,
 				y_align: "font",
 				alpha: fade > 0 ? ease.alpha : void 0,
@@ -237780,6 +238643,7 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 			cur = out;
 		}
 	}
+	flushAss();
 	const exit = motion && !gm.noExit ? round3$1(Math.min(motion.exit_ms / 1e3, durationS * .2)) : 0;
 	if (exit >= .02) chain.push(f$1("fade", {
 		t: "out",
@@ -237792,8 +238656,117 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 	return {
 		inputs,
 		filtergraph: chains.join(";"),
-		textFiles
+		textFiles,
+		warnings
 	};
+}
+/** `#RRGGBB` → ASS `&HBBGGRR&`. */
+function assTagColour(hex) {
+	const h = toHex(rgb(hex)).slice(1);
+	return `&H${h.slice(4, 6)}${h.slice(2, 4)}${h.slice(0, 2)}&`;
+}
+/** ASS alpha (`&H00&` opaque … `&HFF&` clear) for an opacity 0..1. */
+function assAlpha(opacity) {
+	return `&H${Math.round((1 - Math.min(1, Math.max(0, opacity))) * 255).toString(16).padStart(2, "0").toUpperCase()}&`;
+}
+function assTime(sec) {
+	const cs = Math.max(0, Math.round(sec * 100));
+	const p = (n, w = 2) => String(n).padStart(w, "0");
+	return `${Math.floor(cs / 36e4)}:${p(Math.floor(cs / 6e3) % 60)}:${p(Math.floor(cs / 100) % 60)}.${p(cs % 100)}`;
+}
+/** Scene text inside an ASS event: override braces and backslashes cannot appear literally. */
+function assLiteral(text) {
+	return text.replace(/\\/g, "∖").replace(/\{/g, "(").replace(/\}/g, ")").replace(/[\r\n]+/g, " ");
+}
+/** ASCII punctuation and digits the bundled script fonts have (Noto Sans Arabic has few; Devanagari most). */
+const SCRIPT_ASCII = {
+	arabic: /[ !,\-.0-9:]/,
+	devanagari: /[^$&@`A-Za-z]/
+};
+/** The Unicode blocks of each script (their neutral punctuation, e.g. ، ؟ ।, belongs with the script font). */
+const SCRIPT_BLOCK = {
+	arabic: /[\u0600-\u06FF\u0750-\u077F\u0870-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/u,
+	devanagari: /[\u0900-\u097F\uA8E0-\uA8FF\u1CD0-\u1CFF]/u,
+	hebrew: /[\u0590-\u05FF\uFB1D-\uFB4F]/u
+};
+/**
+* Split a line into font runs: Latin letters use the role's Latin font; letters of the line's
+* script use the script font; neutral characters stay with the script font when it has them
+* (its own block, or ASCII it covers), else the Latin font.
+*/
+function assFontRuns(text, script) {
+	const runs = [];
+	const ascii = SCRIPT_ASCII[script];
+	const block = SCRIPT_BLOCK[script];
+	for (const ch of text) {
+		const s = charScript(ch);
+		let latin;
+		if (s === "latin") latin = true;
+		else if (s !== null) latin = false;
+		else if (block?.test(ch)) latin = false;
+		else if (/\s/u.test(ch)) latin = runs.at(-1)?.latin ?? false;
+		else if (ch.charCodeAt(0) < 128) latin = ascii ? !ascii.test(ch) : false;
+		else latin = ascii !== void 0;
+		const last = runs.at(-1);
+		if (last && last.latin === latin) last.text += ch;
+		else runs.push({
+			latin,
+			text: ch
+		});
+	}
+	return runs;
+}
+/**
+* One ASS event for a text element: positioned like drawtext (top of the line at `y`, left edge,
+* centre or right edge), faded in from `start` over `fade` and slid up by `slide` px. libass
+* picks the base direction per line (Encoding -1) and shapes each font run.
+*/
+function assEvent(el, fonts, scriptFont, t) {
+	const an = el.cx !== void 0 ? 8 : el.rx !== void 0 ? 9 : 7;
+	const x = el.cx ?? el.rx ?? el.x;
+	const latin = fonts.latin[el.font];
+	const script = scriptFont ?? latin;
+	const route = textRoute(el.text);
+	const runs = route.kind === "ass" ? assFontRuns(el.text, route.script) : [{
+		latin: true,
+		text: el.text
+	}];
+	const fontTag = (fnt) => `\\fn${fnt.family}\\fs${Math.round(el.size * fnt.scale * 100) / 100}\\b${fnt.bold ? 1 : 0}`;
+	const fadeMs = Math.round(t.fade * 1e3);
+	const winAsc = Math.max(...runs.map((run) => (run.latin ? latin : script).winAscent));
+	const y = Math.round(el.y - (winAsc - script.ascent) * el.size);
+	const head = `{\\an${an}${t.slide > 0 && fadeMs > 0 ? `\\move(${x},${y + t.slide},${x},${y},0,${fadeMs})` : `\\pos(${x},${y})`}${fadeMs > 0 ? `\\fad(${fadeMs},0)` : ""}\\1c${assTagColour(el.color)}\\bord${el.box ? el.box.border : 0}${el.box ? assBoxTags(el.box.color) : ""}}`;
+	const body = runs.map((run) => `{${fontTag(run.latin ? latin : script)}}${assLiteral(run.text)}`).join("");
+	return `Dialogue: 0,${assTime(t.start)},${assTime(t.end)},${el.box ? "Box" : "Text"},,0,0,0,,${head}${body}`;
+}
+/** Plate colour tags for a label box (`0xRRGGBB[@a]` from ffColor). */
+function assBoxTags(color) {
+	const m = /^0x([0-9A-Fa-f]{6})(?:@([0-9.]+))?$/.exec(color);
+	if (!m) return "";
+	return `\\3c${assTagColour(`#${m[1]}`)}\\3a${assAlpha(m[2] ? Number(m[2]) : 1)}`;
+}
+/** A complete ASS script at the target size: `Text` (no border) and `Box` (opaque box behind each line). */
+function assScript(target, events) {
+	const style = (name, borderStyle) => `Style: ${name},sans-serif,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,${borderStyle},0,0,7,0,0,0,-1`;
+	return [
+		"[Script Info]",
+		"; video-studio ffmpeg renderer: complex-script text",
+		"ScriptType: v4.00+",
+		`PlayResX: ${target.width}`,
+		`PlayResY: ${target.height}`,
+		"WrapStyle: 2",
+		"ScaledBorderAndShadow: yes",
+		"",
+		"[V4+ Styles]",
+		"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+		style("Text", 1),
+		style("Box", 3),
+		"",
+		"[Events]",
+		"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+		...events,
+		""
+	].join("\n");
 }
 async function readContentIrAsset(assetId, projectDir) {
 	try {
@@ -237860,6 +238833,94 @@ function ffmpegRenderArgs(built, target, tokens, frames, encode, out) {
 		...FASTSTART,
 		out
 	];
+}
+/** Whether an FFmpeg has the libass `ass` filter (memoised per binary). */
+const assFilterCache = /* @__PURE__ */ new Map();
+function hasAssFilter(tools) {
+	let p = assFilterCache.get(tools.ffmpeg);
+	if (!p) {
+		p = runProcess(tools.ffmpeg, ["-hide_banner", "-filters"], {
+			captureStdout: true,
+			timeoutMs: 15e3
+		}).then(({ stdout }) => /\sass\s/.test(stdout)).catch(() => false);
+		assFilterCache.set(tools.ffmpeg, p);
+	}
+	return p;
+}
+const ROLES = [
+	"heading",
+	"body",
+	"mono"
+];
+/** Family name libass should ask for: the bundled family of a bundled file, else the chain's first named family. */
+function assFamily(file, chain, fontsDir) {
+	const hit = fontsDir ? BUNDLED_FONTS.find((b) => join(fontsDir, b.file) === file) : void 0;
+	if (hit) return hit.family;
+	return parseFontChain(chain).find((n) => !/^(sans-serif|serif|monospace|system-ui|ui-monospace|ui-sans-serif)$/i.test(n)) ?? "sans-serif";
+}
+/**
+* Resolve the fonts a composition's text needs beyond the three role fonts: a script font per
+* role for CJK/Hangul drawtext lines, and libass fonts (flat fonts dir, Latin + script
+* families, size scales) for lines that need shaping. Returns warnings for scripts without a
+* bundled font.
+*/
+async function scriptFonts(comp, tokens, resolve, weights, o) {
+	const warnings = [];
+	const chains = {
+		heading: tokens.font_heading,
+		body: tokens.font_body,
+		mono: tokens.font_mono
+	};
+	const draw = /* @__PURE__ */ new Map();
+	const shaped = /* @__PURE__ */ new Map();
+	for (const el of comp.elements) {
+		if (el.type !== "text") continue;
+		const route = textRoute(el.text);
+		if (!route.script) continue;
+		const m = route.kind === "ass" ? shaped : draw;
+		if (!m.has(route.script)) m.set(route.script, /* @__PURE__ */ new Set());
+		m.get(route.script).add(el.font);
+	}
+	const out = { warnings };
+	for (const [script, roles] of draw) for (const role of roles) {
+		const file = await resolve(scriptFirstChain(chains[role], script, tokens.language), weights[role]);
+		(out.scripts ??= {})[script] = {
+			...out.scripts?.[script],
+			[role]: file
+		};
+	}
+	if (shaped.size === 0 || !o.libass) return out;
+	const files = /* @__PURE__ */ new Set();
+	const assFont = async (chain, role) => {
+		const file = await resolve(chain, weights[role]);
+		files.add(file);
+		const family = assFamily(file, chain, o.fontsDir);
+		for (const b of BUNDLED_FONTS) if (b.family === family && o.fontsDir) files.add(join(o.fontsDir, b.file));
+		const metrics = readFontMetrics(file);
+		return {
+			family,
+			bold: (weights[role] ?? 400) >= 600,
+			scale: assFontSize(1, metrics),
+			winAscent: metrics ? metrics.winAscent / metrics.unitsPerEm : 1,
+			ascent: metrics ? metrics.hheaAscent / metrics.unitsPerEm : 1
+		};
+	};
+	const latin = {};
+	for (const role of ROLES) latin[role] = await assFont(chains[role], role);
+	const scripts = {};
+	for (const [script, roles] of shaped) {
+		if (scriptFontFamilies(script, tokens.language).length === 0) warnings.push(`text: ${script === "other" ? "this script" : script} has no bundled font; libass falls back to a host font`);
+		const perRole = {};
+		for (const role of ROLES) perRole[role] = roles.has(role) || role === "heading" ? await assFont(scriptFirstChain(chains[role], script, tokens.language), role) : latin[role];
+		scripts[script] = perRole;
+	}
+	await prepareLibassFontsDir(o.libassDir, [...files].sort(), o.fontsDir);
+	out.ass = {
+		fontsDir: o.libassDir,
+		latin,
+		scripts
+	};
+	return out;
 }
 function createFfmpegRenderer(opts = {}) {
 	const fontResolver = opts.fontResolver ?? createFontResolver();
@@ -237954,18 +239015,33 @@ function createFfmpegRenderer(opts = {}) {
 				...req.zones ? { zones: req.zones } : {}
 			});
 			warnings.push(...comp.warnings);
+			const weights = {
+				heading: tokens.weight_heading ?? 700,
+				body: tokens.weight_body,
+				mono: void 0
+			};
 			const fonts = {
-				heading: await fontResolver(tokens.font_heading, tokens.weight_heading ?? 700),
-				body: await fontResolver(tokens.font_body, tokens.weight_body),
+				heading: await fontResolver(tokens.font_heading, weights.heading),
+				body: await fontResolver(tokens.font_body, weights.body),
 				mono: await fontResolver(tokens.font_mono)
 			};
 			const frames = frameCount(scene.duration_sec, target.fps);
 			const tmp = await mkdtemp(join(tmpdir(), "vs-ffr-"));
 			try {
+				const needsAss = comp.elements.some((e) => e.type === "text" && textRoute(e.text).kind === "ass");
+				const extra = await scriptFonts(comp, tokens, fontResolver, weights, {
+					fontsDir: opts.fontsDir === void 0 ? findFontsDir() : opts.fontsDir,
+					libassDir: join(tmp, "fonts"),
+					libass: needsAss && await hasAssFilter(tools)
+				});
+				warnings.push(...extra.warnings);
+				if (extra.scripts) fonts.scripts = extra.scripts;
+				if (extra.ass) fonts.ass = extra.ass;
 				const built = buildFilterGraph(comp, target, frames / target.fps, fonts, tmp, {
 					...tokens.motion ? { motion: tokens.motion } : {},
 					background: tokens.color_background
 				});
+				warnings.push(...built.warnings);
 				for (const [name, text] of built.textFiles) await writeFile(join(tmp, name), text, "utf8");
 				await mkdir(dirname(req.out_path), { recursive: true });
 				await runFfmpeg(ffmpegRenderArgs(built, target, tokens, frames, encode, req.out_path), {
@@ -238345,7 +239421,7 @@ async function selectRenderer(kind, renderers, env = process.env, preference = "
 function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage) {
 	return sha256Hex(canonicalJson({
 		v: 1,
-		layout: 5,
+		layout: 6,
 		scene,
 		tokens,
 		target,
@@ -238666,10 +239742,31 @@ function anim(effect, at, len, cls = "", style = "") {
 * estimated from an average advance of `em` × size per character.
 */
 function fitFontInfo(texts, boxW, boxH, maxFs, minFs, lineHeight = 1.2, em = .56) {
+	if (texts.some((t) => isComplexText(t))) return fitFontInfoScript(texts, boxW, boxH, maxFs, minFs, lineHeight, em);
 	const longestWord = Math.max(0, ...texts.flatMap((t) => t.split(/\s+/).map((w) => Array.from(w).length)));
 	const ok = (size) => {
 		const perLine = Math.max(1, Math.floor(boxW / (size * em)));
 		return texts.reduce((acc, t) => acc + Math.max(1, Math.ceil(Array.from(t).length / perLine)), 0) * size * lineHeight <= boxH && longestWord <= perLine;
+	};
+	let fs = maxFs;
+	for (let guard = 0; guard < 60 && fs > minFs; guard++) {
+		if (ok(fs)) break;
+		fs *= .92;
+	}
+	const size = Math.max(minFs, Math.round(fs * 100) / 100);
+	return {
+		fs: size,
+		fits: ok(size)
+	};
+}
+/**
+* fitFontInfo for CJK, Devanagari, Arabic, …: script-aware width estimates, CJK broken between
+* characters (kinsoku), and every unit (word, or CJK character) must fit a line.
+*/
+function fitFontInfoScript(texts, boxW, boxH, maxFs, minFs, lineHeight, em) {
+	const units = texts.flatMap((t) => lineUnits(t));
+	const ok = (size) => {
+		return texts.reduce((acc, t) => acc + Math.max(1, wrapText(t, size, boxW, { em }).length), 0) * size * lineHeight <= boxH && units.every((u) => estimateTextWidth(u, size, { em }) <= boxW + .01);
 	};
 	let fs = maxFs;
 	for (let guard = 0; guard < 60 && fs > minFs; guard++) {
@@ -239920,6 +241017,29 @@ function lookCss(look) {
 	if (look.motion && look.motion.exit_ms > 0) rules.push(".vs-exit { animation: vs-exit var(--xd) linear var(--xt) both paused; }", "@keyframes vs-exit { from { opacity: 1; } to { opacity: 0; } }");
 	return rules.length ? `\n/* style pack */\n${rules.join("\n")}` : "";
 }
+/**
+* Families that get a `local()` @font-face: all but the bundled script families already served
+* from files (a failing later `local()` rule would shadow the bundled face).
+*/
+function localFaceNames(names, bundledFaces) {
+	const script = new Set(BUNDLED_FONTS.filter((f) => f.script).map((f) => f.family));
+	return names.filter((n) => !(script.has(n) && bundledFaces.includes(`font-family: "${n}"`)));
+}
+/**
+* Script rules, only for scenes with non-Latin text: strict kinsoku for CJK, and for RTL pages a
+* left-to-right layout (so the geometry, text boxes and zones stay those of the LTR layout) in
+* which every text block takes its own paragraph direction (`unicode-bidi: plaintext`); a
+* left-aligned style aligns RTL paragraphs to their start (the right). Code stays LTR.
+*/
+function scriptCss(scripts, rtl, look) {
+	const rules = [];
+	if (scripts.includes("cjk")) rules.push("#vs-root { line-break: strict; word-break: normal; }");
+	if (rtl) {
+		rules.push("#vs-root { direction: ltr; }", "#vs-root div, #vs-root span, #vs-root p, #vs-root li, #vs-root text { unicode-bidi: plaintext; }", ".vs-code, .vs-command, .vs-code * { direction: ltr; unicode-bidi: isolate; }");
+		if (look.text_align === "left") rules.push(".vs-typography, .vs-kinetic, .vs-quote, .vs-verdict, .vs-cta, .vs-end, .vs-lt-headline, .vs-map-title { text-align: start; }");
+	}
+	return rules.length ? `\n/* scripts: ${scripts.join(", ")} */\n${rules.join("\n")}` : "";
+}
 function stylesheet(stage, tokens, fontNames, bundledFaces = "", look = {}) {
 	const { W, H, u, safe } = stage;
 	const easing = look.motion ? EASING_CSS[look.motion.easing] : EASING_CSS.ease_out;
@@ -240218,7 +241338,20 @@ function buildComposition(req, opts = {}) {
 		portrait: H > W,
 		dur
 	};
-	const tok = resolveTokens(req.tokens, warnings);
+	const sceneText = propsText(det.props ?? {});
+	const lang = req.tokens.language;
+	const langScript = languageScript(lang);
+	const scripts = [.../* @__PURE__ */ new Set([...langScript && langScript !== "latin" ? [langScript] : [], ...scriptsIn(sceneText).filter((s) => s !== "latin")])];
+	const scriptTokens = scripts.length ? {
+		...req.tokens,
+		font_heading: withScriptFonts(req.tokens.font_heading ?? "", scripts, lang),
+		font_body: withScriptFonts(req.tokens.font_body ?? "", scripts, lang),
+		font_mono: withScriptFonts(req.tokens.font_mono ?? "", scripts, lang)
+	} : req.tokens;
+	const mainScript = scriptsIn(sceneText).length ? dominantScript(sceneText) : langScript ?? "latin";
+	const pageLang = scripts.length ? htmlLang(lang, mainScript) ?? "en" : "en";
+	const rtl = scripts.length > 0 && baseDirection(sceneText, lang) === "rtl";
+	const tok = resolveTokens(scriptTokens, warnings);
 	const v = tok.values;
 	const colors = {
 		bg: v.color_background,
@@ -240267,7 +241400,7 @@ function buildComposition(req, opts = {}) {
 		...t.text_align ? { text_align: t.text_align } : {},
 		...t.motion ? { motion: t.motion } : {}
 	};
-	const bundledFaces = fontFaceCss(req.tokens).replace(/url\("(file:[^"]+)"\)/g, (_m, href) => {
+	const bundledFaces = fontFaceCss(scriptTokens).replace(/url\("(file:[^"]+)"\)/g, (_m, href) => {
 		const src = fileURLToPath(href);
 		const dest = `assets/fonts/${basename(src).replace(/[^A-Za-z0-9._-]/g, "_")}`;
 		if (!assets.some((a) => a.dest === dest)) assets.push({
@@ -240281,13 +241414,13 @@ function buildComposition(req, opts = {}) {
 	return {
 		composition_id: compositionId,
 		html: `<!doctype html>
-<html lang="en">
+<html lang="${esc(pageLang)}"${rtl ? " dir=\"rtl\"" : ""}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=${W}, height=${H}">
 <title>${esc(`${scene.id} ${det.kind}`)}</title>
 <style>
-${stylesheet(stage, tok.values, tok.fontNames, bundledFaces, look)}
+${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}
 </style>
 </head>
 <body>
@@ -241048,49 +242181,93 @@ async function resolveFfTool$1(tool, deps) {
 async function checkBuildconf(ffmpegPath, deps) {
 	if (!ffmpegPath) {
 		const skipped = "skipped: ffmpeg not available";
-		return [{
-			id: "ffmpeg_libass",
-			status: "warn",
-			detail: skipped
-		}, {
-			id: "ffmpeg_libx264",
-			status: "warn",
-			detail: skipped
-		}];
+		return [
+			{
+				id: "ffmpeg_libass",
+				status: "warn",
+				detail: skipped
+			},
+			{
+				id: "ffmpeg_libx264",
+				status: "warn",
+				detail: skipped
+			},
+			{
+				id: "ffmpeg_text_shaping",
+				status: "warn",
+				detail: skipped
+			}
+		];
 	}
 	const res = await deps.exec(ffmpegPath, ["-hide_banner", "-buildconf"]);
 	if (!res || res.code !== 0) {
 		const detail = "could not read `ffmpeg -buildconf`";
-		return [{
-			id: "ffmpeg_libass",
-			status: "warn",
-			detail
-		}, {
-			id: "ffmpeg_libx264",
-			status: "warn",
-			detail
-		}];
+		return [
+			{
+				id: "ffmpeg_libass",
+				status: "warn",
+				detail
+			},
+			{
+				id: "ffmpeg_libx264",
+				status: "warn",
+				detail
+			},
+			{
+				id: "ffmpeg_text_shaping",
+				status: "warn",
+				detail
+			}
+		];
 	}
 	const flags = parseBuildconf(`${res.stdout}\n${res.stderr}`);
-	return [flags.libass ? {
-		id: "ffmpeg_libass",
+	const shaping = textShapingCheck(`${res.stdout}\n${res.stderr}`);
+	return [
+		flags.libass ? {
+			id: "ffmpeg_libass",
+			status: "ok",
+			detail: "ffmpeg built with --enable-libass (burned-in captions)"
+		} : {
+			id: "ffmpeg_libass",
+			status: "warn",
+			detail: "ffmpeg was built without --enable-libass; burned-in ASS captions will not work",
+			fix: "Install an FFmpeg build with libass (Homebrew's `ffmpeg` formula includes it), or set FFMPEG_PATH to one."
+		},
+		flags.libx264 ? {
+			id: "ffmpeg_libx264",
+			status: "ok",
+			detail: "ffmpeg built with --enable-libx264 (H.264 output)"
+		} : {
+			id: "ffmpeg_libx264",
+			status: "warn",
+			detail: "ffmpeg was built without --enable-libx264; H.264 MP4 encoding will be unavailable",
+			fix: "Install an FFmpeg build with libx264 (Homebrew's `ffmpeg` formula includes it), or set FFMPEG_PATH to one."
+		},
+		shaping
+	];
+}
+/**
+* Complex-script text in the ffmpeg renderer. drawtext shapes with HarfBuzz but only reorders
+* right-to-left text and forms Indic conjuncts with FriBidi (`--enable-libfribidi`), which many
+* builds lack; the renderer therefore draws Devanagari, Arabic and Hebrew lines through libass,
+* which always does shaping and bidi. CJK needs neither.
+*/
+function textShapingCheck(buildconf) {
+	const harfbuzz = /--enable-libharfbuzz\b/.test(buildconf);
+	const fribidi = /--enable-libfribidi\b/.test(buildconf);
+	const libass = /--enable-libass\b/.test(buildconf);
+	const flags = `drawtext: harfbuzz ${harfbuzz ? "yes" : "no"}, fribidi ${fribidi ? "yes" : "no"}; libass ${libass ? "yes" : "no"}`;
+	if (libass) return {
+		id: "ffmpeg_text_shaping",
 		status: "ok",
-		detail: "ffmpeg built with --enable-libass (burned-in captions)"
-	} : {
-		id: "ffmpeg_libass",
+		detail: `${flags}. Devanagari, Arabic and Hebrew text is drawn through libass (shaping and right-to-left order); CJK through drawtext`
+	};
+	return {
+		id: "ffmpeg_text_shaping",
 		status: "warn",
-		detail: "ffmpeg was built without --enable-libass; burned-in ASS captions will not work",
-		fix: "Install an FFmpeg build with libass (Homebrew's `ffmpeg` formula includes it), or set FFMPEG_PATH to one."
-	}, flags.libx264 ? {
-		id: "ffmpeg_libx264",
-		status: "ok",
-		detail: "ffmpeg built with --enable-libx264 (H.264 output)"
-	} : {
-		id: "ffmpeg_libx264",
-		status: "warn",
-		detail: "ffmpeg was built without --enable-libx264; H.264 MP4 encoding will be unavailable",
-		fix: "Install an FFmpeg build with libx264 (Homebrew's `ffmpeg` formula includes it), or set FFMPEG_PATH to one."
-	}];
+		detail: `${flags}. Without libass the ffmpeg renderer cannot ${fribidi ? "form Devanagari conjuncts reliably" : "join Arabic letters, order right-to-left text or form Devanagari conjuncts"}`,
+		fix: "Use the HyperFrames renderer for Hindi, Arabic or Hebrew videos, or install an FFmpeg built with libass (Homebrew's `ffmpeg` formula includes it)."
+	};
 }
 function chromeCandidates(platform, home) {
 	if (platform === "darwin") return [
@@ -241267,7 +242444,8 @@ const SCHEMA_NAMES = [
 	"experiment-manifest",
 	"demo-script",
 	"format-grammar",
-	"short-candidates"
+	"short-candidates",
+	"translation-sheet"
 ];
 /**
 * Locate the bundled `schemas/` directory: `${CLAUDE_PLUGIN_ROOT}/schemas` first, then
@@ -241416,14 +242594,14 @@ function formatSpecValidation(r) {
 const MAX_WPS = 3.3;
 /** Shortest scene the schema allows. */
 const MIN_SCENE_SEC = .5;
-const round1$1 = (n) => Math.round(n * 10) / 10;
+const round1$2 = (n) => Math.round(n * 10) / 10;
 /** Scale scene durations to `target`, keeping proportions, each ≥ 0.5 s, summing exactly (to 0.1 s). */
 function scaleDurations(durations, target) {
 	const total = durations.reduce((a, b) => a + b, 0);
-	const scaled = durations.map((d) => Math.max(MIN_SCENE_SEC, round1$1(d / total * target)));
-	const diff = round1$1(target - scaled.reduce((a, b) => a + b, 0));
+	const scaled = durations.map((d) => Math.max(MIN_SCENE_SEC, round1$2(d / total * target)));
+	const diff = round1$2(target - scaled.reduce((a, b) => a + b, 0));
 	const longest = scaled.indexOf(Math.max(...scaled));
-	scaled[longest] = Math.max(MIN_SCENE_SEC, round1$1(scaled[longest] + diff));
+	scaled[longest] = Math.max(MIN_SCENE_SEC, round1$2(scaled[longest] + diff));
 	return scaled;
 }
 async function adaptProject(projectDir, outDir, opts) {
@@ -241469,7 +242647,7 @@ async function adaptProject(projectDir, outDir, opts) {
 		const durations = scaleDurations(src.scenes.map((s) => s.duration_sec), opts.target_duration_sec);
 		spec.scenes.forEach((s, i) => s.duration_sec = durations[i]);
 		spec.target_duration_sec = opts.target_duration_sec;
-		if (spec.cover) spec.cover.focal_time_sec = round1$1(spec.cover.focal_time_sec * factor);
+		if (spec.cover) spec.cover.focal_time_sec = round1$2(spec.cover.focal_time_sec * factor);
 		changes.push(`duration ${src.target_duration_sec}s → ${opts.target_duration_sec}s (scenes scaled ×${Math.round(factor * 100) / 100})`);
 		if (voiceMode(spec) === "narrated") for (const s of spec.scenes) {
 			const words = s.voiceover.trim() ? s.voiceover.trim().split(/\s+/).length : 0;
@@ -242600,6 +243778,1780 @@ function formatDemo(r) {
 		"use it in screen_capture scenes: footage {asset, in_sec, out_sec} with claim_refs of the steps shown"
 	].join("\n");
 }
+//#endregion
+//#region ../voice/dist/exec.js
+const defaultRunner = (cmd, args, opts = {}) => new Promise((resolve, reject) => {
+	const child = spawn(cmd, args, {
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		signal: opts.signal,
+		env: opts.env ? {
+			...process.env,
+			...opts.env
+		} : process.env
+	});
+	const out = [];
+	const err = [];
+	child.stdout.on("data", (b) => out.push(b));
+	child.stderr.on("data", (b) => err.push(b));
+	child.on("error", reject);
+	child.on("close", (code) => resolve({
+		code: code ?? -1,
+		stdout: Buffer.concat(out).toString("utf8"),
+		stderr: Buffer.concat(err).toString("utf8")
+	}));
+});
+function isExecutable(path) {
+	try {
+		accessSync(path, constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+/** Find an executable on PATH. */
+function which(name, env = process.env) {
+	const dirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
+	for (const dir of dirs) {
+		const p = join(dir, name);
+		if (isExecutable(p)) return p;
+	}
+}
+/**
+* Resolve ffmpeg/ffprobe: FFMPEG_PATH / FFPROBE_PATH first, then PATH.
+* TODO: swap for @video-studio/media's resolver once it lands.
+*/
+function resolveFfTool(name, env = process.env) {
+	const override = env[name === "ffmpeg" ? "FFMPEG_PATH" : "FFPROBE_PATH"];
+	if (override && override.trim()) return isExecutable(override) ? override : void 0;
+	return which(name, env);
+}
+const defaultResolver = (name, env) => {
+	if (name === "ffmpeg" || name === "ffprobe") return resolveFfTool(name, env);
+	const found = which(name, env);
+	if (found) return found;
+	if (name === "say" && isExecutable("/usr/bin/say")) return "/usr/bin/say";
+};
+async function runChecked(runner, cmd, args, what, opts) {
+	const res = await runner(cmd, args, opts);
+	if (res.code !== 0) {
+		const tail = res.stderr.trim().split("\n").slice(-3).join(" | ");
+		throw new Error(`${what} failed (exit ${res.code})${tail ? `: ${tail}` : ""}`);
+	}
+	return res;
+}
+//#endregion
+//#region ../voice/dist/ffmpeg.js
+/**
+* Minimal local ffmpeg/ffprobe helpers for the voice package.
+* TODO: replace with @video-studio/media once its resolver/helpers land.
+*/
+/** Convert any input audio to 48 kHz mono 16-bit PCM WAV. */
+async function toWav48kMono(tools, input, output, opts) {
+	await runChecked(tools.runner, tools.ffmpeg, [
+		"-hide_banner",
+		"-loglevel",
+		"error",
+		"-y",
+		"-i",
+		input,
+		"-ar",
+		"48000",
+		"-ac",
+		"1",
+		"-c:a",
+		"pcm_s16le",
+		output
+	], "ffmpeg (convert to wav)", opts);
+}
+/** Concatenate audio files into one 48 kHz mono WAV. */
+async function concatToWav(tools, inputs, output, opts) {
+	if (inputs.length === 1) return toWav48kMono(tools, inputs[0], output, opts);
+	const args = [
+		"-hide_banner",
+		"-loglevel",
+		"error",
+		"-y"
+	];
+	for (const i of inputs) args.push("-i", i);
+	const labels = inputs.map((_, i) => `[${i}:a]`).join("");
+	args.push("-filter_complex", `${labels}concat=n=${inputs.length}:v=0:a=1[a]`, "-map", "[a]", "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", output);
+	await runChecked(tools.runner, tools.ffmpeg, args, "ffmpeg (concat)", opts);
+}
+/** Container duration in integer milliseconds. */
+async function probeDurationMs(tools, file, opts) {
+	const res = await runChecked(tools.runner, tools.ffprobe, [
+		"-v",
+		"error",
+		"-show_entries",
+		"format=duration",
+		"-of",
+		"default=noprint_wrappers=1:nokey=1",
+		file
+	], "ffprobe (duration)", opts);
+	const sec = Number.parseFloat(res.stdout.trim());
+	if (!Number.isFinite(sec) || sec < 0) throw new Error(`ffprobe returned no duration for ${file}`);
+	return Math.round(sec * 1e3);
+}
+/**
+* Parse ffmpeg `silencedetect` stderr into leading/trailing silence.
+* Leading: a silence starting at ~0. Trailing: a silence ending at ~EOF (ffmpeg closes open
+* silences at EOF). Returns zeros when the result would swallow most of the audio.
+*/
+function parseEdgeSilence(stderr, durationMs) {
+	const spans = [];
+	for (const line of stderr.split("\n")) {
+		const s = /silence_start:\s*(-?[\d.]+)/.exec(line);
+		if (s) spans.push({ start: Math.max(0, Number.parseFloat(s[1]) * 1e3) });
+		const e = /silence_end:\s*([\d.]+)/.exec(line);
+		if (e && spans.length) spans[spans.length - 1].end = Number.parseFloat(e[1]) * 1e3;
+	}
+	let leadMs = 0;
+	let trailMs = 0;
+	const first = spans[0];
+	const leading = first && first.start <= 10 && first.end !== void 0 ? first : void 0;
+	if (leading) leadMs = leading.end;
+	const last = spans[spans.length - 1];
+	if (last && last !== leading && (last.end === void 0 || last.end >= durationMs - 50)) trailMs = durationMs - last.start;
+	leadMs = Math.max(0, Math.round(leadMs));
+	trailMs = Math.max(0, Math.round(trailMs));
+	if (leadMs + trailMs > durationMs * .8) return {
+		leadMs: 0,
+		trailMs: 0
+	};
+	return {
+		leadMs,
+		trailMs
+	};
+}
+/** Detect leading/trailing silence with ffmpeg `silencedetect`; zeros on any failure. */
+async function detectEdgeSilence(tools, file, durationMs, opts) {
+	try {
+		const res = await tools.runner(tools.ffmpeg, [
+			"-hide_banner",
+			"-nostats",
+			"-i",
+			file,
+			"-af",
+			"silencedetect=noise=-45dB:d=0.08",
+			"-f",
+			"null",
+			"-"
+		], opts);
+		if (res.code !== 0) return {
+			leadMs: 0,
+			trailMs: 0
+		};
+		return parseEdgeSilence(res.stderr, durationMs);
+	} catch {
+		return {
+			leadMs: 0,
+			trailMs: 0
+		};
+	}
+}
+//#endregion
+//#region ../voice/dist/estimate.js
+const WORDLIKE$1 = /[\p{L}\p{N}]/u;
+/** CJK characters that are each a caption/speech unit: ideographs, kana, full-width letters and digits. */
+const CJK_UNIT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Bopomofo}０-９Ａ-Ｚａ-ｚｦ-ﾟ]/u;
+/** Any CJK character, punctuation included. */
+const CJK_ANY = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Bopomofo}　-〿！-｠・ー]/u;
+/** Kinsoku: never at the start of a unit (glued to the unit before): closing punctuation, small kana, ー. */
+const NO_START = new Set(Array.from("、。，．,.!?！？)）]］}｝〕〉》」』】〙〗〟’”»ー―‐〜～…‥・:;：；々〻ゝゞヽヾぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ%％"));
+/** Kinsoku: never at the end of a unit (glued to the unit after): opening brackets. */
+const NO_END = new Set(Array.from("(（[［{｛〔〈《「『【〘〖〝‘“«"));
+/** True for a character that is a speech/caption unit of its own (ideograph, kana, full-width letter). */
+function isCjkUnitChar(ch) {
+	return CJK_UNIT.test(ch);
+}
+/** True for a character that joins the unit before it (closing punctuation, small kana, ー). */
+function isNoStartChar(ch) {
+	return NO_START.has(ch);
+}
+/** The script with the most letters in `text` (Latin when there are none). */
+function speechScript(text) {
+	const n = {
+		latin: 0,
+		cjk: 0,
+		devanagari: 0,
+		arabic: 0,
+		hebrew: 0,
+		other: 0
+	};
+	for (const ch of text) {
+		if (!/\p{L}/u.test(ch)) continue;
+		if (/[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}]/u.test(ch)) n.latin++;
+		else if (CJK_ANY.test(ch)) n.cjk++;
+		else if (/\p{Script=Devanagari}/u.test(ch)) n.devanagari++;
+		else if (/\p{Script=Arabic}/u.test(ch)) n.arabic++;
+		else if (/\p{Script=Hebrew}/u.test(ch)) n.hebrew++;
+		else n.other++;
+	}
+	let best = "latin";
+	for (const k of Object.keys(n)) if (n[k] > n[best] || n[k] === n[best] && n[k] > 0 && best === "latin") best = k;
+	return best;
+}
+/**
+* Split a whitespace-free token that contains CJK into units: each CJK character is a unit,
+* runs of other characters (Latin words, ASCII digits) stay whole, closing punctuation and
+* small kana join the unit before, opening brackets the unit after.
+*/
+function splitCjk(token) {
+	const units = [];
+	let buf = "";
+	let prefix = "";
+	const flush = () => {
+		if (!buf) return;
+		units.push(prefix + buf);
+		prefix = "";
+		buf = "";
+	};
+	for (const ch of token) {
+		if (NO_START.has(ch)) {
+			if (buf) buf += ch;
+			else if (units.length && !prefix) units[units.length - 1] += ch;
+			else prefix += ch;
+			continue;
+		}
+		if (NO_END.has(ch)) {
+			flush();
+			prefix += ch;
+			continue;
+		}
+		if (CJK_UNIT.test(ch)) {
+			flush();
+			units.push(prefix + ch);
+			prefix = "";
+			continue;
+		}
+		buf += ch;
+	}
+	flush();
+	if (prefix) {
+		if (units.length) units[units.length - 1] += prefix;
+		else units.push(prefix);
+	}
+	return units;
+}
+/**
+* Split text into caption/speech words on whitespace. Punctuation-only tokens ("—", "-", "…")
+* are attached to the preceding word (or the following one when there is none). CJK text has
+* no spaces: each ideograph or kana is its own word (with kinsoku-glued punctuation), so
+* captions can break between characters and karaoke sweeps per character.
+*/
+function tokenize(text) {
+	const out = [];
+	let pending = "";
+	for (const t of text.split(/\s+/).flatMap((tok) => CJK_ANY.test(tok) ? splitCjk(tok) : [tok])) {
+		if (!t) continue;
+		if (!WORDLIKE$1.test(t)) {
+			if (out.length) out[out.length - 1] += t;
+			else pending += t;
+			continue;
+		}
+		out.push(pending + t);
+		pending = "";
+	}
+	return out;
+}
+const VOWEL_GROUP = /[aeiouyàáâãäåæèéêëìíîïòóôõöøùúûüýÿœ]+/g;
+/**
+* Rough syllable count (vowel-group heuristic), minimum 1:
+* - vowel groups, minus a silent trailing "e" (but not "-le");
+* - short all-caps tokens (acronyms like "API", "CI/CD") count one per letter (spelled out);
+* - words with no Latin vowels (e.g. CJK, "HTTP") count one per letter;
+* - each digit adds one.
+*/
+function estimateSyllables(word) {
+	const script = speechScript(word);
+	if (script === "cjk") return cjkMorae(word);
+	if (script === "devanagari") return devanagariSyllables(word);
+	if (script === "arabic" || script === "hebrew") {
+		const letters = (word.match(/\p{L}/gu) ?? []).length;
+		return Math.max(1, Math.round(letters / 2) + (word.match(/\p{N}/gu) ?? []).length);
+	}
+	const digits = (word.match(/\p{N}/gu) ?? []).length;
+	const lettersRaw = word.replace(/[^\p{L}]/gu, "");
+	let n = 0;
+	if (lettersRaw) {
+		const isAcronym = lettersRaw.length >= 2 && lettersRaw.length <= 5 && lettersRaw === lettersRaw.toUpperCase() && lettersRaw !== lettersRaw.toLowerCase();
+		const letters = lettersRaw.toLowerCase();
+		if (isAcronym) n = letters.length;
+		else {
+			n = (letters.match(VOWEL_GROUP) ?? []).length;
+			if (n > 1 && /[^aeiouy]e$/.test(letters) && !/[^aeiouy]le$/.test(letters)) n--;
+			if (n === 0) n = letters.length;
+		}
+	}
+	return Math.max(1, n + digits);
+}
+/** Morae weight of a CJK unit: kana 1 each (small kana 0), ー 1, an ideograph KANJI_MORAE, other characters as Latin. */
+const KANJI_MORAE = 1.6;
+function cjkMorae(word) {
+	let n = 0;
+	let rest = "";
+	for (const ch of word) if (/[ぁぃぅぇぉっゃゅょゎァィゥェォャュョヮ]/u.test(ch)) n += ch === "っ" || ch === "ッ" ? 1 : 0;
+	else if (/[\p{Script=Hiragana}\p{Script=Katakana}ー]/u.test(ch)) n += 1;
+	else if (/\p{Script=Han}/u.test(ch)) n += KANJI_MORAE;
+	else if (/[\p{L}\p{N}]/u.test(ch)) rest += ch;
+	return Math.max(1, n + (rest ? estimateSyllables(rest) : 0));
+}
+/** Devanagari: one syllable per consonant or independent vowel, minus the consonants a virama joins into a conjunct. */
+function devanagariSyllables(word) {
+	const letters = (word.match(/[ऄ-हक़-ॡॲ-ॿ]/gu) ?? []).length;
+	const viramas = (word.match(/्/gu) ?? []).length;
+	const digits = (word.match(/\p{N}/gu) ?? []).length;
+	return Math.max(1, letters - viramas + digits);
+}
+/**
+* Speaking rates for duration estimates (design rules, not measurements of any one voice):
+* - Latin-script languages: words per second at the system voice's 180 wpm (3 words/s).
+* - Japanese / Chinese: characters per second (CJK_CHARS_PER_SEC, about 7.5; natural Japanese
+*   narration runs 7–8 characters/s of mixed kanji and kana).
+* - Hindi (Devanagari): 2.5 words/s; Arabic 2.2 words/s (clitics make words longer); Hebrew 2.5.
+*/
+const SPEECH_RATES = Object.freeze({
+	latin_words_per_sec: 3,
+	cjk_chars_per_sec: 7.5,
+	devanagari_words_per_sec: 2.5,
+	arabic_words_per_sec: 2.2,
+	hebrew_words_per_sec: 2.5,
+	other_words_per_sec: 2.5
+});
+/** Count what the rate counts: CJK characters (letters and digits, not punctuation) or whitespace words. */
+function speechUnits(text) {
+	const script = speechScript(text);
+	if (script === "cjk") {
+		let count = 0;
+		for (const ch of text) if (CJK_UNIT.test(ch) || /[\p{L}\p{N}]/u.test(ch)) count++;
+		return {
+			script,
+			unit: "chars",
+			count
+		};
+	}
+	return {
+		script,
+		unit: "words",
+		count: text.split(/\s+/).filter((w) => WORDLIKE$1.test(w)).length
+	};
+}
+/** Estimated narration time of `text` in seconds (see SPEECH_RATES), without pauses. */
+function estimateSpeechSec$1(text) {
+	const { script, count } = speechUnits(text);
+	const rate = script === "cjk" ? SPEECH_RATES.cjk_chars_per_sec : script === "devanagari" ? SPEECH_RATES.devanagari_words_per_sec : script === "arabic" ? SPEECH_RATES.arabic_words_per_sec : script === "hebrew" ? SPEECH_RATES.hebrew_words_per_sec : script === "other" ? SPEECH_RATES.other_words_per_sec : SPEECH_RATES.latin_words_per_sec;
+	return Math.round(count / rate * 100) / 100;
+}
+const TRAIL_CLOSERS = `["')\\]}»”’」』）]*$`;
+const SENTENCE_END = new RegExp(`[.!?…。！？]${TRAIL_CLOSERS}`, "u");
+const CLAUSE_END = new RegExp(`[,;:—–\\-、，；：]${TRAIL_CLOSERS}`, "u");
+/** Extra pause weight after a word: sentence end 1.2, clause punctuation 0.6, else 0. */
+function pauseWeight(word) {
+	if (SENTENCE_END.test(word)) return 1.2;
+	if (CLAUSE_END.test(word)) return .6;
+	return 0;
+}
+/**
+* Distribute `durationMs` (minus edge silence) across `words`, weighted by estimated syllables,
+* with pauses after punctuation (not after the last word). Timings are integer ms, monotonic
+* and non-overlapping; the first word starts at `leadMs`, the last ends at `durationMs - trailMs`.
+*/
+function estimateWordTimings(words, durationMs, opts = {}) {
+	if (words.length === 0) return [];
+	const total = Math.max(0, Math.round(durationMs));
+	let lead = Math.max(0, Math.round(opts.leadMs ?? 0));
+	let trail = Math.max(0, Math.round(opts.trailMs ?? 0));
+	if (lead + trail >= total) {
+		lead = 0;
+		trail = 0;
+	}
+	const spanStart = lead;
+	const spanEnd = total - trail;
+	const weights = words.map((w) => opts.even ? 1 : estimateSyllables(w));
+	const pauses = words.map((w, i) => opts.even || i === words.length - 1 ? 0 : pauseWeight(w));
+	const units = weights.reduce((a, b) => a + b, 0) + pauses.reduce((a, b) => a + b, 0);
+	const perUnit = (spanEnd - spanStart) / units;
+	const out = [];
+	let cursor = 0;
+	let prevEnd = spanStart;
+	words.forEach((word, i) => {
+		const startF = spanStart + cursor * perUnit;
+		cursor += weights[i];
+		const endF = i === words.length - 1 ? spanEnd : spanStart + cursor * perUnit;
+		cursor += pauses[i];
+		const start = Math.max(prevEnd, Math.round(startF));
+		const end = Math.max(start, Math.round(endF));
+		out.push({
+			word,
+			start_ms: start,
+			end_ms: end
+		});
+		prevEnd = end;
+	});
+	return out;
+}
+//#endregion
+//#region ../voice/dist/text.js
+const LEADING_PUNCT = /^["'(\[{«“‘¿¡]+/u;
+const TRAILING_PUNCT = /["')\]}»”’.,;:!?…]+$/u;
+function core(token) {
+	return token.replace(LEADING_PUNCT, "").replace(TRAILING_PUNCT, "");
+}
+function rulesFrom(terms) {
+	return Object.entries(terms).map(([from, to]) => ({
+		from: tokenize(from).map(core),
+		to: tokenize(to)
+	})).filter((r) => r.from.length > 0 && r.from.every(Boolean)).sort((a, b) => b.from.length - a.from.length || b.from.join(" ").length - a.from.join(" ").length);
+}
+/**
+* Apply brand pronunciation/terminology overrides (`brand.language.terminology`, e.g.
+* {"CI/CD": "C I C D"}) to produce the speech text, while keeping the original words for captions.
+*
+* Matching is token-based and case-sensitive on the token with surrounding punctuation stripped, so
+* "CI/CD," matches "CI/CD" and the trailing comma is carried onto the last speech token (preserving
+* the pause). Longer terms win. Terms embedded inside a larger token (e.g. "CI/CD-based") are not
+* replaced.
+*/
+function prepareSpeechText(voiceover, brand, extra) {
+	const captionWords = tokenize(voiceover);
+	const rules = rulesFrom({
+		...brand?.language?.terminology ?? {},
+		...extra ?? {}
+	});
+	const speechWords = [];
+	const spans = [];
+	let i = 0;
+	while (i < captionWords.length) {
+		const rule = rules.find((r) => r.from.every((f, k) => i + k < captionWords.length && core(captionWords[i + k]) === f));
+		if (rule) {
+			const n = rule.from.length;
+			const first = captionWords[i];
+			const last = captionWords[i + n - 1];
+			const lead = LEADING_PUNCT.exec(first)?.[0] ?? "";
+			const trail = TRAILING_PUNCT.exec(last)?.[0] ?? "";
+			const to = [...rule.to];
+			if (to.length) {
+				to[0] = lead + to[0];
+				to[to.length - 1] = to[to.length - 1] + trail;
+			}
+			spans.push({
+				captionStart: i,
+				captionEnd: i + n,
+				speechStart: speechWords.length,
+				speechEnd: speechWords.length + to.length
+			});
+			speechWords.push(...to);
+			i += n;
+		} else {
+			spans.push({
+				captionStart: i,
+				captionEnd: i + 1,
+				speechStart: speechWords.length,
+				speechEnd: speechWords.length + 1
+			});
+			speechWords.push(captionWords[i]);
+			i += 1;
+		}
+	}
+	return {
+		speech: speechWords.join(" "),
+		speechWords,
+		captionWords,
+		spans
+	};
+}
+/** Split [start, end] across words weighted by syllables; monotonic integer ms. */
+function spread(words, start, end) {
+	const weights = words.map(estimateSyllables);
+	const total = weights.reduce((a, b) => a + b, 0);
+	const out = [];
+	let acc = 0;
+	let prev = start;
+	words.forEach((word, k) => {
+		const s = prev;
+		acc += weights[k];
+		const e = k === words.length - 1 ? end : Math.max(s, Math.round(start + (end - start) * acc / total));
+		out.push({
+			word,
+			start_ms: s,
+			end_ms: e
+		});
+		prev = e;
+	});
+	return out;
+}
+/**
+* Map timings of speech tokens back onto the original caption words.
+*
+* - 1:1 spans copy the timing (with the caption spelling).
+* - A replaced span (e.g. "CI/CD" → "C I C D") takes the time range from its first to its last
+*   speech token and spreads it across its caption words by syllable weight.
+* - A span whose replacement is empty gets zero-width timings at the previous word's end.
+* - Fallback when `timings` does not have one entry per speech token (e.g. a provider normalized
+*   the text differently): the whole range [first start, last end] is spread across all caption
+*   words by syllable weight.
+*/
+function mapTimingsToCaptions(prepared, timings) {
+	const { captionWords, spans, speechWords } = prepared;
+	if (captionWords.length === 0) return [];
+	if (timings.length === 0) return spread(captionWords, 0, 0);
+	if (timings.length !== speechWords.length) return spread(captionWords, timings[0].start_ms, timings[timings.length - 1].end_ms);
+	const out = [];
+	let prevEnd = timings[0].start_ms;
+	for (const span of spans) {
+		const words = captionWords.slice(span.captionStart, span.captionEnd);
+		if (span.speechEnd === span.speechStart) {
+			for (const word of words) out.push({
+				word,
+				start_ms: prevEnd,
+				end_ms: prevEnd
+			});
+			continue;
+		}
+		const first = timings[span.speechStart];
+		const last = timings[span.speechEnd - 1];
+		if (words.length === span.speechEnd - span.speechStart) words.forEach((word, k) => {
+			const t = timings[span.speechStart + k];
+			out.push({
+				word,
+				start_ms: t.start_ms,
+				end_ms: t.end_ms
+			});
+		});
+		else out.push(...spread(words, first.start_ms, last.end_ms));
+		prevEnd = last.end_ms;
+	}
+	return out;
+}
+//#endregion
+//#region ../voice/dist/silent.js
+/** Silent track: no audio, words timed evenly across the scene duration. */
+function silentTrack(input) {
+	const duration_ms = Math.max(0, Math.round(input.duration_ms ?? 0));
+	return {
+		scene_id: input.scene_id,
+		duration_ms,
+		words: estimateWordTimings(tokenize(input.text), duration_ms, { even: true }),
+		timing_source: "none",
+		provider: "silent"
+	};
+}
+function createSilentBackend() {
+	return {
+		id: "silent",
+		available: () => ({
+			ok: true,
+			reason: "always available (no audio)"
+		}),
+		synthesize: async (input) => silentTrack(input)
+	};
+}
+const DEFAULT_SAY_VOICE = "Samantha";
+/** Audio shorter than this from a non-empty script is treated as a failed synthesis. */
+const MIN_AUDIO_MS = 50;
+/**
+* Parse `say -v '?'` output. Lines look like
+* `Samantha            en_US    # Hello! My name is Samantha.` and names may contain spaces and
+* parentheses, e.g. `Eddy (English (US)) en_US    # Hello!`.
+*/
+function parseSayVoices(output) {
+	const voices = [];
+	for (const line of output.split("\n")) {
+		const m = /^(.+?)\s+([a-z]{2,3}(?:[_-][A-Za-z0-9]+)+)\s+#\s?(.*)$/.exec(line.trimEnd());
+		if (m) voices.push({
+			name: m[1].trim(),
+			locale: m[2],
+			sample: m[3]
+		});
+	}
+	return voices;
+}
+/**
+* Preferred macOS `say` voices per language (primary subtag), best first. Any other installed
+* voice whose locale matches the language is used after these.
+*/
+const SAY_VOICES_BY_LANGUAGE = Object.freeze({
+	ja: ["Kyoko", "Otoya"],
+	zh: [
+		"Tingting",
+		"Meijia",
+		"Sinji"
+	],
+	ko: ["Yuna"],
+	hi: ["Lekha"],
+	ar: ["Majed", "Maged"],
+	he: ["Carmit"],
+	fr: [
+		"Thomas",
+		"Amélie",
+		"Amelie"
+	],
+	de: ["Anna"],
+	es: [
+		"Mónica",
+		"Monica",
+		"Paulina"
+	],
+	it: ["Alice"],
+	pt: ["Luciana", "Joana"],
+	ru: ["Milena"]
+});
+/** Primary language subtag, lower case (`ja-JP` → `ja`); undefined for none. */
+function baseLang(language) {
+	return language?.trim().split(/[-_]/)[0]?.toLowerCase() || void 0;
+}
+/** True when a language needs a voice of its own (anything but English, which every engine defaults to). */
+function needsOwnVoice(language) {
+	const base = baseLang(language);
+	return base !== void 0 && base !== "en";
+}
+/**
+* The `say` voice for a language: the requested voice when it speaks that language, else the
+* preferred voice, else any installed voice with a matching locale; undefined when none exists.
+*/
+function pickSayVoice(voices, language, requested) {
+	const base = baseLang(language);
+	const speaks = (v) => v.locale.toLowerCase().split(/[-_]/)[0] === base;
+	const byName = (n) => voices.find((v) => v.name === n && speaks(v));
+	if (requested && byName(requested)) return requested;
+	for (const n of SAY_VOICES_BY_LANGUAGE[base] ?? []) if (byName(n)) return n;
+	const region = language.split(/[-_]/)[1]?.toUpperCase();
+	return (region ? voices.find((v) => speaks(v) && v.locale.toUpperCase().endsWith(`_${region}`)) : void 0)?.name ?? voices.find(speaks)?.name;
+}
+/** Thrown when the system engine has no voice for the spec language (the caller falls back to silent). */
+var NoVoiceForLanguageError = class extends Error {
+	language;
+	engine;
+	constructor(language, engine, detail) {
+		super(`${engine} has no voice for language "${language}"; not reading it with an English voice (${detail})`);
+		this.language = language;
+		this.engine = engine;
+		this.name = "NoVoiceForLanguageError";
+	}
+};
+/**
+* Local OS text-to-speech: macOS `say`, or `espeak-ng` on Linux. Audio is converted to 48 kHz mono
+* WAV with ffmpeg; word timings are ESTIMATED (syllable-weighted over the measured duration).
+*/
+function createSystemBackend(options = {}) {
+	const runner = options.runner ?? defaultRunner;
+	const resolver = options.resolver ?? defaultResolver;
+	const platform = options.platform ?? process.platform;
+	const rate = Math.round(options.rate ?? 180);
+	const trimSilence = options.trimSilence ?? true;
+	let voiceCache;
+	const engine = (env) => {
+		if (platform === "darwin") return resolver("say", env) ? "say" : void 0;
+		if (platform === "linux") return resolver("espeak-ng", env) ? "espeak-ng" : void 0;
+	};
+	const listVoices = (env) => {
+		if (engine(env) !== "say") return Promise.resolve([]);
+		voiceCache ??= runner(resolver("say", env), ["-v", "?"]).then((r) => r.code === 0 ? parseSayVoices(r.stdout) : []).catch(() => []);
+		return voiceCache;
+	};
+	/**
+	* The voice to use. English (or no language): the requested voice, the configured one, or
+	* Samantha, else the system default. Other languages: a voice that speaks the language (see
+	* `pickSayVoice`; espeak-ng: the language code), or undefined when none is installed.
+	*/
+	const resolveVoice = async (requested, env, language) => {
+		const eng = engine(env);
+		if (eng === "espeak-ng") return requested ?? options.voice ?? (needsOwnVoice(language) ? baseLang(language) : void 0);
+		if (eng !== "say") return void 0;
+		const voices = await listVoices(env);
+		if (needsOwnVoice(language)) return pickSayVoice(voices, language, requested ?? options.voice);
+		const has = (n) => voices.some((v) => v.name === n);
+		for (const candidate of [
+			requested,
+			options.voice,
+			DEFAULT_SAY_VOICE
+		]) if (candidate && has(candidate)) return candidate;
+	};
+	const available = (env) => {
+		const eng = engine(env);
+		if (!eng) return {
+			ok: false,
+			reason: platform === "darwin" ? "macOS `say` not found" : platform === "linux" ? "`espeak-ng` not found on PATH" : `no system TTS supported on ${platform}`
+		};
+		if (!resolver("ffmpeg", env) || !resolver("ffprobe", env)) return {
+			ok: false,
+			reason: `${eng} found but ffmpeg/ffprobe missing (set FFMPEG_PATH/FFPROBE_PATH or install ffmpeg)`
+		};
+		return {
+			ok: true,
+			reason: `${eng} with ffmpeg`
+		};
+	};
+	const synthesize = async (input, ctx) => {
+		const eng = engine(ctx.env);
+		const ffmpeg = resolver("ffmpeg", ctx.env);
+		const ffprobe = resolver("ffprobe", ctx.env);
+		if (!eng || !ffmpeg || !ffprobe) throw new Error(`system voice backend unavailable: ${available(ctx.env).reason}`);
+		const tools = {
+			ffmpeg,
+			ffprobe,
+			runner
+		};
+		const run = { signal: ctx.signal };
+		const voice = await resolveVoice(input.voice, ctx.env, input.language);
+		if (eng === "say" && needsOwnVoice(input.language) && !voice) {
+			const langs = [...new Set((await listVoices(ctx.env)).map((v) => v.locale.split(/[-_]/)[0]))].sort().join(", ");
+			throw new NoVoiceForLanguageError(input.language, eng, `installed voice languages: ${langs || "none listed"}; add one in System Settings > Accessibility > Spoken Content > System voice > Manage Voices, or use voice "silent"`);
+		}
+		const words = tokenize(input.text);
+		await ensureDir(ctx.outDir);
+		const outFile = join(ctx.outDir, `${input.scene_id}.wav`);
+		const work = await mkdtemp(join(tmpdir(), "vs-voice-"));
+		try {
+			const textFile = join(work, "text.txt");
+			await writeFile(textFile, input.text, "utf8");
+			if (eng === "say") {
+				const raw = join(work, "say.aiff");
+				const args = [
+					...voice ? ["-v", voice] : [],
+					"-r",
+					String(rate),
+					"-o",
+					raw,
+					"-f",
+					textFile
+				];
+				await runChecked(runner, resolver("say", ctx.env), args, "say", run);
+				await toWav48kMono(tools, raw, outFile, run);
+			} else {
+				const raw = join(work, "espeak.wav");
+				const args = [
+					...voice ? ["-v", voice] : [],
+					"-s",
+					String(rate),
+					"-w",
+					raw,
+					"-f",
+					textFile
+				];
+				await runChecked(runner, resolver("espeak-ng", ctx.env), args, "espeak-ng", run);
+				await toWav48kMono(tools, raw, outFile, run);
+			}
+			const duration_ms = await probeDurationMs(tools, outFile, run);
+			if (words.length > 0 && duration_ms < MIN_AUDIO_MS) throw new Error(`${eng} produced no audio for scene ${input.scene_id} (${duration_ms} ms); it may be blocked by a sandbox`);
+			const edges = trimSilence ? await detectEdgeSilence(tools, outFile, duration_ms, run) : {
+				leadMs: 0,
+				trailMs: 0
+			};
+			return {
+				scene_id: input.scene_id,
+				audio_path: outFile,
+				duration_ms,
+				words: estimateWordTimings(words, duration_ms, edges),
+				timing_source: "estimated",
+				...voice ? { voice } : {},
+				provider: eng === "say" ? "system-say" : "system-espeak-ng"
+			};
+		} finally {
+			await rm(work, {
+				recursive: true,
+				force: true
+			});
+		}
+	};
+	return {
+		id: "system",
+		available,
+		synthesize,
+		resolveVoice,
+		cacheOptions: () => ({
+			rate,
+			platform,
+			trimSilence
+		}),
+		engine,
+		listVoices
+	};
+}
+/** Per-request character budget; well under every current model's limit (5k for eleven_v3). */
+const DEFAULT_CHUNK_CHARS = 2500;
+const WORDLIKE = /[\p{L}\p{N}]/u;
+/**
+* Group ElevenLabs character-level alignment into words.
+* - Whitespace separates words (runs of spaces are fine).
+* - A punctuation-only group ("—", "!") is attached to the preceding word, keeping that word's end
+*   time; with no preceding word it is prefixed to the next one.
+* - A word's start is its first character's start; its end is the end of its last letter/digit
+*   (trailing punctuation carries no speech time).
+* - Times are integer ms offset by `offsetMs`, forced monotonic and non-overlapping.
+*/
+function alignmentToWords(alignment, offsetMs = 0) {
+	const { characters: chars, character_start_times_seconds: starts, character_end_times_seconds: ends } = alignment;
+	const out = [];
+	let pendingPrefix = "";
+	let text = "";
+	let start = -1;
+	let end = -1;
+	let lastSpokenEnd = -1;
+	const flush = () => {
+		if (!text) return;
+		if (!WORDLIKE.test(text)) {
+			if (out.length) out[out.length - 1].word += text;
+			else pendingPrefix += text;
+		} else {
+			const s = Math.round(start * 1e3) + offsetMs;
+			const e = Math.round((lastSpokenEnd >= 0 ? lastSpokenEnd : end) * 1e3) + offsetMs;
+			out.push({
+				word: pendingPrefix + text,
+				start_ms: s,
+				end_ms: e
+			});
+			pendingPrefix = "";
+		}
+		text = "";
+		start = -1;
+		end = -1;
+		lastSpokenEnd = -1;
+	};
+	let cjkOpen = false;
+	for (let i = 0; i < chars.length; i++) {
+		const c = chars[i] ?? "";
+		if (/^\s*$/u.test(c)) {
+			flush();
+			cjkOpen = false;
+			continue;
+		}
+		if (isCjkUnitChar(c) && !(cjkOpen && isNoStartChar(c))) {
+			flush();
+			cjkOpen = true;
+		} else if (cjkOpen && !isNoStartChar(c)) {
+			flush();
+			cjkOpen = false;
+		}
+		if (start < 0) start = starts[i] ?? 0;
+		end = ends[i] ?? end;
+		if (WORDLIKE.test(c)) lastSpokenEnd = ends[i] ?? lastSpokenEnd;
+		text += c;
+	}
+	flush();
+	let prev = 0;
+	for (const w of out) {
+		w.start_ms = Math.max(prev, w.start_ms);
+		w.end_ms = Math.max(w.start_ms, w.end_ms);
+		prev = w.end_ms;
+	}
+	return out;
+}
+/** Split text into chunks of at most `max` chars, preferring sentence, then word boundaries. */
+function chunkText(text, max = DEFAULT_CHUNK_CHARS) {
+	const clean = text.trim();
+	if (clean.length <= max) return clean ? [clean] : [];
+	const sentences = clean.match(/[^.!?…]+(?:[.!?…]+["')\]]*|$)\s*/gu) ?? [clean];
+	const chunks = [];
+	let cur = "";
+	const push = () => {
+		if (cur.trim()) chunks.push(cur.trim());
+		cur = "";
+	};
+	for (const s of sentences) {
+		if ((cur + s).length <= max) {
+			cur += s;
+			continue;
+		}
+		push();
+		if (s.length <= max) {
+			cur = s;
+			continue;
+		}
+		for (const w of s.split(/(\s+)/)) {
+			if ((cur + w).length > max) push();
+			cur += w;
+		}
+	}
+	push();
+	return chunks;
+}
+var ElevenLabsError = class extends Error {
+	status;
+	constructor(message, status) {
+		super(message);
+		this.status = status;
+		this.name = "ElevenLabsError";
+	}
+};
+function apiKey(env) {
+	const k = env.ELEVENLABS_API_KEY;
+	return k && k.trim() ? k.trim() : void 0;
+}
+/**
+* ElevenLabs `with-timestamps` TTS over plain fetch. Enabled only when ELEVENLABS_API_KEY is set.
+* Long scripts are chunked; each chunk passes up to 3 `previous_request_ids` for prosody continuity
+* (also across scenes within one backend instance) and its word times are offset by the cumulative
+* measured audio duration. The key is only ever sent in the `xi-api-key` header, never logged.
+*/
+function createElevenLabsBackend(options = {}) {
+	const doFetch = options.fetch ?? globalThis.fetch;
+	const runner = options.runner ?? defaultRunner;
+	const resolver = options.resolver ?? defaultResolver;
+	const modelId = options.modelId ?? "eleven_multilingual_v2";
+	const outputFormat = options.outputFormat ?? "mp3_44100_128";
+	const baseUrl = (options.baseUrl ?? "https://api.elevenlabs.io").replace(/\/+$/, "");
+	const recentRequestIds = [];
+	const available = (env) => {
+		if (!apiKey(env)) return {
+			ok: false,
+			reason: "ELEVENLABS_API_KEY not set"
+		};
+		if (!resolver("ffmpeg", env) || !resolver("ffprobe", env)) return {
+			ok: false,
+			reason: "ELEVENLABS_API_KEY set but ffmpeg/ffprobe missing"
+		};
+		return {
+			ok: true,
+			reason: "ELEVENLABS_API_KEY set"
+		};
+	};
+	const resolveVoice = async (requested, env) => requested ?? (env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM");
+	const request = async (voiceId, text, key, signal) => {
+		const body = {
+			text,
+			model_id: modelId
+		};
+		if (recentRequestIds.length) body.previous_request_ids = recentRequestIds.slice(-3);
+		if (options.seed !== void 0) body.seed = options.seed;
+		if (options.pronunciationDictionaryLocators?.length) body.pronunciation_dictionary_locators = options.pronunciationDictionaryLocators;
+		const url = `${baseUrl}/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=${encodeURIComponent(outputFormat)}`;
+		const res = await doFetch(url, {
+			method: "POST",
+			headers: {
+				"xi-api-key": key,
+				"content-type": "application/json",
+				accept: "application/json"
+			},
+			body: JSON.stringify(body),
+			...signal ? { signal } : {}
+		});
+		if (!res.ok) {
+			const detail = (await res.text().catch(() => "")).slice(0, 300).replaceAll(key, "***");
+			throw new ElevenLabsError(`ElevenLabs TTS failed: HTTP ${res.status}${detail ? ` ${detail}` : ""}`, res.status);
+		}
+		const json = await res.json();
+		if (!json || typeof json.audio_base64 !== "string" || !json.audio_base64) throw new ElevenLabsError("ElevenLabs response missing audio_base64");
+		const requestId = res.headers.get("request-id");
+		if (requestId) {
+			recentRequestIds.push(requestId);
+			if (recentRequestIds.length > 3) recentRequestIds.shift();
+		}
+		return json;
+	};
+	const synthesize = async (input, ctx) => {
+		const key = apiKey(ctx.env);
+		if (!key) throw new ElevenLabsError("ELEVENLABS_API_KEY not set");
+		const ffmpeg = resolver("ffmpeg", ctx.env);
+		const ffprobe = resolver("ffprobe", ctx.env);
+		if (!ffmpeg || !ffprobe) throw new ElevenLabsError("ffmpeg/ffprobe missing");
+		const tools = {
+			ffmpeg,
+			ffprobe,
+			runner
+		};
+		const run = { signal: ctx.signal };
+		const voice = await resolveVoice(input.voice, ctx.env);
+		const chunks = chunkText(input.text, options.chunkChars ?? 2500);
+		await ensureDir(ctx.outDir);
+		const outFile = join(ctx.outDir, `${input.scene_id}.wav`);
+		const work = await mkdtemp(join(tmpdir(), "vs-11l-"));
+		try {
+			const parts = [];
+			const words = [];
+			let offset = 0;
+			for (const [i, chunk] of chunks.entries()) {
+				const json = await request(voice, chunk, key, ctx.signal);
+				const part = join(work, `part-${i}.${outputFormat.split("_")[0] ?? "mp3"}`);
+				await writeFile(part, Buffer.from(json.audio_base64, "base64"));
+				parts.push(part);
+				const alignment = json.alignment ?? json.normalized_alignment;
+				if (alignment) words.push(...alignmentToWords(alignment, offset));
+				offset += await probeDurationMs(tools, part, run);
+			}
+			if (parts.length === 0) throw new ElevenLabsError(`scene ${input.scene_id} has no text`);
+			await concatToWav(tools, parts, outFile, run);
+			const duration_ms = await probeDurationMs(tools, outFile, run);
+			let prev = 0;
+			for (const w of words) {
+				w.start_ms = Math.min(Math.max(prev, w.start_ms), duration_ms);
+				w.end_ms = Math.min(Math.max(w.start_ms, w.end_ms), duration_ms);
+				prev = w.end_ms;
+			}
+			return {
+				scene_id: input.scene_id,
+				audio_path: outFile,
+				duration_ms,
+				words,
+				timing_source: "provider",
+				voice,
+				provider: "elevenlabs"
+			};
+		} finally {
+			await rm(work, {
+				recursive: true,
+				force: true
+			});
+		}
+	};
+	return {
+		id: "elevenlabs",
+		available,
+		synthesize,
+		resolveVoice,
+		cacheOptions: () => ({
+			modelId,
+			outputFormat,
+			seed: options.seed ?? null,
+			dictionaries: options.pronunciationDictionaryLocators ?? null
+		})
+	};
+}
+var VoiceBackendUnavailableError = class extends Error {
+	backendId;
+	constructor(backendId, reason) {
+		super(`voice backend "${backendId}" is unavailable: ${reason}`);
+		this.backendId = backendId;
+		this.name = "VoiceBackendUnavailableError";
+	}
+};
+function defaultBackends() {
+	return {
+		system: createSystemBackend(),
+		elevenlabs: createElevenLabsBackend(),
+		silent: createSilentBackend()
+	};
+}
+/**
+* auto: elevenlabs if its key is set, else system TTS if available, else silent.
+* An explicit choice that is unavailable throws VoiceBackendUnavailableError.
+*/
+async function selectBackend(choice, env, backends = defaultBackends()) {
+	if (choice !== "auto") {
+		const backend = backends[choice];
+		const a = await backend.available(env);
+		if (!a.ok) throw new VoiceBackendUnavailableError(choice, a.reason ?? "unavailable");
+		return {
+			backend,
+			reason: `requested "${choice}"${a.reason ? ` (${a.reason})` : ""}`
+		};
+	}
+	const skipped = [];
+	for (const id of ["elevenlabs", "system"]) {
+		const a = await backends[id].available(env);
+		if (a.ok) {
+			const prefix = skipped.length ? `${skipped.join("; ")}; ` : "";
+			return {
+				backend: backends[id],
+				reason: `auto: ${prefix}using ${id} (${a.reason ?? "available"})`
+			};
+		}
+		skipped.push(`${id} unavailable: ${a.reason ?? "unknown"}`);
+	}
+	return {
+		backend: backends.silent,
+		reason: `auto: ${skipped.join("; ")}; falling back to silent (no audio)`
+	};
+}
+const toPosix$2 = (p) => p.split(sep).join("/");
+function detectOverrun(scene, track) {
+	if (!track.audio_path || track.duration_ms <= Math.round(scene.duration_sec * 1e3)) return void 0;
+	const audio = track.duration_ms / 1e3;
+	return {
+		scene_id: scene.id,
+		scene_duration_sec: scene.duration_sec,
+		audio_duration_sec: audio,
+		suggested_duration_sec: Math.ceil(Math.round((audio + .3) * 1e3) / 100) / 10
+	};
+}
+/**
+* Synthesize voice for every scene of a spec into `<project>/assets/voice/<scene_id>.wav` and write
+* `assets/voice/voice-tracks.json`. Results are cached by content (backend, voice, text, options)
+* in a ContentStore, so re-runs are free. The spec is never modified: scenes whose audio is longer
+* than `duration_sec` are reported in `overruns` for the caller to act on.
+*/
+async function synthesizeSpec(spec, options) {
+	const env = options.env ?? process.env;
+	const backends = {
+		...defaultBackends(),
+		...options.backends
+	};
+	const { backend, reason } = await selectBackend(options.backend ?? "auto", env, backends);
+	const paths = projectPaths(options.projectDir);
+	const voiceDir = paths.assetsVoice;
+	const cacheRoot = options.cacheDir ?? join(resolveDataDir(env).cache, "voice");
+	const store = new ContentStore(join(cacheRoot, "cas"));
+	const indexDir = join(cacheRoot, "index");
+	const tracks = [];
+	const overruns = [];
+	const cacheHits = [];
+	const work = await mkdtemp(join(tmpdir(), "vs-voice-spec-"));
+	try {
+		for (const scene of spec.scenes) {
+			options.signal?.throwIfAborted();
+			const durationMs = Math.round(scene.duration_sec * 1e3);
+			const prepared = prepareSpeechText(scene.voiceover, options.brand);
+			if (prepared.captionWords.length === 0) {
+				tracks.push(silentTrack({
+					scene_id: scene.id,
+					text: "",
+					duration_ms: durationMs
+				}));
+				continue;
+			}
+			if (backend.id === "silent") {
+				const t = await backend.synthesize({
+					scene_id: scene.id,
+					text: prepared.speech,
+					duration_ms: durationMs
+				}, {
+					outDir: work,
+					env,
+					...options.signal ? { signal: options.signal } : {}
+				});
+				tracks.push({
+					...t,
+					words: mapTimingsToCaptions(prepared, t.words)
+				});
+				continue;
+			}
+			const voice = await backend.resolveVoice?.(spec.voice.voice_id, env, spec.language);
+			const key = cacheKey({
+				kind: "voice",
+				inputDigest: sha256Hex(`${prepared.speech}\u0000${scene.voiceover}`),
+				extractorVersion: "1",
+				options: {
+					backend: backend.id,
+					voice: voice ?? null,
+					text: prepared.speech,
+					...backend.cacheOptions?.() ?? {}
+				},
+				irSchemaVersion: 1
+			});
+			const indexFile = join(indexDir, `${key}.json`);
+			const dest = join(voiceDir, `${scene.id}.wav`);
+			const relAudio = toPosix$2(relative(paths.root, dest));
+			const cached = await readJson(indexFile).catch(() => void 0);
+			if (cached?.version === "1" && cached.audio_sha256 && await store.has(cached.audio_sha256)) {
+				await store.materialize(cached.audio_sha256, dest);
+				const track = SceneVoiceTrack.parse({
+					...cached.track,
+					scene_id: scene.id,
+					audio_path: relAudio
+				});
+				tracks.push(track);
+				cacheHits.push(scene.id);
+				const o = detectOverrun(scene, track);
+				if (o) overruns.push(o);
+				continue;
+			}
+			const raw = await backend.synthesize({
+				scene_id: scene.id,
+				text: prepared.speech,
+				...voice ? { voice } : {},
+				duration_ms: durationMs,
+				language: spec.language
+			}, {
+				outDir: work,
+				env,
+				...options.signal ? { signal: options.signal } : {}
+			});
+			const words = mapTimingsToCaptions(prepared, raw.words);
+			let track;
+			let audioSha;
+			if (raw.audio_path) {
+				const entry = await store.put(raw.audio_path);
+				audioSha = entry.sha256;
+				await store.materialize(entry.sha256, dest);
+				await rm(raw.audio_path, { force: true });
+				track = SceneVoiceTrack.parse({
+					...raw,
+					words,
+					audio_path: relAudio
+				});
+			} else {
+				const { audio_path: _drop, ...rest } = raw;
+				track = SceneVoiceTrack.parse({
+					...rest,
+					words
+				});
+			}
+			if (audioSha) await writeJsonAtomic(indexFile, {
+				version: "1",
+				audio_sha256: audioSha,
+				track
+			});
+			tracks.push(track);
+			const o = detectOverrun(scene, track);
+			if (o) overruns.push(o);
+		}
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+	const tracksFile = join(voiceDir, "voice-tracks.json");
+	await writeJsonAtomic(tracksFile, tracks);
+	return {
+		backend: backend.id,
+		reason,
+		tracks,
+		tracks_path: toPosix$2(relative(paths.root, tracksFile)),
+		overruns,
+		cache_hits: cacheHits
+	};
+}
+//#endregion
+//#region src/localize.ts
+const CHAR_SCRIPTS = {
+	ja: {
+		unit: "chars",
+		speak_per_sec: 7,
+		read_per_sec: 8
+	},
+	zh: {
+		unit: "chars",
+		speak_per_sec: 4.5,
+		read_per_sec: 6
+	},
+	yue: {
+		unit: "chars",
+		speak_per_sec: 4.5,
+		read_per_sec: 6
+	},
+	ko: {
+		unit: "chars",
+		speak_per_sec: 5.5,
+		read_per_sec: 7
+	},
+	th: {
+		unit: "chars",
+		speak_per_sec: 10,
+		read_per_sec: 12
+	},
+	lo: {
+		unit: "chars",
+		speak_per_sec: 10,
+		read_per_sec: 12
+	},
+	km: {
+		unit: "chars",
+		speak_per_sec: 9,
+		read_per_sec: 11
+	},
+	my: {
+		unit: "chars",
+		speak_per_sec: 9,
+		read_per_sec: 11
+	}
+};
+const WORD_RATES = {
+	en: 2.5,
+	de: 2.2,
+	nl: 2.3,
+	fr: 2.6,
+	es: 2.7,
+	it: 2.6,
+	pt: 2.5,
+	ru: 2.2,
+	pl: 2.2,
+	uk: 2.2,
+	tr: 2.1,
+	fi: 1.9,
+	hi: 2.4,
+	bn: 2.3,
+	ar: 2.1,
+	he: 2.2,
+	fa: 2.3,
+	id: 2.3,
+	vi: 3
+};
+function languageRate(language) {
+	const primary = language.split("-")[0].toLowerCase();
+	const chars = CHAR_SCRIPTS[primary];
+	if (chars) return chars;
+	return {
+		unit: "words",
+		speak_per_sec: WORD_RATES[primary] ?? 2.4,
+		read_per_sec: 3
+	};
+}
+/** Length of `text` in the language's unit: words, or letters/digits for character scripts. */
+function countUnits(text, language) {
+	if (languageRate(language).unit === "chars") return (text.match(/[\p{L}\p{N}]/gu) ?? []).length;
+	return text.trim() ? text.trim().split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length : 0;
+}
+/**
+* Seconds to speak `text`: the voice package's per-script rates (the same the render plan uses),
+* plus sentence pauses. `language` only matters when the text's script is ambiguous.
+*/
+function estimateSpeechSec(text, language) {
+	if (!countUnits(text, language)) return 0;
+	const sentences = (text.match(/[.!?…。！？]+/g) ?? []).length;
+	return estimateSpeechSec$1(text) + Math.max(0, sentences - 1) * .25;
+}
+const unitLabel = (language, n) => `${n} ${languageRate(language).unit === "chars" ? "characters" : n === 1 ? "word" : "words"}`;
+const HAS_LETTER = /\p{L}/u;
+const URL_LIKE = /^(?:https?:\/\/|www\.)\S+$|^[\w-]+(?:\.[\w-]+)+(?:\/\S*)?$/i;
+const COMMAND_LIKE = /^(?:\$\s|>\s)|^(?:npm|npx|pnpm|yarn|pip|pipx|brew|git|cargo|go|docker|kubectl|curl|wget|make|node|python3?|uv|deno|bun)\s/;
+const CODE_HINT = /`|=>|\(\)|::|\{\s*\}|<\/?[a-z][^>]*>|[a-z]+_[a-z]+\(|--[a-z]/i;
+/** True when a string is something a viewer reads and a translator should see. */
+function isTranslatable(text) {
+	if (typeof text !== "string") return false;
+	const t = text.trim();
+	if (!t || !HAS_LETTER.test(t)) return false;
+	if (URL_LIKE.test(t) || COMMAND_LIKE.test(t)) return false;
+	return true;
+}
+function codeNote(text) {
+	return CODE_HINT.test(text) ? "contains code or a command: keep those parts exactly as written" : void 0;
+}
+const joinNotes = (...n) => n.filter(Boolean).join("; ") || void 0;
+/** The source language's length of a string and the budget for its translation. */
+function lengthBudget(text, from, to, slack = 1.2) {
+	const fromChars = languageRate(from).unit === "chars";
+	const toChars = languageRate(to).unit === "chars";
+	const src = countUnits(text, from);
+	let max;
+	if (fromChars === toChars) max = Math.ceil(src * slack);
+	else if (toChars) max = Math.ceil(src * 2 * slack);
+	else max = Math.ceil(src / 2 * slack);
+	return `keep it about as short as the source: at most ${unitLabel(to, Math.max(1, max))}`;
+}
+function add(c, path, kind, source, ...notes) {
+	if (!isTranslatable(source)) return;
+	const note = joinNotes(codeNote(source), ...notes);
+	c.entries.push({
+		path,
+		kind,
+		source,
+		...note ? { note } : {}
+	});
+}
+const EMPHASIS_NOTE = (em) => `"${em}" is emphasised: mark the word(s) of your translation that carry it with *asterisks* (e.g. "… *Wörter*"); unmarked, apply keeps "${em}" if it appears, else picks the longest word`;
+function collectProps(c, base, kind, props) {
+	const p = (k) => `${base}.${k}`;
+	const short = (t) => typeof t === "string" ? lengthBudget(t, c.from, c.to) : void 0;
+	const NAME = "a proper name: keep it unless it has an established form in the target language";
+	const arr = (v) => Array.isArray(v) ? v : [];
+	const obj = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : {};
+	const unitNote = "unit: translate words, keep symbols";
+	const unitOk = (u) => typeof u === "string" && /\p{L}{3,}/u.test(u);
+	switch (kind) {
+		case "typography": {
+			const em = typeof props.emphasis === "string" ? props.emphasis.trim() : "";
+			arr(props.lines).forEach((l, j) => {
+				const has = em && typeof l === "string" && l.toLowerCase().includes(em.toLowerCase());
+				add(c, p(`lines.${j}`), "props", l, short(l), has ? EMPHASIS_NOTE(em) : void 0);
+			});
+			break;
+		}
+		case "kinetic_text": {
+			const em = typeof props.emphasis === "string" ? props.emphasis.trim() : "";
+			add(c, p("text"), "props", props.text, short(props.text), "shown word by word: short words and phrases", em ? EMPHASIS_NOTE(em) : void 0);
+			break;
+		}
+		case "diagram":
+			arr(props.nodes).forEach((n, j) => add(c, p(`nodes.${j}`), "props", n, "diagram node label (edges follow it automatically); 1–3 words"));
+			break;
+		case "comparison":
+		case "split_screen":
+			for (const side of ["left", "right"]) {
+				add(c, p(`${side}.label`), "props", obj(props[side]).label, "panel label: 1–2 words");
+				add(c, p(`${side}.text`), "props", obj(props[side]).text, short(obj(props[side]).text));
+			}
+			add(c, p("verdict"), "props", props.verdict, short(props.verdict));
+			break;
+		case "cta":
+			add(c, p("headline"), "props", props.headline, short(props.headline));
+			add(c, p("action"), "props", props.action, "call to action: an imperative verb phrase", short(props.action));
+			break;
+		case "end_card":
+			add(c, p("title"), "props", props.title, "often a product name: keep names");
+			add(c, p("subtitle"), "props", props.subtitle, short(props.subtitle));
+			break;
+		case "chart":
+			add(c, p("label"), "props", props.label, short(props.label));
+			if (unitOk(props.unit)) add(c, p("unit"), "props", props.unit, unitNote);
+			arr(props.series).forEach((s, j) => add(c, p(`series.${j}.label`), "props", obj(s).label, "chart axis/bar label: 1–2 words"));
+			break;
+		case "stat":
+			add(c, p("label"), "props", props.label, short(props.label));
+			add(c, p("context"), "props", props.context, short(props.context));
+			if (unitOk(props.unit)) add(c, p("unit"), "props", props.unit, unitNote);
+			break;
+		case "screenshot":
+			arr(props.callouts).forEach((co, j) => typeof co === "string" ? add(c, p(`callouts.${j}`), "props", co, short(co), "callout on a screenshot: UI names shown in the image stay as they appear") : add(c, p(`callouts.${j}.text`), "props", obj(co).text, short(obj(co).text), "callout on a screenshot: UI names shown in the image stay as they appear"));
+			break;
+		case "quote":
+			add(c, p("text"), "props", props.text, "a quotation: translate faithfully, never paraphrase into new claims", short(props.text));
+			add(c, p("attribution"), "props", props.attribution, NAME);
+			add(c, p("source"), "props", props.source, "the work quoted: keep titles as published");
+			break;
+		case "timeline":
+			arr(props.events).forEach((e, j) => {
+				add(c, p(`events.${j}.label`), "props", obj(e).label, "timeline label: 1–3 words");
+				add(c, p(`events.${j}.text`), "props", obj(e).text, short(obj(e).text));
+			});
+			break;
+		case "lower_third":
+			add(c, p("name"), "props", props.name, NAME);
+			add(c, p("title"), "props", props.title, "job title or role");
+			add(c, p("headline"), "props", props.headline, short(props.headline));
+			break;
+		case "map":
+			add(c, p("title"), "props", props.title, short(props.title));
+			arr(props.points).forEach((pt, j) => add(c, p(`points.${j}.label`), "props", obj(pt).label, "map pin label: 1–2 words"));
+	}
+}
+/** Every viewer-facing string of `spec`, with translator notes for `to`. */
+function extractEntries(spec, to) {
+	const from = spec.language;
+	const c = {
+		entries: [],
+		from,
+		to
+	};
+	const narrated = voiceMode(spec) === "narrated";
+	const rate = languageRate(to);
+	add(c, "title", "title", spec.title, "video title (also the default post title)", lengthBudget(spec.title ?? "", from, to));
+	spec.scenes.forEach((s, i) => {
+		const base = `scenes.${i}`;
+		if (narrated && s.voiceover.trim()) {
+			const max = Math.max(1, Math.floor(Math.max(.5, s.duration_sec - .3) * rate.speak_per_sec));
+			add(c, `${base}.voiceover`, "voiceover", s.voiceover, `spoken in ${s.duration_sec}s (${s.purpose}): aim for at most ${unitLabel(to, max)} (~${rate.speak_per_sec} ${rate.unit}/s); longer lines lengthen the scene at apply`, "same claims as the source, no new facts, numbers and names unchanged");
+		} else if (s.voiceover.trim()) add(c, `${base}.voiceover`, "voiceover", s.voiceover, `voice.mode is ${voiceMode(spec)}: not spoken, used for captions/notes`);
+		if (s.on_screen_text?.trim()) {
+			const max = Math.max(1, Math.floor(Math.max(.5, s.duration_sec - .5) * rate.read_per_sec));
+			add(c, `${base}.on_screen_text`, "on_screen_text", s.on_screen_text, `on screen for ${s.duration_sec}s: at most ${unitLabel(to, max)}`, lengthBudget(s.on_screen_text, from, to));
+		}
+		if (s.deterministic) collectProps(c, `${base}.deterministic.props`, s.deterministic.kind, s.deterministic.props);
+		(s.sfx ?? []).forEach((fx, j) => add(c, `${base}.sfx.${j}.caption`, "on_screen_text", fx.caption, "sound-event caption: keep the [brackets], 1–3 words"));
+	});
+	if (spec.cover) add(c, "cover.headline", "cover", spec.cover.headline, "cover headline: large text on the thumbnail", lengthBudget(spec.cover.headline, from, to, 1.1));
+	for (const [t, pub] of Object.entries(spec.publish ?? {})) {
+		add(c, `publish.${t}.post_caption`, "post", pub.post_caption, `post text for ${t}: keep its length limit (see dist/${t}/post.json limits) and the call to action`);
+		(pub.hashtags ?? []).forEach((h, j) => add(c, `publish.${t}.hashtags.${j}`, "post", h, "hashtag: # then letters, digits or _ only, no spaces; use the tag people search for in the language, or keep it"));
+	}
+	return c.entries;
+}
+function getAt(root, path) {
+	let cur = root;
+	for (const k of path.split(".")) {
+		if (cur === null || typeof cur !== "object") return void 0;
+		cur = cur[k];
+	}
+	return cur;
+}
+function setAt(root, path, value) {
+	const keys = path.split(".");
+	let cur = root;
+	for (const k of keys.slice(0, -1)) {
+		if (cur === null || typeof cur !== "object") return false;
+		cur = cur[k];
+	}
+	if (cur === null || typeof cur !== "object") return false;
+	cur[keys[keys.length - 1]] = value;
+	return true;
+}
+const stripEdges = (w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+/** `*word*` marks → {text without marks, marked words}. */
+function takeEmphasisMarks(text) {
+	const marked = [];
+	return {
+		text: text.replace(/\*([^*\n]+)\*/g, (_, w) => {
+			marked.push(w.trim());
+			return w;
+		}),
+		marked
+	};
+}
+/**
+* The emphasis for translated `lines`: a marked word, else the source emphasis if it still
+* appears (names, numbers, acronyms), else the longest word of the line that held it (word
+* scripts only). Null: drop the emphasis.
+*/
+function deriveEmphasis(opts) {
+	const all = opts.lines.join(" ").toLowerCase();
+	const m = opts.marked.find((w) => w && all.includes(w.toLowerCase()));
+	if (m) return {
+		emphasis: m,
+		how: "marked in the translation"
+	};
+	if (opts.sourceEmphasis && all.includes(opts.sourceEmphasis.toLowerCase())) return {
+		emphasis: opts.sourceEmphasis,
+		how: "kept (appears in the translation)"
+	};
+	if (languageRate(opts.language).unit === "chars") return {
+		emphasis: null,
+		how: "dropped (no word boundaries to pick from; mark it with *asterisks* in the sheet)"
+	};
+	const words = (opts.lines[opts.lineIndex] ?? opts.lines.join(" ")).split(/\s+/).map(stripEdges).filter((w) => Array.from(w).length >= 3);
+	if (!words.length) return {
+		emphasis: null,
+		how: "dropped (no suitable word)"
+	};
+	return {
+		emphasis: words.reduce((a, b) => Array.from(b).length > Array.from(a).length ? b : a),
+		how: "longest word of the line (mark another with *asterisks* in the sheet to change it)"
+	};
+}
+const SHEET = "translation.json";
+const round1$1 = (n) => Math.round(n * 10) / 10;
+async function readSourceSpec(root) {
+	const text = await readFile(projectSpecPaths(root).spec, "utf8").catch(() => {
+		throw new Error(`no project/video-spec.json in ${root}; plan the project first`);
+	});
+	const parsed = parseYamlOrJson(VideoSpec, text);
+	if (!parsed.ok) throw new Error(`project/video-spec.json is invalid; run spec_validate first (${parsed.errors.slice(0, 3).map((e) => `${e.path}: ${e.message}`).join("; ")})`);
+	return parsed.data;
+}
+async function readSheet(path) {
+	if (!existsSync(path)) return void 0;
+	const parsed = parseYamlOrJson(TranslationSheet, await readFile(path, "utf8"));
+	if (!parsed.ok) throw new Error(`${path} is not a valid TranslationSheet: ${parsed.errors.slice(0, 5).map((e) => `${e.path}: ${e.message}`).join("; ")}`);
+	return parsed.data;
+}
+function localizedId(spec, language) {
+	return `${spec.id ?? "video"}-${language.toLowerCase()}`.replace(/[^A-Za-z0-9_.@:-]/g, "-");
+}
+/** The source spec with the language set for `language` (text unchanged). */
+function baseLocalizedSpec(src, language, notes) {
+	const spec = structuredClone(src);
+	spec.language = language;
+	spec.id = localizedId(src, language);
+	if (spec.voice.voice_id) {
+		notes.push(`voice.voice_id "${spec.voice.voice_id}" removed: it speaks ${src.language}; the voice backend picks a ${language} voice (set one explicitly if you prefer)`);
+		delete spec.voice.voice_id;
+	}
+	return spec;
+}
+async function localizeProject(projectDir, language, opts = {}) {
+	const root = projectPaths(projectDir).root;
+	const out = resolve(opts.out_dir ?? join(root, "localized", language));
+	if (out === root) throw new Error("out_dir must differ from the source project (localize never modifies the source)");
+	const src = await readSourceSpec(root);
+	if (src.language.toLowerCase() === language.toLowerCase()) throw new Error(`the project is already in ${src.language}; choose another language`);
+	const srcSha = sha256Hex(canonicalJson(src));
+	const sheetPath = join(out, "project", SHEET);
+	const notes = [];
+	return opts.apply ? applySheet(root, out, sheetPath, src, srcSha, language, notes) : prepare(root, out, sheetPath, src, srcSha, language, notes);
+}
+async function prepare(root, out, sheetPath, src, srcSha, language, notes) {
+	let previous;
+	if (existsSync(out) && (await readdir(out)).length > 0) {
+		previous = await readSheet(sheetPath).catch(() => void 0);
+		if (!previous || previous.target_language.toLowerCase() !== language.toLowerCase()) throw new Error(`out_dir ${out} is not empty and holds no ${language} translation sheet; choose a new folder`);
+	}
+	await mkdir(out, { recursive: true });
+	for (const part of [
+		"source",
+		"input",
+		"assets",
+		"brand.yaml",
+		"project"
+	]) {
+		const from = join(root, part);
+		if (!existsSync(from)) continue;
+		await rm(join(out, part), {
+			recursive: true,
+			force: true
+		});
+		await cp(from, join(out, part), {
+			recursive: true,
+			filter: (p) => !p.startsWith(join(root, "assets", "voice"))
+		});
+	}
+	const spec = baseLocalizedSpec(src, language, notes);
+	await writeFile(projectSpecPaths(out).spec, `${JSON.stringify(spec, null, 2)}\n`);
+	const entries = extractEntries(src, language);
+	let kept = 0;
+	if (previous) {
+		const prior = new Map(previous.entries.map((e) => [`${e.path}\u0000${e.source}`, e.target]));
+		for (const e of entries) {
+			const t = prior.get(`${e.path}\u0000${e.source}`);
+			if (t) {
+				e.target = t;
+				kept++;
+			}
+		}
+		if (kept) notes.push(`kept ${kept} translation(s) from the previous sheet (same path and source text)`);
+	}
+	const sheet = {
+		schema_version: "1.0",
+		source_language: src.language,
+		target_language: language,
+		source_spec_sha256: srcSha,
+		entries
+	};
+	await writeFile(sheetPath, `${JSON.stringify(sheet, null, 2)}\n`);
+	const rate = languageRate(language);
+	notes.push(`fill each entry's "target" in project/translation.json (meaning, not word for word; the same claims; within each note's budget), then run localize with apply: true`, `${language} is measured in ${rate.unit}: about ${rate.speak_per_sec} ${rate.unit}/s spoken, ${rate.read_per_sec} ${rate.unit}/s read`);
+	return {
+		language,
+		out_dir: out,
+		sheet_path: sheetPath,
+		entries: entries.length,
+		translated: kept,
+		applied: false,
+		notes,
+		sheet
+	};
+}
+async function applySheet(root, out, sheetPath, src, srcSha, language, notes) {
+	const sheet = await readSheet(sheetPath);
+	if (!sheet) throw new Error(`no translation sheet at ${sheetPath}; run localize without apply first`);
+	if (sheet.target_language.toLowerCase() !== language.toLowerCase()) throw new Error(`${sheetPath} is for ${sheet.target_language}, not ${language}`);
+	if (sheet.source_spec_sha256 !== srcSha) throw new Error("the source project/video-spec.json changed since the sheet was made; run localize without apply again (translations whose source text is unchanged are kept), translate the new entries, then apply");
+	const spec = baseLocalizedSpec(src, language, notes);
+	const untranslated = /* @__PURE__ */ new Map();
+	let translated = 0;
+	const nodeRenames = /* @__PURE__ */ new Map();
+	const marks = /* @__PURE__ */ new Map();
+	for (const e of sheet.entries) {
+		const target = e.target?.trim();
+		if (!target) {
+			untranslated.set(e.kind, (untranslated.get(e.kind) ?? 0) + 1);
+			continue;
+		}
+		if (getAt(src, e.path) !== e.source) {
+			notes.push(`${e.path}: the sheet's source no longer matches the spec; skipped`);
+			continue;
+		}
+		let value = target;
+		const em = /^scenes\.(\d+)\.deterministic\.props\.(lines\.\d+|text)$/.exec(e.path);
+		if (em) {
+			const t = takeEmphasisMarks(target);
+			value = t.text;
+			if (t.marked.length) marks.set(em[1], [...marks.get(em[1]) ?? [], ...t.marked]);
+		} else if (/\.sfx\.\d+\.caption$/.test(e.path)) value = /^\[.*\]$/.test(value) ? value : `[${value.replace(/^\[|\]$/g, "")}]`;
+		else if (/^publish\.[^.]+\.hashtags\.\d+$/.test(e.path)) {
+			if (!/^#[\p{L}\p{N}_]+$/u.test(value)) {
+				notes.push(`${e.path}: "${value}" is not a hashtag (# then letters, digits or _); kept ${e.source}`);
+				continue;
+			}
+		}
+		const node = /^scenes\.(\d+)\.deterministic\.props\.nodes\.\d+$/.exec(e.path);
+		if (node) {
+			const m = nodeRenames.get(Number(node[1])) ?? /* @__PURE__ */ new Map();
+			m.set(e.source, value);
+			nodeRenames.set(Number(node[1]), m);
+		}
+		if (!setAt(spec, e.path, value)) {
+			notes.push(`${e.path}: not found in the spec; skipped`);
+			continue;
+		}
+		translated++;
+	}
+	for (const [kind, n] of untranslated) notes.push(`${n} ${kind} entr${n === 1 ? "y has" : "ies have"} no target and keep${n === 1 ? "s" : ""} the ${src.language} text`);
+	spec.scenes.forEach((s, i) => {
+		const d = s.deterministic;
+		if (!d) return;
+		const props = d.props;
+		const ren = nodeRenames.get(i);
+		if (d.kind === "diagram" && ren && Array.isArray(props.edges)) props.edges = props.edges.map((edge) => Array.isArray(edge) ? edge.map((n) => typeof n === "string" ? ren.get(n) ?? n : n) : edge);
+		if ((d.kind === "typography" || d.kind === "kinetic_text") && typeof props.emphasis === "string" && props.emphasis.trim()) {
+			const srcProps = src.scenes[i].deterministic.props;
+			const srcLines = d.kind === "typography" ? (srcProps.lines ?? []).map(String) : [String(srcProps.text ?? "")];
+			const lines = d.kind === "typography" ? (props.lines ?? []).map(String) : [String(props.text ?? "")];
+			if (!lines.some((l, k) => l !== srcLines[k])) return;
+			const srcEm = props.emphasis.trim();
+			const lineIndex = Math.max(0, srcLines.findIndex((l) => l.toLowerCase().includes(srcEm.toLowerCase())));
+			const r = deriveEmphasis({
+				lines,
+				marked: marks.get(String(i)) ?? [],
+				sourceEmphasis: srcEm,
+				lineIndex,
+				language
+			});
+			if (r.emphasis) {
+				if (r.emphasis !== srcEm) notes.push(`${s.id}: emphasis "${srcEm}" → "${r.emphasis}" (${r.how})`);
+				props.emphasis = r.emphasis;
+			} else {
+				delete props.emphasis;
+				notes.push(`${s.id}: emphasis "${srcEm}" ${r.how}`);
+			}
+		} else if ((d.kind === "typography" || d.kind === "kinetic_text") && marks.has(String(i))) props.emphasis = marks.get(String(i))[0];
+	});
+	retime(src, spec, language, notes);
+	const { spec: specPath, contentIr } = projectSpecPaths(out);
+	await mkdir(join(out, "project"), { recursive: true });
+	await writeFile(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+	const validation = await validateSpecFile(specPath, existsSync(contentIr) ? contentIr : null);
+	for (const w of validation.warnings) notes.push(`spec warning ${w.path}: ${w.message}`);
+	return {
+		language,
+		out_dir: out,
+		sheet_path: sheetPath,
+		entries: sheet.entries.length,
+		translated,
+		applied: true,
+		notes,
+		valid: validation.ok,
+		errors: validation.errors.map((e) => `${e.path}: ${e.message} (fix: ${e.fix})`)
+	};
+}
+/** Lead-in and tail around narration inside a scene. */
+const SPEECH_PAD_SEC = .4;
+/** Settle time before on-screen text is read. */
+const READ_SETTLE_SEC = .5;
+const DURATION_TOLERANCE = .1;
+/**
+* Lengthen scenes whose translated narration (or, without narration, on-screen text) needs more
+* time in `language`; scenes never shrink (their visuals were paced for the source). Keeps the
+* cover's focal frame at the same relative point of its scene. When the total leaves ±10% of
+* target_duration_sec, the target follows the new total (reported).
+*/
+function retime(src, spec, language, notes) {
+	const narrated = voiceMode(spec) === "narrated";
+	const rate = languageRate(language);
+	const changed = [];
+	spec.scenes.forEach((s) => {
+		let need = 0;
+		if (narrated && s.voiceover.trim()) need = estimateSpeechSec(s.voiceover, language) + SPEECH_PAD_SEC;
+		else if (!narrated && s.on_screen_text?.trim()) need = countUnits(s.on_screen_text, language) / rate.read_per_sec + READ_SETTLE_SEC;
+		need = Math.min(30, round1$1(need));
+		if (need > s.duration_sec + .05) {
+			changed.push(`${s.id} ${s.duration_sec}s → ${need}s`);
+			s.duration_sec = need;
+		}
+	});
+	if (changed.length) notes.push(`re-timed for ${language} ${narrated ? "speech" : "reading"} speed: ${changed.join(", ")}`);
+	if (spec.cover) {
+		let acc = 0;
+		let newAcc = 0;
+		for (const [i, s] of src.scenes.entries()) {
+			const d = s.duration_sec;
+			const nd = spec.scenes[i].duration_sec;
+			if (spec.cover.focal_time_sec < acc + d || i === src.scenes.length - 1) {
+				const f = Math.min(1, Math.max(0, (spec.cover.focal_time_sec - acc) / d));
+				const t = round1$1(newAcc + f * nd);
+				if (t !== spec.cover.focal_time_sec) notes.push(`cover.focal_time_sec ${spec.cover.focal_time_sec} → ${t} (same point of ${s.id})`);
+				spec.cover.focal_time_sec = t;
+				break;
+			}
+			acc += d;
+			newAcc += nd;
+		}
+	}
+	const total = round1$1(spec.scenes.reduce((a, s) => a + s.duration_sec, 0));
+	if (Math.abs(total - spec.target_duration_sec) > spec.target_duration_sec * DURATION_TOLERANCE) {
+		notes.push(`target_duration_sec ${spec.target_duration_sec}s → ${Math.round(total)}s: the ${language} version runs ${total}s, outside ±10%; shorten the longest translations to get closer to ${spec.target_duration_sec}s, and check the targets' duration limits`);
+		spec.target_duration_sec = Math.round(total);
+	} else if (changed.length) notes.push(`total ${total}s, within ±10% of the ${spec.target_duration_sec}s target`);
+}
+function formatLocalize(r) {
+	return [
+		r.applied ? `applied ${r.translated}/${r.entries} translation(s) into ${r.out_dir} (${r.language}); spec ${r.valid ? "valid" : `has ${r.errors?.length ?? 0} error(s)`}` : `wrote ${r.entries} string(s) to translate to ${r.sheet_path} (${r.language})${r.translated ? `; ${r.translated} already translated` : ""}`,
+		...(r.errors ?? []).map((e) => `- error ${e}`),
+		...r.notes.map((n) => `note: ${n}`)
+	].join("\n");
+}
 /**
 * A frame passes when its SSIM against the golden is at least this. Tolerant of encoder and
 * ffmpeg version noise (typically > 0.99) while catching layout, text and colour changes.
@@ -242915,7 +245867,7 @@ function formatGolden(r) {
 * unchanged render writes a byte-identical file.
 */
 const LOCK_FILE = "video.lock";
-const toPosix$2 = (p) => p.split(sep).join("/");
+const toPosix$1 = (p) => p.split(sep).join("/");
 const byKey = (key) => (a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0;
 const GENERIC_FAMILIES = /* @__PURE__ */ new Set([
 	"sans-serif",
@@ -242932,11 +245884,25 @@ const GENERIC_FAMILIES = /* @__PURE__ */ new Set([
 * the file. Bundled files are recorded as `fonts/<family dir>/<file>` (relative to the plugin
 * root); host files as `host/<basename>`, so the lock never holds a machine-specific path.
 * Requests that resolve to no file are skipped (the render reported that already).
+*
+* Script fonts: a chain that names a bundled script family (Noto Sans JP / Devanagari / Arabic,
+* added by `withLanguage` for a non-Latin spec language) also locks that family's file at the
+* request's weight, because the renderers and captions draw that script's text with it even
+* though the chain's first family resolves to a Latin font.
 */
 async function lockFonts(requests, opts) {
 	const resolve = opts.resolver ?? createFontResolver(opts.env ?? process.env, { fontsDir: opts.fontsDir });
 	const out = /* @__PURE__ */ new Map();
+	const scriptFamilies = new Set(BUNDLED_FONTS.filter((f) => f.script).map((f) => f.family.toLowerCase()));
+	const expanded = [];
 	for (const r of requests) {
+		expanded.push(r);
+		for (const name of parseFontChain(r.chain)) if (scriptFamilies.has(name.toLowerCase())) expanded.push({
+			chain: `"${name}"`,
+			weight: r.weight
+		});
+	}
+	for (const r of expanded) {
 		let file;
 		try {
 			file = await resolve(r.chain, r.weight);
@@ -242944,7 +245910,7 @@ async function lockFonts(requests, opts) {
 			continue;
 		}
 		const weight = r.weight >= 600 ? 700 : 400;
-		const inBundle = opts.fontsDir ? toPosix$2(relative(opts.fontsDir, file)) : "";
+		const inBundle = opts.fontsDir ? toPosix$1(relative(opts.fontsDir, file)) : "";
 		const bundled = inBundle && !inBundle.startsWith("..") && !isAbsolute(inBundle) ? BUNDLED_FONTS.find((f) => f.file === inBundle) : void 0;
 		const entry = {
 			family: bundled?.family ?? parseFontChain(r.chain).find((n) => !GENERIC_FAMILIES.has(n.toLowerCase())) ?? basename(file, extname(file)),
@@ -242960,7 +245926,7 @@ async function lockFonts(requests, opts) {
 async function lockAssets(root, relPaths) {
 	const out = /* @__PURE__ */ new Map();
 	for (const p of relPaths) try {
-		out.set(toPosix$2(p), await hashFile(join(root, p)));
+		out.set(toPosix$1(p), await hashFile(join(root, p)));
 	} catch {}
 	return [...out].map(([path, sha256]) => ({
 		path,
@@ -242985,7 +245951,7 @@ async function listFiles(root, dir, skip = []) {
 			else if (e.isFile()) out.push(child);
 		}
 	};
-	await walk(toPosix$2(dir));
+	await walk(toPosix$1(dir));
 	return out.sort();
 }
 /**
@@ -243490,6 +246456,13 @@ function formatDiff(r) {
 */
 /** Words per second above which captions get hard to read (design rule). */
 const MAX_WORDS_PER_SEC = 3.3;
+const MAX_WORDS_PER_SEC_BY_SCRIPT = Object.freeze({
+	devanagari: 3,
+	arabic: 2.8,
+	hebrew: 3,
+	hangul: 3,
+	other: 3
+});
 /** WCAG 2.x contrast minimums (AA): normal text and large text. */
 const CONTRAST_NORMAL = 4.5;
 /**
@@ -243737,9 +246710,47 @@ function checkContrast(boxes, H, out) {
 		});
 	}
 }
+/** The script a scene's text is read in: its dominant script, else the spec language's. */
+function readingScript(text, language) {
+	return scriptsIn(text).length ? dominantScript(text) : languageScript(language) ?? "latin";
+}
+/** CJK characters (ideographs, kana, full-width letters/digits) plus other letters and digits; punctuation and spaces do not count. */
+const cjkCharCount = (s) => Array.from(s).filter((ch) => /[\p{L}\p{N}]/u.test(ch)).length;
+/** Reading density for a non-Latin scene; returns true when handled (Latin scenes keep the word rule below). */
+function checkScriptDensity(s, text, script, onScreen, out) {
+	if (script === "latin") return false;
+	const cjk = script === "cjk";
+	const count = cjk ? cjkCharCount(text) : wordCount(text);
+	const unit = cjk ? "characters" : "words";
+	const limit = cjk ? onScreen ? 8 : 9 : (MAX_WORDS_PER_SEC_BY_SCRIPT[script] ?? 3.3) * (onScreen ? 3 / MAX_WORDS_PER_SEC : 1);
+	const lim = round2(limit);
+	if (onScreen) {
+		const readable = Math.max(0, s.duration_sec - 1) * limit;
+		if (count <= Math.max(cjk ? 8 : 3, readable)) return true;
+		out.push({
+			id: "reading_density",
+			severity: "warning",
+			scene_id: s.id,
+			message: `${count} on-screen ${unit} (${script}) in ${s.duration_sec}s; without narration viewers read at most about ${lim} ${unit}/s after a 1s settle (${Math.floor(readable)} ${unit})`,
+			fix: `cut scene ${s.id}'s on-screen text to at most ${Math.max(cjk ? 8 : 3, Math.floor(readable))} ${unit}, or raise duration_sec to at least ${Math.ceil((count / limit + 1) * 10) / 10}`
+		});
+		return true;
+	}
+	const rate = count / s.duration_sec;
+	if (rate <= limit) return true;
+	out.push({
+		id: "reading_density",
+		severity: "warning",
+		scene_id: s.id,
+		message: `${count} voiceover ${unit} (${script}) in ${s.duration_sec}s is ${round2(rate)} ${unit}/s; captions above ${lim} ${unit}/s are hard to read`,
+		fix: `cut scene ${s.id}'s voiceover to at most ${Math.floor(limit * s.duration_sec)} ${unit}, or raise duration_sec to at least ${Math.ceil(count / limit * 10) / 10}`
+	});
+	return true;
+}
 function checkDensity(spec, out) {
 	if (voiceMode(spec) === "none") return checkOnScreenDensity(spec, out);
 	for (const s of spec.scenes) {
+		if (checkScriptDensity(s, s.voiceover, readingScript(s.voiceover, spec.language), false, out)) continue;
 		const words = wordCount(s.voiceover);
 		const wps = words / s.duration_sec;
 		if (wps <= 3.3) continue;
@@ -243757,6 +246768,7 @@ function checkDensity(spec, out) {
 function checkOnScreenDensity(spec, out) {
 	for (const s of spec.scenes) {
 		const text = [s.on_screen_text ?? "", s.deterministic ? propsText(s.deterministic.props) : ""].join(" ");
+		if (checkScriptDensity(s, text, readingScript(text, spec.language), true, out)) continue;
 		const words = wordCount(text);
 		const readable = Math.max(0, s.duration_sec - 1) * 3;
 		if (words <= Math.max(3, readable)) continue;
@@ -243814,7 +246826,15 @@ function checkCover(spec, contracts, rendered, out) {
 		return;
 	}
 	const words = wordCount(spec.cover.headline);
-	if (words > 7 || spec.cover.headline.length > 40) out.push({
+	if (readingScript(spec.cover.headline, spec.language) === "cjk") {
+		const chars = cjkCharCount(spec.cover.headline);
+		if (chars > 16) out.push({
+			id: "cover_headline",
+			severity: "warning",
+			message: `cover headline "${snippet$1(spec.cover.headline)}" has ${chars} characters; CJK covers read best at ≤ 16 characters`,
+			fix: `shorten cover.headline to at most 16 characters`
+		});
+	} else if (words > 7 || spec.cover.headline.length > 40) out.push({
 		id: "cover_headline",
 		severity: "warning",
 		message: `cover headline "${snippet$1(spec.cover.headline)}" has ${words} words / ${spec.cover.headline.length} characters; covers read best at ≤ 7 words and ≤ 40 characters`,
@@ -244410,1001 +247430,188 @@ async function renderStoryboard(projectDir) {
 	};
 }
 //#endregion
-//#region ../voice/dist/exec.js
-const defaultRunner = (cmd, args, opts = {}) => new Promise((resolve, reject) => {
-	const child = spawn(cmd, args, {
-		stdio: [
-			"ignore",
-			"pipe",
-			"pipe"
-		],
-		signal: opts.signal,
-		env: opts.env ? {
-			...process.env,
-			...opts.env
-		} : process.env
-	});
-	const out = [];
-	const err = [];
-	child.stdout.on("data", (b) => out.push(b));
-	child.stderr.on("data", (b) => err.push(b));
-	child.on("error", reject);
-	child.on("close", (code) => resolve({
-		code: code ?? -1,
-		stdout: Buffer.concat(out).toString("utf8"),
-		stderr: Buffer.concat(err).toString("utf8")
-	}));
-});
-function isExecutable(path) {
-	try {
-		accessSync(path, constants.X_OK);
-		return true;
-	} catch {
-		return false;
-	}
-}
-/** Find an executable on PATH. */
-function which(name, env = process.env) {
-	const dirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
-	for (const dir of dirs) {
-		const p = join(dir, name);
-		if (isExecutable(p)) return p;
-	}
-}
+//#region src/c2pa.ts
 /**
-* Resolve ffmpeg/ffprobe: FFMPEG_PATH / FFPROBE_PATH first, then PATH.
-* TODO: swap for @video-studio/media's resolver once it lands.
-*/
-function resolveFfTool(name, env = process.env) {
-	const override = env[name === "ffmpeg" ? "FFMPEG_PATH" : "FFPROBE_PATH"];
-	if (override && override.trim()) return isExecutable(override) ? override : void 0;
-	return which(name, env);
-}
-const defaultResolver = (name, env) => {
-	if (name === "ffmpeg" || name === "ffprobe") return resolveFfTool(name, env);
-	const found = which(name, env);
-	if (found) return found;
-	if (name === "say" && isExecutable("/usr/bin/say")) return "/usr/bin/say";
-};
-async function runChecked(runner, cmd, args, what, opts) {
-	const res = await runner(cmd, args, opts);
-	if (res.code !== 0) {
-		const tail = res.stderr.trim().split("\n").slice(-3).join(" | ");
-		throw new Error(`${what} failed (exit ${res.code})${tail ? `: ${tail}` : ""}`);
-	}
-	return res;
-}
-//#endregion
-//#region ../voice/dist/ffmpeg.js
-/**
-* Minimal local ffmpeg/ffprobe helpers for the voice package.
-* TODO: replace with @video-studio/media once its resolver/helpers land.
-*/
-/** Convert any input audio to 48 kHz mono 16-bit PCM WAV. */
-async function toWav48kMono(tools, input, output, opts) {
-	await runChecked(tools.runner, tools.ffmpeg, [
-		"-hide_banner",
-		"-loglevel",
-		"error",
-		"-y",
-		"-i",
-		input,
-		"-ar",
-		"48000",
-		"-ac",
-		"1",
-		"-c:a",
-		"pcm_s16le",
-		output
-	], "ffmpeg (convert to wav)", opts);
-}
-/** Concatenate audio files into one 48 kHz mono WAV. */
-async function concatToWav(tools, inputs, output, opts) {
-	if (inputs.length === 1) return toWav48kMono(tools, inputs[0], output, opts);
-	const args = [
-		"-hide_banner",
-		"-loglevel",
-		"error",
-		"-y"
-	];
-	for (const i of inputs) args.push("-i", i);
-	const labels = inputs.map((_, i) => `[${i}:a]`).join("");
-	args.push("-filter_complex", `${labels}concat=n=${inputs.length}:v=0:a=1[a]`, "-map", "[a]", "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", output);
-	await runChecked(tools.runner, tools.ffmpeg, args, "ffmpeg (concat)", opts);
-}
-/** Container duration in integer milliseconds. */
-async function probeDurationMs(tools, file, opts) {
-	const res = await runChecked(tools.runner, tools.ffprobe, [
-		"-v",
-		"error",
-		"-show_entries",
-		"format=duration",
-		"-of",
-		"default=noprint_wrappers=1:nokey=1",
-		file
-	], "ffprobe (duration)", opts);
-	const sec = Number.parseFloat(res.stdout.trim());
-	if (!Number.isFinite(sec) || sec < 0) throw new Error(`ffprobe returned no duration for ${file}`);
-	return Math.round(sec * 1e3);
-}
-/**
-* Parse ffmpeg `silencedetect` stderr into leading/trailing silence.
-* Leading: a silence starting at ~0. Trailing: a silence ending at ~EOF (ffmpeg closes open
-* silences at EOF). Returns zeros when the result would swallow most of the audio.
-*/
-function parseEdgeSilence(stderr, durationMs) {
-	const spans = [];
-	for (const line of stderr.split("\n")) {
-		const s = /silence_start:\s*(-?[\d.]+)/.exec(line);
-		if (s) spans.push({ start: Math.max(0, Number.parseFloat(s[1]) * 1e3) });
-		const e = /silence_end:\s*([\d.]+)/.exec(line);
-		if (e && spans.length) spans[spans.length - 1].end = Number.parseFloat(e[1]) * 1e3;
-	}
-	let leadMs = 0;
-	let trailMs = 0;
-	const first = spans[0];
-	const leading = first && first.start <= 10 && first.end !== void 0 ? first : void 0;
-	if (leading) leadMs = leading.end;
-	const last = spans[spans.length - 1];
-	if (last && last !== leading && (last.end === void 0 || last.end >= durationMs - 50)) trailMs = durationMs - last.start;
-	leadMs = Math.max(0, Math.round(leadMs));
-	trailMs = Math.max(0, Math.round(trailMs));
-	if (leadMs + trailMs > durationMs * .8) return {
-		leadMs: 0,
-		trailMs: 0
-	};
-	return {
-		leadMs,
-		trailMs
-	};
-}
-/** Detect leading/trailing silence with ffmpeg `silencedetect`; zeros on any failure. */
-async function detectEdgeSilence(tools, file, durationMs, opts) {
-	try {
-		const res = await tools.runner(tools.ffmpeg, [
-			"-hide_banner",
-			"-nostats",
-			"-i",
-			file,
-			"-af",
-			"silencedetect=noise=-45dB:d=0.08",
-			"-f",
-			"null",
-			"-"
-		], opts);
-		if (res.code !== 0) return {
-			leadMs: 0,
-			trailMs: 0
-		};
-		return parseEdgeSilence(res.stderr, durationMs);
-	} catch {
-		return {
-			leadMs: 0,
-			trailMs: 0
-		};
-	}
-}
-//#endregion
-//#region ../voice/dist/estimate.js
-const WORDLIKE$1 = /[\p{L}\p{N}]/u;
-/**
-* Split text into caption/speech words on whitespace. Punctuation-only tokens ("—", "-", "…")
-* are attached to the preceding word (or the following one when there is none).
-*/
-function tokenize(text) {
-	const out = [];
-	let pending = "";
-	for (const t of text.split(/\s+/)) {
-		if (!t) continue;
-		if (!WORDLIKE$1.test(t)) {
-			if (out.length) out[out.length - 1] += t;
-			else pending += t;
-			continue;
-		}
-		out.push(pending + t);
-		pending = "";
-	}
-	return out;
-}
-const VOWEL_GROUP = /[aeiouyàáâãäåæèéêëìíîïòóôõöøùúûüýÿœ]+/g;
-/**
-* Rough syllable count (vowel-group heuristic), minimum 1:
-* - vowel groups, minus a silent trailing "e" (but not "-le");
-* - short all-caps tokens (acronyms like "API", "CI/CD") count one per letter (spelled out);
-* - words with no Latin vowels (e.g. CJK, "HTTP") count one per letter;
-* - each digit adds one.
-*/
-function estimateSyllables(word) {
-	const digits = (word.match(/\p{N}/gu) ?? []).length;
-	const lettersRaw = word.replace(/[^\p{L}]/gu, "");
-	let n = 0;
-	if (lettersRaw) {
-		const isAcronym = lettersRaw.length >= 2 && lettersRaw.length <= 5 && lettersRaw === lettersRaw.toUpperCase() && lettersRaw !== lettersRaw.toLowerCase();
-		const letters = lettersRaw.toLowerCase();
-		if (isAcronym) n = letters.length;
-		else {
-			n = (letters.match(VOWEL_GROUP) ?? []).length;
-			if (n > 1 && /[^aeiouy]e$/.test(letters) && !/[^aeiouy]le$/.test(letters)) n--;
-			if (n === 0) n = letters.length;
-		}
-	}
-	return Math.max(1, n + digits);
-}
-const TRAIL_CLOSERS = `["')\\]}»”’]*$`;
-const SENTENCE_END = new RegExp(`[.!?…]${TRAIL_CLOSERS}`, "u");
-const CLAUSE_END = new RegExp(`[,;:—–-]${TRAIL_CLOSERS}`, "u");
-/** Extra pause weight after a word: sentence end 1.2, clause punctuation 0.6, else 0. */
-function pauseWeight(word) {
-	if (SENTENCE_END.test(word)) return 1.2;
-	if (CLAUSE_END.test(word)) return .6;
-	return 0;
-}
-/**
-* Distribute `durationMs` (minus edge silence) across `words`, weighted by estimated syllables,
-* with pauses after punctuation (not after the last word). Timings are integer ms, monotonic
-* and non-overlapping; the first word starts at `leadMs`, the last ends at `durationMs - trailMs`.
-*/
-function estimateWordTimings(words, durationMs, opts = {}) {
-	if (words.length === 0) return [];
-	const total = Math.max(0, Math.round(durationMs));
-	let lead = Math.max(0, Math.round(opts.leadMs ?? 0));
-	let trail = Math.max(0, Math.round(opts.trailMs ?? 0));
-	if (lead + trail >= total) {
-		lead = 0;
-		trail = 0;
-	}
-	const spanStart = lead;
-	const spanEnd = total - trail;
-	const weights = words.map((w) => opts.even ? 1 : estimateSyllables(w));
-	const pauses = words.map((w, i) => opts.even || i === words.length - 1 ? 0 : pauseWeight(w));
-	const units = weights.reduce((a, b) => a + b, 0) + pauses.reduce((a, b) => a + b, 0);
-	const perUnit = (spanEnd - spanStart) / units;
-	const out = [];
-	let cursor = 0;
-	let prevEnd = spanStart;
-	words.forEach((word, i) => {
-		const startF = spanStart + cursor * perUnit;
-		cursor += weights[i];
-		const endF = i === words.length - 1 ? spanEnd : spanStart + cursor * perUnit;
-		cursor += pauses[i];
-		const start = Math.max(prevEnd, Math.round(startF));
-		const end = Math.max(start, Math.round(endF));
-		out.push({
-			word,
-			start_ms: start,
-			end_ms: end
-		});
-		prevEnd = end;
-	});
-	return out;
-}
-//#endregion
-//#region ../voice/dist/text.js
-const LEADING_PUNCT = /^["'(\[{«“‘¿¡]+/u;
-const TRAILING_PUNCT = /["')\]}»”’.,;:!?…]+$/u;
-function core(token) {
-	return token.replace(LEADING_PUNCT, "").replace(TRAILING_PUNCT, "");
-}
-function rulesFrom(terms) {
-	return Object.entries(terms).map(([from, to]) => ({
-		from: tokenize(from).map(core),
-		to: tokenize(to)
-	})).filter((r) => r.from.length > 0 && r.from.every(Boolean)).sort((a, b) => b.from.length - a.from.length || b.from.join(" ").length - a.from.join(" ").length);
-}
-/**
-* Apply brand pronunciation/terminology overrides (`brand.language.terminology`, e.g.
-* {"CI/CD": "C I C D"}) to produce the speech text, while keeping the original words for captions.
+* C2PA content credentials for exported videos (Phase 8, opt-in: `export {sign: true}`).
 *
-* Matching is token-based and case-sensitive on the token with surrounding punctuation stripped, so
-* "CI/CD," matches "CI/CD" and the trailing comma is carried onto the last speech token (preserving
-* the pause). Longer terms win. Terms embedded inside a larger token (e.g. "CI/CD-based") are not
-* replaced.
-*/
-function prepareSpeechText(voiceover, brand, extra) {
-	const captionWords = tokenize(voiceover);
-	const rules = rulesFrom({
-		...brand?.language?.terminology ?? {},
-		...extra ?? {}
-	});
-	const speechWords = [];
-	const spans = [];
-	let i = 0;
-	while (i < captionWords.length) {
-		const rule = rules.find((r) => r.from.every((f, k) => i + k < captionWords.length && core(captionWords[i + k]) === f));
-		if (rule) {
-			const n = rule.from.length;
-			const first = captionWords[i];
-			const last = captionWords[i + n - 1];
-			const lead = LEADING_PUNCT.exec(first)?.[0] ?? "";
-			const trail = TRAILING_PUNCT.exec(last)?.[0] ?? "";
-			const to = [...rule.to];
-			if (to.length) {
-				to[0] = lead + to[0];
-				to[to.length - 1] = to[to.length - 1] + trail;
-			}
-			spans.push({
-				captionStart: i,
-				captionEnd: i + n,
-				speechStart: speechWords.length,
-				speechEnd: speechWords.length + to.length
-			});
-			speechWords.push(...to);
-			i += n;
-		} else {
-			spans.push({
-				captionStart: i,
-				captionEnd: i + 1,
-				speechStart: speechWords.length,
-				speechEnd: speechWords.length + 1
-			});
-			speechWords.push(captionWords[i]);
-			i += 1;
-		}
-	}
-	return {
-		speech: speechWords.join(" "),
-		speechWords,
-		captionWords,
-		spans
-	};
-}
-/** Split [start, end] across words weighted by syllables; monotonic integer ms. */
-function spread(words, start, end) {
-	const weights = words.map(estimateSyllables);
-	const total = weights.reduce((a, b) => a + b, 0);
-	const out = [];
-	let acc = 0;
-	let prev = start;
-	words.forEach((word, k) => {
-		const s = prev;
-		acc += weights[k];
-		const e = k === words.length - 1 ? end : Math.max(s, Math.round(start + (end - start) * acc / total));
-		out.push({
-			word,
-			start_ms: s,
-			end_ms: e
-		});
-		prev = e;
-	});
-	return out;
-}
-/**
-* Map timings of speech tokens back onto the original caption words.
+* Signing uses the local `c2patool` (never bundled, never installed by the plugin). Without a
+* signer configured in c2patool's settings (`C2PATOOL_SETTINGS` or `~/.config/c2pa/c2pa.toml`)
+* c2patool signs with its built-in test certificate ("C2PA Test Signing Cert"): the manifest is
+* well-formed and its hashes validate, but validators report `signingCredential.untrusted`.
+* The record says which one was used (`certificate: "test" | "user"`).
 *
-* - 1:1 spans copy the timing (with the caption spelling).
-* - A replaced span (e.g. "CI/CD" → "C I C D") takes the time range from its first to its last
-*   speech token and spreads it across its caption words by syllable weight.
-* - A span whose replacement is empty gets zero-width timings at the previous word's end.
-* - Fallback when `timings` does not have one entry per speech token (e.g. a provider normalized
-*   the text differently): the whole range [first start, last end] is spread across all caption
-*   words by syllable weight.
+* The manifest holds:
+* - `c2pa.actions`: one `c2pa.created` action with softwareAgent video-studio/<engine version>
+*   and an IPTC `digitalSourceType` (see {@link classifySource});
+* - `stds.schema-org.CreativeWork` with the video's title.
+* c2patool adds the hard binding (`c2pa.hash.bmff`) and records the unsigned file as parent
+* ingredient.
 */
-function mapTimingsToCaptions(prepared, timings) {
-	const { captionWords, spans, speechWords } = prepared;
-	if (captionWords.length === 0) return [];
-	if (timings.length === 0) return spread(captionWords, 0, 0);
-	if (timings.length !== speechWords.length) return spread(captionWords, timings[0].start_ms, timings[timings.length - 1].end_ms);
-	const out = [];
-	let prevEnd = timings[0].start_ms;
-	for (const span of spans) {
-		const words = captionWords.slice(span.captionStart, span.captionEnd);
-		if (span.speechEnd === span.speechStart) {
-			for (const word of words) out.push({
-				word,
-				start_ms: prevEnd,
-				end_ms: prevEnd
-			});
-			continue;
-		}
-		const first = timings[span.speechStart];
-		const last = timings[span.speechEnd - 1];
-		if (words.length === span.speechEnd - span.speechStart) words.forEach((word, k) => {
-			const t = timings[span.speechStart + k];
-			out.push({
-				word,
-				start_ms: t.start_ms,
-				end_ms: t.end_ms
-			});
-		});
-		else out.push(...spread(words, first.start_ms, last.end_ms));
-		prevEnd = last.end_ms;
-	}
-	return out;
-}
-//#endregion
-//#region ../voice/dist/silent.js
-/** Silent track: no audio, words timed evenly across the scene duration. */
-function silentTrack(input) {
-	const duration_ms = Math.max(0, Math.round(input.duration_ms ?? 0));
-	return {
-		scene_id: input.scene_id,
-		duration_ms,
-		words: estimateWordTimings(tokenize(input.text), duration_ms, { even: true }),
-		timing_source: "none",
-		provider: "silent"
-	};
-}
-function createSilentBackend() {
-	return {
-		id: "silent",
-		available: () => ({
-			ok: true,
-			reason: "always available (no audio)"
-		}),
-		synthesize: async (input) => silentTrack(input)
-	};
-}
-const DEFAULT_SAY_VOICE = "Samantha";
-/** Audio shorter than this from a non-empty script is treated as a failed synthesis. */
-const MIN_AUDIO_MS = 50;
+const IPTC_DST = "http://cv.iptc.org/newscodes/digitalsourcetype/";
+const DST_TRAINED = `${IPTC_DST}trainedAlgorithmicMedia`;
+const DST_COMPOSITE_TRAINED = `${IPTC_DST}compositeWithTrainedAlgorithmicMedia`;
+const DST_DIGITAL_CREATION = `${IPTC_DST}digitalCreation`;
+const C2PA_ASSERTIONS = ["c2pa.actions", "stds.schema-org.CreativeWork"];
+/** Scene renderers that draw locally and deterministically (no trained model). */
+const LOCAL_RENDERER_PREFIXES = [
+	"hyperframes",
+	"ffmpeg",
+	"remotion"
+];
+/** Voice backends that produce no synthetic speech. */
+const NO_SYNTHETIC_VOICE = /* @__PURE__ */ new Set([
+	"silent",
+	"native",
+	"none"
+]);
 /**
-* Parse `say -v '?'` output. Lines look like
-* `Samantha            en_US    # Hello! My name is Samantha.` and names may contain spaces and
-* parentheses, e.g. `Eddy (English (US)) en_US    # Hello!`.
+* Pick the IPTC digital source type, conservatively (when in doubt, disclose):
+* - every scene generated by a model (a non-local renderer) and no local graphics:
+*   `trainedAlgorithmicMedia`;
+* - any model-made part (generated scenes, or any synthesized voice, including the system TTS,
+*   because current system voices are neural models): `compositeWithTrainedAlgorithmicMedia`;
+* - only local motion graphics, footage the user supplied, and no synthetic voice:
+*   `digitalCreation`.
+* `ai_generated` is true for the first two.
 */
-function parseSayVoices(output) {
-	const voices = [];
-	for (const line of output.split("\n")) {
-		const m = /^(.+?)\s+([a-z]{2,3}(?:[_-][A-Za-z0-9]+)+)\s+#\s?(.*)$/.exec(line.trimEnd());
-		if (m) voices.push({
-			name: m[1].trim(),
-			locale: m[2],
-			sample: m[3]
-		});
-	}
-	return voices;
-}
-/**
-* Local OS text-to-speech: macOS `say`, or `espeak-ng` on Linux. Audio is converted to 48 kHz mono
-* WAV with ffmpeg; word timings are ESTIMATED (syllable-weighted over the measured duration).
-*/
-function createSystemBackend(options = {}) {
-	const runner = options.runner ?? defaultRunner;
-	const resolver = options.resolver ?? defaultResolver;
-	const platform = options.platform ?? process.platform;
-	const rate = Math.round(options.rate ?? 180);
-	const trimSilence = options.trimSilence ?? true;
-	let voiceCache;
-	const engine = (env) => {
-		if (platform === "darwin") return resolver("say", env) ? "say" : void 0;
-		if (platform === "linux") return resolver("espeak-ng", env) ? "espeak-ng" : void 0;
+function classifySource(f) {
+	const reasons = [];
+	const generated = f.scenes.filter((s) => !s.placeholder && !LOCAL_RENDERER_PREFIXES.some((p) => s.renderer.startsWith(p)));
+	const syntheticVoice = f.voice_has_audio && !NO_SYNTHETIC_VOICE.has(f.voice_backend);
+	if (generated.length) reasons.push(`${generated.length} scene(s) generated by ${[...new Set(generated.map((s) => s.renderer))].join(", ")}`);
+	if (syntheticVoice) reasons.push(`synthetic voice (${f.voice_backend} text-to-speech)`);
+	if (generated.length && generated.length === f.scenes.length && (syntheticVoice || !f.voice_has_audio)) return {
+		digital_source_type: DST_TRAINED,
+		ai_generated: true,
+		reasons
 	};
-	const listVoices = (env) => {
-		if (engine(env) !== "say") return Promise.resolve([]);
-		voiceCache ??= runner(resolver("say", env), ["-v", "?"]).then((r) => r.code === 0 ? parseSayVoices(r.stdout) : []).catch(() => []);
-		return voiceCache;
-	};
-	const resolveVoice = async (requested, env) => {
-		const eng = engine(env);
-		if (eng === "espeak-ng") return requested ?? options.voice;
-		if (eng !== "say") return void 0;
-		const voices = await listVoices(env);
-		const has = (n) => voices.some((v) => v.name === n);
-		for (const candidate of [
-			requested,
-			options.voice,
-			DEFAULT_SAY_VOICE
-		]) if (candidate && has(candidate)) return candidate;
-	};
-	const available = (env) => {
-		const eng = engine(env);
-		if (!eng) return {
-			ok: false,
-			reason: platform === "darwin" ? "macOS `say` not found" : platform === "linux" ? "`espeak-ng` not found on PATH" : `no system TTS supported on ${platform}`
-		};
-		if (!resolver("ffmpeg", env) || !resolver("ffprobe", env)) return {
-			ok: false,
-			reason: `${eng} found but ffmpeg/ffprobe missing (set FFMPEG_PATH/FFPROBE_PATH or install ffmpeg)`
-		};
+	if (generated.length || syntheticVoice) {
+		reasons.push("composited with local motion graphics");
 		return {
-			ok: true,
-			reason: `${eng} with ffmpeg`
+			digital_source_type: DST_COMPOSITE_TRAINED,
+			ai_generated: true,
+			reasons
 		};
-	};
-	const synthesize = async (input, ctx) => {
-		const eng = engine(ctx.env);
-		const ffmpeg = resolver("ffmpeg", ctx.env);
-		const ffprobe = resolver("ffprobe", ctx.env);
-		if (!eng || !ffmpeg || !ffprobe) throw new Error(`system voice backend unavailable: ${available(ctx.env).reason}`);
-		const tools = {
-			ffmpeg,
-			ffprobe,
-			runner
-		};
-		const run = { signal: ctx.signal };
-		const voice = await resolveVoice(input.voice, ctx.env);
-		const words = tokenize(input.text);
-		await ensureDir(ctx.outDir);
-		const outFile = join(ctx.outDir, `${input.scene_id}.wav`);
-		const work = await mkdtemp(join(tmpdir(), "vs-voice-"));
-		try {
-			const textFile = join(work, "text.txt");
-			await writeFile(textFile, input.text, "utf8");
-			if (eng === "say") {
-				const raw = join(work, "say.aiff");
-				const args = [
-					...voice ? ["-v", voice] : [],
-					"-r",
-					String(rate),
-					"-o",
-					raw,
-					"-f",
-					textFile
-				];
-				await runChecked(runner, resolver("say", ctx.env), args, "say", run);
-				await toWav48kMono(tools, raw, outFile, run);
-			} else {
-				const raw = join(work, "espeak.wav");
-				const args = [
-					...voice ? ["-v", voice] : [],
-					"-s",
-					String(rate),
-					"-w",
-					raw,
-					"-f",
-					textFile
-				];
-				await runChecked(runner, resolver("espeak-ng", ctx.env), args, "espeak-ng", run);
-				await toWav48kMono(tools, raw, outFile, run);
-			}
-			const duration_ms = await probeDurationMs(tools, outFile, run);
-			if (words.length > 0 && duration_ms < MIN_AUDIO_MS) throw new Error(`${eng} produced no audio for scene ${input.scene_id} (${duration_ms} ms); it may be blocked by a sandbox`);
-			const edges = trimSilence ? await detectEdgeSilence(tools, outFile, duration_ms, run) : {
-				leadMs: 0,
-				trailMs: 0
-			};
-			return {
-				scene_id: input.scene_id,
-				audio_path: outFile,
-				duration_ms,
-				words: estimateWordTimings(words, duration_ms, edges),
-				timing_source: "estimated",
-				...voice ? { voice } : {},
-				provider: eng === "say" ? "system-say" : "system-espeak-ng"
-			};
-		} finally {
-			await rm(work, {
-				recursive: true,
-				force: true
-			});
-		}
-	};
+	}
+	reasons.push("local motion graphics and user-supplied media only; no synthetic voice");
 	return {
-		id: "system",
-		available,
-		synthesize,
-		resolveVoice,
-		cacheOptions: () => ({
-			rate,
-			platform,
-			trimSilence
-		}),
-		engine,
-		listVoices
+		digital_source_type: DST_DIGITAL_CREATION,
+		ai_generated: false,
+		reasons
 	};
 }
-/** Per-request character budget; well under every current model's limit (5k for eleven_v3). */
-const DEFAULT_CHUNK_CHARS = 2500;
-const WORDLIKE = /[\p{L}\p{N}]/u;
-/**
-* Group ElevenLabs character-level alignment into words.
-* - Whitespace separates words (runs of spaces are fine).
-* - A punctuation-only group ("—", "!") is attached to the preceding word, keeping that word's end
-*   time; with no preceding word it is prefixed to the next one.
-* - A word's start is its first character's start; its end is the end of its last letter/digit
-*   (trailing punctuation carries no speech time).
-* - Times are integer ms offset by `offsetMs`, forced monotonic and non-overlapping.
-*/
-function alignmentToWords(alignment, offsetMs = 0) {
-	const { characters: chars, character_start_times_seconds: starts, character_end_times_seconds: ends } = alignment;
-	const out = [];
-	let pendingPrefix = "";
-	let text = "";
-	let start = -1;
-	let end = -1;
-	let lastSpokenEnd = -1;
-	const flush = () => {
-		if (!text) return;
-		if (!WORDLIKE.test(text)) {
-			if (out.length) out[out.length - 1].word += text;
-			else pendingPrefix += text;
-		} else {
-			const s = Math.round(start * 1e3) + offsetMs;
-			const e = Math.round((lastSpokenEnd >= 0 ? lastSpokenEnd : end) * 1e3) + offsetMs;
-			out.push({
-				word: pendingPrefix + text,
-				start_ms: s,
-				end_ms: e
-			});
-			pendingPrefix = "";
-		}
-		text = "";
-		start = -1;
-		end = -1;
-		lastSpokenEnd = -1;
-	};
-	for (let i = 0; i < chars.length; i++) {
-		const c = chars[i] ?? "";
-		if (/^\s*$/u.test(c)) {
-			flush();
-			continue;
-		}
-		if (start < 0) start = starts[i] ?? 0;
-		end = ends[i] ?? end;
-		if (WORDLIKE.test(c)) lastSpokenEnd = ends[i] ?? lastSpokenEnd;
-		text += c;
-	}
-	flush();
-	let prev = 0;
-	for (const w of out) {
-		w.start_ms = Math.max(prev, w.start_ms);
-		w.end_ms = Math.max(w.start_ms, w.end_ms);
-		prev = w.end_ms;
-	}
-	return out;
-}
-/** Split text into chunks of at most `max` chars, preferring sentence, then word boundaries. */
-function chunkText(text, max = DEFAULT_CHUNK_CHARS) {
-	const clean = text.trim();
-	if (clean.length <= max) return clean ? [clean] : [];
-	const sentences = clean.match(/[^.!?…]+(?:[.!?…]+["')\]]*|$)\s*/gu) ?? [clean];
-	const chunks = [];
-	let cur = "";
-	const push = () => {
-		if (cur.trim()) chunks.push(cur.trim());
-		cur = "";
-	};
-	for (const s of sentences) {
-		if ((cur + s).length <= max) {
-			cur += s;
-			continue;
-		}
-		push();
-		if (s.length <= max) {
-			cur = s;
-			continue;
-		}
-		for (const w of s.split(/(\s+)/)) {
-			if ((cur + w).length > max) push();
-			cur += w;
-		}
-	}
-	push();
-	return chunks;
-}
-var ElevenLabsError = class extends Error {
-	status;
-	constructor(message, status) {
-		super(message);
-		this.status = status;
-		this.name = "ElevenLabsError";
-	}
-};
-function apiKey(env) {
-	const k = env.ELEVENLABS_API_KEY;
-	return k && k.trim() ? k.trim() : void 0;
-}
-/**
-* ElevenLabs `with-timestamps` TTS over plain fetch. Enabled only when ELEVENLABS_API_KEY is set.
-* Long scripts are chunked; each chunk passes up to 3 `previous_request_ids` for prosody continuity
-* (also across scenes within one backend instance) and its word times are offset by the cumulative
-* measured audio duration. The key is only ever sent in the `xi-api-key` header, never logged.
-*/
-function createElevenLabsBackend(options = {}) {
-	const doFetch = options.fetch ?? globalThis.fetch;
-	const runner = options.runner ?? defaultRunner;
-	const resolver = options.resolver ?? defaultResolver;
-	const modelId = options.modelId ?? "eleven_multilingual_v2";
-	const outputFormat = options.outputFormat ?? "mp3_44100_128";
-	const baseUrl = (options.baseUrl ?? "https://api.elevenlabs.io").replace(/\/+$/, "");
-	const recentRequestIds = [];
-	const available = (env) => {
-		if (!apiKey(env)) return {
-			ok: false,
-			reason: "ELEVENLABS_API_KEY not set"
-		};
-		if (!resolver("ffmpeg", env) || !resolver("ffprobe", env)) return {
-			ok: false,
-			reason: "ELEVENLABS_API_KEY set but ffmpeg/ffprobe missing"
-		};
-		return {
-			ok: true,
-			reason: "ELEVENLABS_API_KEY set"
-		};
-	};
-	const resolveVoice = async (requested, env) => requested ?? (env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM");
-	const request = async (voiceId, text, key, signal) => {
-		const body = {
-			text,
-			model_id: modelId
-		};
-		if (recentRequestIds.length) body.previous_request_ids = recentRequestIds.slice(-3);
-		if (options.seed !== void 0) body.seed = options.seed;
-		if (options.pronunciationDictionaryLocators?.length) body.pronunciation_dictionary_locators = options.pronunciationDictionaryLocators;
-		const url = `${baseUrl}/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=${encodeURIComponent(outputFormat)}`;
-		const res = await doFetch(url, {
-			method: "POST",
-			headers: {
-				"xi-api-key": key,
-				"content-type": "application/json",
-				accept: "application/json"
-			},
-			body: JSON.stringify(body),
-			...signal ? { signal } : {}
-		});
-		if (!res.ok) {
-			const detail = (await res.text().catch(() => "")).slice(0, 300).replaceAll(key, "***");
-			throw new ElevenLabsError(`ElevenLabs TTS failed: HTTP ${res.status}${detail ? ` ${detail}` : ""}`, res.status);
-		}
-		const json = await res.json();
-		if (!json || typeof json.audio_base64 !== "string" || !json.audio_base64) throw new ElevenLabsError("ElevenLabs response missing audio_base64");
-		const requestId = res.headers.get("request-id");
-		if (requestId) {
-			recentRequestIds.push(requestId);
-			if (recentRequestIds.length > 3) recentRequestIds.shift();
-		}
-		return json;
-	};
-	const synthesize = async (input, ctx) => {
-		const key = apiKey(ctx.env);
-		if (!key) throw new ElevenLabsError("ELEVENLABS_API_KEY not set");
-		const ffmpeg = resolver("ffmpeg", ctx.env);
-		const ffprobe = resolver("ffprobe", ctx.env);
-		if (!ffmpeg || !ffprobe) throw new ElevenLabsError("ffmpeg/ffprobe missing");
-		const tools = {
-			ffmpeg,
-			ffprobe,
-			runner
-		};
-		const run = { signal: ctx.signal };
-		const voice = await resolveVoice(input.voice, ctx.env);
-		const chunks = chunkText(input.text, options.chunkChars ?? 2500);
-		await ensureDir(ctx.outDir);
-		const outFile = join(ctx.outDir, `${input.scene_id}.wav`);
-		const work = await mkdtemp(join(tmpdir(), "vs-11l-"));
-		try {
-			const parts = [];
-			const words = [];
-			let offset = 0;
-			for (const [i, chunk] of chunks.entries()) {
-				const json = await request(voice, chunk, key, ctx.signal);
-				const part = join(work, `part-${i}.${outputFormat.split("_")[0] ?? "mp3"}`);
-				await writeFile(part, Buffer.from(json.audio_base64, "base64"));
-				parts.push(part);
-				const alignment = json.alignment ?? json.normalized_alignment;
-				if (alignment) words.push(...alignmentToWords(alignment, offset));
-				offset += await probeDurationMs(tools, part, run);
-			}
-			if (parts.length === 0) throw new ElevenLabsError(`scene ${input.scene_id} has no text`);
-			await concatToWav(tools, parts, outFile, run);
-			const duration_ms = await probeDurationMs(tools, outFile, run);
-			let prev = 0;
-			for (const w of words) {
-				w.start_ms = Math.min(Math.max(prev, w.start_ms), duration_ms);
-				w.end_ms = Math.min(Math.max(w.start_ms, w.end_ms), duration_ms);
-				prev = w.end_ms;
-			}
-			return {
-				scene_id: input.scene_id,
-				audio_path: outFile,
-				duration_ms,
-				words,
-				timing_source: "provider",
-				voice,
-				provider: "elevenlabs"
-			};
-		} finally {
-			await rm(work, {
-				recursive: true,
-				force: true
-			});
-		}
-	};
+/** The manifest definition passed to c2patool (`-c`). */
+function c2paManifestDefinition(i) {
 	return {
-		id: "elevenlabs",
-		available,
-		synthesize,
-		resolveVoice,
-		cacheOptions: () => ({
-			modelId,
-			outputFormat,
-			seed: options.seed ?? null,
-			dictionaries: options.pronunciationDictionaryLocators ?? null
-		})
-	};
-}
-var VoiceBackendUnavailableError = class extends Error {
-	backendId;
-	constructor(backendId, reason) {
-		super(`voice backend "${backendId}" is unavailable: ${reason}`);
-		this.backendId = backendId;
-		this.name = "VoiceBackendUnavailableError";
-	}
-};
-function defaultBackends() {
-	return {
-		system: createSystemBackend(),
-		elevenlabs: createElevenLabsBackend(),
-		silent: createSilentBackend()
-	};
-}
-/**
-* auto: elevenlabs if its key is set, else system TTS if available, else silent.
-* An explicit choice that is unavailable throws VoiceBackendUnavailableError.
-*/
-async function selectBackend(choice, env, backends = defaultBackends()) {
-	if (choice !== "auto") {
-		const backend = backends[choice];
-		const a = await backend.available(env);
-		if (!a.ok) throw new VoiceBackendUnavailableError(choice, a.reason ?? "unavailable");
-		return {
-			backend,
-			reason: `requested "${choice}"${a.reason ? ` (${a.reason})` : ""}`
-		};
-	}
-	const skipped = [];
-	for (const id of ["elevenlabs", "system"]) {
-		const a = await backends[id].available(env);
-		if (a.ok) {
-			const prefix = skipped.length ? `${skipped.join("; ")}; ` : "";
-			return {
-				backend: backends[id],
-				reason: `auto: ${prefix}using ${id} (${a.reason ?? "available"})`
-			};
-		}
-		skipped.push(`${id} unavailable: ${a.reason ?? "unknown"}`);
-	}
-	return {
-		backend: backends.silent,
-		reason: `auto: ${skipped.join("; ")}; falling back to silent (no audio)`
-	};
-}
-const toPosix$1 = (p) => p.split(sep).join("/");
-function detectOverrun(scene, track) {
-	if (!track.audio_path || track.duration_ms <= Math.round(scene.duration_sec * 1e3)) return void 0;
-	const audio = track.duration_ms / 1e3;
-	return {
-		scene_id: scene.id,
-		scene_duration_sec: scene.duration_sec,
-		audio_duration_sec: audio,
-		suggested_duration_sec: Math.ceil(Math.round((audio + .3) * 1e3) / 100) / 10
-	};
-}
-/**
-* Synthesize voice for every scene of a spec into `<project>/assets/voice/<scene_id>.wav` and write
-* `assets/voice/voice-tracks.json`. Results are cached by content (backend, voice, text, options)
-* in a ContentStore, so re-runs are free. The spec is never modified: scenes whose audio is longer
-* than `duration_sec` are reported in `overruns` for the caller to act on.
-*/
-async function synthesizeSpec(spec, options) {
-	const env = options.env ?? process.env;
-	const backends = {
-		...defaultBackends(),
-		...options.backends
-	};
-	const { backend, reason } = await selectBackend(options.backend ?? "auto", env, backends);
-	const paths = projectPaths(options.projectDir);
-	const voiceDir = paths.assetsVoice;
-	const cacheRoot = options.cacheDir ?? join(resolveDataDir(env).cache, "voice");
-	const store = new ContentStore(join(cacheRoot, "cas"));
-	const indexDir = join(cacheRoot, "index");
-	const tracks = [];
-	const overruns = [];
-	const cacheHits = [];
-	const work = await mkdtemp(join(tmpdir(), "vs-voice-spec-"));
-	try {
-		for (const scene of spec.scenes) {
-			options.signal?.throwIfAborted();
-			const durationMs = Math.round(scene.duration_sec * 1e3);
-			const prepared = prepareSpeechText(scene.voiceover, options.brand);
-			if (prepared.captionWords.length === 0) {
-				tracks.push(silentTrack({
-					scene_id: scene.id,
-					text: "",
-					duration_ms: durationMs
-				}));
-				continue;
-			}
-			if (backend.id === "silent") {
-				const t = await backend.synthesize({
-					scene_id: scene.id,
-					text: prepared.speech,
-					duration_ms: durationMs
-				}, {
-					outDir: work,
-					env,
-					...options.signal ? { signal: options.signal } : {}
-				});
-				tracks.push({
-					...t,
-					words: mapTimingsToCaptions(prepared, t.words)
-				});
-				continue;
-			}
-			const voice = await backend.resolveVoice?.(spec.voice.voice_id, env);
-			const key = cacheKey({
-				kind: "voice",
-				inputDigest: sha256Hex(`${prepared.speech}\u0000${scene.voiceover}`),
-				extractorVersion: "1",
-				options: {
-					backend: backend.id,
-					voice: voice ?? null,
-					text: prepared.speech,
-					...backend.cacheOptions?.() ?? {}
+		claim_generator_info: [{
+			name: "video-studio",
+			version: i.engineVersion
+		}],
+		title: i.title,
+		assertions: [{
+			label: "c2pa.actions",
+			data: { actions: [{
+				action: "c2pa.created",
+				softwareAgent: {
+					name: "video-studio",
+					version: i.engineVersion
 				},
-				irSchemaVersion: 1
-			});
-			const indexFile = join(indexDir, `${key}.json`);
-			const dest = join(voiceDir, `${scene.id}.wav`);
-			const relAudio = toPosix$1(relative(paths.root, dest));
-			const cached = await readJson(indexFile).catch(() => void 0);
-			if (cached?.version === "1" && cached.audio_sha256 && await store.has(cached.audio_sha256)) {
-				await store.materialize(cached.audio_sha256, dest);
-				const track = SceneVoiceTrack.parse({
-					...cached.track,
-					scene_id: scene.id,
-					audio_path: relAudio
-				});
-				tracks.push(track);
-				cacheHits.push(scene.id);
-				const o = detectOverrun(scene, track);
-				if (o) overruns.push(o);
-				continue;
+				digitalSourceType: i.digitalSourceType
+			}] }
+		}, {
+			label: "stds.schema-org.CreativeWork",
+			data: {
+				"@context": "https://schema.org",
+				"@type": "CreativeWork",
+				name: i.title
 			}
-			const raw = await backend.synthesize({
-				scene_id: scene.id,
-				text: prepared.speech,
-				...voice ? { voice } : {},
-				duration_ms: durationMs
-			}, {
-				outDir: work,
-				env,
-				...options.signal ? { signal: options.signal } : {}
-			});
-			const words = mapTimingsToCaptions(prepared, raw.words);
-			let track;
-			let audioSha;
-			if (raw.audio_path) {
-				const entry = await store.put(raw.audio_path);
-				audioSha = entry.sha256;
-				await store.materialize(entry.sha256, dest);
-				await rm(raw.audio_path, { force: true });
-				track = SceneVoiceTrack.parse({
-					...raw,
-					words,
-					audio_path: relAudio
-				});
-			} else {
-				const { audio_path: _drop, ...rest } = raw;
-				track = SceneVoiceTrack.parse({
-					...rest,
-					words
-				});
-			}
-			if (audioSha) await writeJsonAtomic(indexFile, {
-				version: "1",
-				audio_sha256: audioSha,
-				track
-			});
-			tracks.push(track);
-			const o = detectOverrun(scene, track);
-			if (o) overruns.push(o);
-		}
-	} finally {
-		await rm(work, {
-			recursive: true,
-			force: true
-		});
+		}]
+	};
+}
+/** Locate c2patool: `C2PATOOL_PATH`, then PATH. Null when absent or not runnable. */
+async function findC2patool(deps = {}) {
+	const env = deps.env ?? process.env;
+	const run = deps.runner ?? defaultRunner;
+	const path = env.C2PATOOL_PATH || which("c2patool", env);
+	if (!path) return null;
+	try {
+		const r = await run(path, ["--version"]);
+		if (r.code !== 0) return null;
+		return {
+			path,
+			version: r.stdout.trim().replace(/^c2patool\s+/, "") || "unknown"
+		};
+	} catch {
+		return null;
 	}
-	const tracksFile = join(voiceDir, "voice-tracks.json");
-	await writeJsonAtomic(tracksFile, tracks);
+}
+/**
+* Sign `file` in place: c2patool writes a signed copy next to it, which then replaces it.
+* Returns which certificate signed it.
+*/
+async function signFile(tool, file, definition, deps = {}) {
+	const run = deps.runner ?? defaultRunner;
+	const tmp = join(dirname(file), `.${basename(file, ".mp4")}.signing.mp4`);
+	await rm(tmp, { force: true });
+	try {
+		const r = await run(tool.path, [
+			file,
+			"-c",
+			JSON.stringify(definition),
+			"-o",
+			tmp,
+			"-f"
+		]);
+		if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").slice(-3).join(" ") || `exit ${r.code}`);
+		await rename(tmp, file);
+		return { certificate: /default private key|test signing cert/i.test(`${r.stdout}\n${r.stderr}`) ? "test" : "user" };
+	} finally {
+		await rm(tmp, { force: true });
+	}
+}
+/**
+* Sign every file; a failure on one file is a warning (that file stays unsigned). Without
+* c2patool nothing is signed and the warning says how to get it; export still succeeds.
+*/
+async function signVideos(i) {
+	const warnings = [];
+	const tool = await findC2patool(i);
+	if (!tool) return {
+		signed: [],
+		warnings: ["c2pa: c2patool not found (install it, e.g. `brew install c2patool` or `cargo install c2patool`, or set C2PATOOL_PATH); the videos were exported unsigned"]
+	};
+	const cls = classifySource(i.facts);
+	const definition = c2paManifestDefinition({
+		title: i.title,
+		engineVersion: i.engineVersion,
+		digitalSourceType: cls.digital_source_type
+	});
+	const signed = [];
+	const certs = /* @__PURE__ */ new Set();
+	for (const f of i.files) try {
+		const r = await signFile(tool, f, definition, i);
+		certs.add(r.certificate);
+		signed.push(f);
+	} catch (e) {
+		warnings.push(`c2pa: could not sign ${relative(i.root, f).split(sep).join("/")}: ${e instanceof Error ? e.message : String(e)}`);
+	}
+	if (!signed.length) return {
+		signed,
+		warnings
+	};
+	const certificate = certs.has("test") ? "test" : "user";
+	if (certificate === "test") warnings.push("c2pa: signed with c2patool's built-in test certificate; validators show the credentials as untrusted. Configure your own signer in c2patool's settings for trusted credentials");
 	return {
-		backend: backend.id,
-		reason,
-		tracks,
-		tracks_path: toPosix$1(relative(paths.root, tracksFile)),
-		overruns,
-		cache_hits: cacheHits
+		signed,
+		warnings,
+		record: {
+			tool: `c2patool ${tool.version}`,
+			certificate,
+			claim_generator: `video-studio/${i.engineVersion}`,
+			assertions: [...C2PA_ASSERTIONS],
+			signed: signed.map((f) => relative(i.root, f).split(sep).join("/")),
+			ai_generated: cls.ai_generated
+		}
 	};
 }
 //#endregion
@@ -245548,7 +247755,32 @@ async function renderCover(o) {
 				t: "fill"
 			}));
 			const top = by + (blockH - fit.height) / 2;
-			for (const [i, line] of fit.lines.entries()) {
+			const script = dominantScript(o.headline);
+			if (COMPLEX_SCRIPTS.has(script) && script !== "other") {
+				const fontsDir = await prepareLibassFontsDir(join(tmp, "fonts"));
+				const family = scriptFontFamilies(script)[0] ?? "Noto Sans";
+				const bgr = (hex) => `&H00${hex.slice(5, 7)}${hex.slice(3, 5)}${hex.slice(1, 3)}`.toUpperCase();
+				const ass = [
+					"[Script Info]",
+					"ScriptType: v4.00+",
+					`PlayResX: ${W}`,
+					`PlayResY: ${H}`,
+					"WrapStyle: 2",
+					"",
+					"[V4+ Styles]",
+					"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+					`Style: H,${family},${fit.fontSize},${bgr(o.tokens.color_text)},${bgr(o.tokens.color_text)},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,8,0,0,0,1`,
+					"",
+					"[Events]",
+					"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+					`Dialogue: 0,0:00:00.00,0:00:10.00,H,,0,0,0,,{\\an8\\pos(${cx},${Math.round(top)})}${fit.lines.join("\\N")}`,
+					""
+				].join("\n");
+				const assFile = join(tmp, "headline.ass");
+				await writeFile(assFile, ass, "utf8");
+				filters.push(`ass=filename=${escapeFiltergraph(escapeFilterOption(assFile))}:fontsdir=${escapeFiltergraph(escapeFilterOption(fontsDir))}`);
+			}
+			for (const [i, line] of (COMPLEX_SCRIPTS.has(script) && script !== "other" ? [] : fit.lines).entries()) {
 				const file = join(tmp, `l${i}.txt`);
 				await writeFile(file, line, "utf8");
 				filters.push(f("drawtext", {
@@ -246081,7 +248313,7 @@ async function renderProject(projectDir, o = {}) {
 	const brandFile = await loadBrand(root, o.brandPath);
 	const brand = brandFile?.brand;
 	const style = spec.style ? await getStyle(findStylesDir(env), spec.style) : void 0;
-	const tokens = resolveTokens$1(brand, {}, style);
+	const tokens = resolveTokens$1(brand, {}, style, { language: spec.language });
 	const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
 	const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
 	const brandCaptions = style?.captions || brand?.captions ? {
@@ -246308,12 +248540,44 @@ async function renderProject(projectDir, o = {}) {
 		...brandCaptions?.active_word !== void 0 ? { activeWord: brandCaptions.active_word } : {},
 		maxLines: brandCaptions?.max_lines ?? 2
 	};
-	const captionSet = words.length ? await writeCaptionSet(captionsDir, "captions", words, {
+	const cues = spec.captions.sound_events === false ? [] : soundEventCues({
+		scenes: planScenes.map((s, i) => {
+			const start = frameMs(bounds[i]);
+			const amode = s.audio?.mode ?? "native";
+			const f = footage.byScene.get(s.id);
+			const asset = s.footage ? footage.assets.get(s.footage.asset) : void 0;
+			const footageSound = !!s.footage && (amode === "native" || amode === "mix") && !!f && !("error" in f) && asset?.kind === "video" && f.media.has_audio;
+			const sfx = (s.sfx ?? []).filter((x) => x.caption?.trim()).map((x) => ({
+				at_ms: start + x.at_sec * 1e3,
+				caption: x.caption
+			}));
+			return {
+				id: s.id,
+				start_ms: start,
+				end_ms: start + slotMs[i],
+				...footageSound ? { footage_sound: true } : {},
+				...s.footage && (amode === "native" || amode === "mute") ? { bed_muted: true } : {},
+				...sfx.length ? { sfx } : {}
+			};
+		}),
+		speech: words,
+		music: !!music,
+		total_ms: totalMs
+	}, warnings);
+	const captionWords = cues.length ? [...words, ...cues].sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms) : words;
+	const captionSet = captionWords.length ? await writeCaptionSet(captionsDir, "captions", captionWords, {
 		ass: assOpts,
 		maxLines: assOpts.maxLines,
 		endMs: totalMs
 	}) : void 0;
 	const captionFiles = captionSet?.files;
+	if (captionFiles && cues.length) {
+		if (words.length) await writeFile(captionFiles.txt, toTranscript(words));
+		else {
+			await rm(captionFiles.txt, { force: true });
+			delete captionFiles.txt;
+		}
+	}
 	if (!words.length && narrated) warnings.push("no voiceover text: captions and transcript skipped");
 	if (!words.length && mode === "native") warnings.push("voice.mode \"native\": no transcript words in the footage spans; captions and transcript skipped (transcribe the video assets first)");
 	const speech = placements.filter((p) => p.track.audio_path).map((p) => ({
@@ -246341,7 +248605,7 @@ async function renderProject(projectDir, o = {}) {
 	const burn = burnIn && !!captionFiles?.ass;
 	const assSha = captionFiles?.ass ? sha256Hex(await readFile(captionFiles.ass)) : null;
 	const assemblyKey = sha256Hex(canonicalJson({
-		v: 2,
+		v: 3,
 		target,
 		encode: encodePreset ?? null,
 		pad: tokens.color_background,
@@ -246417,7 +248681,7 @@ async function renderProject(projectDir, o = {}) {
 			...burn ? {
 				reel,
 				assPath: captionFiles.ass,
-				...fontsDir ? { fontsDir } : {}
+				...fontsDir ? { fontsDir: await prepareLibassFontsDir(join(rdir, "fonts"), void 0, fontsDir) } : {}
 			} : {}
 		}, {
 			...encodePreset ? { encode: { preset: encodePreset } } : {},
@@ -246586,7 +248850,8 @@ async function renderProject(projectDir, o = {}) {
 		} } : {},
 		...brandFile ? { brand_path: brandRel(root, brandFile.path) } : {},
 		fonts: lockedFonts,
-		...style ? { style: styleRef(style) } : {}
+		...style ? { style: styleRef(style) } : {},
+		...cues.length ? { sound_events: cues.length } : {}
 	};
 	const reelSha = await hashFile(reel);
 	let qa;
@@ -246647,6 +248912,112 @@ async function renderProject(projectDir, o = {}) {
 			assembly: reuse ? "reused" : "assembled"
 		}
 	};
+}
+/** Longest a `[music]` / `[ambient sound]` cue stays up (it names the sound; it need not last). */
+const CUE_MAX_MS = 3e3;
+/** How long an sfx caption stays up (the effect's length is not probed). */
+const SFX_CUE_MS = 1500;
+/** Scene id prefix of cue words: cues form their own captions (never merged with speech). */
+const SOUND_CUE_SCENE_PREFIX = "sound:";
+/** `spans` minus `cut`, both as [start, end) intervals. */
+function subtractSpans(spans, cut) {
+	let out = spans.map((s) => ({ ...s }));
+	for (const c of cut) {
+		const next = [];
+		for (const s of out) {
+			if (c.end_ms <= s.start_ms || c.start_ms >= s.end_ms) {
+				next.push(s);
+				continue;
+			}
+			if (c.start_ms > s.start_ms) next.push({
+				start_ms: s.start_ms,
+				end_ms: c.start_ms
+			});
+			if (c.end_ms < s.end_ms) next.push({
+				start_ms: c.end_ms,
+				end_ms: s.end_ms
+			});
+		}
+		out = next;
+	}
+	return out;
+}
+/** `[applause]` stays; `applause` becomes `[applause]`. */
+function bracketCue(text) {
+	const t = text.trim().replace(/\s+/g, " ");
+	return /^\[.*\]$/.test(t) ? t : `[${t.replace(/^\[|\]$/g, "")}]`;
+}
+/**
+* Bracketed sound-event cues for accessibility, as caption "words" (one cue = one word, which may
+* contain spaces) that never overlap speech:
+* - each sfx `caption` at its time, for up to {@link SFX_CUE_MS} (dropped, with a warning, when
+*   the effect starts during speech);
+* - `[ambient sound]` at the start of a footage scene whose own sound plays and that has no
+*   spoken words;
+* - `[music]` where only the music bed plays for at least {@link MUSIC_CUE_MIN_GAP_MS} (no speech,
+*   no footage sound, bed not muted), shown at the start of that stretch.
+* Cue words carry scene_id `sound:<scene id>`, so the caption engine gives them captions of their own.
+*/
+function soundEventCues(i, warnings = []) {
+	const speech = i.speech.map((w) => ({
+		start_ms: w.start_ms,
+		end_ms: Math.max(w.end_ms, w.start_ms + 1)
+	}));
+	const sceneAt = (ms) => i.scenes.find((s) => ms >= s.start_ms && ms < s.end_ms) ?? i.scenes[i.scenes.length - 1];
+	const cues = [];
+	const push = (word, start, end) => cues.push({
+		word,
+		start_ms: Math.round(start),
+		end_ms: Math.round(end),
+		scene_id: `${SOUND_CUE_SCENE_PREFIX}${sceneAt(start)?.id ?? ""}`
+	});
+	const nextSpeechStart = (ms) => speech.find((s) => s.start_ms >= ms)?.start_ms ?? Number.POSITIVE_INFINITY;
+	const sfx = i.scenes.flatMap((s) => (s.sfx ?? []).map((x) => ({
+		...x,
+		scene: s
+	}))).sort((a, b) => a.at_ms - b.at_ms);
+	sfx.forEach((x, k) => {
+		const text = x.caption.trim();
+		if (!text || text === "[]") return;
+		const word = bracketCue(text);
+		if (x.at_ms >= i.total_ms) return;
+		if (speech.some((s) => x.at_ms >= s.start_ms && x.at_ms < s.end_ms)) {
+			warnings.push(`captions: sfx caption ${word} in ${x.scene.id} starts during speech; not shown (move the effect into a pause)`);
+			return;
+		}
+		const end = Math.min(x.at_ms + SFX_CUE_MS, i.total_ms, nextSpeechStart(x.at_ms), sfx[k + 1]?.at_ms ?? Number.POSITIVE_INFINITY);
+		if (end - x.at_ms < 500) {
+			warnings.push(`captions: sfx caption ${word} in ${x.scene.id} has under 500 ms before the next speech or effect; not shown`);
+			return;
+		}
+		push(word, x.at_ms, end);
+	});
+	const taken = () => [...speech, ...cues];
+	for (const s of i.scenes) {
+		if (!s.footage_sound) continue;
+		if (speech.some((w) => w.start_ms < s.end_ms && w.end_ms > s.start_ms)) continue;
+		const free = subtractSpans([{
+			start_ms: s.start_ms,
+			end_ms: s.end_ms
+		}], taken()).find((f) => f.end_ms - f.start_ms >= 500);
+		if (free) push("[ambient sound]", free.start_ms, Math.min(free.end_ms, free.start_ms + CUE_MAX_MS));
+	}
+	if (i.music) {
+		const blocked = [...taken(), ...i.scenes.filter((s) => s.footage_sound || s.bed_muted).map((s) => ({
+			start_ms: s.start_ms,
+			end_ms: s.end_ms
+		}))];
+		for (const f of subtractSpans([{
+			start_ms: 0,
+			end_ms: i.total_ms
+		}], blocked)) {
+			if (f.end_ms - f.start_ms < 2e3) continue;
+			const afterSpeech = speech.some((w) => Math.abs(w.end_ms - f.start_ms) <= 1);
+			const start = f.start_ms + (afterSpeech ? 300 : 0);
+			push("[music]", start, Math.min(f.end_ms, start + CUE_MAX_MS));
+		}
+	}
+	return cues.sort((a, b) => a.start_ms - b.start_ms);
 }
 async function probeMedia(abs, kind) {
 	const p = await ffprobe(abs);
@@ -247020,7 +249391,10 @@ async function runQa(projectDir, opts = {}) {
 async function exportProject(projectDir, opts = {}) {
 	const root = projectPaths(projectDir).root;
 	const state = await loadState(root, opts.quality);
-	const dist = await exportFromState(root, state, opts.now ?? (() => /* @__PURE__ */ new Date()));
+	const dist = await exportFromState(root, state, opts.now ?? (() => /* @__PURE__ */ new Date()), {
+		...opts.sign ? { sign: true } : {},
+		...opts.c2pa ? { c2pa: opts.c2pa } : {}
+	});
 	return {
 		quality: state.quality,
 		dist,
@@ -247088,7 +249462,7 @@ function socialCopyParts(spec, brief) {
 		hashtags: tags.slice(0, 7).map((t) => `#${t}`)
 	};
 }
-async function exportFromState(root, state, now) {
+async function exportFromState(root, state, now, opts = {}) {
 	const paths = projectPaths(root);
 	const distDir = paths.dist;
 	await ensureDir(distDir);
@@ -247191,6 +249565,39 @@ async function exportFromState(root, state, now) {
 			...state.music.license ? { license: state.music.license } : {}
 		} } : {}
 	}, allContracts.map((c) => c.id));
+	const exportWarnings = [];
+	let signed = /* @__PURE__ */ new Set();
+	let c2pa;
+	let c2paSource;
+	if (opts.sign) {
+		const facts = {
+			voice_backend: state.voice.backend,
+			voice_has_audio: state.voice.has_audio,
+			scenes: state.scenes.map((s) => ({
+				renderer: s.renderer,
+				placeholder: s.placeholder
+			}))
+		};
+		const r = await signVideos({
+			root,
+			files: [
+				out.reel,
+				out.clean_master,
+				...out.targets.map((t) => t.video)
+			],
+			title: spec.title?.trim() || socialCopyParts(spec, brief).title,
+			engineVersion: ENGINE_VERSION,
+			facts,
+			...opts.c2pa
+		});
+		exportWarnings.push(...r.warnings);
+		signed = new Set(r.signed);
+		c2pa = r.record;
+		if (c2pa) c2paSource = classifySource(facts);
+	}
+	const c2paFlag = (p) => signed.has(p) ? { c2pa: true } : {};
+	if (c2pa) out.c2pa = c2pa;
+	if (exportWarnings.length) out.warnings = exportWarnings;
 	let source = null;
 	try {
 		source = JSON.parse(await readFile(join(paths.source, "provenance.json"), "utf8"));
@@ -247227,6 +249634,12 @@ async function exportFromState(root, state, now) {
 				license: x.license ?? null
 			})) } : {},
 			...state.timing_adjustments.length ? { timing_adjustments: state.timing_adjustments } : {},
+			...state.sound_events ? { captions: { sound_events: state.sound_events } } : {},
+			...c2pa && c2paSource ? { c2pa: {
+				...c2pa,
+				digital_source_type: c2paSource.digital_source_type,
+				reasons: c2paSource.reasons
+			} } : {},
 			scenes: state.scenes.map((s) => ({
 				scene_id: s.scene_id,
 				claim_refs: s.claim_refs,
@@ -247247,12 +249660,14 @@ async function exportFromState(root, state, now) {
 		kind: "final",
 		path: rel(root, out.reel),
 		sha256: await sha(out.reel),
-		...reelProbe
+		...reelProbe,
+		...c2paFlag(out.reel)
 	}, {
 		kind: "clean_master",
 		path: rel(root, out.clean_master),
 		sha256: await sha(out.clean_master),
-		...reelProbe
+		...reelProbe,
+		...c2paFlag(out.clean_master)
 	}];
 	if (out.captions_srt) outputs.push({
 		kind: "captions",
@@ -247325,7 +249740,8 @@ async function exportFromState(root, state, now) {
 			width: t.width,
 			height: t.height,
 			duration_sec: state.duration_ms / 1e3,
-			...t.transcoded ? { transcoded: true } : {}
+			...t.transcoded ? { transcoded: true } : {},
+			...c2paFlag(t.video)
 		});
 		if (t.cover) outputs.push({
 			kind: "thumbnail",
@@ -247423,6 +249839,7 @@ async function exportFromState(root, state, now) {
 				box: state.caption_layout.box,
 				max_lines: state.caption_layout.max_lines
 			} : {},
+			...state.sound_events ? { sound_events: state.sound_events } : {},
 			files: captionFiles
 		} } : {},
 		...state.music ? { music: {
@@ -247448,6 +249865,7 @@ async function exportFromState(root, state, now) {
 			}))
 		} } : {},
 		outputs,
+		...c2pa ? { c2pa } : {},
 		...state.qa ? { qa: {
 			status: state.qa.status,
 			checks: state.qa.checks,
@@ -247463,8 +249881,11 @@ async function exportFromState(root, state, now) {
 			renderer_reasons: state.renderer.reasons
 		},
 		...state.timing_adjustments.length ? { timing_adjustments: state.timing_adjustments } : {},
-		...state.warnings.length ? { warnings: state.warnings } : {},
-		tool_versions: state.tool_versions
+		...state.warnings.length || exportWarnings.length ? { warnings: [...state.warnings, ...exportWarnings] } : {},
+		tool_versions: {
+			...state.tool_versions,
+			...c2pa ? { c2patool: c2pa.tool.replace(/^c2patool\s+/, "") } : {}
+		}
 	};
 	const lock = await lockFromState(root, state, projectId, outputs);
 	await writeFile(out.lock, serializeLock(lock));
@@ -247506,7 +249927,8 @@ async function lockFromState(root, state, projectId, outputs) {
 		const brandFile = await loadBrand(root).catch(() => void 0);
 		const styleId = state.style?.split("@")[0];
 		const style = styleId ? await getStyle(findStylesDir(process.env), styleId).catch(() => void 0) : void 0;
-		const tokens = resolveTokens$1(brandFile?.brand, {}, style);
+		const language = await loadSpecLoose(root).then((r) => r.spec.language).catch(() => void 0);
+		const tokens = resolveTokens$1(brandFile?.brand, {}, style, language ? { language } : {});
 		fonts = await lockFonts(fontRequests(tokens, brandFile?.brand.captions?.family ?? parseFontChain(tokens.font_body)[0], state.burn_in), { fontsDir: findFontsDir(process.env) });
 	}
 	const specsDir = findPlatformSpecsDir();
@@ -247521,11 +249943,11 @@ async function lockFromState(root, state, projectId, outputs) {
 		...state.content_ir_sha256 ? { content_ir_sha256: state.content_ir_sha256 } : {},
 		engine: {
 			engine: ENGINE_VERSION,
-			assembly: String(2),
+			assembly: String(3),
 			cover: String(2),
 			target_package: String(1),
 			zones: String(2),
-			layout: String(5)
+			layout: String(6)
 		},
 		tools,
 		voice: {
@@ -248552,7 +250974,8 @@ function createServer(options = {}) {
 		description: "Rebuild <project_dir>/dist/ from the latest existing render (or the given quality) without rendering: reel.mp4, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target: video.mp4 (copied, or re-encoded only when the target's contract needs lower fps/size/bitrate), cover.jpg, captions.srt/.vtt, post.json (from spec publish.<target>, else a generated draft) and qa.json (lint findings for that target; lint is re-run). Packages of targets no longer in the spec are removed. Returns dist.targets[] {id, transcoded, transcode_reasons, width, height, fps, ...}.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Rendered project folder"),
-			quality: QUALITY.optional().describe("Which render to export (default: the latest)")
+			quality: QUALITY.optional().describe("Which render to export (default: the latest)"),
+			sign: boolean().optional().describe("Add C2PA content credentials (provenance, AI disclosure) to the exported videos with the local c2patool")
 		},
 		annotations: {
 			readOnlyHint: false,
@@ -248560,8 +250983,11 @@ function createServer(options = {}) {
 			idempotentHint: true,
 			openWorldHint: false
 		}
-	}, safe(async ({ project_dir, quality }) => {
-		const r = await exportProject(resolveInputPath(project_dir, cwd()), quality ? { quality } : {});
+	}, safe(async ({ project_dir, quality, sign }) => {
+		const r = await exportProject(resolveInputPath(project_dir, cwd()), {
+			...quality ? { quality } : {},
+			...sign ? { sign } : {}
+		});
 		return jsonResult(`exported the ${r.quality} render to ${r.dist.dir}${r.qa_status ? ` (QA ${r.qa_status})` : ""}`, r);
 	}));
 	server.registerTool("verify", {
@@ -248793,6 +251219,28 @@ function createServer(options = {}) {
 			env
 		});
 		return jsonResult(formatDemo(r), r);
+	}));
+	server.registerTool("localize", {
+		title: "Make a language version",
+		description: "Localize <project_dir> into `language` (BCP-47, e.g. hi-IN, ja-JP, ar-SA, de-DE). Step 1 (default): copy the project to localized/<language>/ with spec.language set and write project/translation.json (TranslationSheet: every voiceover, on-screen text, text prop, cover headline and post copy, with notes such as word limits and 'do not translate code'). Fill each entry's `target`, then step 2 (apply: true): the translations are written into the localized spec, scenes are re-timed for the language (speaking and reading speed per script), fonts switch to the script's bundled Noto family, and the spec is validated. Claims keep their claim_refs; translate meaning, never add facts.",
+		inputSchema: {
+			project_dir: string().min(1),
+			language: LanguageTag.describe("Target language, e.g. hi-IN, ja-JP"),
+			apply: boolean().optional().describe("Apply the filled translation.json (step 2)"),
+			out_dir: string().min(1).optional().describe("Default <project_dir>/localized/<language>")
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async (args) => {
+		const r = await localizeProject(resolveInputPath(args.project_dir, cwd()), args.language, {
+			...args.apply ? { apply: true } : {},
+			...args.out_dir ? { out_dir: resolveInputPath(args.out_dir, cwd()) } : {}
+		});
+		return jsonResult(formatLocalize(r), r);
 	}));
 	return server;
 }

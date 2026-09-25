@@ -4,6 +4,7 @@ import { canonicalJson, ensureDir, hashFile, projectPaths, readJson, resolveData
 import {
   type AudioSlot,
   type CaptionPlacement,
+  type CaptionWord,
   type OneShot,
   type QaReport,
   type SceneAudioSlot,
@@ -16,6 +17,7 @@ import {
   snapCuts,
   makeThumbnail,
   technicalQa,
+  toTranscript,
   writeCaptionSet,
   writeQaReport,
 } from "@video-studio/media";
@@ -41,6 +43,7 @@ import {
   resolveTokens,
   selectRenderer,
   targetForAspect,
+  prepareLibassFontsDir,
 } from "@video-studio/renderer";
 import {
   Brand,
@@ -62,11 +65,13 @@ import {
   resolveTargets,
   voiceMode,
   type AudioLicense,
+  type C2paRecord,
   type Style,
   type VoiceMode,
 } from "@video-studio/schema";
 import { ZONES_VERSION, findPlatformSpecsDir, layoutZones, loadContracts } from "@video-studio/platforms";
 import { type BackendChoice, type BackendSet, type SynthesizeSpecResult, defaultBackends, selectBackend, synthesizeSpec } from "@video-studio/voice";
+import { type C2paDeps, type SourceFacts, classifySource, signVideos } from "./c2pa.js";
 import { COVER_VERSION, renderCover } from "./cover.js";
 import { type ResolvedMusic, resolveMusic } from "./music.js";
 import { type FontRequest, type LockFont, LOCK_FILE, buildLock, listFiles, lockAssets, lockFonts, serializeLock } from "./lock.js";
@@ -81,8 +86,8 @@ type Env = Record<string, string | undefined>;
 export const ENGINE_VERSION = "0.1.0";
 /** Bump when technical QA's checks change, so cached QA results are re-run. 2: background-aware black frames, intended silence. */
 export const QA_VERSION = 2;
-/** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. */
-export const ASSEMBLY_VERSION = 2;
+/** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). */
+export const ASSEMBLY_VERSION = 3;
 
 export type Quality = "preview" | "final";
 
@@ -174,6 +179,10 @@ export interface DistFiles {
   storyboard?: string;
   /** One package per target: dist/<target>/. */
   targets: TargetDist[];
+  /** C2PA content credentials written by this export (`sign: true`). */
+  c2pa?: C2paRecord;
+  /** Export-time warnings (e.g. signing skipped); also in the manifest's warnings. */
+  warnings?: string[];
 }
 
 /** Spec failed validation: the render was refused. */
@@ -278,6 +287,8 @@ interface RenderState {
   fonts?: LockFont[];
   /** Style pack the render used, `<id>@<version>` (also in tool_versions.style). */
   style?: string;
+  /** Sound-event cues added to the captions ([music], sfx captions, [ambient sound]). */
+  sound_events?: number;
 }
 
 const toPosix = (p: string) => p.split(sep).join("/");
@@ -404,7 +415,8 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   const brand = brandFile?.brand;
   // Style pack (styles/<id>.yaml): defaults < style < brand. Unknown ids fail with the available ones.
   const style: Style | undefined = spec.style ? await getStyle(findStylesDir(env), spec.style) : undefined;
-  const tokens: VisualTokens = resolveTokens(brand, {}, style);
+  // The spec language picks script fonts (Noto JP/Devanagari/Arabic) ahead of the Latin chain.
+  const tokens: VisualTokens = resolveTokens(brand, {}, style, { language: spec.language });
   const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
   const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
   // Caption styling: the style's, overridden field by field by the brand's.
@@ -605,8 +617,46 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     ...(brandCaptions?.active_word !== undefined ? { activeWord: brandCaptions.active_word } : {}),
     maxLines: brandCaptions?.max_lines ?? 2,
   };
-  const captionSet = words.length ? await writeCaptionSet(captionsDir, "captions", words, { ass: assOpts, maxLines: assOpts.maxLines, endMs: totalMs }) : undefined;
+  // Sound-event cues ([music], sfx captions, [ambient sound]) join the timeline unless captions.sound_events is false.
+  const cues =
+    spec.captions.sound_events === false
+      ? []
+      : soundEventCues(
+          {
+            scenes: planScenes.map((s, i) => {
+              const start = frameMs(bounds[i]!);
+              const amode = s.audio?.mode ?? "native";
+              const f = footage.byScene.get(s.id);
+              const asset = s.footage ? footage.assets.get(s.footage.asset) : undefined;
+              const footageSound = !!s.footage && (amode === "native" || amode === "mix") && !!f && !("error" in f) && asset?.kind === "video" && f.media.has_audio;
+              const sfx = (s.sfx ?? []).filter((x) => x.caption?.trim()).map((x) => ({ at_ms: start + x.at_sec * 1000, caption: x.caption! }));
+              return {
+                id: s.id,
+                start_ms: start,
+                end_ms: start + slotMs[i]!,
+                ...(footageSound ? { footage_sound: true } : {}),
+                ...(s.footage && (amode === "native" || amode === "mute") ? { bed_muted: true } : {}),
+                ...(sfx.length ? { sfx } : {}),
+              };
+            }),
+            speech: words,
+            music: !!music,
+            total_ms: totalMs,
+          },
+          warnings,
+        );
+  const captionWords = cues.length ? [...words, ...cues].sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms) : words;
+  const captionSet = captionWords.length ? await writeCaptionSet(captionsDir, "captions", captionWords, { ass: assOpts, maxLines: assOpts.maxLines, endMs: totalMs }) : undefined;
   const captionFiles = captionSet?.files;
+  if (captionFiles && cues.length) {
+    // The transcript is speech only (cues are for the captions).
+    if (words.length) {
+      await writeFile(captionFiles.txt, toTranscript(words));
+    } else {
+      await rm(captionFiles.txt, { force: true });
+      delete (captionFiles as { txt?: string }).txt;
+    }
+  }
   if (!words.length && narrated) warnings.push("no voiceover text: captions and transcript skipped");
   if (!words.length && mode === "native") warnings.push('voice.mode "native": no transcript words in the footage spans; captions and transcript skipped (transcribe the video assets first)');
 
@@ -687,7 +737,8 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
             }
           : {}),
         master,
-        ...(burn ? { reel, assPath: captionFiles!.ass!, ...(fontsDir ? { fontsDir } : {}) } : {}),
+        // libass does not search subfolders of fontsdir: hand it a flat folder of the bundled fonts.
+        ...(burn ? { reel, assPath: captionFiles!.ass!, ...(fontsDir ? { fontsDir: await prepareLibassFontsDir(join(rdir, "fonts"), undefined, fontsDir) } : {}) } : {}),
       },
       { ...(encodePreset ? { encode: { preset: encodePreset } } : {}), ...(signal ? { signal } : {}) },
     );
@@ -811,6 +862,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     ...(brandFile ? { brand_path: brandRel(root, brandFile.path) } : {}),
     fonts: lockedFonts,
     ...(style ? { style: styleRef(style) } : {}),
+    ...(cues.length ? { sound_events: cues.length } : {}),
   };
 
   // f'. technical QA on the reel (reused when the reel is unchanged)
@@ -853,6 +905,135 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
       assembly: reuse ? "reused" : "assembled",
     },
   };
+}
+
+// ------------------------------------------------------------------------------------ sound-event captions
+
+/** Shortest stretch with only the music bed that gets a `[music]` cue. */
+export const MUSIC_CUE_MIN_GAP_MS = 2000;
+/** A cue after speech starts this late, so the last spoken caption keeps its display time. */
+export const CUE_SETTLE_MS = 300;
+/** Longest a `[music]` / `[ambient sound]` cue stays up (it names the sound; it need not last). */
+export const CUE_MAX_MS = 3000;
+/** How long an sfx caption stays up (the effect's length is not probed). */
+export const SFX_CUE_MS = 1500;
+/** Cues shorter than this are dropped. */
+export const MIN_CUE_MS = 500;
+/** Scene id prefix of cue words: cues form their own captions (never merged with speech). */
+export const SOUND_CUE_SCENE_PREFIX = "sound:";
+
+export interface SoundCueScene {
+  id: string;
+  start_ms: number;
+  end_ms: number;
+  /** The footage's own sound plays (audio mode native or mix, a video with an audio stream). */
+  footage_sound?: boolean;
+  /** The music bed is silenced here (footage scene in native or mute mode). */
+  bed_muted?: boolean;
+  /** Sound effects with a caption, at absolute video time. */
+  sfx?: Array<{ at_ms: number; caption: string }>;
+}
+
+export interface SoundCueInput {
+  scenes: SoundCueScene[];
+  /** Spoken words (voiceover or transcript) on the video timeline, sorted. */
+  speech: ReadonlyArray<{ start_ms: number; end_ms: number }>;
+  /** A music bed plays under the video. */
+  music: boolean;
+  total_ms: number;
+}
+
+type Span = { start_ms: number; end_ms: number };
+
+/** `spans` minus `cut`, both as [start, end) intervals. */
+function subtractSpans(spans: readonly Span[], cut: readonly Span[]): Span[] {
+  let out = spans.map((s) => ({ ...s }));
+  for (const c of cut) {
+    const next: Span[] = [];
+    for (const s of out) {
+      if (c.end_ms <= s.start_ms || c.start_ms >= s.end_ms) {
+        next.push(s);
+        continue;
+      }
+      if (c.start_ms > s.start_ms) next.push({ start_ms: s.start_ms, end_ms: c.start_ms });
+      if (c.end_ms < s.end_ms) next.push({ start_ms: c.end_ms, end_ms: s.end_ms });
+    }
+    out = next;
+  }
+  return out;
+}
+
+/** `[applause]` stays; `applause` becomes `[applause]`. */
+export function bracketCue(text: string): string {
+  const t = text.trim().replace(/\s+/g, " ");
+  return /^\[.*\]$/.test(t) ? t : `[${t.replace(/^\[|\]$/g, "")}]`;
+}
+
+/** True for a sound-event cue word such as `[music]`. */
+export function isSoundCue(word: { word: string; scene_id?: string }): boolean {
+  return word.scene_id?.startsWith(SOUND_CUE_SCENE_PREFIX) ?? /^\[.*\]$/.test(word.word);
+}
+
+/**
+ * Bracketed sound-event cues for accessibility, as caption "words" (one cue = one word, which may
+ * contain spaces) that never overlap speech:
+ * - each sfx `caption` at its time, for up to {@link SFX_CUE_MS} (dropped, with a warning, when
+ *   the effect starts during speech);
+ * - `[ambient sound]` at the start of a footage scene whose own sound plays and that has no
+ *   spoken words;
+ * - `[music]` where only the music bed plays for at least {@link MUSIC_CUE_MIN_GAP_MS} (no speech,
+ *   no footage sound, bed not muted), shown at the start of that stretch.
+ * Cue words carry scene_id `sound:<scene id>`, so the caption engine gives them captions of their own.
+ */
+export function soundEventCues(i: SoundCueInput, warnings: string[] = []): CaptionWord[] {
+  const speech: Span[] = i.speech.map((w) => ({ start_ms: w.start_ms, end_ms: Math.max(w.end_ms, w.start_ms + 1) }));
+  const sceneAt = (ms: number) => i.scenes.find((s) => ms >= s.start_ms && ms < s.end_ms) ?? i.scenes[i.scenes.length - 1];
+  const cues: CaptionWord[] = [];
+  const push = (word: string, start: number, end: number) => cues.push({ word, start_ms: Math.round(start), end_ms: Math.round(end), scene_id: `${SOUND_CUE_SCENE_PREFIX}${sceneAt(start)?.id ?? ""}` });
+  const nextSpeechStart = (ms: number) => speech.find((s) => s.start_ms >= ms)?.start_ms ?? Number.POSITIVE_INFINITY;
+
+  // 1. sfx captions
+  const sfx = i.scenes.flatMap((s) => (s.sfx ?? []).map((x) => ({ ...x, scene: s }))).sort((a, b) => a.at_ms - b.at_ms);
+  sfx.forEach((x, k) => {
+    const text = x.caption.trim();
+    if (!text || text === "[]") return;
+    const word = bracketCue(text);
+    if (x.at_ms >= i.total_ms) return;
+    if (speech.some((s) => x.at_ms >= s.start_ms && x.at_ms < s.end_ms)) {
+      warnings.push(`captions: sfx caption ${word} in ${x.scene.id} starts during speech; not shown (move the effect into a pause)`);
+      return;
+    }
+    const end = Math.min(x.at_ms + SFX_CUE_MS, i.total_ms, nextSpeechStart(x.at_ms), sfx[k + 1]?.at_ms ?? Number.POSITIVE_INFINITY);
+    if (end - x.at_ms < MIN_CUE_MS) {
+      warnings.push(`captions: sfx caption ${word} in ${x.scene.id} has under ${MIN_CUE_MS} ms before the next speech or effect; not shown`);
+      return;
+    }
+    push(word, x.at_ms, end);
+  });
+  const taken = (): Span[] => [...speech, ...cues];
+
+  // 2. ambient sound of footage scenes without speech
+  for (const s of i.scenes) {
+    if (!s.footage_sound) continue;
+    if (speech.some((w) => w.start_ms < s.end_ms && w.end_ms > s.start_ms)) continue;
+    const free = subtractSpans([{ start_ms: s.start_ms, end_ms: s.end_ms }], taken()).find((f) => f.end_ms - f.start_ms >= MIN_CUE_MS);
+    if (free) push("[ambient sound]", free.start_ms, Math.min(free.end_ms, free.start_ms + CUE_MAX_MS));
+  }
+
+  // 3. music-only stretches
+  if (i.music) {
+    const blocked = [
+      ...taken(),
+      ...i.scenes.filter((s) => s.footage_sound || s.bed_muted).map((s) => ({ start_ms: s.start_ms, end_ms: s.end_ms })),
+    ];
+    for (const f of subtractSpans([{ start_ms: 0, end_ms: i.total_ms }], blocked)) {
+      if (f.end_ms - f.start_ms < MUSIC_CUE_MIN_GAP_MS) continue;
+      const afterSpeech = speech.some((w) => Math.abs(w.end_ms - f.start_ms) <= 1);
+      const start = f.start_ms + (afterSpeech ? CUE_SETTLE_MS : 0);
+      push("[music]", start, Math.min(f.end_ms, start + CUE_MAX_MS));
+    }
+  }
+  return cues.sort((a, b) => a.start_ms - b.start_ms);
 }
 
 // ------------------------------------------------------------------------------------ footage, scene audio, beat sync
@@ -1193,10 +1374,20 @@ export async function runQa(projectDir: string, opts: { quality?: Quality; now?:
 }
 
 /** Re-export dist/ from the latest (or given quality's) existing render; renders nothing. */
-export async function exportProject(projectDir: string, opts: { quality?: Quality; now?: () => Date; /** Sign the videos with C2PA content credentials (Phase 8; not implemented yet). */ sign?: boolean } = {}): Promise<{ quality: Quality; dist: DistFiles; qa_status?: string }> {
+export async function exportProject(
+  projectDir: string,
+  opts: {
+    quality?: Quality;
+    now?: () => Date;
+    /** Sign the exported videos (reel, clean master, every dist/<target>/video.mp4) with C2PA content credentials via the local c2patool. */
+    sign?: boolean;
+    /** c2patool lookup/runner overrides (tests). */
+    c2pa?: C2paDeps;
+  } = {},
+): Promise<{ quality: Quality; dist: DistFiles; qa_status?: string }> {
   const root = projectPaths(projectDir).root;
   const state = await loadState(root, opts.quality);
-  const dist = await exportFromState(root, state, opts.now ?? (() => new Date()));
+  const dist = await exportFromState(root, state, opts.now ?? (() => new Date()), { ...(opts.sign ? { sign: true } : {}), ...(opts.c2pa ? { c2pa: opts.c2pa } : {}) });
   return { quality: state.quality, dist, ...(state.qa ? { qa_status: state.qa.status } : {}) };
 }
 
@@ -1272,7 +1463,7 @@ export function socialCopyParts(spec: VideoSpec, brief?: CreativeBrief): { title
   return { title, lines: lines.slice(0, 3), hashtags: tags.slice(0, 7).map((t) => `#${t}`) };
 }
 
-async function exportFromState(root: string, state: RenderState, now: () => Date): Promise<DistFiles> {
+async function exportFromState(root: string, state: RenderState, now: () => Date, opts: { sign?: boolean; c2pa?: C2paDeps } = {}): Promise<DistFiles> {
   const paths = projectPaths(root);
   const distDir = paths.dist;
   await ensureDir(distDir);
@@ -1368,6 +1559,35 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
     allContracts.map((c) => c.id),
   );
 
+  // C2PA: sign the exported videos (after packaging, which copies/transcodes the unsigned reel;
+  // before hashing, so outputs and video.lock describe the signed files).
+  const exportWarnings: string[] = [];
+  let signed = new Set<string>();
+  let c2pa: C2paRecord | undefined;
+  let c2paSource: ReturnType<typeof classifySource> | undefined;
+  if (opts.sign) {
+    const facts: SourceFacts = {
+      voice_backend: state.voice.backend,
+      voice_has_audio: state.voice.has_audio,
+      scenes: state.scenes.map((s) => ({ renderer: s.renderer, placeholder: s.placeholder })),
+    };
+    const r = await signVideos({
+      root,
+      files: [out.reel, out.clean_master, ...out.targets.map((t) => t.video)],
+      title: spec.title?.trim() || socialCopyParts(spec, brief).title,
+      engineVersion: ENGINE_VERSION,
+      facts,
+      ...opts.c2pa,
+    });
+    exportWarnings.push(...r.warnings);
+    signed = new Set(r.signed);
+    c2pa = r.record;
+    if (c2pa) c2paSource = classifySource(facts);
+  }
+  const c2paFlag = (p: string) => (signed.has(p) ? { c2pa: true } : {});
+  if (c2pa) out.c2pa = c2pa;
+  if (exportWarnings.length) out.warnings = exportWarnings;
+
   // provenance: copy source/provenance.json and add what this render used
   let source: unknown = null;
   try {
@@ -1387,6 +1607,8 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
       ...(state.footage?.length ? { footage: state.footage.map((f) => ({ asset: f.asset, file: f.path, sha256: f.sha256, scenes: f.scenes })) } : {}),
       ...(state.sfx?.length ? { sfx: state.sfx.map((x) => ({ file: x.file, sha256: x.sha256, scenes: x.scenes, license: x.license ?? null })) } : {}),
       ...(state.timing_adjustments.length ? { timing_adjustments: state.timing_adjustments } : {}),
+      ...(state.sound_events ? { captions: { sound_events: state.sound_events } } : {}),
+      ...(c2pa && c2paSource ? { c2pa: { ...c2pa, digital_source_type: c2paSource.digital_source_type, reasons: c2paSource.reasons } } : {}),
       scenes: state.scenes.map((s) => ({
         scene_id: s.scene_id,
         claim_refs: s.claim_refs,
@@ -1402,8 +1624,8 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
   const sha = (p: string) => hashFile(p);
   const reelProbe = { width: state.target.width, height: state.target.height, duration_sec: state.duration_ms / 1000 };
   const outputs: RenderManifest["outputs"] = [
-    { kind: "final", path: rel(root, out.reel), sha256: await sha(out.reel), ...reelProbe },
-    { kind: "clean_master", path: rel(root, out.clean_master), sha256: await sha(out.clean_master), ...reelProbe },
+    { kind: "final", path: rel(root, out.reel), sha256: await sha(out.reel), ...reelProbe, ...c2paFlag(out.reel) },
+    { kind: "clean_master", path: rel(root, out.clean_master), sha256: await sha(out.clean_master), ...reelProbe, ...c2paFlag(out.clean_master) },
   ];
   if (out.captions_srt) outputs.push({ kind: "captions", path: rel(root, out.captions_srt), sha256: await sha(out.captions_srt) });
   if (out.captions_vtt) outputs.push({ kind: "captions", path: rel(root, out.captions_vtt), sha256: await sha(out.captions_vtt) });
@@ -1429,6 +1651,7 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
       height: t.height,
       duration_sec: state.duration_ms / 1000,
       ...(t.transcoded ? { transcoded: true } : {}),
+      ...c2paFlag(t.video),
     });
     if (t.cover) outputs.push({ kind: "thumbnail", target, path: rel(root, t.cover), sha256: await sha(t.cover) });
     for (const p of [t.captions_srt, t.captions_vtt]) if (p) outputs.push({ kind: "captions", target, path: rel(root, p), sha256: await sha(p) });
@@ -1491,6 +1714,7 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
             preset: state.caption_preset,
             burn_in: state.burn_in,
             ...(state.burn_in && state.caption_layout ? { box: state.caption_layout.box, max_lines: state.caption_layout.max_lines } : {}),
+            ...(state.sound_events ? { sound_events: state.sound_events } : {}),
             files: captionFiles,
           },
         }
@@ -1508,6 +1732,7 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
         }
       : {}),
     outputs,
+    ...(c2pa ? { c2pa } : {}),
     ...(state.qa ? { qa: { status: state.qa.status, checks: state.qa.checks, report_path: "qa/report.json" } } : {}),
     settings: {
       quality: state.quality,
@@ -1519,8 +1744,8 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
       renderer_reasons: state.renderer.reasons,
     },
     ...(state.timing_adjustments.length ? { timing_adjustments: state.timing_adjustments } : {}),
-    ...(state.warnings.length ? { warnings: state.warnings } : {}),
-    tool_versions: state.tool_versions,
+    ...(state.warnings.length || exportWarnings.length ? { warnings: [...state.warnings, ...exportWarnings] } : {}),
+    tool_versions: { ...state.tool_versions, ...(c2pa ? { c2patool: c2pa.tool.replace(/^c2patool\s+/, "") } : {}) },
   };
   // video.lock (before the manifest, which lists it)
   const lock = await lockFromState(root, state, projectId, outputs);
@@ -1559,7 +1784,8 @@ async function lockFromState(root: string, state: RenderState, projectId: string
     const brandFile = await loadBrand(root).catch(() => undefined);
     const styleId = state.style?.split("@")[0];
     const style = styleId ? await getStyle(findStylesDir(process.env), styleId).catch(() => undefined) : undefined;
-    const tokens = resolveTokens(brandFile?.brand, {}, style);
+    const language = await loadSpecLoose(root).then((r) => r.spec.language).catch(() => undefined);
+    const tokens = resolveTokens(brandFile?.brand, {}, style, language ? { language } : {});
     const captionFamily = brandFile?.brand.captions?.family ?? parseFontChain(tokens.font_body)[0];
     fonts = await lockFonts(fontRequests(tokens, captionFamily, state.burn_in), { fontsDir: findFontsDir(process.env) });
   }

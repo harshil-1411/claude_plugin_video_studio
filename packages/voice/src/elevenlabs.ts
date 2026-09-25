@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SceneVoiceTrack, WordTiming } from "@video-studio/schema";
 import { ensureDir } from "@video-studio/core";
+import { isCjkUnitChar, isNoStartChar } from "./estimate.js";
 import { defaultResolver, defaultRunner, type CommandRunner, type ToolResolver } from "./exec.js";
 import { concatToWav, probeDurationMs, type FfTools } from "./ffmpeg.js";
 import type { Availability, Env, SynthesisContext, SynthesisInput, VoiceBackend } from "./types.js";
@@ -64,11 +65,21 @@ export function alignmentToWords(alignment: CharacterAlignment, offsetMs = 0): W
     lastSpokenEnd = -1;
   };
 
+  // CJK has no spaces: each ideograph/kana is a word; small kana, ー and closing punctuation join it.
+  let cjkOpen = false;
   for (let i = 0; i < chars.length; i++) {
     const c = chars[i] ?? "";
     if (/^\s*$/u.test(c)) {
       flush();
+      cjkOpen = false;
       continue;
+    }
+    if (isCjkUnitChar(c) && !(cjkOpen && isNoStartChar(c))) {
+      flush();
+      cjkOpen = true;
+    } else if (cjkOpen && !isNoStartChar(c)) {
+      flush();
+      cjkOpen = false;
     }
     if (start < 0) start = starts[i] ?? 0;
     end = ends[i] ?? end;

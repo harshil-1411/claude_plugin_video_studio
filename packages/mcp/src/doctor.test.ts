@@ -6,6 +6,7 @@ import {
   formatDoctorReport,
   parseBuildconf,
   runDoctor,
+  textShapingCheck,
 } from "./doctor.js";
 
 const FULL_BUILDCONF = "configuration:\n    --prefix=/opt/homebrew\n    --enable-gpl\n    --enable-libass\n    --enable-libx264\n";
@@ -79,6 +80,21 @@ describe("doctor", () => {
     expect(byId(r, "ffmpeg_libass").fix).toBeDefined();
     expect(byId(r, "ffmpeg_libx264").status).toBe("ok");
     expect(r.overall).toBe("warn");
+  });
+
+  it("reports harfbuzz/fribidi for drawtext and how complex scripts are drawn", async () => {
+    const ok = textShapingCheck("--enable-libass --enable-libharfbuzz --enable-libfreetype");
+    expect(ok).toMatchObject({ id: "ffmpeg_text_shaping", status: "ok" });
+    expect(ok.detail).toMatch(/drawtext: harfbuzz yes, fribidi no; libass yes.*through libass/);
+    const bare = textShapingCheck("--enable-libharfbuzz --enable-libfreetype");
+    expect(bare.status).toBe("warn");
+    expect(bare.detail).toMatch(/join Arabic letters/);
+    expect(bare.fix).toMatch(/HyperFrames/);
+    expect(textShapingCheck("--enable-libfribidi").detail).toMatch(/fribidi yes/);
+    const r = await runDoctor(fakeDeps({ buildconf: "configuration:\n  --enable-gpl\n  --enable-libx264\n" }));
+    expect(byId(r, "ffmpeg_text_shaping").status).toBe("warn");
+    const skipped = await runDoctor(fakeDeps({ executables: ["/usr/bin/ffprobe"] }));
+    expect(byId(skipped, "ffmpeg_text_shaping").detail).toMatch(/skipped/);
   });
 
   it("honours FFMPEG_PATH and fails if it is not executable", async () => {

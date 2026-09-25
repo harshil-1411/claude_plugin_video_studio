@@ -35,6 +35,63 @@ export function parseSayVoices(output: string): SayVoice[] {
 
 export type SystemEngine = "say" | "espeak-ng";
 
+/**
+ * Preferred macOS `say` voices per language (primary subtag), best first. Any other installed
+ * voice whose locale matches the language is used after these.
+ */
+export const SAY_VOICES_BY_LANGUAGE: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  ja: ["Kyoko", "Otoya"],
+  zh: ["Tingting", "Meijia", "Sinji"],
+  ko: ["Yuna"],
+  hi: ["Lekha"],
+  ar: ["Majed", "Maged"],
+  he: ["Carmit"],
+  fr: ["Thomas", "Amélie", "Amelie"],
+  de: ["Anna"],
+  es: ["Mónica", "Monica", "Paulina"],
+  it: ["Alice"],
+  pt: ["Luciana", "Joana"],
+  ru: ["Milena"],
+});
+
+/** Primary language subtag, lower case (`ja-JP` → `ja`); undefined for none. */
+function baseLang(language: string | undefined): string | undefined {
+  return language?.trim().split(/[-_]/)[0]?.toLowerCase() || undefined;
+}
+
+/** True when a language needs a voice of its own (anything but English, which every engine defaults to). */
+function needsOwnVoice(language: string | undefined): boolean {
+  const base = baseLang(language);
+  return base !== undefined && base !== "en";
+}
+
+/**
+ * The `say` voice for a language: the requested voice when it speaks that language, else the
+ * preferred voice, else any installed voice with a matching locale; undefined when none exists.
+ */
+export function pickSayVoice(voices: readonly SayVoice[], language: string, requested?: string): string | undefined {
+  const base = baseLang(language)!;
+  const speaks = (v: SayVoice) => v.locale.toLowerCase().split(/[-_]/)[0] === base;
+  const byName = (n: string) => voices.find((v) => v.name === n && speaks(v));
+  if (requested && byName(requested)) return requested;
+  for (const n of SAY_VOICES_BY_LANGUAGE[base] ?? []) if (byName(n)) return n;
+  // Prefer a region matching the tag (zh-TW → zh_TW), then any voice of the language.
+  const region = language.split(/[-_]/)[1]?.toUpperCase();
+  return (region ? voices.find((v) => speaks(v) && v.locale.toUpperCase().endsWith(`_${region}`)) : undefined)?.name ?? voices.find(speaks)?.name;
+}
+
+/** Thrown when the system engine has no voice for the spec language (the caller falls back to silent). */
+export class NoVoiceForLanguageError extends Error {
+  constructor(
+    readonly language: string,
+    readonly engine: SystemEngine,
+    detail: string,
+  ) {
+    super(`${engine} has no voice for language "${language}"; not reading it with an English voice (${detail})`);
+    this.name = "NoVoiceForLanguageError";
+  }
+}
+
 export interface SystemBackendOptions {
   runner?: CommandRunner;
   resolver?: ToolResolver;
@@ -80,11 +137,17 @@ export function createSystemBackend(options: SystemBackendOptions = {}): Omit<Vo
     return voiceCache;
   };
 
-  const resolveVoice = async (requested: string | undefined, env: Env): Promise<string | undefined> => {
+  /**
+   * The voice to use. English (or no language): the requested voice, the configured one, or
+   * Samantha, else the system default. Other languages: a voice that speaks the language (see
+   * `pickSayVoice`; espeak-ng: the language code), or undefined when none is installed.
+   */
+  const resolveVoice = async (requested: string | undefined, env: Env, language?: string): Promise<string | undefined> => {
     const eng = engine(env);
-    if (eng === "espeak-ng") return requested ?? options.voice;
+    if (eng === "espeak-ng") return requested ?? options.voice ?? (needsOwnVoice(language) ? baseLang(language) : undefined);
     if (eng !== "say") return undefined;
     const voices = await listVoices(env);
+    if (needsOwnVoice(language)) return pickSayVoice(voices, language!, requested ?? options.voice);
     const has = (n: string) => voices.some((v) => v.name === n);
     for (const candidate of [requested, options.voice, DEFAULT_SAY_VOICE]) {
       if (candidate && has(candidate)) return candidate;
@@ -118,7 +181,15 @@ export function createSystemBackend(options: SystemBackendOptions = {}): Omit<Vo
     if (!eng || !ffmpeg || !ffprobe) throw new Error(`system voice backend unavailable: ${available(ctx.env).reason}`);
     const tools: FfTools = { ffmpeg, ffprobe, runner };
     const run = { signal: ctx.signal };
-    const voice = await resolveVoice(input.voice, ctx.env);
+    const voice = await resolveVoice(input.voice, ctx.env, input.language);
+    if (eng === "say" && needsOwnVoice(input.language) && !voice) {
+      const langs = [...new Set((await listVoices(ctx.env)).map((v) => v.locale.split(/[-_]/)[0]))].sort().join(", ");
+      throw new NoVoiceForLanguageError(
+        input.language!,
+        eng,
+        `installed voice languages: ${langs || "none listed"}; add one in System Settings > Accessibility > Spoken Content > System voice > Manage Voices, or use voice "silent"`,
+      );
+    }
     const words = tokenize(input.text);
 
     await ensureDir(ctx.outDir);

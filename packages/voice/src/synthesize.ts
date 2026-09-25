@@ -163,7 +163,7 @@ export async function synthesizeSpec(spec: VideoSpec, options: SynthesizeSpecOpt
         continue;
       }
 
-      const voice = await backend.resolveVoice?.(spec.voice.voice_id, env);
+      const voice = await backend.resolveVoice?.(spec.voice.voice_id, env, spec.language);
       const key = cacheKey({
         kind: "voice",
         inputDigest: sha256Hex(`${prepared.speech}\u0000${scene.voiceover}`),
@@ -192,7 +192,7 @@ export async function synthesizeSpec(spec: VideoSpec, options: SynthesizeSpecOpt
       }
 
       const raw = await backend.synthesize(
-        { scene_id: scene.id, text: prepared.speech, ...(voice ? { voice } : {}), duration_ms: durationMs },
+        { scene_id: scene.id, text: prepared.speech, ...(voice ? { voice } : {}), duration_ms: durationMs, language: spec.language },
         { outDir: work, env, ...(options.signal ? { signal: options.signal } : {}) },
       );
       const words = mapTimingsToCaptions(prepared, raw.words);

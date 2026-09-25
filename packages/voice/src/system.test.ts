@@ -3,20 +3,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { defaultResolver, defaultRunner, type CommandRunner, type ToolResolver } from "./exec.js";
-import { createSystemBackend, parseSayVoices } from "./system.js";
+import { NoVoiceForLanguageError, createSystemBackend, parseSayVoices, pickSayVoice } from "./system.js";
 
 const SAY_VOICES = [
   "Albert              en_US    # Hello! My name is Albert.",
   "Eddy (English (US)) en_US    # Hello! My name is Eddy.",
   "Samantha            en_US    # Hello! My name is Samantha.",
   "Grandpa (Chinese (China mainland)) zh_CN    # 你好！我叫Grandpa。",
+  "Kyoko               ja_JP    # こんにちは、私の名前はKyokoです。",
   "",
 ].join("\n");
 
 describe("parseSayVoices", () => {
   it("parses names with spaces and parentheses", () => {
     const v = parseSayVoices(SAY_VOICES);
-    expect(v.map((x) => x.name)).toEqual(["Albert", "Eddy (English (US))", "Samantha", "Grandpa (Chinese (China mainland))"]);
+    expect(v.map((x) => x.name)).toEqual(["Albert", "Eddy (English (US))", "Samantha", "Grandpa (Chinese (China mainland))", "Kyoko"]);
     expect(v[3]!.locale).toBe("zh_CN");
     expect(v[0]!.sample).toBe("Hello! My name is Albert.");
   });
@@ -78,6 +79,41 @@ describe("system backend (mocked commands)", () => {
     expect(await b.resolveVoice!("NoSuchVoice", {})).toBe("Samantha");
     expect(await b.resolveVoice!(undefined, {})).toBe("Samantha");
     expect(calls.filter((c) => c.args[1] === "?")).toHaveLength(1); // voice list cached
+  });
+
+  it("picks a voice that speaks the spec language (ja → Kyoko), never an English one", async () => {
+    const calls: Call[] = [];
+    const b = createSystemBackend({ platform: "darwin", resolver: allTools, runner: fakeRunner(calls) });
+    expect(await b.resolveVoice!(undefined, {}, "ja")).toBe("Kyoko");
+    expect(await b.resolveVoice!(undefined, {}, "ja-JP")).toBe("Kyoko");
+    expect(await b.resolveVoice!("Albert", {}, "ja")).toBe("Kyoko"); // Albert does not speak Japanese
+    expect(await b.resolveVoice!(undefined, {}, "zh-CN")).toBe("Grandpa (Chinese (China mainland))");
+    expect(await b.resolveVoice!(undefined, {}, "en-GB")).toBe("Samantha");
+    expect(await b.resolveVoice!(undefined, {}, "hi")).toBeUndefined();
+    const voices = parseSayVoices(SAY_VOICES);
+    expect(pickSayVoice(voices, "ja", "Kyoko")).toBe("Kyoko");
+    expect(pickSayVoice([...voices, { name: "Lekha", locale: "hi_IN", sample: "" }], "hi-IN")).toBe("Lekha");
+  });
+
+  it("synthesizes Japanese with Kyoko and per-character words; Hindi without a voice fails with a clear reason", async () => {
+    const calls: Call[] = [];
+    const b = createSystemBackend({ platform: "darwin", resolver: allTools, runner: fakeRunner(calls), trimSilence: false });
+    const track = await b.synthesize({ scene_id: "s01", text: "意味で検索します。", language: "ja" }, { outDir: dir, env: {} });
+    expect(track.voice).toBe("Kyoko");
+    expect(track.words.map((w) => w.word)).toEqual(["意", "味", "で", "検", "索", "し", "ま", "す。"]);
+    const sayCall = calls.find((c) => c.cmd.endsWith("say") && c.args.includes("-o"))!;
+    expect(sayCall.args).toEqual(expect.arrayContaining(["-v", "Kyoko"]));
+    const err = await b.synthesize({ scene_id: "s02", text: "नमस्ते दुनिया", language: "hi" }, { outDir: dir, env: {} }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NoVoiceForLanguageError);
+    expect(String(err)).toMatch(/no voice for language "hi".*not reading it with an English voice.*installed voice languages: en, ja, zh/);
+    expect(calls.filter((c) => c.cmd.endsWith("say") && c.args.includes("-o"))).toHaveLength(1); // nothing spoken for hi
+  });
+
+  it("uses the language code as the espeak-ng voice", async () => {
+    const calls: Call[] = [];
+    const b = createSystemBackend({ platform: "linux", resolver: allTools, runner: fakeRunner(calls, "0.8"), trimSilence: false });
+    await b.synthesize({ scene_id: "s01", text: "नमस्ते", language: "hi-IN" }, { outDir: dir, env: {} });
+    expect(calls.find((c) => c.cmd.endsWith("espeak-ng"))!.args).toEqual(expect.arrayContaining(["-v", "hi"]));
   });
 
   it("falls back to the system default when Samantha is missing", async () => {

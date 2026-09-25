@@ -16,6 +16,7 @@ import {
   resolveTargets,
   voiceMode,
 } from "@video-studio/schema";
+import { type Script, dominantScript, languageScript, scriptsIn } from "@video-studio/renderer";
 import { projectSpecPaths } from "./spec-validate.js";
 
 /**
@@ -35,6 +36,18 @@ export const MAX_WORDS_PER_SEC = 3.3;
  */
 export const MAX_ONSCREEN_WORDS_PER_SEC = 3;
 export const ONSCREEN_SETTLE_SEC = 1;
+/**
+ * Reading limits for other scripts (design rules). CJK is counted in characters: about 9
+ * characters/s is the comfortable caption reading limit for Japanese and Chinese (narration runs
+ * 7–8 characters/s), 8 characters/s for silent on-screen text. Devanagari, Arabic and Hebrew are
+ * counted in words, a little below the Latin limit (Hindi words carry more syllables; Arabic
+ * words fold in articles and prepositions).
+ */
+export const MAX_CJK_CHARS_PER_SEC = 9;
+export const MAX_ONSCREEN_CJK_CHARS_PER_SEC = 8;
+export const MAX_WORDS_PER_SEC_BY_SCRIPT: Readonly<Partial<Record<Script, number>>> = Object.freeze({ devanagari: 3, arabic: 2.8, hebrew: 3, hangul: 3, other: 3 });
+/** CJK cover headlines: full-width characters are about twice as wide as Latin letters. */
+export const COVER_HEADLINE_MAX_CJK_CHARS = 16;
 /** WCAG 2.x contrast minimums (AA): normal text and large text. */
 export const CONTRAST_NORMAL = 4.5;
 export const CONTRAST_LARGE = 3;
@@ -376,9 +389,50 @@ function checkContrast(boxes: Array<{ scene_id: string; box: TextBox }>, H: numb
   }
 }
 
+/** The script a scene's text is read in: its dominant script, else the spec language's. */
+function readingScript(text: string, language: string | undefined): Script {
+  return scriptsIn(text).length ? dominantScript(text) : (languageScript(language) ?? "latin");
+}
+
+/** CJK characters (ideographs, kana, full-width letters/digits) plus other letters and digits; punctuation and spaces do not count. */
+const cjkCharCount = (s: string) => Array.from(s).filter((ch) => /[\p{L}\p{N}]/u.test(ch)).length;
+
+/** Reading density for a non-Latin scene; returns true when handled (Latin scenes keep the word rule below). */
+function checkScriptDensity(s: VideoSpec["scenes"][number], text: string, script: Script, onScreen: boolean, out: LintFinding[]): boolean {
+  if (script === "latin") return false;
+  const cjk = script === "cjk";
+  const count = cjk ? cjkCharCount(text) : wordCount(text);
+  const unit = cjk ? "characters" : "words";
+  const limit = cjk ? (onScreen ? MAX_ONSCREEN_CJK_CHARS_PER_SEC : MAX_CJK_CHARS_PER_SEC) : (MAX_WORDS_PER_SEC_BY_SCRIPT[script] ?? MAX_WORDS_PER_SEC) * (onScreen ? MAX_ONSCREEN_WORDS_PER_SEC / MAX_WORDS_PER_SEC : 1);
+  const lim = round2(limit);
+  if (onScreen) {
+    const readable = Math.max(0, s.duration_sec - ONSCREEN_SETTLE_SEC) * limit;
+    if (count <= Math.max(cjk ? 8 : 3, readable)) return true;
+    out.push({
+      id: "reading_density",
+      severity: "warning",
+      scene_id: s.id,
+      message: `${count} on-screen ${unit} (${script}) in ${s.duration_sec}s; without narration viewers read at most about ${lim} ${unit}/s after a ${ONSCREEN_SETTLE_SEC}s settle (${Math.floor(readable)} ${unit})`,
+      fix: `cut scene ${s.id}'s on-screen text to at most ${Math.max(cjk ? 8 : 3, Math.floor(readable))} ${unit}, or raise duration_sec to at least ${Math.ceil((count / limit + ONSCREEN_SETTLE_SEC) * 10) / 10}`,
+    });
+    return true;
+  }
+  const rate = count / s.duration_sec;
+  if (rate <= limit) return true;
+  out.push({
+    id: "reading_density",
+    severity: "warning",
+    scene_id: s.id,
+    message: `${count} voiceover ${unit} (${script}) in ${s.duration_sec}s is ${round2(rate)} ${unit}/s; captions above ${lim} ${unit}/s are hard to read`,
+    fix: `cut scene ${s.id}'s voiceover to at most ${Math.floor(limit * s.duration_sec)} ${unit}, or raise duration_sec to at least ${Math.ceil((count / limit) * 10) / 10}`,
+  });
+  return true;
+}
+
 function checkDensity(spec: VideoSpec, out: LintFinding[]): void {
   if (voiceMode(spec) === "none") return checkOnScreenDensity(spec, out);
   for (const s of spec.scenes) {
+    if (checkScriptDensity(s, s.voiceover, readingScript(s.voiceover, spec.language), false, out)) continue;
     const words = wordCount(s.voiceover);
     const wps = words / s.duration_sec;
     if (wps <= MAX_WORDS_PER_SEC) continue;
@@ -397,6 +451,7 @@ function checkDensity(spec: VideoSpec, out: LintFinding[]): void {
 function checkOnScreenDensity(spec: VideoSpec, out: LintFinding[]): void {
   for (const s of spec.scenes) {
     const text = [s.on_screen_text ?? "", s.deterministic ? propsText(s.deterministic.props) : ""].join(" ");
+    if (checkScriptDensity(s, text, readingScript(text, spec.language), true, out)) continue;
     const words = wordCount(text);
     const readable = Math.max(0, s.duration_sec - ONSCREEN_SETTLE_SEC) * MAX_ONSCREEN_WORDS_PER_SEC;
     if (words <= Math.max(3, readable)) continue;
@@ -466,7 +521,17 @@ function checkCover(spec: VideoSpec, contracts: readonly PlatformContract[], ren
     return;
   }
   const words = wordCount(spec.cover.headline);
-  if (words > COVER_HEADLINE_MAX_WORDS || spec.cover.headline.length > COVER_HEADLINE_MAX_CHARS) {
+  if (readingScript(spec.cover.headline, spec.language) === "cjk") {
+    const chars = cjkCharCount(spec.cover.headline);
+    if (chars > COVER_HEADLINE_MAX_CJK_CHARS) {
+      out.push({
+        id: "cover_headline",
+        severity: "warning",
+        message: `cover headline "${snippet(spec.cover.headline)}" has ${chars} characters; CJK covers read best at ≤ ${COVER_HEADLINE_MAX_CJK_CHARS} characters`,
+        fix: `shorten cover.headline to at most ${COVER_HEADLINE_MAX_CJK_CHARS} characters`,
+      });
+    }
+  } else if (words > COVER_HEADLINE_MAX_WORDS || spec.cover.headline.length > COVER_HEADLINE_MAX_CHARS) {
     out.push({
       id: "cover_headline",
       severity: "warning",

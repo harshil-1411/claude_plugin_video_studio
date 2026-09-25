@@ -7,7 +7,7 @@ import { ffprobe, runFfmpeg, runProcess, getTools } from "@video-studio/media";
 import type { DeterministicKind, Scene } from "@video-studio/schema";
 import { DETERMINISTIC_PROPS_EXAMPLES } from "@video-studio/schema";
 import { layoutZones } from "@video-studio/platforms";
-import { buildFilterGraph, composeScene, createFfmpegRenderer, easingExpr, ffColor, frameCount, kineticChunks, motionTiming } from "./ffmpeg-renderer.js";
+import { type AssFont, type AssTextFonts, assFontRuns, buildFilterGraph, composeScene, createFfmpegRenderer, easingExpr, ffColor, frameCount, kineticChunks, motionTiming, textRoute } from "./ffmpeg-renderer.js";
 import { findStylesDir, getStyle } from "./styles.js";
 import { applyTextCase } from "./text-layout.js";
 import { createFontResolver, resolveTokens, targetForAspect } from "./tokens.js";
@@ -407,5 +407,95 @@ describe("style tokens", () => {
     const bg = [0x16, 0x0b, 0x33];
     for (let i = 0; i < buf.length; i += 3) for (let k = 0; k < 3; k++) maxDiff = Math.max(maxDiff, Math.abs(buf[i + k]! - bg[k]!));
     expect(maxDiff).toBeLessThanOrEqual(24);
+  }, T);
+});
+
+describe("scripts (CJK, Devanagari, Arabic)", () => {
+  const FONTS = { heading: "/f/h.ttf", body: "/f/b.ttf", mono: "/f/m.ttf" };
+  const assFont = (family: string, scale = 1.2): AssFont => ({ family, bold: true, scale, winAscent: 1, ascent: 0.9 });
+  const ASS: AssTextFonts = {
+    fontsDir: "/tmp/fonts",
+    latin: { heading: assFont("Inter"), body: assFont("Inter"), mono: assFont("JetBrains Mono") },
+    scripts: { arabic: { heading: assFont("Noto Sans Arabic", 2.169), body: assFont("Noto Sans Arabic", 2.169), mono: assFont("Noto Sans Arabic", 2.169) } },
+  };
+
+  it("routes lines: shaping scripts through libass, CJK through drawtext with a script font", () => {
+    expect(textRoute("Vector databases")).toEqual({ kind: "drawtext" });
+    expect(textRoute("ベクトルデータベース")).toEqual({ kind: "drawtext", script: "cjk" });
+    expect(textRoute("Whisperは音声")).toEqual({ kind: "drawtext", script: "cjk" });
+    expect(textRoute("नमस्ते API")).toEqual({ kind: "ass", script: "devanagari" });
+    expect(textRoute("مرحبا Whisper")).toEqual({ kind: "ass", script: "arabic" });
+  });
+
+  it("splits libass lines into Latin and script font runs", () => {
+    expect(assFontRuns("نموذج Whisper لعام 2022", "arabic")).toEqual([
+      { latin: false, text: "نموذج " },
+      { latin: true, text: "Whisper " },
+      { latin: false, text: "لعام 2022" },
+    ]);
+    expect(assFontRuns("मॉडल (API) है।", "devanagari")).toEqual([
+      { latin: false, text: "मॉडल (" },
+      { latin: true, text: "API" },
+      { latin: false, text: ") है।" },
+    ]);
+  });
+
+  it("draws Arabic through an ass filter (right-aligned when the style aligns left) and CJK with the script font", () => {
+    const t = { ...tokens, text_align: "left" as const };
+    const ar = composeScene(scene("typography", { lines: ["قواعد البيانات المتجهة"] }), target, t);
+    const line = ar.elements.find((e) => e.type === "text")!;
+    expect(line.type === "text" && line.rx).toBeGreaterThan(target.width / 2);
+    const built = buildFilterGraph(ar, target, 1, { ...FONTS, ass: ASS }, "/tmp/x", {});
+    expect(built.filtergraph).toContain("ass=filename=/tmp/x/a0.ass:fontsdir=/tmp/fonts");
+    expect(built.filtergraph).not.toContain("drawtext");
+    const script = built.textFiles.get("a0.ass")!;
+    expect(script).toContain("PlayResX: 180");
+    expect(script).toMatch(/Style: Text,.*,-1$/m); // Encoding -1: libass picks the base direction
+    expect(script).toContain("\\an9");
+    expect(script).toContain("\\fnNoto Sans Arabic");
+    expect(built.warnings).toEqual([]);
+
+    const ja = composeScene(scene("typography", { lines: ["意味で検索します"] }), target, tokens);
+    const jb = buildFilterGraph(ja, target, 1, { ...FONTS, scripts: { cjk: { heading: "/f/jp-bold.otf" } } }, "/tmp/x", {});
+    expect(jb.filtergraph).toContain("fontfile=/f/jp-bold.otf");
+    expect(jb.filtergraph).not.toContain("ass=");
+  });
+
+  it("warns when a shaping script has no libass to draw it", () => {
+    const ar = composeScene(scene("typography", { lines: ["نموذج Whisper"] }), target, tokens);
+    const built = buildFilterGraph(ar, target, 1, FONTS, "/tmp/x", {});
+    expect(built.filtergraph).toContain("drawtext");
+    expect(built.warnings.join()).toMatch(/right-to-left mixed with left-to-right runs.*FriBidi.*HyperFrames/);
+  });
+
+  it("places RTL kinetic words from the right edge in reading order", () => {
+    const c = composeScene(scene("kinetic_text", { text: "نموذج التعرف", rhythm: "word" }), target, tokens);
+    const words = c.elements.filter((e) => e.type === "text");
+    expect(words.map((w) => w.type === "text" && w.text)).toEqual(["نموذج", "التعرف"]);
+    const [a, b] = words as Array<{ x: number; y: number; rx?: number }>;
+    if (a!.y === b!.y) expect(a!.x).toBeGreaterThan(b!.x);
+    expect(a!.rx).toBeDefined();
+  });
+
+  const SCRIPT_SCENES = {
+    ja: { lang: "ja", lines: ["ベクトルデータベースは、意味で検索します。", "Whisperは音声認識モデルです（2022年）"] },
+    hi: { lang: "hi", lines: ["वेक्टर डेटाबेस अर्थ से खोजते हैं", "क्षत्रिय और Whisper मॉडल"] },
+    ar: { lang: "ar", lines: ["قواعد البيانات المتجهة تبحث بالمعنى", "نموذج Whisper لعام 2022"] },
+  } as const;
+  const big = targetForAspect("9:16", { shortSide: 360, fps: 15 });
+  it.each(Object.entries(SCRIPT_SCENES))("renders a %s typography scene at 360x640 without warnings", async (name, c) => {
+    const out = join(dir, `script-${name}.mp4`);
+    const t = resolveTokens(undefined, {}, undefined, { language: c.lang });
+    const res = await renderer.render({ scene: scene("typography", { lines: [...c.lines] }), target: big, tokens: t, out_path: out, project_dir: dir });
+    expect(res.warnings).toEqual([]);
+    const p = await ffprobe(out);
+    expect([p.width, p.height]).toEqual([360, 640]);
+    const frame = join(process.env.VS_TEST_FRAMES_DIR ?? dir, `script-${name}.png`);
+    await runFfmpeg(["-y", "-sseof", "-0.1", "-i", out, "-frames:v", "1", frame]);
+    // Text was drawn: the last frame is not a flat background.
+    const raw = join(dir, `script-${name}.gray`);
+    await runFfmpeg(["-y", "-i", frame, "-f", "rawvideo", "-pix_fmt", "gray", raw]);
+    const buf = await readFile(raw);
+    expect(buf.filter((v) => v > 128).length).toBeGreaterThan(2000);
   }, T);
 });

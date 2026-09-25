@@ -65,6 +65,7 @@ export const CaptionsRender = z.strictObject({
   burn_in: z.boolean(),
   box: PxBox.optional().describe("Region the burned-in captions occupy, in output pixels, for lint."),
   max_lines: z.int().positive().optional(),
+  sound_events: z.int().nonnegative().optional().describe("Sound-event cues ([music], sfx captions, [ambient sound]) in the captions."),
   files: z.array(
     z.strictObject({
       format: CaptionFormat,

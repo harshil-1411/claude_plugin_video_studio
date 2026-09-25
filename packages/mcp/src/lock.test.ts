@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { findFontsDir } from "@video-studio/renderer";
+import { findFontsDir, resolveTokens } from "@video-studio/renderer";
 import type { VideoLock } from "@video-studio/schema";
 import { buildLock, diffLocks, formatLockChanges, listFiles, lockAssets, lockFonts, readLock, serializeLock } from "./lock.js";
 
@@ -243,5 +243,19 @@ describe("lock files and inputs", () => {
     const host = await lockFonts([{ chain: "Brand Sans, sans-serif", weight: 400 }], { fontsDir, resolver: async () => hostFile });
     expect(host).toEqual([{ family: "Brand Sans", weight: 400, file: "host/Host.ttf", sha256: expect.stringMatching(/^[a-f0-9]{64}$/) }]);
     expect(await lockFonts([{ chain: "Nope", weight: 400 }], { fontsDir, resolver: async () => Promise.reject(new Error("none")) })).toEqual([]);
+  });
+
+  it("lockFonts: a chain naming a bundled script family also locks that family's file", async () => {
+    const fontsDir = findFontsDir({});
+    const ja = resolveTokens(undefined, {}, undefined, { language: "ja" });
+    const fonts = await lockFonts([{ chain: ja.font_heading, weight: 700 }], { fontsDir });
+    expect(fonts).toEqual([
+      { family: "Inter", weight: 700, file: "fonts/Inter/Inter-Bold.ttf", sha256: "288316099b1e0a47a4716d159098005eef7c0066921f34e3200393dbdb01947f" },
+      { family: "Noto Sans JP", weight: 700, file: "fonts/NotoSansJP/NotoSansJP-Bold.otf", sha256: "1b0edfb500b73a4fa8a4fcaae1bbbd403994e08e73e3e0da37e70d3853f42c5f" },
+    ]);
+    const hi = await lockFonts([{ chain: resolveTokens(undefined, {}, undefined, { language: "hi" }).font_body, weight: 400 }], { fontsDir });
+    expect(hi.map((f) => f.file)).toContain("fonts/NotoSansDevanagari/NotoSansDevanagari-Regular.ttf");
+    const en = await lockFonts([{ chain: resolveTokens().font_body, weight: 400 }], { fontsDir });
+    expect(en.map((f) => f.family)).toEqual(["Inter"]);
   });
 });

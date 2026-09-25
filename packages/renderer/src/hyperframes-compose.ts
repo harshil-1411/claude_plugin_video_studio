@@ -1,9 +1,10 @@
 import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DeterministicKind, TextBox, TextRole } from "@video-studio/schema";
+import { type DeterministicKind, type TextBox, type TextRole, propsText } from "@video-studio/schema";
 import { codeLabel, escapeHtml, highlightLines, languageFamily } from "./hyperframes-highlight.js";
-import { applyTextCase, safeArea, wrapText } from "./text-layout.js";
-import { fontFaceCss } from "./tokens.js";
+import { type Script, baseDirection, dominantScript, htmlLang, languageScript, scriptsIn } from "./script.js";
+import { applyTextCase, estimateTextWidth, isComplexText, lineUnits, safeArea, wrapText } from "./text-layout.js";
+import { BUNDLED_FONTS, fontFaceCss, withScriptFonts } from "./tokens.js";
 import type { MotionTokens, SceneRenderRequest, VisualTokens } from "./types.js";
 
 /**
@@ -211,11 +212,31 @@ interface FontFit {
  * estimated from an average advance of `em` × size per character.
  */
 function fitFontInfo(texts: readonly string[], boxW: number, boxH: number, maxFs: number, minFs: number, lineHeight = 1.2, em = 0.56): FontFit {
+  if (texts.some((t) => isComplexText(t))) return fitFontInfoScript(texts, boxW, boxH, maxFs, minFs, lineHeight, em);
   const longestWord = Math.max(0, ...texts.flatMap((t) => t.split(/\s+/).map((w) => Array.from(w).length)));
   const ok = (size: number) => {
     const perLine = Math.max(1, Math.floor(boxW / (size * em)));
     const lines = texts.reduce((acc, t) => acc + Math.max(1, Math.ceil(Array.from(t).length / perLine)), 0);
     return lines * size * lineHeight <= boxH && longestWord <= perLine;
+  };
+  let fs = maxFs;
+  for (let guard = 0; guard < 60 && fs > minFs; guard++) {
+    if (ok(fs)) break;
+    fs *= 0.92;
+  }
+  const size = Math.max(minFs, Math.round(fs * 100) / 100);
+  return { fs: size, fits: ok(size) };
+}
+
+/**
+ * fitFontInfo for CJK, Devanagari, Arabic, …: script-aware width estimates, CJK broken between
+ * characters (kinsoku), and every unit (word, or CJK character) must fit a line.
+ */
+function fitFontInfoScript(texts: readonly string[], boxW: number, boxH: number, maxFs: number, minFs: number, lineHeight: number, em: number): FontFit {
+  const units = texts.flatMap((t) => lineUnits(t));
+  const ok = (size: number) => {
+    const lines = texts.reduce((acc, t) => acc + Math.max(1, wrapText(t, size, boxW, { em }).length), 0);
+    return lines * size * lineHeight <= boxH && units.every((u) => estimateTextWidth(u, size, { em }) <= boxW + 0.01);
   };
   let fs = maxFs;
   for (let guard = 0; guard < 60 && fs > minFs; guard++) {
@@ -1347,6 +1368,37 @@ function lookCss(look: Look): string {
   return rules.length ? `\n/* style pack */\n${rules.join("\n")}` : "";
 }
 
+/**
+ * Families that get a `local()` @font-face: all but the bundled script families already served
+ * from files (a failing later `local()` rule would shadow the bundled face).
+ */
+function localFaceNames(names: readonly string[], bundledFaces: string): string[] {
+  const script = new Set(BUNDLED_FONTS.filter((f) => f.script).map((f) => f.family));
+  return names.filter((n) => !(script.has(n) && bundledFaces.includes(`font-family: "${n}"`)));
+}
+
+/**
+ * Script rules, only for scenes with non-Latin text: strict kinsoku for CJK, and for RTL pages a
+ * left-to-right layout (so the geometry, text boxes and zones stay those of the LTR layout) in
+ * which every text block takes its own paragraph direction (`unicode-bidi: plaintext`); a
+ * left-aligned style aligns RTL paragraphs to their start (the right). Code stays LTR.
+ */
+function scriptCss(scripts: readonly Script[], rtl: boolean, look: Look): string {
+  const rules: string[] = [];
+  if (scripts.includes("cjk")) rules.push("#vs-root { line-break: strict; word-break: normal; }");
+  if (rtl) {
+    rules.push(
+      "#vs-root { direction: ltr; }",
+      "#vs-root div, #vs-root span, #vs-root p, #vs-root li, #vs-root text { unicode-bidi: plaintext; }",
+      ".vs-code, .vs-command, .vs-code * { direction: ltr; unicode-bidi: isolate; }",
+    );
+    if (look.text_align === "left") {
+      rules.push(".vs-typography, .vs-kinetic, .vs-quote, .vs-verdict, .vs-cta, .vs-end, .vs-lt-headline, .vs-map-title { text-align: start; }");
+    }
+  }
+  return rules.length ? `\n/* scripts: ${scripts.join(", ")} */\n${rules.join("\n")}` : "";
+}
+
 function stylesheet(stage: Stage, tokens: Record<keyof typeof FALLBACK_TOKENS, string>, fontNames: string[], bundledFaces = "", look: Look = {}): string {
   const { W, H, u, safe } = stage;
   const easing = look.motion ? EASING_CSS[look.motion.easing] : EASING_CSS.ease_out;
@@ -1635,7 +1687,24 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
 
   const safe = safeArea({ width: W, height: H, aspect_ratio: target.aspect_ratio }, req.zones);
   const stage: Stage = { W, H, u: Math.min(W, H) / 100, safe, portrait: H > W, dur };
-  const tok = resolveTokens(req.tokens, warnings);
+  // Scripts on screen (and the spec language's): their Noto families join every font chain, the
+  // page gets `lang`, and right-to-left text gets `dir="rtl"`. Latin-only scenes are unchanged.
+  const sceneText = propsText(det.props ?? {});
+  const lang = req.tokens.language;
+  const langScript = languageScript(lang);
+  const scripts: Script[] = [...new Set([...(langScript && langScript !== "latin" ? [langScript] : []), ...scriptsIn(sceneText).filter((s) => s !== "latin")])];
+  const scriptTokens: VisualTokens = scripts.length
+    ? {
+        ...req.tokens,
+        font_heading: withScriptFonts(req.tokens.font_heading ?? "", scripts, lang),
+        font_body: withScriptFonts(req.tokens.font_body ?? "", scripts, lang),
+        font_mono: withScriptFonts(req.tokens.font_mono ?? "", scripts, lang),
+      }
+    : req.tokens;
+  const mainScript = scriptsIn(sceneText).length ? dominantScript(sceneText) : (langScript ?? "latin");
+  const pageLang = scripts.length ? (htmlLang(lang, mainScript) ?? "en") : "en";
+  const rtl = scripts.length > 0 && baseDirection(sceneText, lang) === "rtl";
+  const tok = resolveTokens(scriptTokens, warnings);
   const v = tok.values;
   const colors = { bg: v.color_background, text: v.color_text, primary: v.color_primary, secondary: v.color_secondary, panel: mixHex(v.color_background, v.color_text, 0.07) };
   const boxes: TextBox[] = [];
@@ -1669,7 +1738,7 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
   };
   // Bundled font files are copied next to the composition and referenced relatively, so the
   // page loads nothing from outside its directory and the HTML does not embed host paths.
-  const bundledFaces = fontFaceCss(req.tokens).replace(/url\("(file:[^"]+)"\)/g, (_m, href: string) => {
+  const bundledFaces = fontFaceCss(scriptTokens).replace(/url\("(file:[^"]+)"\)/g, (_m, href: string) => {
     const src = fileURLToPath(href);
     const dest = `assets/fonts/${basename(src).replace(/[^A-Za-z0-9._-]/g, "_")}`;
     if (!assets.some((a) => a.dest === dest)) assets.push({ src, dest });
@@ -1678,13 +1747,13 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
   const compositionId = compositionIdFor(scene.id);
   const d = fmtSec(dur);
   const html = `<!doctype html>
-<html lang="en">
+<html lang="${esc(pageLang)}"${rtl ? ' dir="rtl"' : ""}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=${W}, height=${H}">
 <title>${esc(`${scene.id} ${det.kind}`)}</title>
 <style>
-${stylesheet(stage, tok.values, tok.fontNames, bundledFaces, look)}
+${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}
 </style>
 </head>
 <body>

@@ -162,3 +162,24 @@ describe("synthesizeSpec", () => {
     expect(res.reason).toMatch(/say not found.*silent/);
   });
 });
+
+describe("synthesizeSpec language", () => {
+  it("passes the spec language to voice resolution and synthesis", async () => {
+    const seen: Array<string | undefined> = [];
+    const { backend } = fakeBackend("system", { ok: true });
+    const withLang: VoiceBackend = {
+      ...backend,
+      resolveVoice: async (v, _env, language) => (seen.push(`resolve:${language}`), v ?? "fake-voice"),
+      synthesize: async (input, ctx) => (seen.push(`synth:${input.language}`), backend.synthesize(input, ctx)),
+    };
+    const project = await mkdtemp(join(tmpdir(), "vs-voice-lang-"));
+    try {
+      const s = { ...spec([{ id: "s01", duration_sec: 3, voiceover: "意味で検索します。" }]), language: "ja" };
+      const res = await synthesizeSpec(s, { projectDir: project, backend: "system", cacheDir: join(project, "cache"), backends: { ...set({ eleven: false, system: true }), system: withLang }, env: {} });
+      expect(seen).toEqual(["resolve:ja", "synth:ja"]);
+      expect(res.tracks[0]!.words.map((w) => w.word)).toEqual(["意", "味", "で", "検", "索", "し", "ま", "す。"]);
+    } finally {
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+});

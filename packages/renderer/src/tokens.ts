@@ -1,9 +1,10 @@
-import { constants, existsSync } from "node:fs";
-import { access } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { constants, existsSync, openSync, readSync, closeSync } from "node:fs";
+import { access, mkdir, readlink, symlink, unlink } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runProcess } from "@video-studio/media";
 import type { AspectRatio, Brand, Style } from "@video-studio/schema";
+import { type Script, languageScript, scriptFontFamilies } from "./script.js";
 import type { MotionTokens, RenderTarget, VisualTokens } from "./types.js";
 
 /**
@@ -94,7 +95,49 @@ export const PERSONALITY_MOTION: Readonly<Record<MotionTokens["personality"], Om
  * `logo_path` is the brand's logo path as written (project-relative); renderers resolve it.
  * Without a style and without brand weights or motion, the tokens are exactly the v1 tokens.
  */
-export function resolveTokens(brand?: Brand, defaults: Partial<VisualTokens> = {}, style?: Style): VisualTokens {
+export function resolveTokens(brand?: Brand, defaults: Partial<VisualTokens> = {}, style?: Style, opts: { language?: string } = {}): VisualTokens {
+  const out = resolveTokensBase(brand, defaults, style);
+  return opts.language ? withLanguage(out, opts.language) : out;
+}
+
+/**
+ * Tokens for a spec language: when the language is written in a non-Latin script (ja, hi, ar, …)
+ * the script's font families (Noto Sans JP / Devanagari / Arabic first) are added to every chain
+ * before its generic family, and `language` is recorded. Latin-script languages (en, fr, …)
+ * return the tokens unchanged, so English renders and their cache keys do not move.
+ */
+export function withLanguage(tokens: VisualTokens, language: string): VisualTokens {
+  const script = languageScript(language);
+  if (!script || script === "latin") return tokens;
+  return {
+    ...tokens,
+    language,
+    font_heading: withScriptFonts(tokens.font_heading, [script], language),
+    font_body: withScriptFonts(tokens.font_body, [script], language),
+    font_mono: withScriptFonts(tokens.font_mono, [script], language),
+  };
+}
+
+/** Add the families covering `scripts` to a chain, before its generic family (skipping families already there). */
+export function withScriptFonts(chain: string, scripts: readonly Script[], language?: string): string {
+  return withFallbacks(chain, scripts.flatMap((s) => scriptFontFamilies(s, language)));
+}
+
+/**
+ * A chain for drawing one line of `script` text with a single font file (FFmpeg drawtext has no
+ * per-glyph fallback): the script's families first, then the original chain. Latin: unchanged.
+ */
+export function scriptFirstChain(chain: string, script: Script, language?: string): string {
+  const fams = scriptFontFamilies(script, language);
+  if (fams.length === 0) return chain;
+  const rest = chain
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p && !fams.some((f) => f.toLowerCase() === p.replace(/^["']|["']$/g, "").toLowerCase()));
+  return [...fams.map((f) => (/\s/.test(f) ? `"${f}"` : f)), ...rest].join(", ");
+}
+
+function resolveTokensBase(brand?: Brand, defaults: Partial<VisualTokens> = {}, style?: Style): VisualTokens {
   const base: VisualTokens = { ...DEFAULT_TOKENS, ...defaults };
   if (style) {
     base.style = `${style.id}@${style.version}`;
@@ -150,6 +193,8 @@ export interface BundledFont {
   weight: 400 | 700;
   /** Path relative to the fonts directory. */
   file: string;
+  /** Script font (only needed for text in that script); absent: a core font every render uses. */
+  script?: Script;
 }
 
 export const BUNDLED_FONTS: readonly BundledFont[] = Object.freeze([
@@ -159,7 +204,18 @@ export const BUNDLED_FONTS: readonly BundledFont[] = Object.freeze([
   { family: "Noto Sans", weight: 700, file: "NotoSans/NotoSans-Bold.ttf" },
   { family: "JetBrains Mono", weight: 400, file: "JetBrainsMono/JetBrainsMono-Regular.ttf" },
   { family: "JetBrains Mono", weight: 700, file: "JetBrainsMono/JetBrainsMono-Bold.ttf" },
+  { family: "Noto Sans JP", weight: 400, file: "NotoSansJP/NotoSansJP-Regular.otf", script: "cjk" },
+  { family: "Noto Sans JP", weight: 700, file: "NotoSansJP/NotoSansJP-Bold.otf", script: "cjk" },
+  { family: "Noto Sans Devanagari", weight: 400, file: "NotoSansDevanagari/NotoSansDevanagari-Regular.ttf", script: "devanagari" },
+  { family: "Noto Sans Devanagari", weight: 700, file: "NotoSansDevanagari/NotoSansDevanagari-Bold.ttf", script: "devanagari" },
+  { family: "Noto Sans Arabic", weight: 400, file: "NotoSansArabic/NotoSansArabic-Regular.ttf", script: "arabic" },
+  { family: "Noto Sans Arabic", weight: 700, file: "NotoSansArabic/NotoSansArabic-Bold.ttf", script: "arabic" },
 ]);
+
+/** The bundled family for a script, if one is shipped (Noto Sans JP, Devanagari, Arabic). */
+export function bundledScriptFamily(script: Script): string | undefined {
+  return BUNDLED_FONTS.find((f) => f.script === script)?.family;
+}
 
 const FONTS_MARKER = "README.md";
 
@@ -183,12 +239,33 @@ export function findFontsDir(env: Record<string, string | undefined> = process.e
   return null;
 }
 
-/** Which bundled font files are present in `dir` (null dir: none). */
-export function bundledFontsStatus(dir: string | null): { dir: string | null; present: string[]; missing: string[] } {
+export interface BundledFontsStatus {
+  dir: string | null;
+  /** Core fonts, plus the script fonts of `scripts`, that are present. */
+  present: string[];
+  /** Core fonts, plus the script fonts of `scripts`, that are missing: these change how this render looks. */
+  missing: string[];
+  /** Every missing script font (informational: only matters for text in that script). */
+  script_missing: string[];
+}
+
+/**
+ * Which bundled font files are present in `dir` (null dir: none). Script fonts (Noto Sans JP,
+ * Devanagari, Arabic) count in `present`/`missing` only for the `scripts` a render uses, so a
+ * missing Japanese font only matters for videos with Japanese text.
+ */
+export function bundledFontsStatus(dir: string | null, opts: { scripts?: readonly Script[] } = {}): BundledFontsStatus {
   const present: string[] = [];
   const missing: string[] = [];
-  for (const f of BUNDLED_FONTS) (dir && existsSync(join(dir, f.file)) ? present : missing).push(f.file);
-  return { dir, present, missing };
+  const scriptMissing: string[] = [];
+  const want = new Set(opts.scripts ?? []);
+  for (const f of BUNDLED_FONTS) {
+    const ok = Boolean(dir && existsSync(join(dir, f.file)));
+    if (f.script && !ok) scriptMissing.push(f.file);
+    if (f.script && !want.has(f.script)) continue;
+    (ok ? present : missing).push(f.file);
+  }
+  return { dir, present, missing, script_missing: scriptMissing };
 }
 
 /** Nearest bundled weight: 600 and up map to Bold, anything lighter to Regular. */
@@ -221,8 +298,9 @@ export function fontFaceCss(tokens: VisualTokens, opts: { fontsDir?: string | nu
     if (!used.has(f.family.toLowerCase())) continue;
     const p = join(dir, f.file);
     if (!existsSync(p)) continue;
+    const format = f.file.endsWith(".otf") ? "opentype" : "truetype";
     rules.push(
-      `@font-face { font-family: "${f.family}"; src: url("${pathToFileURL(p).href}") format("truetype"); font-weight: ${f.weight}; font-style: normal; font-display: block; }`,
+      `@font-face { font-family: "${f.family}"; src: url("${pathToFileURL(p).href}") format("${format}"); font-weight: ${f.weight}; font-style: normal; font-display: block; }`,
     );
   }
   return rules.join("\n");
@@ -365,6 +443,101 @@ export function createFontResolver(env: NodeJS.ProcessEnv = process.env, deps: F
     }
     return p;
   };
+}
+
+// ---------------------------------------------------------------------------------- font metrics and libass
+
+export interface FontMetrics {
+  unitsPerEm: number;
+  /** OS/2 usWinAscent + usWinDescent, in font units. */
+  winHeight: number;
+  /** OS/2 usWinAscent (libass puts the baseline this far below the line top). */
+  winAscent: number;
+  hheaAscent: number;
+  hheaDescent: number;
+}
+
+const metricsCache = new Map<string, FontMetrics | null>();
+
+/**
+ * Vertical metrics from a TTF/OTF (first face of a TTC), read from the `head`, `hhea` and `OS/2`
+ * tables. Null when the file cannot be read or parsed. Memoised per path.
+ */
+export function readFontMetrics(file: string): FontMetrics | null {
+  if (metricsCache.has(file)) return metricsCache.get(file)!;
+  let out: FontMetrics | null = null;
+  let fd: number | undefined;
+  try {
+    fd = openSync(file, "r");
+    const read = (pos: number, len: number) => {
+      const b = Buffer.alloc(len);
+      readSync(fd!, b, 0, len, pos);
+      return b;
+    };
+    let base = 0;
+    // A collection (ttcf) lists its faces' offsets after a 12-byte header: use the first face.
+    if (read(0, 4).toString("latin1") === "ttcf") base = read(12, 4).readUInt32BE(0);
+    const hdr = read(base, 12);
+    const n = hdr.readUInt16BE(4);
+    const dir = read(base + 12, n * 16);
+    const tables: Record<string, number> = {};
+    for (let i = 0; i < n; i++) tables[dir.toString("latin1", i * 16, i * 16 + 4)] = dir.readUInt32BE(i * 16 + 8);
+    if (tables.head !== undefined && tables.hhea !== undefined && tables["OS/2"] !== undefined) {
+      const head = read(tables.head, 54);
+      const hhea = read(tables.hhea, 8);
+      const os2 = read(tables["OS/2"], 78);
+      out = {
+        unitsPerEm: head.readUInt16BE(18),
+        winHeight: os2.readUInt16BE(74) + os2.readUInt16BE(76),
+        winAscent: os2.readUInt16BE(74),
+        hheaAscent: hhea.readInt16BE(4),
+        hheaDescent: hhea.readInt16BE(6),
+      };
+      if (!(out.unitsPerEm > 0 && out.winHeight > 0)) out = null;
+    }
+  } catch {
+    out = null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+  metricsCache.set(file, out);
+  return out;
+}
+
+/**
+ * libass font size for a wanted em size: libass scales a font so that its OS/2 win height
+ * (usWinAscent + usWinDescent) equals the ASS font size, while FFmpeg drawtext sizes the em.
+ * Tall-metric fonts (Noto Sans Devanagari 1.906, Arabic 2.169) would otherwise come out small.
+ */
+export function assFontSize(emPx: number, metrics: FontMetrics | null): number {
+  if (!metrics) return emPx;
+  return Math.round(((emPx * metrics.winHeight) / metrics.unitsPerEm) * 100) / 100;
+}
+
+/**
+ * libass only reads font files directly inside its `fontsdir` (not sub-directories), while
+ * `fonts/` keeps one directory per family. Link the given font files (default: every bundled
+ * font present) flat into `destDir` and return it, for `subtitles=…:fontsdir=` / `ass=…:fontsdir=`.
+ * Symlinks, so nothing is copied; existing links are replaced.
+ */
+export async function prepareLibassFontsDir(destDir: string, files?: readonly string[], fontsDir: string | null = findFontsDir()): Promise<string> {
+  await mkdir(destDir, { recursive: true });
+  const list = files ?? (fontsDir ? BUNDLED_FONTS.map((f) => join(fontsDir, f.file)).filter((p) => existsSync(p)) : []);
+  for (const src of list) {
+    const dest = join(destDir, basename(src));
+    try {
+      if ((await readlink(dest)) === src) continue;
+      await unlink(dest);
+    } catch {
+      // not a link yet
+    }
+    try {
+      await symlink(src, dest);
+    } catch {
+      // an unrelated file of that name: leave it
+    }
+  }
+  return destDir;
 }
 
 // ---------------------------------------------------------------------------------- targets

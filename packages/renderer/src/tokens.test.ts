@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Brand, Style } from "@video-studio/schema";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -15,9 +15,15 @@ import {
   PERSONALITY_MOTION,
   parseFontChain,
   resolveFontFile,
+  assFontSize,
+  prepareLibassFontsDir,
+  readFontMetrics,
   resolveTokens,
+  scriptFirstChain,
   targetForAspect,
+  withLanguage,
 } from "./tokens.js";
+import { existsSync, readlinkSync } from "node:fs";
 
 describe("resolveTokens", () => {
   it("returns the defaults without a brand", () => {
@@ -220,7 +226,19 @@ describe("bundled fonts", () => {
     const dir = findFontsDir({});
     expect(dir).not.toBeNull();
     expect(bundledFontsStatus(dir).missing).toEqual([]);
+    expect(bundledFontsStatus(dir, { scripts: ["cjk", "devanagari", "arabic"] }).missing).toEqual([]);
     expect(bundledFontsStatus(null).present).toEqual([]);
+  });
+
+  it("reports script fonts separately: a missing JP font only matters for Japanese", () => {
+    const dir = fakeFontsDir();
+    rmSync(join(dir, "NotoSansJP/NotoSansJP-Bold.otf"));
+    const latin = bundledFontsStatus(dir);
+    expect(latin.missing).toEqual([]);
+    expect(latin.present).toHaveLength(6);
+    expect(latin.script_missing).toEqual(["NotoSansJP/NotoSansJP-Bold.otf"]);
+    expect(bundledFontsStatus(dir, { scripts: ["cjk"] }).missing).toEqual(["NotoSansJP/NotoSansJP-Bold.otf"]);
+    expect(bundledFontsStatus(dir, { scripts: ["arabic"] }).missing).toEqual([]);
   });
 
   it("prefers bundled files by family and weight before fontconfig", async () => {
@@ -249,5 +267,55 @@ describe("bundled fonts", () => {
     const brandOnly = fontFaceCss({ ...DEFAULT_TOKENS, font_heading: "Georgia", font_body: "Georgia", font_mono: "Courier" }, { fontsDir: dir });
     expect(brandOnly).toBe("");
     expect(fontFaceCss(DEFAULT_TOKENS, { fontsDir: null })).toBe("");
+    const ja = fontFaceCss(withLanguage(DEFAULT_TOKENS, "ja"), { fontsDir: dir });
+    expect(ja).toContain('font-family: "Noto Sans JP"');
+    expect(ja).toContain('NotoSansJP-Bold.otf") format("opentype"); font-weight: 700');
+  });
+});
+
+describe("script fonts", () => {
+  it("adds the language's Noto family to every chain before the generic family; Latin languages are unchanged", () => {
+    expect(resolveTokens(undefined, {}, undefined, { language: "en-US" })).toEqual(resolveTokens());
+    expect(resolveTokens(undefined, {}, undefined, { language: "fr" })).toEqual(resolveTokens());
+    const ja = resolveTokens(undefined, {}, undefined, { language: "ja" });
+    expect(ja.language).toBe("ja");
+    expect(parseFontChain(ja.font_heading)).toEqual(["Inter", "Noto Sans", "Helvetica", "Arial", "Noto Sans JP", "Hiragino Sans", "Yu Gothic", "sans-serif"]);
+    expect(parseFontChain(ja.font_mono)).toContain("Noto Sans JP");
+    expect(parseFontChain(resolveTokens(undefined, {}, undefined, { language: "hi" }).font_body)).toContain("Noto Sans Devanagari");
+    expect(parseFontChain(resolveTokens(undefined, {}, undefined, { language: "ar-EG" }).font_body)).toContain("Noto Sans Arabic");
+    expect(parseFontChain(resolveTokens(undefined, {}, undefined, { language: "zh-CN" }).font_body).slice(-4)).toEqual(["Noto Sans SC", "PingFang SC", "Noto Sans JP", "sans-serif"]);
+  });
+
+  it("puts the script family first for single-file (drawtext) resolution", async () => {
+    expect(parseFontChain(scriptFirstChain(DEFAULT_TOKENS.font_heading, "cjk"))).toEqual(["Noto Sans JP", "Hiragino Sans", "Yu Gothic", "Inter", "Noto Sans", "Helvetica", "Arial", "sans-serif"]);
+    expect(scriptFirstChain(DEFAULT_TOKENS.font_heading, "latin")).toBe(DEFAULT_TOKENS.font_heading);
+    const dir = findFontsDir({})!;
+    const fcNone = async () => null;
+    const exists = async () => true;
+    const resolve = (chain: string, w?: number) => resolveFontFile(chain, {}, { fcMatch: fcNone, exists, fontsDir: dir }, w);
+    expect(await resolve(scriptFirstChain(DEFAULT_TOKENS.font_heading, "cjk"), 700)).toBe(join(dir, "NotoSansJP/NotoSansJP-Bold.otf"));
+    expect(await resolve(scriptFirstChain(DEFAULT_TOKENS.font_body, "devanagari"))).toBe(join(dir, "NotoSansDevanagari/NotoSansDevanagari-Regular.ttf"));
+    expect(await resolve(scriptFirstChain(DEFAULT_TOKENS.font_body, "arabic"), 700)).toBe(join(dir, "NotoSansArabic/NotoSansArabic-Bold.ttf"));
+  });
+
+  it("reads vertical metrics and converts em sizes to libass sizes", () => {
+    const dir = findFontsDir({})!;
+    const inter = readFontMetrics(join(dir, "Inter/Inter-Regular.ttf"))!;
+    expect(inter).toEqual({ unitsPerEm: 2048, winHeight: 2478, winAscent: 1984, hheaAscent: 1984, hheaDescent: -494 });
+    const deva = readFontMetrics(join(dir, "NotoSansDevanagari/NotoSansDevanagari-Regular.ttf"))!;
+    expect(deva.winHeight / deva.unitsPerEm).toBeCloseTo(1.906);
+    expect(readFontMetrics(join(dir, "NotoSansJP/NotoSansJP-Regular.otf"))!.winHeight).toBe(1448);
+    expect(assFontSize(10, deva)).toBeCloseTo(19.06);
+    expect(assFontSize(10, null)).toBe(10);
+    expect(readFontMetrics(join(dir, "README.md"))).toBeNull();
+  });
+
+  it("links font files flat for libass (which does not search sub-directories)", async () => {
+    const dir = findFontsDir({})!;
+    const dest = mkdtempSync(join(tmpdir(), "vs-libass-"));
+    await prepareLibassFontsDir(dest, undefined, dir);
+    for (const f of BUNDLED_FONTS) expect(existsSync(join(dest, f.file.split("/")[1]!))).toBe(true);
+    expect(readlinkSync(join(dest, "Inter-Bold.ttf"))).toBe(join(dir, "Inter/Inter-Bold.ttf"));
+    await prepareLibassFontsDir(dest, [join(dir, "Inter/Inter-Bold.ttf")], dir); // idempotent
   });
 });

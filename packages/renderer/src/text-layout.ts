@@ -1,4 +1,5 @@
 import { type LayoutZones, layoutZones } from "@video-studio/platforms";
+import { breakUnits, charScript, isWideChar } from "./script.js";
 import type { RenderTarget } from "./types.js";
 
 /**
@@ -30,10 +31,93 @@ function charEm(opts: MeasureOptions): number {
   return opts.em ?? (opts.mono ? CHAR_EM.mono : CHAR_EM.proportional);
 }
 
-/** Estimated rendered width in px. */
+/**
+ * Average advances of non-Latin characters in em (design estimates, a little generous so wrapped
+ * lines fit): CJK ideographs, kana, Hangul and full-width punctuation are square (1 em);
+ * Devanagari consonants and vowels 0.6 em, spacing vowel signs 0.28 em, marks above/below 0;
+ * joined Arabic letters 0.48 em, harakat 0; Hebrew letters 0.55 em, points 0.
+ */
+export const SCRIPT_EM = { wide: 1, devanagari: 0.6, devanagari_sign: 0.28, arabic: 0.48, hebrew: 0.55, other: 0.6 } as const;
+
+/** Text made only of Latin-1/Latin Extended letters, general punctuation and ASCII: the original estimates apply unchanged. */
+const SIMPLE = /^[\u0000-\u024F\u2000-\u206F\u20A0-\u20CF\u2100-\u214F]*$/u;
+
+/** True when `text` needs the script-aware estimates (CJK, Hangul, Devanagari, Arabic, Hebrew, other scripts). */
+export function isComplexText(text: string): boolean {
+  if (SIMPLE.test(text)) return false;
+  for (const ch of text) if (scriptEm(ch) !== null) return true;
+  return false;
+}
+
+/** Advance of one character in em, or null when it takes the base (Latin/neutral) estimate. */
+export function scriptEm(ch: string): number | null {
+  if (isWideChar(ch)) return SCRIPT_EM.wide;
+  const s = charScript(ch);
+  if (s === null || s === "latin") return null;
+  if (/\p{Mn}|\p{Me}/u.test(ch)) return 0;
+  if (s === "devanagari") return /\p{Mc}/u.test(ch) ? SCRIPT_EM.devanagari_sign : SCRIPT_EM.devanagari;
+  if (s === "arabic") return SCRIPT_EM.arabic;
+  if (s === "hebrew") return SCRIPT_EM.hebrew;
+  return /\p{Mc}/u.test(ch) ? SCRIPT_EM.devanagari_sign : SCRIPT_EM.other;
+}
+
+/**
+ * Estimated rendered width in px. Latin and neutral characters use the base advance (`em`, or
+ * CHAR_EM); CJK, Devanagari, Arabic and Hebrew characters use SCRIPT_EM.
+ */
 export function estimateTextWidth(text: string, fontSize: number, opts: MeasureOptions = {}): number {
   const em = charEm(opts);
-  return Array.from(text).length * fontSize * em;
+  if (SIMPLE.test(text)) return Array.from(text).length * fontSize * em;
+  let n = 0;
+  let extra = 0;
+  for (const ch of text) {
+    const e = scriptEm(ch);
+    if (e === null) n++;
+    else extra += e;
+  }
+  return n * fontSize * em + extra * fontSize;
+}
+
+/** Break a unit wider than `maxWidth` into character pieces that each fit (at least one character each). */
+function hardBreakWidth(unit: string, fontSize: number, maxWidth: number, opts: MeasureOptions): string[] {
+  const out: string[] = [];
+  let cur = "";
+  for (const ch of unit) {
+    if (cur && estimateTextWidth(cur + ch, fontSize, opts) > maxWidth + 0.01) {
+      out.push(cur);
+      cur = ch;
+    } else cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/**
+ * Width-based wrap for script-aware text: spaced scripts break at spaces, CJK between
+ * characters with kinsoku (see `breakUnits`). Units wider than the line are hard-broken.
+ */
+function wrapComplex(para: string, fontSize: number, maxWidth: number, opts: MeasureOptions): string[] {
+  const lines: string[] = [];
+  let cur = "";
+  for (const u of breakUnits(para)) {
+    const pieces = estimateTextWidth(u.text, fontSize, opts) > maxWidth + 0.01 ? hardBreakWidth(u.text, fontSize, maxWidth, opts) : [u.text];
+    pieces.forEach((piece, k) => {
+      const cand = cur ? `${cur}${u.space && k === 0 ? " " : ""}${piece}` : piece;
+      if (!cur || estimateTextWidth(cand, fontSize, opts) <= maxWidth + 0.01) cur = cand;
+      else {
+        lines.push(cur);
+        cur = piece;
+      }
+    });
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/** The units that must stay whole on a line: words for spaced scripts, characters (with glued punctuation) for CJK. */
+export function lineUnits(text: string): string[] {
+  if (!isComplexText(text)) return text.split(/\s+/).filter(Boolean);
+  return breakUnits(text).map((u) => u.text);
 }
 
 /** Break a single word that is wider than `maxWidth` into pieces that fit. */
@@ -50,6 +134,11 @@ export function wrapText(text: string, fontSize: number, maxWidth: number, opts:
   const maxChars = Math.max(1, Math.floor(maxWidth / (fontSize * em)));
   const lines: string[] = [];
   for (const para of text.replace(/\r\n?/g, "\n").split("\n")) {
+    if (isComplexText(para)) {
+      const wrapped = wrapComplex(para, fontSize, maxWidth, opts);
+      lines.push(...(wrapped.length ? wrapped : [""]));
+      continue;
+    }
     const words = para.split(/[ \t]+/).filter(Boolean);
     if (words.length === 0) {
       lines.push("");
@@ -116,7 +205,8 @@ export function fitText(text: string | readonly string[], box: { w: number; h: n
   const layout = (size: number): string[] =>
     opts.noWrap ? paras.flatMap((p) => p.split("\n")) : paras.flatMap((p) => wrapText(p, size, box.w, opts));
   // Whole words must fit on a line: hard-breaking inside a word ("Thumbnai/l") is a last resort at the minimum size.
-  const words = opts.noWrap ? [] : [...new Set(paras.flatMap((p) => p.split(/\s+/)).filter(Boolean))];
+  // CJK text has no spaces: there the units are characters (with kinsoku-glued punctuation).
+  const words = opts.noWrap ? [] : [...new Set(paras.flatMap((p) => lineUnits(p)))];
   const wordsFit = (size: number) => words.every((w) => blockSize([w], size, lh, opts).width <= box.w + 0.01);
   const fits = (lines: string[], size: number) => {
     const b = blockSize(lines, size, lh, opts);
@@ -135,11 +225,28 @@ export function fitText(text: string | readonly string[], box: { w: number; h: n
   const em = charEm(opts);
   const maxChars = Math.max(1, Math.floor(box.w / (size * em)));
   const maxLines = Math.max(1, Math.min(opts.maxLines ?? Infinity, Math.floor((box.h - size) / (size * lh)) + 1));
-  let lines = layout(size).map((l) => ellipsize(l, maxChars));
-  if (lines.length > maxLines) {
-    lines = lines.slice(0, maxLines);
-    const last = lines[maxLines - 1]!;
-    lines[maxLines - 1] = Array.from(last).length >= maxChars ? ellipsize(`${last}…`, maxChars) : `${last}…`;
+  let lines: string[];
+  if (paras.some((p) => isComplexText(p))) {
+    // Script-aware: cut by estimated width rather than character count.
+    const fitW = (l: string) => {
+      if (estimateTextWidth(l, size, opts) <= box.w + 0.01) return l;
+      const chars = Array.from(l);
+      while (chars.length > 1 && estimateTextWidth(`${chars.join("").trimEnd()}…`, size, opts) > box.w + 0.01) chars.pop();
+      return `${chars.join("").trimEnd()}…`;
+    };
+    lines = layout(size).map(fitW);
+    if (lines.length > maxLines) {
+      lines = lines.slice(0, maxLines);
+      const last = lines[maxLines - 1]!;
+      lines[maxLines - 1] = last.endsWith("…") ? last : fitW(`${last}…`);
+    }
+  } else {
+    lines = layout(size).map((l) => ellipsize(l, maxChars));
+    if (lines.length > maxLines) {
+      lines = lines.slice(0, maxLines);
+      const last = lines[maxLines - 1]!;
+      lines[maxLines - 1] = Array.from(last).length >= maxChars ? ellipsize(`${last}…`, maxChars) : `${last}…`;
+    }
   }
   return { fontSize: size, lines, lineAdvance: size * lh, ...blockSize(lines, size, lh, opts), truncated: true };
 }
@@ -218,8 +325,10 @@ export function applyTextCase(text: string, mode: "as_is" | "upper" | "title" | 
  * v3: the safe area is the platform zones' content rect (design grid minus UI masks).
  * v4: code panels show no language label for plain text (`text`, `txt`, `plaintext`).
  * v5: text shrinks until every whole word fits a line; words are only hard-broken at the minimum size.
+ * v6: script-aware widths and breaking (CJK per character with kinsoku, Devanagari/Arabic widths),
+ *     right-aligned RTL lines, script fonts.
  */
-export const LAYOUT_VERSION = 5;
+export const LAYOUT_VERSION = 6;
 
 /**
  * The content-safe rectangle of a target, in px (integers): `zones.content` when the pipeline

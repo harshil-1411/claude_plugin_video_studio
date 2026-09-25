@@ -193,3 +193,57 @@ describe("lint checks", () => {
     expect(contrastRatio("#777777", "#FFFFFF")).toBeCloseTo(4.48, 2);
   });
 });
+
+describe("lint: reading density for CJK, Devanagari and Arabic", () => {
+  const density = async (edit: (s: Record<string, any>) => void) => {
+    const r = await lintProject(project((s) => (delete s.captions.position, edit(s))));
+    return r.findings.filter((f) => f.id === "reading_density" && f.scene_id === "s01");
+  };
+
+  it("counts Japanese by characters against 9 characters/s", async () => {
+    const tooDense = await density((s) => {
+      s.language = "ja";
+      s.scenes[0].duration_sec = 3;
+      s.scenes[0].voiceover = "ベクトルデータベースは埋め込みを保存して意味の近いものを素早く見つけます。"; // 36 characters
+    });
+    expect(tooDense).toEqual([expect.objectContaining({ severity: "warning", message: expect.stringMatching(/36 voiceover characters \(cjk\) in 3s is 12 characters\/s; captions above 9 characters\/s/), fix: expect.stringMatching(/at most 27 characters/) })]);
+    const ok = await density((s) => {
+      s.language = "ja";
+      s.scenes[0].duration_sec = 3;
+      s.scenes[0].voiceover = "ベクトルデータベースは意味で検索します。"; // 19 characters
+    });
+    expect(ok).toEqual([]);
+  });
+
+  it("counts Hindi and Arabic by words with their own limits", async () => {
+    const hi = await density((s) => {
+      s.language = "hi";
+      s.scenes[0].duration_sec = 3;
+      s.scenes[0].voiceover = "वेक्टर डेटाबेस अर्थ से खोजते हैं और बहुत तेज़ी से सही जवाब देते हैं";
+    });
+    expect(hi).toEqual([expect.objectContaining({ message: expect.stringMatching(/14 voiceover words \(devanagari\).*above 3 words\/s/) })]);
+    const ar = await density((s) => {
+      s.language = "ar";
+      s.scenes[0].duration_sec = 3;
+      s.scenes[0].voiceover = "قواعد البيانات المتجهة تبحث بالمعنى وتجد النتائج القريبة بسرعة كبيرة";
+    });
+    expect(ar).toEqual([expect.objectContaining({ message: expect.stringMatching(/10 voiceover words \(arabic\).*above 2\.8 words\/s/) })]);
+  });
+
+  it("checks silent on-screen Japanese at 8 characters/s and CJK cover headlines by characters", async () => {
+    const r = await lintProject(
+      project((s) => {
+        delete s.captions.position;
+        s.language = "ja";
+        s.voice = { mode: "none" };
+        for (const sc of s.scenes) sc.voiceover = "";
+        s.scenes[0].duration_sec = 2;
+        s.scenes[0].on_screen_text = "ベクトルデータベースは意味で検索します";
+        if (s.scenes[0].deterministic) s.scenes[0].deterministic = { kind: "typography", props: { lines: ["意味で検索"] } };
+        s.cover.headline = "ベクトルデータベースは意味で検索します";
+      }),
+    );
+    expect(r.findings.find((f) => f.id === "reading_density" && f.scene_id === "s01")).toMatchObject({ message: expect.stringMatching(/on-screen characters \(cjk\).*8 characters\/s/) });
+    expect(r.findings.find((f) => f.id === "cover_headline")).toMatchObject({ message: expect.stringMatching(/19 characters; CJK covers read best at ≤ 16/) });
+  });
+});

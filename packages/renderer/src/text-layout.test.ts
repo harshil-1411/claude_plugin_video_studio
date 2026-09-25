@@ -1,6 +1,6 @@
 import { layoutZones } from "@video-studio/platforms";
 import { describe, expect, it } from "vitest";
-import { estimateTextWidth, fitText, placeLines, safeArea, splitH, splitV, wrapText } from "./text-layout.js";
+import { CHAR_EM_UPPER, estimateTextWidth, fitText, isComplexText, lineUnits, placeLines, safeArea, splitH, splitV, wrapText } from "./text-layout.js";
 
 describe("estimateTextWidth", () => {
   it("uses 0.55 em proportional and 0.6 em mono", () => {
@@ -106,5 +106,58 @@ describe("whole words", () => {
     const r = fitText(["Captions. Thumbnail. Provenance."], { w: 300, h: 600 }, { maxSize: 120, minSize: 20 });
     expect(r.truncated).toBe(false);
     for (const w of ["Captions.", "Thumbnail.", "Provenance."]) expect(r.lines.some((l) => l.split(" ").includes(w))).toBe(true);
+  });
+});
+
+describe("script-aware layout", () => {
+  it("estimates CJK at 1 em per character and Devanagari/Arabic by their own advances", () => {
+    expect(estimateTextWidth("日本語", 10)).toBeCloseTo(30);
+    expect(estimateTextWidth("日本 a", 10)).toBeCloseTo(20 + 2 * 5.5);
+    expect(estimateTextWidth("、。", 10)).toBeCloseTo(20);
+    // क (0.6) + ् (0) + ष (0.6) + ि (0.28 spacing sign)
+    expect(estimateTextWidth("क्षि", 10)).toBeCloseTo(14.8);
+    expect(estimateTextWidth("مرحبا", 10)).toBeCloseTo(5 * 4.8);
+    // Latin text is unchanged (the upper-case em applies to Latin only)
+    expect(estimateTextWidth("ABC", 10, { em: CHAR_EM_UPPER })).toBeCloseTo(3 * 6.8);
+    expect(estimateTextWidth("AB日", 10, { em: CHAR_EM_UPPER })).toBeCloseTo(2 * 6.8 + 10);
+    expect(isComplexText("Vector databases — 100%")).toBe(false);
+    expect(isComplexText("Ωmega Жук")).toBe(false);
+    expect(isComplexText("日本")).toBe(true);
+  });
+
+  it("wraps CJK between characters with kinsoku", () => {
+    // 10 px per character, 60 px: 6 characters per line
+    const lines = wrapText("ベクトルデータベースは、意味で検索します。", 10, 60);
+    for (const l of lines) expect(estimateTextWidth(l, 10)).toBeLessThanOrEqual(60 + 0.01);
+    expect(lines.join("")).toBe("ベクトルデータベースは、意味で検索します。");
+    for (const l of lines.slice(1)) expect(l[0]).not.toMatch(/[、。ー）」』]/u);
+    // "、" is glued to "は": neither a line starting with "、" nor a split between them
+    expect(lines.some((l) => l.endsWith("は、"))).toBe(true);
+    const bracket = wrapText("これは（重要な）話です", 10, 30);
+    for (const l of bracket) expect(l.endsWith("（")).toBe(false);
+  });
+
+  it("keeps Latin words whole inside CJK and breaks spaced scripts at spaces", () => {
+    const lines = wrapText("Whisperは音声認識モデルです", 10, 70);
+    expect(lines.some((l) => l.includes("Whisper"))).toBe(true);
+    expect(lines.join("")).toBe("Whisperは音声認識モデルです");
+    const hi = wrapText("वेक्टर डेटाबेस अर्थ से खोजते हैं", 10, 60);
+    expect(hi.length).toBeGreaterThan(1);
+    expect(hi.join(" ")).toBe("वेक्टर डेटाबेस अर्थ से खोजते हैं");
+    for (const l of hi) expect(estimateTextWidth(l, 10)).toBeLessThanOrEqual(60 + 0.01);
+    expect(lineUnits("意味です。")).toEqual(["意", "味", "で", "す。"]);
+    expect(lineUnits("two words")).toEqual(["two", "words"]);
+  });
+
+  it("fits CJK per character (a sentence without spaces is not one long word)", () => {
+    const text = "ベクトルデータベースは意味で検索します";
+    const f = fitText(text, { w: 200, h: 200 }, { maxSize: 60, minSize: 10 });
+    expect(f.truncated).toBe(false);
+    expect(f.fontSize).toBeGreaterThan(20);
+    for (const l of f.lines) expect(estimateTextWidth(l, f.fontSize)).toBeLessThanOrEqual(200 + 0.01);
+    const cut = fitText("日本語".repeat(50), { w: 100, h: 30 }, { maxSize: 20, minSize: 12 });
+    expect(cut.truncated).toBe(true);
+    expect(cut.lines.at(-1)!.endsWith("…")).toBe(true);
+    for (const l of cut.lines) expect(estimateTextWidth(l, cut.fontSize)).toBeLessThanOrEqual(100 + 0.01);
   });
 });

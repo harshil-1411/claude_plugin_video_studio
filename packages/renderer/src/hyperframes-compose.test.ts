@@ -554,3 +554,52 @@ describe("buildComposition: style tokens", () => {
     }
   });
 });
+
+describe("scripts: lang, dir and fonts", () => {
+  const faces = (html: string) => [...html.matchAll(/@font-face \{ font-family: "([^"]+)"; src: url\("assets\/fonts\/([^"]+)"\) format\("(\w+)"\)/g)].map((m) => `${m[1]}|${m[2]}|${m[3]}`);
+
+  it("keeps Latin scenes exactly as before (lang en, no dir, no script faces)", () => {
+    const c = buildComposition(req("typography", { lines: ["Vector databases"] }, { tokens: resolveTokens() }));
+    expect(c.html).toContain('<html lang="en">');
+    expect(c.html).not.toContain("dir=");
+    expect(c.html).not.toContain("/* scripts:");
+    expect(faces(c.html).every((f) => !f.includes("Noto Sans JP"))).toBe(true);
+  });
+
+  it("Japanese: lang ja, Noto Sans JP @font-face (OpenType), strict line breaking", () => {
+    const c = buildComposition(req("typography", { lines: ["ベクトルデータベースは、意味で検索します。"] }, { tokens: resolveTokens(undefined, {}, undefined, { language: "ja-JP" }) }));
+    expect(c.html).toContain('<html lang="ja-JP">');
+    expect(c.html).not.toContain('dir="rtl"');
+    expect(faces(c.html)).toContain("Noto Sans JP|NotoSansJP-Bold.otf|opentype");
+    expect(c.html).toMatch(/--vs-font-heading: "Inter", .*"Noto Sans JP"/);
+    expect(c.html).toContain("line-break: strict");
+    expect(c.html).not.toContain('src: local("Noto Sans JP")');
+    expect(c.assets.map((a) => a.dest)).toContain("assets/fonts/NotoSansJP-Regular.otf");
+  });
+
+  it("detects the script from the text when the tokens carry no language (Hindi)", () => {
+    const c = buildComposition(req("typography", { lines: ["वेक्टर डेटाबेस अर्थ से खोजते हैं"] }, { tokens: resolveTokens() }));
+    expect(c.html).toContain('<html lang="hi">');
+    expect(faces(c.html)).toContain("Noto Sans Devanagari|NotoSansDevanagari-Regular.ttf|truetype");
+  });
+
+  it("Arabic: dir rtl on the page, LTR geometry, plaintext paragraphs, start alignment for a left style", () => {
+    const t = { ...resolveTokens(undefined, {}, undefined, { language: "ar" }), text_align: "left" as const };
+    const c = buildComposition(req("typography", { lines: ["قواعد البيانات المتجهة", "نموذج Whisper لعام 2022"] }, { tokens: t }));
+    expect(c.html).toContain('<html lang="ar" dir="rtl">');
+    expect(faces(c.html)).toContain("Noto Sans Arabic|NotoSansArabic-Bold.ttf|truetype");
+    expect(c.html).toContain("#vs-root { direction: ltr; }");
+    expect(c.html).toContain("unicode-bidi: plaintext");
+    expect(c.html).toContain("text-align: start");
+    expect(c.html).toContain(".vs-code, .vs-command, .vs-code * { direction: ltr; unicode-bidi: isolate; }");
+  });
+
+  it("fits CJK text per character instead of treating a sentence as one word", () => {
+    const text = "ベクトルデータベースは意味で検索します";
+    const c = buildComposition(req("typography", { lines: [text] }, { tokens: resolveTokens(undefined, {}, undefined, { language: "ja" }) }));
+    const box = c.text_boxes.find((b) => b.text.includes("ベクトル"))!;
+    // As one 19-em "word" it would have to fit a single line (≤ w/19 px); broken per character it wraps larger.
+    expect(box.font_px).toBeGreaterThan((box.rect.w / 19) * 1.5);
+    expect(box.truncated).toBe(false);
+  });
+});

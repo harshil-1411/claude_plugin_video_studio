@@ -184,6 +184,7 @@ export async function checkBuildconf(ffmpegPath: string | null, deps: DoctorDeps
     return [
       { id: "ffmpeg_libass", status: "warn", detail: skipped },
       { id: "ffmpeg_libx264", status: "warn", detail: skipped },
+      { id: "ffmpeg_text_shaping", status: "warn", detail: skipped },
     ];
   }
   const res = await deps.exec(ffmpegPath, ["-hide_banner", "-buildconf"]);
@@ -192,9 +193,11 @@ export async function checkBuildconf(ffmpegPath: string | null, deps: DoctorDeps
     return [
       { id: "ffmpeg_libass", status: "warn", detail },
       { id: "ffmpeg_libx264", status: "warn", detail },
+      { id: "ffmpeg_text_shaping", status: "warn", detail },
     ];
   }
   const flags = parseBuildconf(`${res.stdout}\n${res.stderr}`);
+  const shaping = textShapingCheck(`${res.stdout}\n${res.stderr}`);
   return [
     flags.libass
       ? { id: "ffmpeg_libass", status: "ok", detail: "ffmpeg built with --enable-libass (burned-in captions)" }
@@ -212,7 +215,34 @@ export async function checkBuildconf(ffmpegPath: string | null, deps: DoctorDeps
           detail: "ffmpeg was built without --enable-libx264; H.264 MP4 encoding will be unavailable",
           fix: "Install an FFmpeg build with libx264 (Homebrew's `ffmpeg` formula includes it), or set FFMPEG_PATH to one.",
         },
+    shaping,
   ];
+}
+
+/**
+ * Complex-script text in the ffmpeg renderer. drawtext shapes with HarfBuzz but only reorders
+ * right-to-left text and forms Indic conjuncts with FriBidi (`--enable-libfribidi`), which many
+ * builds lack; the renderer therefore draws Devanagari, Arabic and Hebrew lines through libass,
+ * which always does shaping and bidi. CJK needs neither.
+ */
+export function textShapingCheck(buildconf: string): Check {
+  const harfbuzz = /--enable-libharfbuzz\b/.test(buildconf);
+  const fribidi = /--enable-libfribidi\b/.test(buildconf);
+  const libass = /--enable-libass\b/.test(buildconf);
+  const flags = `drawtext: harfbuzz ${harfbuzz ? "yes" : "no"}, fribidi ${fribidi ? "yes" : "no"}; libass ${libass ? "yes" : "no"}`;
+  if (libass) {
+    return {
+      id: "ffmpeg_text_shaping",
+      status: "ok",
+      detail: `${flags}. Devanagari, Arabic and Hebrew text is drawn through libass (shaping and right-to-left order); CJK through drawtext`,
+    };
+  }
+  return {
+    id: "ffmpeg_text_shaping",
+    status: "warn",
+    detail: `${flags}. Without libass the ffmpeg renderer cannot ${fribidi ? "form Devanagari conjuncts reliably" : "join Arabic letters, order right-to-left text or form Devanagari conjuncts"}`,
+    fix: "Use the HyperFrames renderer for Hindi, Arabic or Hebrew videos, or install an FFmpeg built with libass (Homebrew's `ffmpeg` formula includes it).",
+  };
 }
 
 export function chromeCandidates(platform: NodeJS.Platform, home: string): string[] {

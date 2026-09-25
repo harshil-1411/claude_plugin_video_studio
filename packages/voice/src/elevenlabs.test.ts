@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { alignmentToWords, chunkText, createElevenLabsBackend, type WithTimestampsResponse } from "./elevenlabs.js";
 import type { CommandRunner, ToolResolver } from "./exec.js";
+import { tokenize } from "./estimate.js";
 
 const fixturePath = fileURLToPath(new URL("./__fixtures__/elevenlabs-with-timestamps.json", import.meta.url));
 const KEY = "sk_test_secret_key_123";
@@ -33,6 +34,14 @@ describe("alignmentToWords", () => {
       expect(w.end_ms).toBeGreaterThanOrEqual(w.start_ms);
       prev = w.end_ms;
     }
+  });
+
+  it("splits CJK into per-character words, gluing small kana and closing punctuation", () => {
+    const words = alignmentToWords(chars("しょう、意味。 API"));
+    expect(words.map((w) => w.word)).toEqual(["しょ", "う、", "意", "味。", "API"]);
+    expect(words[0]).toEqual({ word: "しょ", start_ms: 0, end_ms: 200 });
+    // same units as tokenize, so provider timings map 1:1 onto caption words
+    expect(words.map((w) => w.word)).toEqual(tokenize("しょう、意味。 API"));
   });
 
   it("prefixes leading punctuation to the first word and applies an offset", () => {

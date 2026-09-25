@@ -28,11 +28,13 @@ import {
   inset,
   placeLines,
   safeArea,
+  scriptEm,
   splitH,
   splitV,
   wrapText,
 } from "./text-layout.js";
-import { type FontResolver, createFontResolver } from "./tokens.js";
+import { type Script, baseDirection, charScript, dominantScript, hasCjk, needsShaping, scriptFontFamilies, scriptsIn, textDirection } from "./script.js";
+import { BUNDLED_FONTS, type FontResolver, assFontSize, createFontResolver, findFontsDir, parseFontChain, prepareLibassFontsDir, readFontMetrics, scriptFirstChain } from "./tokens.js";
 import type { Availability, LayoutZones, MotionTokens, RenderTarget, SceneRenderRequest, SceneRenderResult, SceneRenderer, VisualTokens } from "./types.js";
 
 /**
@@ -52,7 +54,8 @@ import type { Availability, LayoutZones, MotionTokens, RenderTarget, SceneRender
  */
 
 export const FFMPEG_RENDERER_ID = "ffmpeg-drawtext";
-export const FFMPEG_RENDERER_VERSION = "0.3.0";
+/** 0.4.0: script fonts for CJK lines; Devanagari/Arabic/Hebrew lines drawn through libass (shaping + bidi). */
+export const FFMPEG_RENDERER_VERSION = "0.4.0";
 
 export const FFMPEG_RENDERER_KINDS = [
   "typography",
@@ -93,6 +96,8 @@ export interface FfmpegRendererOptions {
   resolveAsset?: AssetResolver;
   /** Keep the temp dir (text files) for debugging. */
   keepTemp?: boolean;
+  /** Bundled fonts directory (for libass); undefined: `findFontsDir()`, null: host fonts only. */
+  fontsDir?: string | null;
 }
 
 // ---------------------------------------------------------------------------------- composition model
@@ -105,9 +110,10 @@ interface TextEl {
   font: FontRole;
   size: number;
   color: string;
-  /** Left edge in px, or centred on `cx` using the measured text width. */
+  /** Left edge in px, or centred on `cx` using the measured text width, or right-aligned to `rx` (RTL lines). */
   x: number;
   cx?: number;
+  rx?: number;
   y: number;
   beat: number;
   slide?: boolean;
@@ -220,6 +226,8 @@ function textLines(
   o: { font: FontRole; color: string | ((line: string, i: number) => string); beat: number | ((i: number) => number); align?: "left" | "center"; valign?: "top" | "middle" | "bottom"; slide?: boolean },
 ): TextEl[] {
   const mono = o.font === "mono";
+  // Right-to-left paragraphs mirror a left alignment: their lines hang from the box's right edge.
+  const rtl = o.align === "left" && !mono && baseDirection(fit.lines.join(" ")) === "rtl";
   return placeLines(fit, box, o.align ?? "center", o.valign ?? "middle", { mono })
     .filter((l) => l.text.trim().length > 0)
     .map((l, i) => ({
@@ -228,8 +236,8 @@ function textLines(
       font: o.font,
       size: l.fontSize,
       color: typeof o.color === "function" ? o.color(l.text, i) : o.color,
-      x: l.x,
-      ...(o.align === "left" ? {} : { cx: r(l.cx) }),
+      x: rtl ? r(box.x + box.w - l.width) : l.x,
+      ...(rtl ? { rx: r(box.x + box.w) } : o.align === "left" ? {} : { cx: r(l.cx) }),
       y: l.y,
       beat: typeof o.beat === "function" ? o.beat(i) : o.beat,
       slide: o.slide ?? true,
@@ -813,7 +821,7 @@ function glyphWidth(text: string, size: number): number {
     else if (/[frt()]/.test(ch)) em += 0.44;
     else if (/[MWmw@%]/.test(ch)) em += 0.9;
     else if (/[A-Z0-9]/.test(ch)) em += 0.7;
-    else em += 0.6;
+    else em += scriptEm(ch) ?? 0.6;
   }
   return em * size;
 }
@@ -1128,19 +1136,24 @@ function kineticText(p: Record<string, unknown>, c: Ctx): Layout {
   let k = 0;
   let acc = "";
   let hit = false;
+  // Right-to-left text: words enter in reading order from the right edge of the line.
+  const rtl = baseDirection(text) === "rtl";
   for (const line of placeLines(fit, box, "center", "middle")) {
     const parts = line.text.split(" ").filter(Boolean);
     const space = glyphWidth(" ", fit.fontSize);
     const widths = parts.map((w) => glyphWidth(w, fit.fontSize));
     const lineW = widths.reduce((a, b) => a + b, 0) + space * Math.max(0, parts.length - 1);
     const scale = lineW > box.w ? box.w / lineW : 1;
-    let x = c.align === "left" ? box.x : box.x + (box.w - lineW * scale) / 2;
+    let x = c.align === "left" ? (rtl ? box.x + box.w - lineW * scale : box.x) : box.x + (box.w - lineW * scale) / 2;
+    if (rtl) x += lineW * scale;
     parts.forEach((w, j) => {
       const beat = chunkOf[Math.min(k, chunkOf.length - 1)] ?? 0;
       const em = emSet.has(norm(w)) && norm(w) !== "";
       if (em) hit = true;
-      els.push({ type: "text", text: w, font: "heading", size: fit.fontSize, color: em ? c.colors.primary : c.colors.text, x: r(x), y: line.y, beat, slide: true });
-      x += (widths[j]! + space) * scale;
+      if (rtl) x -= widths[j]! * scale;
+      // RTL words hang from their right edge (libass measures Arabic ink wider than its advances).
+      els.push({ type: "text", text: w, font: "heading", size: fit.fontSize, color: em ? c.colors.primary : c.colors.text, x: r(x), ...(rtl ? { rx: r(x + widths[j]! * scale) } : {}), y: line.y, beat, slide: true });
+      x += rtl ? -space * scale : (widths[j]! + space) * scale;
       // A hard-broken word spans several pieces: advance once the whole word is consumed.
       acc += w;
       if (acc.length >= (words[k]?.length ?? 0)) {
@@ -1357,14 +1370,64 @@ export interface BuiltGraph {
   /** Extra `-i` inputs (images) after the colour source. */
   inputs: string[][];
   filtergraph: string;
-  /** Text payloads to write: file name → contents. */
+  /** Text payloads to write: file name → contents (drawtext text files and `.ass` scripts). */
   textFiles: Map<string, string>;
+  /** Text the graph could not draw faithfully (e.g. Arabic without libass). */
+  warnings: string[];
+}
+
+/** A font as libass sees it: family name, weight, and the ASS size per px of em (see `assFontSize`). */
+export interface AssFont {
+  family: string;
+  bold: boolean;
+  /** ASS font size = em px × `scale` (win height / units per em). */
+  scale: number;
+  /** Where libass puts the baseline below the line top (OS/2 win ascent), in em. */
+  winAscent: number;
+  /** Where drawtext puts it (hhea ascender), in em: the layout's baseline. */
+  ascent: number;
+}
+
+/**
+ * libass drawing for lines drawtext cannot shape (Devanagari conjuncts, Arabic joining,
+ * right-to-left and mixed-direction lines): libass shapes with HarfBuzz and reorders with FriBidi.
+ */
+export interface AssTextFonts {
+  /** Flat directory holding the font files (libass does not search sub-directories). */
+  fontsDir: string;
+  /** Latin runs inside those lines, per role. */
+  latin: Record<FontRole, AssFont>;
+  /** The script's font per role. */
+  scripts: Partial<Record<Script, Record<FontRole, AssFont>>>;
 }
 
 export interface FontFiles {
   heading: string;
   body: string;
   mono: string;
+  /** Font files for lines in a script the role fonts do not cover but drawtext can draw (CJK, Hangul). */
+  scripts?: Partial<Record<Script, Partial<Record<FontRole, string>>>>;
+  /** libass drawing for lines that need shaping or bidi; absent: drawtext with a warning. */
+  ass?: AssTextFonts;
+}
+
+/** How one text element is drawn. */
+export type TextRoute = { kind: "drawtext"; script?: Script } | { kind: "ass"; script: Script };
+
+/**
+ * Route a line: lines with Devanagari, Arabic, Hebrew or other complex-script letters go through
+ * libass; CJK and Hangul lines use drawtext with the script's font (which also covers Latin);
+ * everything else keeps the role font.
+ */
+export function textRoute(text: string): TextRoute {
+  if (needsShaping(text)) {
+    const counts: Script[] = scriptsIn(text).filter((s) => s !== "latin" && s !== "cjk" && s !== "hangul");
+    const dom = dominantScript(text);
+    return { kind: "ass", script: counts.includes(dom) ? dom : (counts[0] ?? "other") };
+  }
+  if (hasCjk(text)) return { kind: "drawtext", script: "cjk" };
+  if (scriptsIn(text).includes("hangul")) return { kind: "drawtext", script: "hangul" };
+  return { kind: "drawtext" };
 }
 
 export interface GraphMotion {
@@ -1386,23 +1449,55 @@ export function buildFilterGraph(comp: Pick<Composition, "elements">, target: Re
   const slide = Math.max(2, r(Math.min(target.width, target.height) * 0.025));
   const inputs: string[][] = [];
   const textFiles = new Map<string, string>();
+  const warnings: string[] = [];
   const chains: string[] = [];
   let chain: string[] = [];
   let cur = gm.base ?? "[0:v]";
   let label = 0;
   const flush = () => {
+    flushAss();
     if (!chain.length) return;
     const out = `[b${label++}]`;
     chains.push(`${cur}${chain.join(",")}${out}`);
     cur = out;
     chain = [];
   };
+  // Consecutive libass lines share one script; any other element closes it, keeping draw order.
+  let assEvents: string[] = [];
+  let assFiles = 0;
+  const flushAss = () => {
+    if (!assEvents.length || !fonts.ass) return;
+    const name = `a${assFiles++}.ass`;
+    textFiles.set(name, assScript(target, assEvents));
+    chain.push(f("ass", { filename: join(textDir, name), fontsdir: fonts.ass.fontsDir }));
+    assEvents = [];
+  };
+  const noted = new Set<string>();
+  const warnOnce = (w: string) => {
+    if (noted.has(w)) return;
+    noted.add(w);
+    warnings.push(w);
+  };
 
   for (const el of comp.elements) {
     const start = round3(el.beat * step);
     const progress = `min(1,max(0,(t-${start})/${fade}))`;
     const ease = easingExpr(motion?.easing, progress);
+    const route = el.type === "text" ? textRoute(el.text) : undefined;
+    if (route?.kind === "ass" && el.type === "text") {
+      const a = fonts.ass;
+      if (a) {
+        assEvents.push(assEvent(el, a, a.scripts[route.script]?.[el.font], { start, fade, end: durationS + 1, slide: el.slide ? slide : 0 }));
+        continue;
+      }
+      warnOnce(
+        textDirection(el.text) === "ltr"
+          ? `text: "${el.text.slice(0, 24)}" needs complex shaping (${route.script}), but this FFmpeg has no libass \`ass\` filter and drawtext has no FriBidi/script shaping; conjuncts and vowel signs may be wrong. Use the HyperFrames renderer or an FFmpeg built with libass.`
+          : `text: "${el.text.slice(0, 24)}" is right-to-left${textDirection(el.text) === "mixed" ? " mixed with left-to-right runs" : ""}; FFmpeg drawtext has no FriBidi here and this FFmpeg has no libass \`ass\` filter, so letters are not joined or reordered. Use the HyperFrames renderer or an FFmpeg built with libass.`,
+      );
+    }
     if (el.type === "box") {
+      flushAss();
       chain.push(
         f("drawbox", {
           x: el.x,
@@ -1415,16 +1510,18 @@ export function buildFilterGraph(comp: Pick<Composition, "elements">, target: Re
         }),
       );
     } else if (el.type === "text") {
+      flushAss();
       const name = `t${textFiles.size}.txt`;
       textFiles.set(name, el.text);
+      const scriptFile = route?.kind === "drawtext" && route.script ? fonts.scripts?.[route.script]?.[el.font] : undefined;
       chain.push(
         f("drawtext", {
-          fontfile: fonts[el.font],
+          fontfile: scriptFile ?? fonts[el.font],
           textfile: join(textDir, name),
           expansion: "none",
           fontsize: el.size,
           fontcolor: ffColor(el.color),
-          x: el.cx !== undefined ? `${el.cx}-text_w/2` : el.x,
+          x: el.cx !== undefined ? `${el.cx}-text_w/2` : el.rx !== undefined ? `${el.rx}-text_w` : el.x,
           y: el.slide ? `${el.y}+${slide}*${ease.offset}` : el.y,
           y_align: "font",
           alpha: fade > 0 ? ease.alpha : undefined,
@@ -1444,12 +1541,130 @@ export function buildFilterGraph(comp: Pick<Composition, "elements">, target: Re
     }
   }
   // Exit: the whole frame fades back to the background over the style's exit_ms, ending on the last frame.
+  flushAss();
   const exit = motion && !gm.noExit ? round3(Math.min(motion.exit_ms / 1000, durationS * 0.2)) : 0;
   if (exit >= 0.02) chain.push(f("fade", { t: "out", st: round3(Math.max(0, durationS - 1 / target.fps - exit)), d: exit, color: ffColor(gm.background ?? "#000000") }));
   chain.push("format=yuv420p");
   const out = "[vout]";
   chains.push(`${cur}${chain.join(",")}${out}`);
-  return { inputs, filtergraph: chains.join(";"), textFiles };
+  return { inputs, filtergraph: chains.join(";"), textFiles, warnings };
+}
+
+// ---------------------------------------------------------------------------------- libass text
+
+/** `#RRGGBB` → ASS `&HBBGGRR&`. */
+function assTagColour(hex: string): string {
+  const h = toHex(rgb(hex)).slice(1);
+  return `&H${h.slice(4, 6)}${h.slice(2, 4)}${h.slice(0, 2)}&`;
+}
+
+/** ASS alpha (`&H00&` opaque … `&HFF&` clear) for an opacity 0..1. */
+function assAlpha(opacity: number): string {
+  return `&H${Math.round((1 - Math.min(1, Math.max(0, opacity))) * 255).toString(16).padStart(2, "0").toUpperCase()}&`;
+}
+
+function assTime(sec: number): string {
+  const cs = Math.max(0, Math.round(sec * 100));
+  const p = (n: number, w = 2) => String(n).padStart(w, "0");
+  return `${Math.floor(cs / 360_000)}:${p(Math.floor(cs / 6000) % 60)}:${p(Math.floor(cs / 100) % 60)}.${p(cs % 100)}`;
+}
+
+/** Scene text inside an ASS event: override braces and backslashes cannot appear literally. */
+function assLiteral(text: string): string {
+  return text.replace(/\\/g, "∖").replace(/\{/g, "(").replace(/\}/g, ")").replace(/[\r\n]+/g, " ");
+}
+
+/** ASCII punctuation and digits the bundled script fonts have (Noto Sans Arabic has few; Devanagari most). */
+const SCRIPT_ASCII: Partial<Record<Script, RegExp>> = {
+  arabic: /[ !,\-.0-9:]/,
+  devanagari: /[^$&@`A-Za-z]/,
+};
+/** The Unicode blocks of each script (their neutral punctuation, e.g. ، ؟ ।, belongs with the script font). */
+const SCRIPT_BLOCK: Partial<Record<Script, RegExp>> = {
+  arabic: /[\u0600-\u06FF\u0750-\u077F\u0870-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/u,
+  devanagari: /[\u0900-\u097F\uA8E0-\uA8FF\u1CD0-\u1CFF]/u,
+  hebrew: /[\u0590-\u05FF\uFB1D-\uFB4F]/u,
+};
+
+/**
+ * Split a line into font runs: Latin letters use the role's Latin font; letters of the line's
+ * script use the script font; neutral characters stay with the script font when it has them
+ * (its own block, or ASCII it covers), else the Latin font.
+ */
+export function assFontRuns(text: string, script: Script): { latin: boolean; text: string }[] {
+  const runs: { latin: boolean; text: string }[] = [];
+  const ascii = SCRIPT_ASCII[script];
+  const block = SCRIPT_BLOCK[script];
+  for (const ch of text) {
+    const s = charScript(ch);
+    let latin: boolean;
+    if (s === "latin") latin = true;
+    else if (s !== null) latin = false;
+    else if (block?.test(ch)) latin = false;
+    else if (/\s/u.test(ch)) latin = runs.at(-1)?.latin ?? false;
+    else if (ch.charCodeAt(0) < 0x80) latin = ascii ? !ascii.test(ch) : false;
+    else latin = ascii !== undefined; // other neutrals (…, —, “ ”): the Latin font has them
+    const last = runs.at(-1);
+    if (last && last.latin === latin) last.text += ch;
+    else runs.push({ latin, text: ch });
+  }
+  return runs;
+}
+
+/**
+ * One ASS event for a text element: positioned like drawtext (top of the line at `y`, left edge,
+ * centre or right edge), faded in from `start` over `fade` and slid up by `slide` px. libass
+ * picks the base direction per line (Encoding -1) and shapes each font run.
+ */
+function assEvent(el: TextEl, fonts: AssTextFonts, scriptFont: AssFont | undefined, t: { start: number; fade: number; end: number; slide: number }): string {
+  const an = el.cx !== undefined ? 8 : el.rx !== undefined ? 9 : 7;
+  const x = el.cx ?? el.rx ?? el.x;
+  const latin = fonts.latin[el.font];
+  const script = scriptFont ?? latin;
+  const route = textRoute(el.text);
+  const runs = route.kind === "ass" ? assFontRuns(el.text, route.script) : [{ latin: true, text: el.text }];
+  const fontTag = (fnt: AssFont) => `\\fn${fnt.family}\\fs${Math.round(el.size * fnt.scale * 100) / 100}\\b${fnt.bold ? 1 : 0}`;
+  const fadeMs = Math.round(t.fade * 1000);
+  // libass hangs the baseline at the tallest run's win ascent below the top; drawtext (and the
+  // layout) at the font's hhea ascender. Lift the line so the baselines agree.
+  const winAsc = Math.max(...runs.map((run) => (run.latin ? latin : script).winAscent));
+  const y = Math.round(el.y - (winAsc - script.ascent) * el.size);
+  const move = t.slide > 0 && fadeMs > 0 ? `\\move(${x},${y + t.slide},${x},${y},0,${fadeMs})` : `\\pos(${x},${y})`;
+  const head = `{\\an${an}${move}${fadeMs > 0 ? `\\fad(${fadeMs},0)` : ""}\\1c${assTagColour(el.color)}\\bord${el.box ? el.box.border : 0}${el.box ? assBoxTags(el.box.color) : ""}}`;
+  const body = runs.map((run) => `{${fontTag(run.latin ? latin : script)}}${assLiteral(run.text)}`).join("");
+  return `Dialogue: 0,${assTime(t.start)},${assTime(t.end)},${el.box ? "Box" : "Text"},,0,0,0,,${head}${body}`;
+}
+
+/** Plate colour tags for a label box (`0xRRGGBB[@a]` from ffColor). */
+function assBoxTags(color: string): string {
+  const m = /^0x([0-9A-Fa-f]{6})(?:@([0-9.]+))?$/.exec(color);
+  if (!m) return "";
+  return `\\3c${assTagColour(`#${m[1]}`)}\\3a${assAlpha(m[2] ? Number(m[2]) : 1)}`;
+}
+
+/** A complete ASS script at the target size: `Text` (no border) and `Box` (opaque box behind each line). */
+function assScript(target: RenderTarget, events: readonly string[]): string {
+  const style = (name: string, borderStyle: number) =>
+    `Style: ${name},sans-serif,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,${borderStyle},0,0,7,0,0,0,-1`;
+  return [
+    "[Script Info]",
+    "; video-studio ffmpeg renderer: complex-script text",
+    "ScriptType: v4.00+",
+    `PlayResX: ${target.width}`,
+    `PlayResY: ${target.height}`,
+    "WrapStyle: 2",
+    "ScaledBorderAndShadow: yes",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    style("Text", 1),
+    style("Box", 3),
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ...events,
+    "",
+  ].join("\n");
 }
 
 // ---------------------------------------------------------------------------------- renderer
@@ -1512,6 +1727,93 @@ export function ffmpegRenderArgs(built: BuiltGraph, target: RenderTarget, tokens
     ...FASTSTART,
     out,
   ];
+}
+
+/** Whether an FFmpeg has the libass `ass` filter (memoised per binary). */
+const assFilterCache = new Map<string, Promise<boolean>>();
+function hasAssFilter(tools: FfmpegTools): Promise<boolean> {
+  let p = assFilterCache.get(tools.ffmpeg);
+  if (!p) {
+    p = runProcess(tools.ffmpeg, ["-hide_banner", "-filters"], { captureStdout: true, timeoutMs: 15_000 })
+      .then(({ stdout }) => /\sass\s/.test(stdout))
+      .catch(() => false);
+    assFilterCache.set(tools.ffmpeg, p);
+  }
+  return p;
+}
+
+const ROLES: readonly FontRole[] = ["heading", "body", "mono"];
+
+/** Family name libass should ask for: the bundled family of a bundled file, else the chain's first named family. */
+function assFamily(file: string, chain: string, fontsDir: string | null): string {
+  const hit = fontsDir ? BUNDLED_FONTS.find((b) => join(fontsDir, b.file) === file) : undefined;
+  if (hit) return hit.family;
+  return parseFontChain(chain).find((n) => !/^(sans-serif|serif|monospace|system-ui|ui-monospace|ui-sans-serif)$/i.test(n)) ?? "sans-serif";
+}
+
+/**
+ * Resolve the fonts a composition's text needs beyond the three role fonts: a script font per
+ * role for CJK/Hangul drawtext lines, and libass fonts (flat fonts dir, Latin + script
+ * families, size scales) for lines that need shaping. Returns warnings for scripts without a
+ * bundled font.
+ */
+async function scriptFonts(
+  comp: Pick<Composition, "elements">,
+  tokens: VisualTokens,
+  resolve: FontResolver,
+  weights: Record<FontRole, number | undefined>,
+  o: { fontsDir: string | null; libassDir: string; libass: boolean },
+): Promise<{ scripts?: FontFiles["scripts"]; ass?: AssTextFonts; warnings: string[] }> {
+  const warnings: string[] = [];
+  const chains: Record<FontRole, string> = { heading: tokens.font_heading, body: tokens.font_body, mono: tokens.font_mono };
+  const draw = new Map<Script, Set<FontRole>>();
+  const shaped = new Map<Script, Set<FontRole>>();
+  for (const el of comp.elements) {
+    if (el.type !== "text") continue;
+    const route = textRoute(el.text);
+    if (!route.script) continue;
+    const m = route.kind === "ass" ? shaped : draw;
+    if (!m.has(route.script)) m.set(route.script, new Set());
+    m.get(route.script)!.add(el.font);
+  }
+  const out: { scripts?: FontFiles["scripts"]; ass?: AssTextFonts; warnings: string[] } = { warnings };
+  for (const [script, roles] of draw) {
+    for (const role of roles) {
+      const file = await resolve(scriptFirstChain(chains[role], script, tokens.language), weights[role]);
+      (out.scripts ??= {})[script] = { ...out.scripts?.[script], [role]: file };
+    }
+  }
+  if (shaped.size === 0 || !o.libass) return out;
+  const files = new Set<string>();
+  const assFont = async (chain: string, role: FontRole): Promise<AssFont> => {
+    const file = await resolve(chain, weights[role]);
+    files.add(file);
+    const family = assFamily(file, chain, o.fontsDir);
+    // Both weights of a bundled family, so libass can switch with \b.
+    for (const b of BUNDLED_FONTS) if (b.family === family && o.fontsDir) files.add(join(o.fontsDir, b.file));
+    const metrics = readFontMetrics(file);
+    return {
+      family,
+      bold: (weights[role] ?? 400) >= 600,
+      scale: assFontSize(1, metrics),
+      winAscent: metrics ? metrics.winAscent / metrics.unitsPerEm : 1,
+      ascent: metrics ? metrics.hheaAscent / metrics.unitsPerEm : 1,
+    };
+  };
+  const latin = {} as Record<FontRole, AssFont>;
+  for (const role of ROLES) latin[role] = await assFont(chains[role], role);
+  const scripts: AssTextFonts["scripts"] = {};
+  for (const [script, roles] of shaped) {
+    if (scriptFontFamilies(script, tokens.language).length === 0) {
+      warnings.push(`text: ${script === "other" ? "this script" : script} has no bundled font; libass falls back to a host font`);
+    }
+    const perRole = {} as Record<FontRole, AssFont>;
+    for (const role of ROLES) perRole[role] = roles.has(role) || role === "heading" ? await assFont(scriptFirstChain(chains[role], script, tokens.language), role) : latin[role];
+    scripts[script] = perRole;
+  }
+  await prepareLibassFontsDir(o.libassDir, [...files].sort(), o.fontsDir);
+  out.ass = { fontsDir: o.libassDir, latin, scripts };
+  return out;
 }
 
 export function createFfmpegRenderer(opts: FfmpegRendererOptions = {}): SceneRenderer {
@@ -1592,17 +1894,28 @@ export function createFfmpegRenderer(opts: FfmpegRendererOptions = {}): SceneRen
 
       const comp = composeScene(scene, target, tokens, { image, images, ...(req.zones ? { zones: req.zones } : {}) });
       warnings.push(...comp.warnings);
+      // Bold headings by default, matching the HTML renderer (bundled Inter has a real Bold);
+      // style/brand weights pick the nearest bundled file (600+ Bold, lighter Regular).
+      const weights: Record<FontRole, number | undefined> = { heading: tokens.weight_heading ?? 700, body: tokens.weight_body, mono: undefined };
       const fonts: FontFiles = {
-        // Bold headings by default, matching the HTML renderer (bundled Inter has a real Bold);
-        // style/brand weights pick the nearest bundled file (600+ Bold, lighter Regular).
-        heading: await fontResolver(tokens.font_heading, tokens.weight_heading ?? 700),
-        body: await fontResolver(tokens.font_body, tokens.weight_body),
+        heading: await fontResolver(tokens.font_heading, weights.heading),
+        body: await fontResolver(tokens.font_body, weights.body),
         mono: await fontResolver(tokens.font_mono),
       };
       const frames = frameCount(scene.duration_sec, target.fps);
       const tmp = await mkdtemp(join(tmpdir(), "vs-ffr-"));
       try {
+        const needsAss = comp.elements.some((e) => e.type === "text" && textRoute(e.text).kind === "ass");
+        const extra = await scriptFonts(comp, tokens, fontResolver, weights, {
+          fontsDir: opts.fontsDir === undefined ? findFontsDir() : opts.fontsDir,
+          libassDir: join(tmp, "fonts"),
+          libass: needsAss && (await hasAssFilter(tools)),
+        });
+        warnings.push(...extra.warnings);
+        if (extra.scripts) fonts.scripts = extra.scripts;
+        if (extra.ass) fonts.ass = extra.ass;
         const built = buildFilterGraph(comp, target, frames / target.fps, fonts, tmp, { ...(tokens.motion ? { motion: tokens.motion } : {}), background: tokens.color_background });
+        warnings.push(...built.warnings);
         for (const [name, text] of built.textFiles) await writeFile(join(tmp, name), text, "utf8");
         await mkdir(dirname(req.out_path), { recursive: true });
         await runFfmpeg(ffmpegRenderArgs(built, target, tokens, frames, encode, req.out_path), { tools, signal: ropts.signal, timeoutMs: 10 * 60_000 });

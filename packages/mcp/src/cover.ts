@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type RunOptions, escapeFilterOption, escapeFiltergraph, ffprobe, runFfmpeg, secs } from "@video-studio/media";
 import { type LayoutZones, type PxRect, intersect } from "@video-studio/platforms";
-import { type FontResolver, type VisualTokens, createFontResolver, ffColor, fitText } from "@video-studio/renderer";
+import { COMPLEX_SCRIPTS, type FontResolver, type VisualTokens, createFontResolver, dominantScript, ffColor, fitText, prepareLibassFontsDir, scriptFontFamilies } from "@video-studio/renderer";
 import type { AspectRatio, PlatformContract, TextBox } from "@video-studio/schema";
 
 /**
@@ -168,7 +168,33 @@ export async function renderCover(o: CoverOptions): Promise<CoverResult> {
       filters.push(f("drawbox", { x: 0, y: 0, w: W, h: H, color: ffColor(o.tokens.color_background, 0.7), t: "fill" }));
       filters.push(f("drawbox", { x: bx, y: by, w: blockW, h: blockH, color: ffColor(o.tokens.color_background, 1), t: "fill" }));
       const top = by + (blockH - fit.height) / 2;
-      for (const [i, line] of fit.lines.entries()) {
+      const script = dominantScript(o.headline);
+      if (COMPLEX_SCRIPTS.has(script) && script !== "other") {
+        // drawtext cannot shape Devanagari or join/reorder Arabic: draw the headline with libass.
+        const fontsDir = await prepareLibassFontsDir(join(tmp, "fonts"));
+        const family = scriptFontFamilies(script)[0] ?? "Noto Sans";
+        const bgr = (hex: string) => `&H00${hex.slice(5, 7)}${hex.slice(3, 5)}${hex.slice(1, 3)}`.toUpperCase();
+        const ass = [
+          "[Script Info]",
+          "ScriptType: v4.00+",
+          `PlayResX: ${W}`,
+          `PlayResY: ${H}`,
+          "WrapStyle: 2",
+          "",
+          "[V4+ Styles]",
+          "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+          `Style: H,${family},${fit.fontSize},${bgr(o.tokens.color_text)},${bgr(o.tokens.color_text)},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,8,0,0,0,1`,
+          "",
+          "[Events]",
+          "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+          `Dialogue: 0,0:00:00.00,0:00:10.00,H,,0,0,0,,{\\an8\\pos(${cx},${Math.round(top)})}${fit.lines.join("\\N")}`,
+          "",
+        ].join("\n");
+        const assFile = join(tmp, "headline.ass");
+        await writeFile(assFile, ass, "utf8");
+        filters.push(`ass=filename=${escapeFiltergraph(escapeFilterOption(assFile))}:fontsdir=${escapeFiltergraph(escapeFilterOption(fontsDir))}`);
+      }
+      for (const [i, line] of (COMPLEX_SCRIPTS.has(script) && script !== "other" ? [] : fit.lines).entries()) {
         const file = join(tmp, `l${i}.txt`);
         await writeFile(file, line, "utf8");
         filters.push(

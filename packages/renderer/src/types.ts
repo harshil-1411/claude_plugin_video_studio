@@ -33,6 +33,12 @@ export interface VisualTokens {
   heading_scale?: number;
   text_align?: "center" | "left";
   motion?: MotionTokens;
+  /**
+   * Spec language (BCP-47), set only for languages written in a non-Latin script (see
+   * `withLanguage`): HyperFrames uses it for `lang`/`dir`, both renderers for script fonts.
+   * Without it, renderers detect the script from the text itself.
+   */
+  language?: string;
 }
 
 /** Resolved motion tokens (style pack, overridden by brand.motion). */
