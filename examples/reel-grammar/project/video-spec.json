@@ -1,0 +1,190 @@
+{
+  "schema_version": "1.0",
+  "title": "Reel grammar tour",
+  "goal": "explain",
+  "audience": "developers",
+  "platform": "tiktok",
+  "aspect_ratio": "9:16",
+  "targets": [
+    "tiktok",
+    "instagram"
+  ],
+  "target_duration_sec": 14,
+  "language": "en-US",
+  "grounding": "off",
+  "voice": {
+    "mode": "none"
+  },
+  "captions": {
+    "preset": "minimal",
+    "burn_in": false
+  },
+  "audio": {
+    "music": {
+      "file": "bundled:lofi"
+    }
+  },
+  "scenes": [
+    {
+      "id": "s01",
+      "duration_sec": 2,
+      "purpose": "hook",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "kinetic_text",
+        "props": {
+          "text": "Docs in. Video out.",
+          "rhythm": "word",
+          "emphasis": "Video"
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": []
+    },
+    {
+      "id": "s02",
+      "duration_sec": 2,
+      "purpose": "reveal",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "stat",
+        "props": {
+          "value": 0,
+          "unit": " keys",
+          "label": "API keys needed",
+          "context": "renders with local tools"
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": []
+    },
+    {
+      "id": "s03",
+      "duration_sec": 2,
+      "purpose": "step",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "timeline",
+        "props": {
+          "events": [
+            {
+              "label": "Ingest"
+            },
+            {
+              "label": "Plan"
+            },
+            {
+              "label": "Render"
+            },
+            {
+              "label": "Export"
+            }
+          ],
+          "current": 2
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": []
+    },
+    {
+      "id": "s04",
+      "duration_sec": 2,
+      "purpose": "comparison",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "split_screen",
+        "props": {
+          "mode": "before_after",
+          "left": {
+            "text": "Timeline editing"
+          },
+          "right": {
+            "text": "One command"
+          }
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": []
+    },
+    {
+      "id": "s05",
+      "duration_sec": 2,
+      "purpose": "testimonial",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "quote",
+        "props": {
+          "text": "It turned our README into a reel.",
+          "attribution": "Example user"
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": []
+    },
+    {
+      "id": "s06",
+      "duration_sec": 2,
+      "purpose": "context",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "map",
+        "props": {
+          "title": "Runs anywhere",
+          "points": [
+            {
+              "label": "Laptop",
+              "x": 0.25,
+              "y": 0.35
+            },
+            {
+              "label": "CI",
+              "x": 0.7,
+              "y": 0.65
+            }
+          ],
+          "route": true
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": []
+    },
+    {
+      "id": "s07",
+      "duration_sec": 2,
+      "purpose": "cta",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "lower_third",
+        "props": {
+          "name": "video-studio",
+          "title": "Claude Code plugin",
+          "headline": "Try it today"
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": []
+    }
+  ],
+  "style": "energetic"
+}
