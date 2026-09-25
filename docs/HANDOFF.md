@@ -147,8 +147,15 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 
 Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md` (Phases 4 → 5 → 6 → local 8, no human intervention; Phase 7, Phase 9 and CI are out of scope).
 
-- **Current:** Phase 5 step 1 (schema: purposes, kinds, `audio.music`, `voice.mode`, `Style`).
-- **Done:** Step 0 (Phase 4 closed).
+- **Current:** Phase 5 steps 4 (style packs) and 5 (archetype templates), then step 6 (`variants`/`adapt`), then the Phase 5 exit.
+- **Done:**
+  - Step 0 (Phase 4 closed).
+  - Phase 5 step 1 (`489dbbd`): schema for the new purposes and kinds, `audio.music`, `voice.mode` and `Style`.
+  - Phase 5 steps 2–3 (`db94d16`):
+    - 7 new kinds in both renderers
+    - `music/` CC0 beds with ducking
+    - `voice.mode: none`
+    - background-aware black-frame QA, with `QA_VERSION`
 - **Deferred to `docs/USER_CHECKLIST.md`** (written at the end):
   - real `say` renders
   - HyperFrames install and renders of new kinds and styles
@@ -158,6 +165,10 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
 
 **Loop decisions** (defaults chosen without asking; revisit if needed):
 - Phase 4 Parts 3–6 were verified in the sandbox instead of interactively.
+- Music beds are synthesized in-repo (`scripts/generate-music.mjs`), CC0, 16–32 s seamless loops at about −20 LUFS. The mix is normalised to −14 LUFS.
+- Ducking uses the known speech intervals (scene voice slots), not a sidechain compressor, so it is exact and deterministic.
+- On-screen reading rule without narration: at most 3 words/s after a 1 s settle (a design constant in `lint.ts`).
+- Strict grounding now also reads viewer-facing props text (stat values, quotes), so a numeric stat card needs a `claim_ref`.
 
 **Open decisions from step 3** (defaults chosen; revisit if needed):
 - "Key claims" means claims restated by the brief's `key_messages`.
