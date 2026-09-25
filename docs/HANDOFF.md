@@ -1,5 +1,7 @@
 # Handoff: video-studio (2026-09-25)
 
+**Git:** repo initialized on `master`. Initial commit `aa729d5`, "Phases 0–3: ingest, plan, local render pipeline" (241 files, clean tree). No remote yet.
+
 Read with `.claude/CLAUDE.md` (architecture rules and commands) and `docs/PLAN.md` (the roadmap, revised local-first after `deep-research-report_v2.md`). This file covers only the current state and the next steps.
 
 ## Where things stand
@@ -19,7 +21,7 @@ Phases 0–3 are built. A planned project renders to a finished, captioned 9:16 
 - **Skills:** create, plan, ingest, validate, render, qa, export, doctor.
 - **Agents:** source-researcher, creative-director.
 
-**Not yet done for Phase 3:** the interactive exit check. The user runs `claude --plugin-dir .`, then `/video-studio:create "Explain vector DBs in 30s"`.
+**Phase 3 exit check:** the plugin loads in Claude Code, and its tools resolve as `mcp__plugin_video-studio_engine__*`. Still to confirm: a full interactive `/video-studio:create "Explain vector DBs in 30s"` run ending in `dist/reel.mp4`.
 
 ## Environment facts that shape everything
 
@@ -34,6 +36,11 @@ Phases 0–3 are built. A planned project renders to a finished, captioned 9:16 
 - **The plugin's MCP server runs outside the sandbox** for the user, so `say` and Chrome work there.
 - **Chrome on macOS:** plain `chrome --headless --dump-dom` hangs for 45 s or more (the updater keeps it alive). The HyperFrames probe therefore launches Chrome through the producer's own `puppeteer-core`, which takes about 0.6 s (`puppeteerLaunchProbe` in `packages/renderer/src/hyperframes-renderer.ts`). The diagnostic is `node scripts/diagnose-chrome.mjs`.
 - **HyperFrames install:** it is never bundled. It is installed at `~/.video-studio/deps` for dev runs, or at `${CLAUDE_PLUGIN_DATA}/deps` for the plugin: `PUPPETEER_SKIP_DOWNLOAD=1 npm i @hyperframes/producer@0.8.75 --prefix deps`. It uses the system Chrome.
+- **Duplicate "engine" MCP server:** the repo root is also the plugin root, so Claude Code loads `.mcp.json` twice.
+  - The plugin copy, `plugin:video-studio:engine`, works.
+  - The project-scope copy, `engine`, fails with CONNECTION_CLOSED because `${CLAUDE_PLUGIN_ROOT}` isn't substituted.
+  - That notice is harmless. Keep `engine` in `disabledMcpjsonServers` in `.claude/settings.local.json`.
+  - Debug logs are in `~/.claude-msbector/debug/`.
 - **pnpm:** the store is pinned inside the repo (`storeDir: .pnpm-store` in `pnpm-workspace.yaml`) so sandboxed and unsandboxed installs agree. Some `node_modules/@video-studio/*` workspace symlinks were created by hand while installs were blocked; `pnpm install` recreates them.
 
 ## Open issues (small)
@@ -44,7 +51,8 @@ Phases 0–3 are built. A planned project renders to a finished, captioned 9:16 
 4. **Scenes open empty.** Scenes fade in from an empty first frame. Start them partly visible (Phase 5 motion work).
 5. **Spec vs. actual timing.** The example's scenes s05 and s06 get lengthened in the render plan to fit the `say` voiceover. The spec is left unchanged by design; the manifest records `timing_adjustments`.
 6. **Stale lockfile entries.** `pnpm-lock.yaml` contains 2 orphan `@secretlint/node` entries. They are harmless.
-7. **SQLite warning.** Node prints an `ExperimentalWarning` for `node:sqlite`. It is harmless.
+7. **Duplicate MCP notice.** The project-scope `engine` fails as described above. Candidate fix for Phase 4: have the doctor and docs explain it, or give `.mcp.json` a path that also works without `${CLAUDE_PLUGIN_ROOT}`.
+8. **SQLite warning.** Node prints an `ExperimentalWarning` for `node:sqlite`. It is harmless.
 
 ## Next: Phase 4, the platform compiler (all local, no keys)
 
