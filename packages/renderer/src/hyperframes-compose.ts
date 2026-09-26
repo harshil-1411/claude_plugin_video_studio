@@ -1,4 +1,5 @@
 import { basename, extname, isAbsolute, relative, resolve } from "node:path";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { type DeterministicKind, type SceneMotion, type TextBox, type TextRole, cueItems, propsText } from "@video-studio/schema";
 import { type CountUp, countUpSpan, countUpSteps, countUpTiming, COUNT_UP_ENTRANCE_LEAD_S, withEarlyFirstStep } from "./count-up.js";
@@ -1817,6 +1818,18 @@ function inside(parent: string, child: string): boolean {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
+/** `abs` if it is inside `root` after resolving symlinks (a link inside the project may point anywhere). */
+function realInside(root: string, abs: string): string | undefined {
+  if (!inside(root, abs)) return undefined;
+  try {
+    const real = realpathSync(abs);
+    return inside(realpathSync(root), real) ? real : undefined;
+  } catch {
+    // Missing file: lexically inside; the copy step reports it.
+    return abs;
+  }
+}
+
 /** Composition id for a scene (`vs-s01`). */
 export function compositionIdFor(sceneId: string): string {
   return `vs-${sceneId.replace(/[^A-Za-z0-9_-]/g, "_")}`;
@@ -1851,15 +1864,14 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
   /** Project-relative path → absolute, only if it stays inside the project and is an image. */
   const projectImage = (p: string): string | undefined => {
     const abs = resolve(projectRoot, p);
-    if (!inside(projectRoot, abs)) return undefined;
     if (!IMAGE_EXT.test(extname(abs))) return undefined;
-    return abs;
+    return realInside(projectRoot, abs);
   };
   const resolveAsset = (id: string): string | undefined => {
     const viaOpt = opts.resolveAsset?.(id);
     if (viaOpt) {
-      const abs = resolve(projectRoot, viaOpt);
-      if (inside(projectRoot, abs) && IMAGE_EXT.test(extname(abs))) return abs;
+      const abs = IMAGE_EXT.test(extname(viaOpt)) ? realInside(projectRoot, resolve(projectRoot, viaOpt)) : undefined;
+      if (abs) return abs;
       warnings.push(`${det.kind}: asset "${id}" resolves outside the project or is not an image; ignored`);
       return undefined;
     }

@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { resolveDataDir, writeJsonAtomic } from "@video-studio/core";
+import { projectPaths, resolveDataDir, resolveInsideProject, writeJsonAtomic } from "@video-studio/core";
 import { classifyText, deriveClaims, maxDataClass } from "@video-studio/ingestion";
 import { type TimedWord, groupSentences, isVtt, parseCaptionFile, whisperLanguage, whisperTranscribe } from "@video-studio/media";
 import { ContentIR, type EvidenceSpan, type IrAsset, formatIssues } from "@video-studio/schema";
@@ -260,7 +260,13 @@ export async function transcribeAsset(projectDir: string, assetId: string, opts:
   let meta: Omit<TranscriptMeta, "path">;
   let downloaded: TranscribeResult["model_downloaded"];
   if (opts.captions_file) {
-    const file = isAbsolute(opts.captions_file) ? opts.captions_file : join(root, opts.captions_file);
+    // Inside the project only (symlinks resolved): a caption path never reads files from elsewhere.
+    let file: string;
+    try {
+      file = await resolveInsideProject(projectPaths(root), opts.captions_file);
+    } catch {
+      throw new TranscribeError(`captions_file must be a path inside the project: ${opts.captions_file}`, "copy the .srt/.vtt into the project folder and pass its project-relative path");
+    }
     const ext = extname(file).toLowerCase();
     if (ext !== ".srt" && ext !== ".vtt") throw new TranscribeError(`captions_file must be a .srt or .vtt file, got ${basename(file)}`);
     if (!existsSync(file)) throw new TranscribeError(`captions file not found: ${file}`, "pass a path relative to the project folder");

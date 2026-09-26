@@ -2215,11 +2215,13 @@ export function createFfmpegRenderer(opts: FfmpegRendererOptions = {}): SceneRen
         if (!image) warnings.push(`screenshot: asset "${id}" could not be resolved or read; drew a placeholder panel`);
       } else if (det.kind === "end_card" && tokens.logo_path) {
         const lp = tokens.logo_path;
+        // Project-relative only (symlinks resolved): a brand logo can never pull in a file from elsewhere on disk.
         let path: string | null = null;
         try {
-          path = isAbsolute(lp) ? lp : await resolveInsideProject(projectPaths(req.project_dir), lp);
+          path = await resolveInsideProject(projectPaths(req.project_dir), lp);
         } catch {
           path = null;
+          warnings.push(`end_card: logo "${lp}" must be a path inside the project (copy it into assets/); skipped`);
         }
         if (path && extname(path).toLowerCase() === ".svg") {
           warnings.push("end_card: SVG logos are not supported by ffmpeg-drawtext; logo skipped");

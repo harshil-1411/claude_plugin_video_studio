@@ -10,6 +10,8 @@ export * from "./url.js";
 export * from "./repo.js";
 export * from "./media.js";
 export * from "./classify.js";
+export * from "./redact.js";
+export * from "./net-guard.js";
 export * from "./builder.js";
 export * from "./detect.js";
 export * from "./extractors.js";

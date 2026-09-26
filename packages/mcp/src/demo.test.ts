@@ -109,6 +109,15 @@ describe("demo capture", () => {
     expect(r.warnings.join(" ")).toMatch(/not a local address/);
   }, 30_000);
 
+  it("refuses goto steps that leave the app's origin, and scripts outside the project, before opening a browser", async () => {
+    const dir = await project("leave");
+    await writeFile(join(dir, "project", "demo.json"), JSON.stringify({ ...script, url: "http://localhost:3000", steps: [{ action: "goto", url: "https://evil.example/steal" }] }));
+    const log: string[] = [];
+    await expect(recordDemo(dir, { confirm: true, browser: fakeBrowser(log), sleep: async () => undefined })).rejects.toThrow(/leaves http:\/\/localhost:3000/);
+    expect(log).toEqual([]);
+    await expect(recordDemo(dir, { confirm: true, script: "../../outside.json", browser: fakeBrowser(log) })).rejects.toThrow(/inside the project/);
+  });
+
   it("lays portrait recordings out at phone width and records at the full size", async () => {
     expect(cssViewport({ width: 1080, height: 1920 })).toEqual({ width: 390, height: 693, deviceScaleFactor: 2.769 });
     expect(cssViewport({ width: 1920, height: 1080 })).toEqual({ width: 1920, height: 1080, deviceScaleFactor: 1 });

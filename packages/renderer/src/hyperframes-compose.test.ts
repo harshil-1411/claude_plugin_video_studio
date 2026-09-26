@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { DETERMINISTIC_PROPS_EXAMPLES, type DeterministicKind, type MotionPattern, type Scene, cueItems, kineticUnits } from "@video-studio/schema";
 import { CUE_LEAD_S } from "./cue-timing.js";
@@ -268,6 +271,23 @@ describe("buildComposition: tokens, safe areas, assets", () => {
     const missing = buildComposition(req("screenshot", { asset: "a9" }));
     expect(own(missing.assets)).toEqual([]);
     expect(missing.html).toContain("vs-shot-missing");
+  });
+
+  it("follows symlinks: an image link inside the project that points outside is refused", () => {
+    const root = mkdtempSync(join(tmpdir(), "vs-hf-link-"));
+    try {
+      mkdirSync(join(root, "proj", "shots"), { recursive: true });
+      writeFileSync(join(root, "secret.png"), "not really a png");
+      writeFileSync(join(root, "proj", "shots", "real.png"), "png");
+      symlinkSync(join(root, "secret.png"), join(root, "proj", "shots", "link.png"));
+      const proj = join(root, "proj");
+      const linked = buildComposition(req("screenshot", { asset: "shots/link.png" }, { project_dir: proj }));
+      expect(own(linked.assets)).toEqual([]);
+      const real = buildComposition(req("screenshot", { asset: "shots/real.png" }, { project_dir: proj }));
+      expect(own(real.assets)).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("adds the brand logo to cta and end_card", () => {

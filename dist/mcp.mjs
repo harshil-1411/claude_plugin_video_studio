@@ -9,6 +9,11 @@ import os, { homedir, hostname, platform, tmpdir } from "node:os";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
 import { DatabaseSync } from "node:sqlite";
+import http from "node:http";
+import https from "node:https";
+import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import perf_hooks from "node:perf_hooks";
 import tty from "node:tty";
 import "node:events";
@@ -211258,9 +211263,137 @@ var require_node$1 = /* @__PURE__ */ __commonJSMin(((exports) => {
 	}
 }));
 //#endregion
-//#region ../ingestion/dist/url.js
+//#region ../ingestion/dist/net-guard.js
 var import_readability = require_readability();
 var import_node = require_node$1();
+const defaultLookup = async (hostname) => {
+	return (await lookup(hostname, {
+		all: true,
+		verbatim: true
+	})).map((a) => ({
+		address: a.address,
+		family: a.family === 6 ? 6 : 4
+	}));
+};
+/** Env switch (set by the user in the engine's environment) that disables the guard. */
+const ALLOW_PRIVATE_URLS_ENV = "VS_ALLOW_PRIVATE_URLS";
+function allowPrivateUrls(env) {
+	return env?.[ALLOW_PRIVATE_URLS_ENV] === "1";
+}
+function v4ToInt(ip) {
+	return ip.split(".").reduce((acc, o) => acc * 256 + Number(o), 0);
+}
+/** [network, prefix] pairs of IPv4 ranges that must never be fetched. */
+const BLOCKED_V4 = [
+	["0.0.0.0", 8],
+	["10.0.0.0", 8],
+	["100.64.0.0", 10],
+	["127.0.0.0", 8],
+	["169.254.0.0", 16],
+	["172.16.0.0", 12],
+	["192.0.0.0", 24],
+	["192.168.0.0", 16],
+	["198.18.0.0", 15],
+	["224.0.0.0", 4],
+	["240.0.0.0", 4]
+];
+function isBlockedV4(ip) {
+	const n = v4ToInt(ip);
+	return BLOCKED_V4.some(([net, prefix]) => {
+		const size = 2 ** (32 - prefix);
+		const start = v4ToInt(net);
+		return n >= start && n < start + size;
+	});
+}
+/** Expand an IPv6 literal (optionally with an embedded dotted IPv4 tail) to 8 hextets. */
+function expandV6(ip) {
+	let s = ip.toLowerCase();
+	const zone = s.indexOf("%");
+	if (zone >= 0) s = s.slice(0, zone);
+	const tail = /(\d+\.\d+\.\d+\.\d+)$/.exec(s);
+	if (tail) {
+		const n = v4ToInt(tail[1]);
+		s = `${s.slice(0, -tail[1].length)}${(n >>> 16 & 65535).toString(16)}:${(n & 65535).toString(16)}`;
+	}
+	const halves = s.split("::");
+	if (halves.length > 2) return void 0;
+	const [head, rest] = halves;
+	const parse = (part) => part ? part.split(":").map((h) => Number.parseInt(h, 16)) : [];
+	const a = parse(head);
+	const b = rest === void 0 ? [] : parse(rest);
+	const fill = 8 - a.length - b.length;
+	if (fill < 0 || rest === void 0 && fill !== 0) return void 0;
+	const out = [
+		...a,
+		...new Array(fill).fill(0),
+		...b
+	];
+	return out.length === 8 && out.every((h) => Number.isInteger(h) && h >= 0 && h <= 65535) ? out : void 0;
+}
+function isBlockedV6(ip) {
+	const h = expandV6(ip);
+	if (!h) return true;
+	const v4 = (hi, lo) => `${hi >>> 8}.${hi & 255}.${lo >>> 8}.${lo & 255}`;
+	const zeros5 = h.slice(0, 5).every((x) => x === 0);
+	if (zeros5 && h[5] === 65535) return isBlockedV4(v4(h[6], h[7]));
+	if (zeros5 && h[5] === 0) {
+		if (h[6] === 0) return true;
+		return isBlockedV4(v4(h[6], h[7]));
+	}
+	if (h[0] === 100 && h[1] === 65435 && h.slice(2, 6).every((x) => x === 0)) return isBlockedV4(v4(h[6], h[7]));
+	const first = h[0];
+	if ((first & 65024) === 64512) return true;
+	if ((first & 65472) === 65152) return true;
+	if ((first & 65472) === 65216) return true;
+	if ((first & 65280) === 65280) return true;
+	return false;
+}
+/** True when `ip` is loopback, private, link-local, unspecified, CGNAT, multicast or reserved. */
+function isPrivateAddress(ip) {
+	const bare = ip.startsWith("[") && ip.endsWith("]") ? ip.slice(1, -1) : ip;
+	const v = isIP(bare.split("%")[0]);
+	if (v === 4) return isBlockedV4(bare);
+	if (v === 6) return isBlockedV6(bare);
+	return true;
+}
+var BlockedAddressError = class extends Error {
+	url;
+	host;
+	ip;
+	constructor(url, host, ip) {
+		super(`refusing to fetch ${url}: ${host} resolves to a private or local address (${ip}). Set ${ALLOW_PRIVATE_URLS_ENV}=1 in the engine's environment to allow local URLs.`);
+		this.url = url;
+		this.host = host;
+		this.ip = ip;
+		this.name = "BlockedAddressError";
+	}
+};
+/**
+* Validate the host of `url`. Returns the resolved addresses (all public) so the caller can pin
+* the connection to them, or `undefined` when nothing was resolved (literal public IP handled by
+* the caller's connect; no lookup given).
+*/
+async function checkUrlHost(url, opts) {
+	if (opts.allowPrivate) return void 0;
+	const host = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
+	const literal = isIP(host);
+	if (literal) {
+		if (isPrivateAddress(host)) throw new BlockedAddressError(url.href, url.hostname, host);
+		return [{
+			address: host,
+			family: literal === 6 ? 6 : 4
+		}];
+	}
+	const name = host.toLowerCase().replace(/\.$/, "");
+	if (name === "localhost" || name.endsWith(".localhost")) throw new BlockedAddressError(url.href, url.hostname, "localhost");
+	if (!opts.lookup) return void 0;
+	const addrs = await opts.lookup(host);
+	if (addrs.length === 0) throw new Error(`${host} did not resolve to any address`);
+	for (const a of addrs) if (isPrivateAddress(a.address)) throw new BlockedAddressError(url.href, url.hostname, a.address);
+	return addrs;
+}
+/** Largest saved `.html` page read from disk (S9: a huge file would exhaust memory in the parser). */
+const MAX_LOCAL_HTML_BYTES = 20971520;
 var UrlFetchError = class extends Error {
 	code;
 	constructor(code, message) {
@@ -211314,12 +211447,92 @@ async function readCapped$1(res, maxBytes) {
 	}
 	return out;
 }
+function headersOf(init) {
+	const out = {};
+	new Headers(init?.headers).forEach((v, k) => {
+		out[k] = v;
+	});
+	return out;
+}
+const NULL_BODY_STATUS = /* @__PURE__ */ new Set([
+	101,
+	103,
+	204,
+	205,
+	304
+]);
+/**
+* GET over node:http(s) with the connection pinned to addresses the SSRF guard already validated:
+* the socket's `lookup` returns only `pinned`, so a second DNS answer (DNS rebinding) can never
+* redirect the connection to a private address. TLS still verifies the certificate against the
+* URL's host name. Compressed bodies are decoded here (the size cap applies to decoded bytes).
+*/
+function pinnedFetch(url, init, pinned) {
+	const u = new URL(url);
+	const mod = u.protocol === "https:" ? https : http;
+	const lookup = (_host, options, cb) => {
+		if (typeof options === "object" && options?.all) cb(null, pinned.map((a) => ({
+			address: a.address,
+			family: a.family
+		})));
+		else cb(null, pinned[0].address, pinned[0].family);
+	};
+	return new Promise((resolvePromise, reject) => {
+		const req = mod.request(u, {
+			method: "GET",
+			headers: {
+				"accept-encoding": "gzip, deflate, br",
+				...headersOf(init)
+			},
+			agent: false,
+			lookup,
+			...init?.signal ? { signal: init.signal } : {}
+		}, (res) => {
+			const headers = new Headers();
+			for (const [k, v] of Object.entries(res.headers)) {
+				if (v === void 0) continue;
+				for (const one of Array.isArray(v) ? v : [v]) headers.append(k, one);
+			}
+			let stream = res;
+			const enc = (res.headers["content-encoding"] ?? "").toLowerCase().trim();
+			const decoder = enc === "gzip" || enc === "x-gzip" ? createGunzip() : enc === "deflate" ? createInflate() : enc === "br" ? createBrotliDecompress() : void 0;
+			if (decoder) {
+				res.on("error", (e) => decoder.destroy(e));
+				stream = res.pipe(decoder);
+				headers.delete("content-encoding");
+				headers.delete("content-length");
+			}
+			const status = res.statusCode ?? 0;
+			const body = NULL_BODY_STATUS.has(status) ? null : Readable.toWeb(stream);
+			if (body === null) res.resume();
+			try {
+				resolvePromise(new Response(body, {
+					status,
+					headers
+				}));
+			} catch (err) {
+				res.destroy();
+				reject(err);
+			}
+		});
+		req.on("error", reject);
+		req.end();
+	});
+}
 /**
 * Fetch a page with a timeout, size cap, content-type check and manual
 * redirect handling (each hop must stay http/https). Never executes content.
+*
+* SSRF guard (unless `allowPrivateAddresses`): before the first request and before every redirect
+* hop the host is resolved and refused when any address is loopback, private, link-local, CGNAT,
+* multicast, unspecified or reserved ({@link checkUrlHost}). With the default transport the
+* connection is pinned to the validated addresses ({@link pinnedFetch}), which closes the DNS
+* rebinding window. Residual risk: an injected `fetch` does its own resolution, so a rebinding
+* DNS server could still steer it; production code never injects one.
 */
 async function fetchPage(url, opts = {}) {
-	const doFetch = opts.fetch ?? globalThis.fetch;
+	const injected = opts.fetch;
+	const lookup = opts.lookup ?? (injected ? void 0 : defaultLookup);
 	const timeoutMs = opts.timeoutMs ?? 15e3;
 	const maxBytes = opts.maxBytes ?? 5242880;
 	const maxRedirects = opts.maxRedirects ?? 5;
@@ -211327,6 +211540,18 @@ async function fetchPage(url, opts = {}) {
 	let current = parseHttpUrl(url);
 	try {
 		for (let hop = 0;; hop++) {
+			let pinned;
+			try {
+				pinned = await raceAbort(checkUrlHost(current, {
+					...lookup ? { lookup } : {},
+					allowPrivate: opts.allowPrivateAddresses === true
+				}), signal);
+			} catch (err) {
+				if (err instanceof BlockedAddressError) throw new UrlFetchError("blocked_address", err.message);
+				if (signal.aborted) throw err;
+				throw new UrlFetchError("network_error", `could not resolve ${current.hostname}: ${err.message}`);
+			}
+			const doFetch = injected ?? (pinned ? (u, init) => pinnedFetch(u, init, pinned) : globalThis.fetch);
 			let res;
 			try {
 				res = await doFetch(current.href, {
@@ -211372,6 +211597,21 @@ async function fetchPage(url, opts = {}) {
 		if (signal.aborted && !(err instanceof UrlFetchError)) throw new UrlFetchError("timeout", `timed out after ${timeoutMs} ms fetching ${url}`);
 		throw err;
 	}
+}
+/** Reject as soon as `signal` aborts (dns.lookup itself cannot be cancelled). */
+function raceAbort(p, signal) {
+	if (signal.aborted) return Promise.reject(signal.reason);
+	return new Promise((res, rej) => {
+		const onAbort = () => rej(signal.reason);
+		signal.addEventListener("abort", onAbort, { once: true });
+		p.then((v) => {
+			signal.removeEventListener("abort", onAbort);
+			res(v);
+		}, (e) => {
+			signal.removeEventListener("abort", onAbort);
+			rej(e);
+		});
+	});
 }
 function decode$1(body, charset) {
 	try {
@@ -211542,8 +211782,25 @@ async function extractHtml(html, url, minChars = 200) {
 * A saved web page on disk (`.html`/`.htm`), read like a fetched page. Its "URL" is the file name
 * (refs encode it: `url:MSB%20Docs.html#pricing`), so evidence never carries a machine path. The charset comes from `<meta charset>` when present.
 */
-async function loadLocalPage(path) {
-	const body = new Uint8Array(await readFile(path));
+async function loadLocalPage(path, maxBytes = MAX_LOCAL_HTML_BYTES) {
+	const fh = await open(path, "r");
+	let body;
+	try {
+		const { size } = await fh.stat();
+		if (size > maxBytes) throw new UrlFetchError("too_large", `${basename(path)} is ${size} bytes; saved web pages are limited to ${maxBytes} bytes (${Math.round(maxBytes / 1024 / 1024)} MB)`);
+		const buf = Buffer.alloc(size + 1 > maxBytes + 1 ? maxBytes + 1 : size + 1);
+		let off = 0;
+		for (;;) {
+			const { bytesRead } = await fh.read(buf, off, buf.length - off, off);
+			if (bytesRead === 0) break;
+			off += bytesRead;
+			if (off >= buf.length) break;
+		}
+		if (off > maxBytes) throw new UrlFetchError("too_large", `${basename(path)} exceeds ${maxBytes} bytes`);
+		body = new Uint8Array(buf.buffer, buf.byteOffset, off);
+	} finally {
+		await fh.close();
+	}
 	const head = new TextDecoder("latin1").decode(body.subarray(0, 4096));
 	const charset = /<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1]?.toLowerCase();
 	const name = basename(path);
@@ -228538,7 +228795,7 @@ const SECRET_PATTERNS = [
 ];
 /** `FOO_KEY = "…"`, `api_secret: …`, `GITHUB_TOKEN=…`, `password=…` */
 const ASSIGNMENT = /\b([A-Za-z0-9_.-]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIALS?)[A-Za-z0-9_]*)["']?\s*(?:=|:|=>)\s*["'`]?([^\s"'`,;]{12,})/gi;
-const PLACEHOLDER = /^(?:x+|\*+|\.+|<.*>|\{.*\}|\$\{?.*|%.*%|your[_-]?.*|changeme|example.*|placeholder.*|redacted|null|none|undefined|true|false|process\.env.*|os\.environ.*|env\(.*)$/i;
+const PLACEHOLDER = /^(?:\[REDACTED[:\]].*|x+|\*+|\.+|<.*>|\{.*\}|\$\{?.*|%.*%|your[_-]?.*|changeme|example.*|placeholder.*|redacted|null|none|undefined|true|false|process\.env.*|os\.environ.*|env\(.*)$/i;
 /** Shannon entropy in bits per character. */
 function shannonEntropy(s) {
 	if (!s) return 0;
@@ -228580,6 +228837,57 @@ function scanSecrets(text, findings) {
 			preview: redact(value)
 		});
 	}
+}
+const PEM_BEGIN = /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/g;
+const PEM_END = /-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/g;
+/**
+* Positions of the secrets {@link classifyText} reports, widened to what must be hidden: a
+* private key covers its whole PEM block (from BEGIN to END, or to the end of the string when the
+* block was split; an END with no BEGIN before it covers from the string start), and a
+* high-entropy assignment covers only its value (`API_TOKEN=[REDACTED:…]`).
+*/
+function secretSpans(text) {
+	const spans = [];
+	let lastBlockEnd = 0;
+	for (const m of text.matchAll(PEM_BEGIN)) {
+		if (m.index < lastBlockEnd) continue;
+		PEM_END.lastIndex = m.index + m[0].length;
+		const end = PEM_END.exec(text);
+		const stop = end ? end.index + end[0].length : text.length;
+		spans.push({
+			start: m.index,
+			end: stop,
+			type: "private_key"
+		});
+		lastBlockEnd = stop;
+	}
+	PEM_END.lastIndex = 0;
+	for (const m of text.matchAll(PEM_END)) if (!spans.some((s) => m.index >= s.start && m.index < s.end)) spans.push({
+		start: 0,
+		end: m.index + m[0].length,
+		type: "private_key"
+	});
+	for (const { type, re } of SECRET_PATTERNS) {
+		if (type === "private_key") continue;
+		for (const m of text.matchAll(re)) spans.push({
+			start: m.index,
+			end: m.index + m[0].length,
+			type
+		});
+	}
+	const assignment = new RegExp(ASSIGNMENT.source, "gid");
+	for (const m of text.matchAll(assignment)) {
+		const value = m[2];
+		if (PLACEHOLDER.test(value)) continue;
+		if (shannonEntropy(value) < 3.5 || !/\d/.test(value) || !/[A-Za-z]/.test(value)) continue;
+		const [start, end] = m.indices[2];
+		spans.push({
+			start,
+			end,
+			type: "high_entropy_assignment"
+		});
+	}
+	return spans;
 }
 function scanPii(text, findings) {
 	for (const m of text.matchAll(EMAIL)) {
@@ -228881,7 +229189,7 @@ async function repoDigest(dir) {
 	}
 	return h.digest("hex");
 }
-const SECRETLINT_CONFIG = { rules: [{
+const SECRETLINT_CONFIG$1 = { rules: [{
 	id: "@secretlint/secretlint-rule-preset-recommend",
 	rule: creator
 }] };
@@ -228900,7 +229208,7 @@ async function scanFileForSecrets(relPath, content) {
 			contentType: "text"
 		},
 		options: {
-			config: SECRETLINT_CONFIG,
+			config: SECRETLINT_CONFIG$1,
 			maskSecrets: true,
 			noPhysicFilePath: true
 		}
@@ -232020,6 +232328,190 @@ const mediaExtractor = {
 		};
 	}
 };
+//#endregion
+//#region ../ingestion/dist/redact.js
+/**
+* Secret redaction for every extracted source (S3). The repo extractor excludes secret-bearing
+* files; everything else (text, markdown, PDF, DOCX, PPTX, HTML, URL pages, transcripts) used to
+* keep a matched secret verbatim in `content-ir.json` and the ingest cache. {@link redactPart}
+* runs the same detection (secretlint's recommend preset, passed in memory, plus the heuristic
+* patterns of classify.ts) over the extracted title, headings, section text and evidence text and
+* replaces each match with `[REDACTED:<rule>]`. The part records a `secret_redacted` warning per
+* rule and a `contains_secrets` classification hint; neither carries any secret text.
+*/
+const SECRETLINT_CONFIG = { rules: [{
+	id: "@secretlint/secretlint-rule-preset-recommend",
+	rule: creator
+}] };
+const REDACTION_WARNING = "secret_redacted";
+/** secretlint (recommend preset, in-memory config: no rc file is ever loaded) + classify.ts patterns. */
+async function findSecretSpans(text) {
+	const spans = secretSpans(text);
+	if (text.trim()) {
+		const result = await lintSource({
+			source: {
+				filePath: "extracted.txt",
+				content: text,
+				ext: ".txt",
+				contentType: "text"
+			},
+			options: {
+				config: SECRETLINT_CONFIG,
+				maskSecrets: true,
+				noPhysicFilePath: true
+			}
+		});
+		for (const m of result.messages) {
+			if (m.type === "ignore") continue;
+			const [start, end] = m.range;
+			if (end > start) spans.push({
+				start,
+				end,
+				type: m.ruleId.replace(/^@secretlint\/secretlint-rule-/, "secretlint-")
+			});
+		}
+	}
+	return mergeSpans(spans);
+}
+/** Sort and merge overlapping spans; a merged span keeps the rule of its earliest (then longest) member. */
+function mergeSpans(spans) {
+	const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
+	const out = [];
+	for (const s of sorted) {
+		const last = out[out.length - 1];
+		if (last && s.start < last.end) last.end = Math.max(last.end, s.end);
+		else out.push({ ...s });
+	}
+	return out;
+}
+const redactionMarker = (rule) => `[REDACTED:${rule}]`;
+async function redactString(text) {
+	const spans = await findSecretSpans(text);
+	if (spans.length === 0) return {
+		text,
+		edits: [],
+		found: []
+	};
+	let out = "";
+	let pos = 0;
+	const edits = [];
+	const found = [];
+	for (const s of spans) {
+		const marker = redactionMarker(s.type);
+		out += text.slice(pos, s.start) + marker;
+		edits.push({
+			start: s.start,
+			end: s.end,
+			len: marker.length
+		});
+		found.push({
+			rule: s.type,
+			digest: createHash("sha256").update(text.slice(s.start, s.end)).digest("hex")
+		});
+		pos = s.end;
+	}
+	out += text.slice(pos);
+	return {
+		text: out,
+		edits,
+		found
+	};
+}
+/**
+* Map an offset in the original string to the redacted one. An offset inside a redacted range
+* snaps to the marker's start (`side: "start"`) or end (`side: "end"`).
+*/
+function mapOffset(edits, i, side) {
+	let delta = 0;
+	for (const e of edits) {
+		if (i <= e.start) break;
+		if (i < e.end) return e.start + delta + (side === "start" ? 0 : e.len);
+		delta += e.len - (e.end - e.start);
+	}
+	return i + delta;
+}
+/**
+* Redact secrets in one extracted source. Returns the same object when nothing matched (so
+* already-redacted cache entries are a no-op).
+*
+* Evidence offsets: a span whose `char_start`/`char_end` index into one of the part's section
+* texts (DOCX) is re-sliced from the redacted section and its offsets are remapped, so
+* `section.text.slice(char_start, char_end) === evidence.text` still holds. Offsets that index the
+* original source file (text, markdown) are left alone: they still locate the span in that file;
+* only the stored excerpt is redacted.
+*/
+async function redactPart(part) {
+	const memo = /* @__PURE__ */ new Map();
+	const red = (t) => {
+		let p = memo.get(t);
+		if (!p) memo.set(t, p = redactString(t));
+		return p;
+	};
+	const title = part.source.title !== void 0 ? await red(part.source.title) : void 0;
+	const sections = await Promise.all(part.sections.map(async (s) => ({
+		heading: s.heading !== void 0 ? await red(s.heading) : void 0,
+		text: await red(s.text)
+	})));
+	const evidence = await Promise.all(part.evidence.map((e) => red(e.text)));
+	const all = [
+		title,
+		...sections.flatMap((s) => [s.heading, s.text]),
+		...evidence
+	].filter((r) => r !== void 0);
+	if (all.every((r) => r.edits.length === 0)) return part;
+	const newEvidence = part.evidence.map((e, k) => {
+		const r = evidence[k];
+		const { char_start: cs, char_end: ce } = e.locator;
+		if (cs !== void 0 && ce !== void 0) {
+			const idx = part.sections.findIndex((s, j) => sections[j].text.edits.length > 0 && s.text.slice(cs, ce) === e.text);
+			if (idx >= 0) {
+				const sec = sections[idx].text;
+				const ns = mapOffset(sec.edits, cs, "start");
+				const ne = mapOffset(sec.edits, ce, "end");
+				return {
+					...e,
+					text: sec.text.slice(ns, ne),
+					locator: {
+						...e.locator,
+						char_start: ns,
+						char_end: ne
+					}
+				};
+			}
+		}
+		return r.edits.length ? {
+			...e,
+			text: r.text
+		} : e;
+	});
+	const byRule = /* @__PURE__ */ new Map();
+	for (const r of all) for (const f of r.found) (byRule.get(f.rule) ?? byRule.set(f.rule, /* @__PURE__ */ new Set()).get(f.rule)).add(f.digest);
+	const rules = [...byRule].sort(([a], [b]) => a.localeCompare(b));
+	const warnings = [...part.warnings, ...rules.map(([rule, set]) => ({
+		code: REDACTION_WARNING,
+		message: `${set.size} possible secret(s) matching rule ${rule} were redacted from the extracted text (shown as ${redactionMarker(rule)}).`
+	}))];
+	const hints = part.classificationHints ?? {};
+	return {
+		...part,
+		source: {
+			...part.source,
+			...title ? { title: title.text } : {}
+		},
+		sections: part.sections.map((s, j) => ({
+			...s,
+			...s.heading !== void 0 ? { heading: sections[j].heading.text } : {},
+			text: sections[j].text.text
+		})),
+		evidence: newEvidence,
+		warnings,
+		classificationHints: {
+			...hints,
+			contains_secrets: true,
+			notes: [...hints.notes ?? [], ...rules.map(([rule, set]) => `secret redacted: ${rule} ×${set.size}`)]
+		}
+	};
+}
 const SchemaVersion = literal("1.0").describe("Schema version of this document.");
 /** ISO-8601 date-time string (UTC `Z` or explicit offset). Never a Date object. */
 const IsoDateTime = datetime({ offset: true });
@@ -235411,10 +235903,16 @@ async function ingest(inputs, options) {
 	const replacing = options.replace === true && existsSync(irPath);
 	inputs = inputs.flatMap((raw) => typeof raw === "string" ? mediaFolderFiles(resolve(cwd, expandHome(raw.trim()))) ?? [raw] : [raw]);
 	const now = toIso(options.now);
+	const allowPrivate = allowPrivateUrls(options.env ?? process.env);
+	const urlOptions = {
+		...options.lookup ? { lookup: options.lookup } : {},
+		...allowPrivate ? { allowPrivateAddresses: true } : {}
+	};
 	const registry = {
 		...createExtractors({
 			...options.fetch ? { fetch: options.fetch } : {},
-			...options.fetchRepo ? { fetchRepo: options.fetchRepo } : {}
+			...options.fetchRepo ? { fetchRepo: options.fetchRepo } : {},
+			...Object.keys(urlOptions).length ? { url: urlOptions } : {}
 		}),
 		...options.extractors
 	};
@@ -235449,10 +235947,11 @@ async function ingest(inputs, options) {
 			let part;
 			let fetchedAt = now;
 			if (hit) {
-				part = hit.part;
+				part = await redactPart(hit.part);
 				fetchedAt = hit.entry.fetched_at;
+				if (part !== hit.part) await cache?.put(key, part, projectDir, extractor.version, fetchedAt);
 			} else {
-				part = await extractor.extract(input);
+				part = await redactPart(await extractor.extract(input));
 				await cache?.put(key, part, projectDir, extractor.version, now);
 			}
 			parts.push(part);
@@ -241718,9 +242217,10 @@ function createFfmpegRenderer(opts = {}) {
 				const lp = tokens.logo_path;
 				let path = null;
 				try {
-					path = isAbsolute(lp) ? lp : await resolveInsideProject(projectPaths(req.project_dir), lp);
+					path = await resolveInsideProject(projectPaths(req.project_dir), lp);
 				} catch {
 					path = null;
+					warnings.push(`end_card: logo "${lp}" must be a path inside the project (copy it into assets/); skipped`);
 				}
 				if (path && extname(path).toLowerCase() === ".svg") warnings.push("end_card: SVG logos are not supported by ffmpeg-drawtext; logo skipped");
 				else {
@@ -244285,6 +244785,16 @@ function inside$1(parent, child) {
 	const rel = relative(parent, child);
 	return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
+/** `abs` if it is inside `root` after resolving symlinks (a link inside the project may point anywhere). */
+function realInside(root, abs) {
+	if (!inside$1(root, abs)) return void 0;
+	try {
+		const real = realpathSync(abs);
+		return inside$1(realpathSync(root), real) ? real : void 0;
+	} catch {
+		return abs;
+	}
+}
 /** Composition id for a scene (`vs-s01`). */
 function compositionIdFor(sceneId) {
 	return `vs-${sceneId.replace(/[^A-Za-z0-9_-]/g, "_")}`;
@@ -244320,15 +244830,14 @@ function buildComposition(req, opts = {}) {
 	/** Project-relative path → absolute, only if it stays inside the project and is an image. */
 	const projectImage = (p) => {
 		const abs = resolve(projectRoot, p);
-		if (!inside$1(projectRoot, abs)) return void 0;
 		if (!IMAGE_EXT.test(extname(abs))) return void 0;
-		return abs;
+		return realInside(projectRoot, abs);
 	};
 	const resolveAsset = (id) => {
 		const viaOpt = opts.resolveAsset?.(id);
 		if (viaOpt) {
-			const abs = resolve(projectRoot, viaOpt);
-			if (inside$1(projectRoot, abs) && IMAGE_EXT.test(extname(abs))) return abs;
+			const abs = IMAGE_EXT.test(extname(viaOpt)) ? realInside(projectRoot, resolve(projectRoot, viaOpt)) : void 0;
+			if (abs) return abs;
 			warnings.push(`${det.kind}: asset "${id}" resolves outside the project or is not an image; ignored`);
 			return;
 		}
@@ -245975,7 +246484,12 @@ async function transcribeAsset(projectDir, assetId, opts = {}) {
 	let meta;
 	let downloaded;
 	if (opts.captions_file) {
-		const file = isAbsolute(opts.captions_file) ? opts.captions_file : join(root, opts.captions_file);
+		let file;
+		try {
+			file = await resolveInsideProject(projectPaths(root), opts.captions_file);
+		} catch {
+			throw new TranscribeError(`captions_file must be a path inside the project: ${opts.captions_file}`, "copy the .srt/.vtt into the project folder and pass its project-relative path");
+		}
 		const ext = extname(file).toLowerCase();
 		if (ext !== ".srt" && ext !== ".vtt") throw new TranscribeError(`captions_file must be a .srt or .vtt file, got ${basename(file)}`);
 		if (!existsSync(file)) throw new TranscribeError(`captions file not found: ${file}`, "pass a path relative to the project folder");
@@ -246717,7 +247231,12 @@ function describeStep(s) {
 	}
 }
 async function loadScript(root, rel) {
-	const path = join(root, rel ?? join("project", "demo.json"));
+	let path;
+	try {
+		path = await resolveInsideProject(projectPaths(root), rel ?? join("project", "demo.json"));
+	} catch {
+		throw new Error(`demo script must be a path inside the project: ${rel}`);
+	}
 	if (!existsSync(path)) throw new Error(`no ${rel ?? `project/demo.json`}; write a DemoScript first (schema_get demo-script): {schema_version, id, url, viewport, steps}`);
 	const r = parseYamlOrJson(DemoScript, await readFile(path, "utf8"));
 	if (!r.ok) throw new Error(`demo script is invalid: ${r.errors.slice(0, 5).map((e) => `${e.path}: ${e.message}`).join("; ")}`);
@@ -246790,7 +247309,18 @@ async function recordDemo(projectDir, opts = {}) {
 	const now = opts.now ?? (() => Date.now());
 	const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 	const warnings = [];
-	const host = new URL(script.url).hostname;
+	const start = new URL(script.url);
+	for (const s of script.steps) {
+		if (s.action !== "goto") continue;
+		let to;
+		try {
+			to = new URL(s.url, start);
+		} catch {
+			throw new Error(`demo: goto step has an invalid URL: ${s.url}`);
+		}
+		if (to.origin !== start.origin) throw new Error(`demo: goto ${to.href} leaves ${start.origin}; demo steps must stay on the app you started`);
+	}
+	const host = start.hostname;
 	if (![
 		"localhost",
 		"127.0.0.1",
@@ -249820,8 +250350,8 @@ function tileDecor(tile, width, font) {
 		const text = (t) => escapeFiltergraph(escapeFilterOption(t));
 		const inset = tile.severity ? border + 2 : 4;
 		const common = `fontfile=${escapeFilterPath(font)}:fontsize=${labelSize}:boxborderw=${Math.round(labelSize / 3)}`;
-		parts.push(`drawtext=${common}:text=${text(tile.label)}:fontcolor=white:box=1:boxcolor=black@0.6:x=${inset}:y=${inset}`);
-		if (tile.cues?.length) parts.push(`drawtext=${common}:text=${text(`cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`)}:fontcolor=black:box=1:boxcolor=0xFFD60A@0.9:x=${inset}:y=h-th-${inset + Math.round(labelSize / 3)}`);
+		parts.push(`drawtext=${common}:expansion=none:text=${text(tile.label)}:fontcolor=white:box=1:boxcolor=black@0.6:x=${inset}:y=${inset}`);
+		if (tile.cues?.length) parts.push(`drawtext=${common}:expansion=none:text=${text(`cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`)}:fontcolor=black:box=1:boxcolor=0xFFD60A@0.9:x=${inset}:y=h-th-${inset + Math.round(labelSize / 3)}`);
 	}
 	return parts.length ? `,${parts.join(",")}` : "";
 }

@@ -1,11 +1,17 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { open } from "node:fs/promises";
+import http from "node:http";
+import https from "node:https";
+import type { LookupAddress } from "node:dns";
 import { basename } from "node:path";
+import { Readable } from "node:stream";
+import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
 import { Readability } from "@mozilla/readability";
 import { Defuddle } from "defuddle/node";
 import { parseHTML } from "linkedom";
 import { markdownToParts, parseMarkdown, stripInline, type MdSection } from "./markdown.js";
+import { BlockedAddressError, type LookupFn, type ResolvedAddress, checkUrlHost, defaultLookup } from "./net-guard.js";
 import { slugify, uniquify, urlRef } from "./refs.js";
 import type { ExtractInput, ExtractedSource, Extractor } from "./types.js";
 
@@ -13,6 +19,8 @@ export const USER_AGENT = "video-studio/0.1 (+ingest)";
 export const DEFAULT_TIMEOUT_MS = 15_000;
 export const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 export const DEFAULT_MAX_REDIRECTS = 5;
+/** Largest saved `.html` page read from disk (S9: a huge file would exhaust memory in the parser). */
+export const MAX_LOCAL_HTML_BYTES = 20 * 1024 * 1024;
 /** Below this many characters of extracted text, the page counts as thin. */
 export const MIN_CONTENT_CHARS = 200;
 
@@ -25,6 +33,17 @@ export interface FetchOptions {
   maxBytes?: number;
   maxRedirects?: number;
   userAgent?: string;
+  /**
+   * Host resolver for the SSRF guard. Defaults to `dns.lookup(host, {all: true})` when `fetch` is
+   * not injected. With an injected `fetch` and no `lookup`, only literal IP hosts and `localhost`
+   * names are checked: the injected transport (tests, embedders) owns name resolution.
+   */
+  lookup?: LookupFn;
+  /**
+   * Disable the SSRF guard (loopback/private/link-local hosts allowed). Only set from the user's
+   * environment (`VS_ALLOW_PRIVATE_URLS=1`), never from tool arguments.
+   */
+  allowPrivateAddresses?: boolean;
 }
 
 export interface FetchedPage {
@@ -44,7 +63,8 @@ export type UrlFetchErrorCode =
   | "too_large"
   | "unsupported_content_type"
   | "timeout"
-  | "network_error";
+  | "network_error"
+  | "blocked_address";
 
 export class UrlFetchError extends Error {
   constructor(
@@ -102,12 +122,88 @@ async function readCapped(res: Response, maxBytes: number): Promise<Uint8Array> 
   return out;
 }
 
+function headersOf(init: RequestInit | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  new Headers(init?.headers).forEach((v, k) => {
+    out[k] = v;
+  });
+  return out;
+}
+
+const NULL_BODY_STATUS = new Set([101, 103, 204, 205, 304]);
+
+/**
+ * GET over node:http(s) with the connection pinned to addresses the SSRF guard already validated:
+ * the socket's `lookup` returns only `pinned`, so a second DNS answer (DNS rebinding) can never
+ * redirect the connection to a private address. TLS still verifies the certificate against the
+ * URL's host name. Compressed bodies are decoded here (the size cap applies to decoded bytes).
+ */
+export function pinnedFetch(url: string, init: RequestInit | undefined, pinned: readonly ResolvedAddress[]): Promise<Response> {
+  const u = new URL(url);
+  const mod = u.protocol === "https:" ? https : http;
+  const lookup = (
+    _host: string,
+    options: { all?: boolean } | number | undefined,
+    cb: (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void,
+  ) => {
+    if (typeof options === "object" && options?.all) cb(null, pinned.map((a) => ({ address: a.address, family: a.family })));
+    else cb(null, pinned[0]!.address, pinned[0]!.family);
+  };
+  return new Promise<Response>((resolvePromise, reject) => {
+    const req = mod.request(
+      u,
+      {
+        method: "GET",
+        headers: { "accept-encoding": "gzip, deflate, br", ...headersOf(init) },
+        agent: false,
+        lookup: lookup as unknown as typeof import("node:dns").lookup,
+        ...(init?.signal ? { signal: init.signal } : {}),
+      },
+      (res) => {
+        const headers = new Headers();
+        for (const [k, v] of Object.entries(res.headers)) {
+          if (v === undefined) continue;
+          for (const one of Array.isArray(v) ? v : [v]) headers.append(k, one);
+        }
+        let stream: Readable = res;
+        const enc = (res.headers["content-encoding"] ?? "").toLowerCase().trim();
+        const decoder = enc === "gzip" || enc === "x-gzip" ? createGunzip() : enc === "deflate" ? createInflate() : enc === "br" ? createBrotliDecompress() : undefined;
+        if (decoder) {
+          res.on("error", (e) => decoder.destroy(e));
+          stream = res.pipe(decoder);
+          headers.delete("content-encoding");
+          headers.delete("content-length");
+        }
+        const status = res.statusCode ?? 0;
+        const body = NULL_BODY_STATUS.has(status) ? null : (Readable.toWeb(stream) as unknown as ReadableStream<Uint8Array>);
+        if (body === null) res.resume();
+        try {
+          resolvePromise(new Response(body, { status, headers }));
+        } catch (err) {
+          res.destroy();
+          reject(err);
+        }
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 /**
  * Fetch a page with a timeout, size cap, content-type check and manual
  * redirect handling (each hop must stay http/https). Never executes content.
+ *
+ * SSRF guard (unless `allowPrivateAddresses`): before the first request and before every redirect
+ * hop the host is resolved and refused when any address is loopback, private, link-local, CGNAT,
+ * multicast, unspecified or reserved ({@link checkUrlHost}). With the default transport the
+ * connection is pinned to the validated addresses ({@link pinnedFetch}), which closes the DNS
+ * rebinding window. Residual risk: an injected `fetch` does its own resolution, so a rebinding
+ * DNS server could still steer it; production code never injects one.
  */
 export async function fetchPage(url: string, opts: FetchOptions = {}): Promise<FetchedPage> {
-  const doFetch = opts.fetch ?? (globalThis.fetch as FetchImpl);
+  const injected = opts.fetch;
+  const lookup = opts.lookup ?? (injected ? undefined : defaultLookup);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
   const maxRedirects = opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
@@ -116,6 +212,15 @@ export async function fetchPage(url: string, opts: FetchOptions = {}): Promise<F
   let current = parseHttpUrl(url);
   try {
     for (let hop = 0; ; hop++) {
+      let pinned: ResolvedAddress[] | undefined;
+      try {
+        pinned = await raceAbort(checkUrlHost(current, { ...(lookup ? { lookup } : {}), allowPrivate: opts.allowPrivateAddresses === true }), signal);
+      } catch (err) {
+        if (err instanceof BlockedAddressError) throw new UrlFetchError("blocked_address", err.message);
+        if (signal.aborted) throw err;
+        throw new UrlFetchError("network_error", `could not resolve ${current.hostname}: ${(err as Error).message}`);
+      }
+      const doFetch: FetchImpl = injected ?? (pinned ? (u, init) => pinnedFetch(u, init, pinned!) : (globalThis.fetch as FetchImpl));
       let res: Response;
       try {
         res = await doFetch(current.href, {
@@ -156,6 +261,25 @@ export async function fetchPage(url: string, opts: FetchOptions = {}): Promise<F
     }
     throw err;
   }
+}
+
+/** Reject as soon as `signal` aborts (dns.lookup itself cannot be cancelled). */
+function raceAbort<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((res, rej) => {
+    const onAbort = () => rej(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    p.then(
+      (v) => {
+        signal.removeEventListener("abort", onAbort);
+        res(v);
+      },
+      (e) => {
+        signal.removeEventListener("abort", onAbort);
+        rej(e);
+      },
+    );
+  });
 }
 
 function decode(body: Uint8Array, charset?: string): string {
@@ -338,8 +462,29 @@ export const URL_EXTRACTOR_VERSION = "1";
  * A saved web page on disk (`.html`/`.htm`), read like a fetched page. Its "URL" is the file name
  * (refs encode it: `url:MSB%20Docs.html#pricing`), so evidence never carries a machine path. The charset comes from `<meta charset>` when present.
  */
-export async function loadLocalPage(path: string): Promise<FetchedPage> {
-  const body = new Uint8Array(await readFile(path));
+export async function loadLocalPage(path: string, maxBytes = MAX_LOCAL_HTML_BYTES): Promise<FetchedPage> {
+  // Stat the open handle before reading, so a multi-GB page is refused without being loaded.
+  const fh = await open(path, "r");
+  let body: Uint8Array;
+  try {
+    const { size } = await fh.stat();
+    if (size > maxBytes) {
+      throw new UrlFetchError("too_large", `${basename(path)} is ${size} bytes; saved web pages are limited to ${maxBytes} bytes (${Math.round(maxBytes / 1024 / 1024)} MB)`);
+    }
+    // Read at most maxBytes + 1 in case the file grew after the stat.
+    const buf = Buffer.alloc(size + 1 > maxBytes + 1 ? maxBytes + 1 : size + 1);
+    let off = 0;
+    for (;;) {
+      const { bytesRead } = await fh.read(buf, off, buf.length - off, off);
+      if (bytesRead === 0) break;
+      off += bytesRead;
+      if (off >= buf.length) break;
+    }
+    if (off > maxBytes) throw new UrlFetchError("too_large", `${basename(path)} exceeds ${maxBytes} bytes`);
+    body = new Uint8Array(buf.buffer, buf.byteOffset, off);
+  } finally {
+    await fh.close();
+  }
   const head = new TextDecoder("latin1").decode(body.subarray(0, 4096));
   const charset = /<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1]?.toLowerCase();
   const name = basename(path);

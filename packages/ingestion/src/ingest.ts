@@ -27,6 +27,8 @@ import { displayPath } from "./refs.js";
 import type { FetchRepo } from "./repo.js";
 import type { ExtractInput, ExtractedSource, Extractor } from "./types.js";
 import type { FetchImpl } from "./url.js";
+import { type LookupFn, allowPrivateUrls } from "./net-guard.js";
+import { redactPart } from "./redact.js";
 
 /** One ingest input: a path, URL or inline text, optionally with an explicit kind. */
 export interface IngestInput {
@@ -47,8 +49,14 @@ export interface IngestOptions {
   noCache?: boolean;
   /** Base for relative input paths (default process.cwd()). */
   cwd?: string;
+  /**
+   * Environment (default process.env). `VS_ALLOW_PRIVATE_URLS=1` here, set by the USER, lets URL
+   * ingest fetch loopback/private/link-local hosts; it is never a tool argument.
+   */
   env?: Record<string, string | undefined>;
   fetch?: FetchImpl;
+  /** Host resolver for the URL SSRF guard (tests inject one); default DNS. */
+  lookup?: LookupFn;
   fetchRepo?: FetchRepo;
   /** Replace or extend extractors (tests). */
   extractors?: ExtractorRegistry;
@@ -314,10 +322,16 @@ export async function ingest(inputs: ReadonlyArray<string | IngestInput>, option
   // A folder of clips (not a repository) stands for its video and audio files.
   inputs = inputs.flatMap((raw): Array<string | IngestInput> => (typeof raw === "string" ? (mediaFolderFiles(resolve(cwd, expandHome(raw.trim()))) ?? [raw]) : [raw]));
   const now = toIso(options.now);
+  const allowPrivate = allowPrivateUrls(options.env ?? process.env);
+  const urlOptions = {
+    ...(options.lookup ? { lookup: options.lookup } : {}),
+    ...(allowPrivate ? { allowPrivateAddresses: true } : {}),
+  };
   const registry: ExtractorRegistry = {
     ...createExtractors({
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.fetchRepo ? { fetchRepo: options.fetchRepo } : {}),
+      ...(Object.keys(urlOptions).length ? { url: urlOptions } : {}),
     }),
     ...options.extractors,
   };
@@ -353,10 +367,14 @@ export async function ingest(inputs: ReadonlyArray<string | IngestInput>, option
       let part: ExtractedSource;
       let fetchedAt = now;
       if (hit) {
-        part = hit.part;
+        // Entries written before redaction existed may hold secrets: redact them too (a no-op
+        // for entries that are already redacted).
+        part = await redactPart(hit.part);
         fetchedAt = hit.entry.fetched_at;
+        if (part !== hit.part) await cache?.put(key, part, projectDir, extractor.version, fetchedAt);
       } else {
-        part = await extractor.extract(input);
+        // Secrets are redacted before anything is persisted: the cache stores the redacted part.
+        part = await redactPart(await extractor.extract(input));
         await cache?.put(key, part, projectDir, extractor.version, now);
       }
       parts.push(part);

@@ -75,6 +75,10 @@ describe("transcribeAsset with a caption file", () => {
   it("rejects unknown assets and non-caption files", async () => {
     await expect(transcribeAsset(project, "asset-99", { captions_file: "talk.srt", env: {} })).rejects.toThrow(/not a video or audio asset[\s\S]*use one of/);
     await expect(transcribeAsset(project, videoId, { captions_file: "notes.txt", env: {} })).rejects.toThrow(/\.srt or \.vtt/);
+    // Caption files come from inside the project only.
+    await writeFile(join(dir, "outside.srt"), SRT);
+    await expect(transcribeAsset(project, videoId, { captions_file: join(dir, "outside.srt"), env: {} })).rejects.toThrow(/inside the project/);
+    await expect(transcribeAsset(project, videoId, { captions_file: "../outside.srt", env: {} })).rejects.toThrow(/inside the project/);
   });
 });
 

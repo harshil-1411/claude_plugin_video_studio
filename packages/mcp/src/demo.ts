@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { hashFile, projectPaths, readJson, writeJsonAtomic } from "@video-studio/core";
+import { hashFile, projectPaths, readJson, resolveInsideProject, writeJsonAtomic } from "@video-studio/core";
 import { ffprobe, runFfmpeg } from "@video-studio/media";
 import { findChrome } from "@video-studio/renderer";
 import { ContentIR, DemoScript, type DemoStep, type IrAsset, parseYamlOrJson } from "@video-studio/schema";
@@ -200,7 +200,13 @@ function describeStep(s: DemoStep): string {
 }
 
 async function loadScript(root: string, rel?: string): Promise<DemoScript> {
-  const path = join(root, rel ?? join("project", DEMO_FILE));
+  // Inside the project only (the script drives a browser; it must be the project's own file).
+  let path: string;
+  try {
+    path = await resolveInsideProject(projectPaths(root), rel ?? join("project", DEMO_FILE));
+  } catch {
+    throw new Error(`demo script must be a path inside the project: ${rel}`);
+  }
   if (!existsSync(path)) {
     throw new Error(`no ${rel ?? `project/${DEMO_FILE}`}; write a DemoScript first (schema_get demo-script): {schema_version, id, url, viewport, steps}`);
   }
@@ -261,7 +267,19 @@ export async function recordDemo(projectDir: string, opts: RecordDemoOptions = {
   const now = opts.now ?? (() => Date.now());
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const warnings: string[] = [];
-  const host = new URL(script.url).hostname;
+  const start = new URL(script.url);
+  // goto steps stay on the app the user started (same origin); anything else is refused up front.
+  for (const s of script.steps) {
+    if (s.action !== "goto") continue;
+    let to: URL;
+    try {
+      to = new URL(s.url, start);
+    } catch {
+      throw new Error(`demo: goto step has an invalid URL: ${s.url}`);
+    }
+    if (to.origin !== start.origin) throw new Error(`demo: goto ${to.href} leaves ${start.origin}; demo steps must stay on the app you started`);
+  }
+  const host = start.hostname;
   if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(host) && !host.endsWith(".localhost")) {
     warnings.push(`${script.url} is not a local address; make sure you may record it and that no real customer data is on screen`);
   }

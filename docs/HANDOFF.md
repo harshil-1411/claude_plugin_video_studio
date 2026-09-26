@@ -31,8 +31,14 @@ Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixe
     - Ingest merges into the existing ContentIR with stable ids (`replace: true` starts fresh).
     - Missing paths, binary, image, credential and non-media files are refused.
     - Unused provider keys are marked in `plugin.json`; stale skill text fixed.
+  - Step 2 (P0 security):
+    - Path confinement: the end-card logo is project-relative only; HyperFrames images are resolved with realpath (no symlink escape); `captions_file` and the demo script must be inside the project; demo `goto` steps must stay on the start origin.
+    - SSRF guard (`ingestion/src/net-guard.ts`): private, loopback and link-local addresses are refused on every redirect hop, and connections are DNS-pinned. `VS_ALLOW_PRIVATE_URLS=1` is a user-only override.
+    - Local HTML is capped at 20 MB.
+    - Secrets are redacted in every source (`redact.ts`, cache included).
+    - Review labels use `expansion=none`.
 - **Next:**
-  - Step 2: P0 security (path confinement, SSRF guard, HTML cap, demo goto hosts, review label expansion, secret redaction).
+  - Step 3: P1.5, split `renderProjectLocked` into stage functions (pure refactor).
 
 ## Where things stand
 

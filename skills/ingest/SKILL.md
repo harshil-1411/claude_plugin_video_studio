@@ -36,7 +36,12 @@ allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_
    `"replace": true`, and say it discards the previous sources.
 4. If the result is an error, show the message and the likely fix (missing
    file, unsupported type, image files not supported yet, credential files
-   refused, remote repo not cloned). Stop.
+   refused, remote repo not cloned). Stop. A URL that resolves to a local or
+   private network address is refused (it could reach internal services); if
+   the user really means a page on their own machine, they can allow it by
+   starting Claude Code with `VS_ALLOW_PRIVATE_URLS=1`. Never set it yourself.
+   Secrets found in any source are replaced by `[REDACTED:<rule>]` markers in
+   the ContentIR; mention the `secret_redacted` warnings.
 
 ## Video and audio files
 

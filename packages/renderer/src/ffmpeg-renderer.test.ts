@@ -294,6 +294,17 @@ describe("determinism and colour", () => {
     expect(sha256Hex(await readFile(a))).toBe(sha256Hex(await readFile(b)));
   }, T);
 
+  it("draws the end-card logo only from inside the project", async () => {
+    const proj = join(dir, "logo-proj");
+    await mkdir(join(proj, "assets"), { recursive: true });
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", "color=c=red:s=40x20", "-frames:v", "1", join(proj, "assets", "logo.png")]);
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", "color=c=red:s=40x20", "-frames:v", "1", join(dir, "outside-logo.png")]);
+    const inside = await renderer.render({ scene: scene("end_card", { title: "Hi" }), target, tokens: { ...tokens, logo_path: "assets/logo.png" }, out_path: join(proj, "in.mp4"), project_dir: proj });
+    expect(inside.warnings.join(" ")).not.toMatch(/logo/);
+    const outside = await renderer.render({ scene: scene("end_card", { title: "Hi" }), target, tokens: { ...tokens, logo_path: join(dir, "outside-logo.png") }, out_path: join(proj, "out.mp4"), project_dir: proj });
+    expect(outside.warnings.join(" ")).toMatch(/must be a path inside the project/);
+  }, 60_000);
+
   it("paints the background token colour", async () => {
     const brandTokens = resolveTokens({ brand: { name: "x" }, visual: { fonts: { heading: "Helvetica", body: "Helvetica" }, palette: { background: "#1E6432" } } });
     const out = join(dir, "bg.mp4");

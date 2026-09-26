@@ -163,9 +163,9 @@ export function tileDecor(tile: Pick<ReviewTile, "label" | "severity" | "cues">,
     const text = (t: string) => escapeFiltergraph(escapeFilterOption(t));
     const inset = tile.severity ? border + 2 : 4;
     const common = `fontfile=${escapeFilterPath(font)}:fontsize=${labelSize}:boxborderw=${Math.round(labelSize / 3)}`;
-    parts.push(`drawtext=${common}:text=${text(tile.label)}:fontcolor=white:box=1:boxcolor=black@0.6:x=${inset}:y=${inset}`);
+    parts.push(`drawtext=${common}:expansion=none:text=${text(tile.label)}:fontcolor=white:box=1:boxcolor=black@0.6:x=${inset}:y=${inset}`);
     if (tile.cues?.length) {
-      parts.push(`drawtext=${common}:text=${text(`cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`)}:fontcolor=black:box=1:boxcolor=0xFFD60A@0.9:x=${inset}:y=h-th-${inset + Math.round(labelSize / 3)}`);
+      parts.push(`drawtext=${common}:expansion=none:text=${text(`cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`)}:fontcolor=black:box=1:boxcolor=0xFFD60A@0.9:x=${inset}:y=h-th-${inset + Math.round(labelSize / 3)}`);
     }
   }
   return parts.length ? `,${parts.join(",")}` : "";

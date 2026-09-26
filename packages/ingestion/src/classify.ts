@@ -58,7 +58,7 @@ const SECRET_PATTERNS: SecretPattern[] = [
 const ASSIGNMENT =
   /\b([A-Za-z0-9_.-]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIALS?)[A-Za-z0-9_]*)["']?\s*(?:=|:|=>)\s*["'`]?([^\s"'`,;]{12,})/gi;
 
-const PLACEHOLDER = /^(?:x+|\*+|\.+|<.*>|\{.*\}|\$\{?.*|%.*%|your[_-]?.*|changeme|example.*|placeholder.*|redacted|null|none|undefined|true|false|process\.env.*|os\.environ.*|env\(.*)$/i;
+const PLACEHOLDER = /^(?:\[REDACTED[:\]].*|x+|\*+|\.+|<.*>|\{.*\}|\$\{?.*|%.*%|your[_-]?.*|changeme|example.*|placeholder.*|redacted|null|none|undefined|true|false|process\.env.*|os\.environ.*|env\(.*)$/i;
 
 /** Shannon entropy in bits per character. */
 export function shannonEntropy(s: string): number {
@@ -98,6 +98,54 @@ function scanSecrets(text: string, findings: Finding[]): void {
     if (shannonEntropy(value) < 3.5 || !/\d/.test(value) || !/[A-Za-z]/.test(value)) continue;
     findings.push({ category: "secret", type: `high_entropy_assignment:${m[1]!.toUpperCase()}`, preview: redact(value) });
   }
+}
+
+/** A secret's position in a string (for redaction). Never persisted with the text. */
+export interface SecretSpan {
+  start: number;
+  end: number;
+  /** Finding type, e.g. `aws_access_key_id`, `private_key`, `high_entropy_assignment`. */
+  type: string;
+}
+
+const PEM_BEGIN = /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/g;
+const PEM_END = /-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/g;
+
+/**
+ * Positions of the secrets {@link classifyText} reports, widened to what must be hidden: a
+ * private key covers its whole PEM block (from BEGIN to END, or to the end of the string when the
+ * block was split; an END with no BEGIN before it covers from the string start), and a
+ * high-entropy assignment covers only its value (`API_TOKEN=[REDACTED:…]`).
+ */
+export function secretSpans(text: string): SecretSpan[] {
+  const spans: SecretSpan[] = [];
+  let lastBlockEnd = 0;
+  for (const m of text.matchAll(PEM_BEGIN)) {
+    if (m.index < lastBlockEnd) continue;
+    PEM_END.lastIndex = m.index + m[0].length;
+    const end = PEM_END.exec(text);
+    const stop = end ? end.index + end[0].length : text.length;
+    spans.push({ start: m.index, end: stop, type: "private_key" });
+    lastBlockEnd = stop;
+  }
+  PEM_END.lastIndex = 0;
+  for (const m of text.matchAll(PEM_END)) {
+    const inside = spans.some((s) => m.index >= s.start && m.index < s.end);
+    if (!inside) spans.push({ start: 0, end: m.index + m[0].length, type: "private_key" });
+  }
+  for (const { type, re } of SECRET_PATTERNS) {
+    if (type === "private_key") continue;
+    for (const m of text.matchAll(re)) spans.push({ start: m.index, end: m.index + m[0].length, type });
+  }
+  const assignment = new RegExp(ASSIGNMENT.source, "gid");
+  for (const m of text.matchAll(assignment)) {
+    const value = m[2]!;
+    if (PLACEHOLDER.test(value)) continue;
+    if (shannonEntropy(value) < 3.5 || !/\d/.test(value) || !/[A-Za-z]/.test(value)) continue;
+    const [start, end] = m.indices![2]!;
+    spans.push({ start, end, type: "high_entropy_assignment" });
+  }
+  return spans;
 }
 
 function scanPii(text: string, findings: Finding[]): void {
