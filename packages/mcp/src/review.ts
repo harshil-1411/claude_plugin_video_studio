@@ -217,13 +217,17 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
       tiles = [0.25, 0.5, 0.75].map((f) => ({ time: clamp(dur * f) }));
       notes.push("no render state with scene timings: sampled 25%, 50% and 75%");
     } else {
+      // Three tiles per scene; long videos drop to mid + out, then mid only, so every scene shows.
+      const per = list.length * 3 <= REVIEW_MAX_TILES ? 3 : list.length * 2 <= REVIEW_MAX_TILES ? 2 : 1;
+      if (per < 3) notes.push(`${list.length} scenes: ${per === 2 ? "middle and closing" : "middle"} frame of each (use scene for all three)`);
       tiles = list.flatMap((s) => {
         const len = s.end - s.start;
-        return [
+        const all = [
           { time: clamp(s.start + Math.min(0.3, len * 0.2)), tag: "in" },
           { time: clamp(s.start + len / 2), tag: "mid" },
           { time: clamp(s.end - Math.max(frame, Math.min(0.45, len * 0.15))), tag: "out" },
         ];
+        return per === 3 ? all : per === 2 ? all.slice(1) : [all[1]!];
       });
     }
   }

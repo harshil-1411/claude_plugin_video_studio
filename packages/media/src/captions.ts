@@ -88,6 +88,15 @@ export interface GroupOptions {
   emphasis?: boolean;
 }
 
+/**
+ * Time a caption needs on screen to be read: 250 ms per word plus 300 ms, at least 700 ms (the same
+ * rule as lint's `caption_too_brief`). Grouping prefers captions that get it, and a caption is held
+ * into the following pause until it has it.
+ */
+export function captionReadMs(words: number): number {
+  return Math.max(700, 250 * words + 300);
+}
+
 const SENTENCE_END = /[.!?…。！？]["'”’)\]」』）]*$/;
 const CLAUSE_END = /[,;:—–\-、，；：]["'”’)\]」』）]*$/;
 
@@ -284,11 +293,21 @@ export function groupCaptionLines(words: readonly CaptionWord[], opts: GroupOpti
       // A single word always fits on its own (over-long words are allowed alone).
       best[i] = pick ?? { cost: best[i - 1]!.cost + 100, from: i - 1, rows: [1] };
     }
+    const segs: Array<{ from: number; to: number; rows: number[] }> = [];
+    for (let i = n; i > 0; i = best[i]!.from) segs.unshift({ from: best[i]!.from, to: i, rows: best[i]!.rows });
+    // A caption the next one would cut off before it can be read joins the next, when both fit.
+    for (let k = 0; k + 1 < segs.length; ) {
+      const a = segs[k]!;
+      const b = segs[k + 1]!;
+      const shown = ws[b.from]!.start_ms - ws[a.from]!.start_ms;
+      const merged = b.to - a.from <= maxWords && shown < captionReadMs(a.to - a.from) ? planRows(ws, a.from, b.to, maxChars, maxLines) : null;
+      if (merged) segs.splice(k, 2, { from: a.from, to: b.to, rows: merged.sizes });
+      else k++;
+    }
     const cues: CaptionLine[] = [];
-    for (let i = n; i > 0; i = best[i]!.from) {
-      const { from, rows } = best[i]!;
-      const cw = ws.slice(from, i);
-      cues.unshift({
+    for (const { from, to, rows } of segs) {
+      const cw = ws.slice(from, to);
+      cues.push({
         start_ms: cw[0]!.start_ms,
         end_ms: cw[cw.length - 1]!.end_ms,
         text: joinWords(cw.map((w) => w.word)),
@@ -310,7 +329,8 @@ export function groupCaptionLines(words: readonly CaptionWord[], opts: GroupOpti
     }
     const next = lines[i + 1];
     const limit = Math.min(next ? next.start_ms : Number.POSITIVE_INFINITY, opts.endMs ?? Number.POSITIVE_INFINITY);
-    let end = Math.max(l.end_ms, l.start_ms + minDisplay);
+    // Held until it can be read (and at least minDisplay), never into the next caption.
+    let end = Math.max(l.end_ms, l.start_ms + Math.max(minDisplay, captionReadMs(l.words.length)));
     if (next && next.start_ms - l.end_ms < holdGap) end = Math.max(end, next.start_ms);
     l.end_ms = Math.max(l.end_ms, Math.min(end, limit));
   });

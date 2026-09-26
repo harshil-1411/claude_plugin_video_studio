@@ -229898,6 +229898,14 @@ function buildWordTimeline(scenes) {
 	}
 	return out;
 }
+/**
+* Time a caption needs on screen to be read: 250 ms per word plus 300 ms, at least 700 ms (the same
+* rule as lint's `caption_too_brief`). Grouping prefers captions that get it, and a caption is held
+* into the following pause until it has it.
+*/
+function captionReadMs(words) {
+	return Math.max(700, 250 * words + 300);
+}
 const SENTENCE_END$1 = /[.!?…。！？]["'”’)\]」』）]*$/;
 const CLAUSE_END$1 = /[,;:—–\-、，；：]["'”’)\]」』）]*$/;
 /**
@@ -230074,11 +230082,28 @@ function groupCaptionLines(words, opts = {}) {
 				rows: [1]
 			};
 		}
+		const segs = [];
+		for (let i = n; i > 0; i = best[i].from) segs.unshift({
+			from: best[i].from,
+			to: i,
+			rows: best[i].rows
+		});
+		for (let k = 0; k + 1 < segs.length;) {
+			const a = segs[k];
+			const b = segs[k + 1];
+			const shown = ws[b.from].start_ms - ws[a.from].start_ms;
+			const merged = b.to - a.from <= maxWords && shown < captionReadMs(a.to - a.from) ? planRows(ws, a.from, b.to, maxChars, maxLines) : null;
+			if (merged) segs.splice(k, 2, {
+				from: a.from,
+				to: b.to,
+				rows: merged.sizes
+			});
+			else k++;
+		}
 		const cues = [];
-		for (let i = n; i > 0; i = best[i].from) {
-			const { from, rows } = best[i];
-			const cw = ws.slice(from, i);
-			cues.unshift({
+		for (const { from, to, rows } of segs) {
+			const cw = ws.slice(from, to);
+			cues.push({
 				start_ms: cw[0].start_ms,
 				end_ms: cw[cw.length - 1].end_ms,
 				text: joinWords(cw.map((w) => w.word)),
@@ -230098,7 +230123,7 @@ function groupCaptionLines(words, opts = {}) {
 		}
 		const next = lines[i + 1];
 		const limit = Math.min(next ? next.start_ms : Number.POSITIVE_INFINITY, opts.endMs ?? Number.POSITIVE_INFINITY);
-		let end = Math.max(l.end_ms, l.start_ms + minDisplay);
+		let end = Math.max(l.end_ms, l.start_ms + Math.max(minDisplay, captionReadMs(l.words.length)));
 		if (next && next.start_ms - l.end_ms < holdGap) end = Math.max(end, next.start_ms);
 		l.end_ms = Math.max(l.end_ms, Math.min(end, limit));
 	});
@@ -249181,23 +249206,28 @@ async function reviewRender(projectDir, opts = {}) {
 				.75
 			].map((f) => ({ time: clamp(dur * f) }));
 			notes.push("no render state with scene timings: sampled 25%, 50% and 75%");
-		} else tiles = list.flatMap((s) => {
-			const len = s.end - s.start;
-			return [
-				{
-					time: clamp(s.start + Math.min(.3, len * .2)),
-					tag: "in"
-				},
-				{
-					time: clamp(s.start + len / 2),
-					tag: "mid"
-				},
-				{
-					time: clamp(s.end - Math.max(frame, Math.min(.45, len * .15))),
-					tag: "out"
-				}
-			];
-		});
+		} else {
+			const per = list.length * 3 <= 48 ? 3 : list.length * 2 <= 48 ? 2 : 1;
+			if (per < 3) notes.push(`${list.length} scenes: ${per === 2 ? "middle and closing" : "middle"} frame of each (use scene for all three)`);
+			tiles = list.flatMap((s) => {
+				const len = s.end - s.start;
+				const all = [
+					{
+						time: clamp(s.start + Math.min(.3, len * .2)),
+						tag: "in"
+					},
+					{
+						time: clamp(s.start + len / 2),
+						tag: "mid"
+					},
+					{
+						time: clamp(s.end - Math.max(frame, Math.min(.45, len * .15))),
+						tag: "out"
+					}
+				];
+				return per === 3 ? all : per === 2 ? all.slice(1) : [all[1]];
+			});
+		}
 	}
 	if (tiles.length > 48) {
 		notes.push(`${tiles.length} tiles requested; showing the first 48 (review one scene at a time with scene)`);

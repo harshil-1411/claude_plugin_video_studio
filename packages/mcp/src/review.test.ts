@@ -81,6 +81,23 @@ describe("review", () => {
     expect(r.tiles.every((t) => t.time_sec <= 2.934)).toBe(true);
   }, 60_000);
 
+  it("long videos keep every scene on the sheet (fewer tiles per scene)", async () => {
+    const many = join(dir, "..", `${Date.now()}-many`);
+    await mkdir(join(many, "renders", "preview"), { recursive: true });
+    const { copyFile } = await import("node:fs/promises");
+    await copyFile(join(dir, "renders", "preview", "reel.mp4"), join(many, "renders", "preview", "reel.mp4"));
+    const scenes = Array.from({ length: 20 }, (_, i) => ({ scene_id: `s${String(i + 1).padStart(2, "0")}`, duration_ms: 150 }));
+    await writeFile(join(many, "renders", "preview", "render-state.json"), JSON.stringify({ quality: "preview", reel: "renders/preview/reel.mp4", target: { width: 180, height: 320, fps: 15 }, duration_ms: 3000, scenes }));
+    try {
+      const r = await reviewRender(many, { quality: "preview", width: 64 });
+      expect(r.tiles).toHaveLength(40);
+      expect(new Set(r.tiles.map((t) => t.scene_id)).size).toBe(20);
+      expect(r.notes.join(" ")).toMatch(/20 scenes: middle and closing frame of each/);
+    } finally {
+      await rm(many, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("explains bad input", async () => {
     await expect(reviewRender(dir, { mode: "crop" })).rejects.toThrow(/needs crop/);
     await expect(reviewRender(dir, { scene: "s09" })).rejects.toThrow(/no scene "s09".*s01, s02/);

@@ -11,6 +11,7 @@ import {
   captionBlockBox,
   captionLayout,
   captionRows,
+  captionReadMs,
   groupCaptionLines,
   joinWords,
   pickEmphasis,
@@ -158,6 +159,17 @@ describe("groupCaptionLines", () => {
     for (let i = 0; i + 1 < ls.length; i++) expect(ls[i]!.end_ms).toBeLessThanOrEqual(ls[i + 1]!.start_ms);
     const tight = groupCaptionLines([w("A.", 0, 100), w("B.", 300, 400)]);
     expect(tight[0]!.end_ms).toBe(300);
+  });
+
+  it("gives every caption time to be read: brief phrases join the next, sentences hold into the pause", () => {
+    // Fast speech (200 ms a word): "What if Claude" would show for 0.6 s (needs 1.05 s), so it joins the next phrase.
+    const fast = groupCaptionLines(seq("What if Claude could make videos", 200));
+    expect(fast.map((l) => l.text)).toEqual(["What if Claude could make videos"]);
+    // A short sentence followed by a pause stays up for its reading time (3 words: 1.05 s), not just 0.8 s.
+    const held = groupCaptionLines([w("It's", 0, 200), w("open", 200, 400), w("source.", 400, 600), w("Next", 2000, 2300), w("line", 2300, 2600), w("here.", 2600, 2900)]);
+    expect([held[0]!.start_ms, held[0]!.end_ms]).toEqual([0, 1050]);
+    expect(captionReadMs(3)).toBe(1050);
+    expect(captionReadMs(1)).toBe(700);
   });
 
   it("emphasises 1–2 salient words", () => {

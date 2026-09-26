@@ -166,6 +166,10 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
   - **Polish:** scene video transitions; natural voices (Premium/Enhanced picked automatically, `voice.rate_wpm`, default 160, doctor `system_voice`); the narrated hero video (`examples/readme-hero`); local `.html` ingest.
   - **New:** HyperFrames 0.8.78, and `tighten` (pauses, fillers and retakes → a new `<asset>-tight`).
   - **Hero video re-rendered (2026-09-26):** the narrated `docs/media/hero.mp4` captions "LLM" as one word; the voice spells it out through brand `language.terminology`.
+  - **From reviewing the user's own reels (2026-09-26):** captions now get time to be read. `captionReadMs` (250 ms/word + 300 ms, min 700 ms) is the same rule as lint's `caption_too_brief`. A caption the next one would cut short joins it when both fit, and a sentence holds into the following pause. On the user's Instagram and LinkedIn reels, too-brief captions went from 5 of 26 to 1 of 26 (an 8-word sentence at the estimated `say` rate). `review` sheets with more than 16 scenes now use 2 tiles per scene (1 per scene past 24), so no scene is dropped. Still open, noticed on those reels:
+    - On-screen headlines repeat the burned-in captions word for word.
+    - Terminal footage text is too small on a phone.
+    - A long URL breaks mid-word on the end card.
   - **Improvements 1–9 (2026-09-26):**
     1. **Exact voice timings:** `voice-align.ts` runs local whisper on estimated tracks (system TTS). Matched words take whisper's times; the others are interpolated between them. The result is cached in `<plugin data>/cache/align`. Opt out with `voice.align: false`. It runs only when whisper.cpp and the model are installed (the model is never downloaded implicitly). Checked on JFK with an even-spread estimate: "ask not" moved from 2.5 s to 3.3 s, the real pause.
     2. **ffmpeg count-up:** shared `count-up.ts` gives the same 8 steps as HyperFrames, with a fixed unit. `spacedUnit` spaces word units ("12 packages") and keeps symbols attached ("40%").
