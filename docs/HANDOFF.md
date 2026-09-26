@@ -12,9 +12,17 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 
 ## Start here: next steps (the user chooses)
 
-1. **The first real reel:** the MSB Docs eBMR page for Instagram, `/video-studio:create ~/Downloads/"MSB Docs eBMR.html" as an Instagram reel`, run by the user in their own terminal (the sandbox can't read `~/Downloads`). Real runs have found a bug every time, so fix whatever it surfaces. Local `.html` ingest was fixed for this.
-2. **The one open user-checklist item:** a HyperFrames render with `scene.motion` (`docs/USER_CHECKLIST.md`).
-3. **Phase 7**, paid providers, ElevenLabs first (needs the user's API key).
+Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and the user's top-8 features; see below and `CHANGELOG.md`).
+
+1. **The user's checklist** (`docs/USER_CHECKLIST.md`). These can't be tested in the sandbox:
+   - `pnpm hooks`
+   - the approval dialog (MCP elicitation)
+   - a real YouTube ingest with `yt-dlp`
+   - speaker turns on a real interview
+   - HyperFrames renders (camera moves, count-up, openings)
+   - ElevenLabs prices
+2. **Real reels:** the user's eBMR and launch videos exercise the new footage and review features. Real runs have found a bug every time, so fix whatever they surface.
+3. **Phase 7**, paid providers, ElevenLabs first (needs the user's API key). The `policy.yaml`, spend and consent machinery it needs is now in place.
 4. **Phase 9**, publishing (needs platform developer accounts). Default targets are Instagram and YouTube Shorts: the user is in India, where TikTok is banned.
 
 ## Audit fix loop (2026-09-26; resume from here)
@@ -69,8 +77,12 @@ Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixe
     - `footage.focus_track` holds subject-centre keyframes. The renderer smooths them and uses a clamped smoothstep crop (`renderer/src/reframe.ts`, footage renderer 0.4.0).
     - macOS Vision detector (`media/src/subject-detect.ts`, JXA with `usesCPUOnly`); the `footage_focus` tool suggests tracks. Lint check: `subject_near_edge`.
     - Real end-to-end: a face moving right in a 1280×720 clip was found in 8/8 frames, and the track followed x 0.20 → 0.75.
-- **Next:**
-  - Step 10: an automatic review loop in the render and create skills; footage QA (exposure, SNR, rotation, HDR + tonemap); render speed (parallel scenes, no `-threads 1`, logo merged into the burn-in encode).
+  - Step 10:
+    - The review → fix → re-render loop (at most 2 passes) in the render and create skills.
+    - Ingest probes rotation and HDR and computes quality metrics (`media.quality`). The footage renderer (0.5.0) tonemaps HDR through zscale. Lint check: `footage_quality`. A steady tone or ambience reads as low SNR, and the note says so.
+    - Scenes render in parallel: auto, memory-aware via `vm_stat` on macOS, capped at 2, overridable with `VS_RENDER_CONCURRENCY`; HyperFrames is serialised. The thread count is fixed per machine, and the logo is drawn in the concat pass (`ASSEMBLY_VERSION` 6). The scene stage is about 2× faster.
+  - Step 11: version 0.2.0, `CHANGELOG.md`, tags `v0.1.0` (3e4143d) and `v0.2.0`; `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `.github` templates; README Quick start is marketplace-first.
+- **Loop complete (2026-09-26).**
 
 ## Where things stand
 
@@ -89,8 +101,8 @@ Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixe
 
 Since the loop (2026-09-26): scene transitions, natural macOS voices with `voice.rate_wpm`, `tighten`, camera moves (`scene.motion`), lint timing and story checks (`caption_too_brief`, `caption_sync`, `caption_gap`, `cut_off_beat`, `onscreen_too_brief`, `story_structure`), `skills/plan/references/storytelling.md`, and the narrated hero video. Details are in "Loop state" below.
 
-- **Checks (all green at the latest commit, `pnpm check`):** 873 tests pass, 5 skipped (env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1` need outside the sandbox; `VS_TEST_GOLDEN=1` runs anywhere and passes), smoke, both `plugin validate --strict`.
-- **MCP tools (28):** adapt, analyze, brief_validate, compare, demo, diff, doctor, export, ingest, job_status, lint, localize, project_init, qa_run, render_submit, review, schema_get, shorts, spec_scaffold, spec_validate, storyboard_render, template_get, template_list, test, tighten, transcribe, variants, verify.
+- **Checks (all green at the latest commit, `pnpm check`):** 1,174 tests pass, 5 skipped (env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1` need outside the sandbox; `VS_TEST_GOLDEN=1` runs anywhere and passes), smoke, both `plugin validate --strict`.
+- **MCP tools (34):** adapt, analyze, brief_validate, compare, demo, diff, doctor, footage_focus, footage_look, footage_notes, render_cancel, source_section, source_summary, export, ingest, job_status, lint, localize, project_init, qa_run, render_submit, review, schema_get, shorts, spec_scaffold, spec_validate, storyboard_render, template_get, template_list, test, tighten, transcribe, variants, verify.
 - **Skills (21):** adapt, analyze, compare, create, demo, diff, doctor, export, ingest, lint, localize, plan, qa, render, review, shorts, test, tighten, validate, variants, verify.
 - **Agents:** source-researcher, creative-director.
 

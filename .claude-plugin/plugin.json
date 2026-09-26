@@ -1,7 +1,7 @@
 {
   "name": "video-studio",
   "displayName": "Video Studio",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Provider-neutral knowledge-to-video compiler: turns text, URLs, documents and repos into reproducible videos with captions, thumbnails and provenance.",
   "author": { "name": "Suparn Bector" },
   "homepage": "https://github.com/harshil-1411/claude_plugin_video_studio",
