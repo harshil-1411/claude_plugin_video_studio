@@ -151,6 +151,7 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
   - **Fixed from real runs:** caption plates without dark bars; demo capture at phone width; `footage.redact`; shorts copy only their span; true-peak headroom; strict letterbox cropping.
   - **Polish:** scene video transitions; natural voices (Premium/Enhanced picked automatically, `voice.rate_wpm`, default 160, doctor `system_voice`); the narrated hero video (`examples/readme-hero`); local `.html` ingest.
   - **New:** HyperFrames 0.8.78, and `tighten` (pauses, fillers and retakes → a new `<asset>-tight`).
+  - **Hero video re-rendered (2026-09-26):** the narrated `docs/media/hero.mp4` captions "LLM" as one word; the voice spells it out through brand `language.terminology`.
   - **Student-kit ideas (2026-09-26):**
     - `scene.motion` {push_in, pull_out, punch, reveal, drift, hold} × {subtle, normal, strong} in all three renderers. The same amounts are used everywhere (`SCENE_MOTION_AMOUNT`). Versions: ffmpeg renderer 0.4.1, footage 0.2.1. Scenes without motion render byte-identically. Text boxes record the rest pose.
     - Lint timing checks from `renders/final/render-state.json`: `caption_too_brief`, `caption_sync`, `caption_gap`, `cut_off_beat` (needs `beat_sync.beat_times_ms`, recorded from now on), `onscreen_too_brief`.
@@ -161,7 +162,6 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
     - the first real reel: the MSB Docs eBMR page for Instagram (`/video-studio:create ~/Downloads/"MSB Docs eBMR.html" …`)
     - Phase 7 (ElevenLabs first)
     - Phase 9 (publishing)
-    - re-render the narrated hero (`examples/readme-hero`, command in its README): its captions now read "LLM" (brand `language.terminology` spells it out for the voice)
 - **Done:**
   - Step 0 (Phase 4 closed).
   - Phase 5 step 1 (`489dbbd`): schema for the new purposes and kinds, `audio.music`, `voice.mode` and `Style`.
