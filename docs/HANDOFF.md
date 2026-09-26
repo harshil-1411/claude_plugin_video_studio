@@ -252,10 +252,10 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
 
 ## Open issues
 
-0. **From the first real `shorts` run (2026-09-26):**
-   - **No footage redaction.** Screen or meeting recordings can show private data, and the spec has no way to blur regions. The session hand-made a blurred copy with ffmpeg. Planned: `footage.redact: [{x, y, w, h, from_sec?, to_sec?, mode: blur|box}]`, applied by the footage renderer.
-   - **Short projects copy the whole recording.** `makeShortProjects` copies all of `source/assets`, so an unredacted full copy sat in each `shorts/<id>/`. Planned: copy only a trimmed span (candidate ± margin) and rewrite the asset.
-   - **Loudness:** the true peak can land 0.1 dB over −1 dBTP on native meeting audio. Planned: keep a true-peak margin after the mix and encode.
+0. **From the first real `shorts` run (2026-09-26), all fixed the same day:**
+   - ~~No footage redaction~~ → `footage.redact: [{x, y, w, h, from_sec?, to_sec?, mode: blur|box, label?}]`, in source-frame fractions and asset seconds, applied before the fit (heavy gblur or a solid box).
+   - ~~Short projects copy the whole recording~~ → each `shorts/<id>/` gets only its span ± 1 s (re-encoded), with its own ContentIR, the transcript shifted, and footage times relative to the clip.
+   - ~~True peak 0.1 dB over~~ → loudnorm now aims at −1.5 dBTP (`ASSEMBLY_VERSION` 5).
 
 1. **TikTok contract not re-verified.** Re-check `platform-specs/tiktok.yaml` against developers.tiktok.com and bump `contract_version`/`verified`.
 2. ~~Deprecated caption helpers~~: already removed.

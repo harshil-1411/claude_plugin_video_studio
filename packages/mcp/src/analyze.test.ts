@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { TimedWord } from "@video-studio/media";
+import { type TimedWord, runFfmpeg } from "@video-studio/media";
 import { type ContentIR, SCHEMA_VERSION, ShortCandidates } from "@video-studio/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { analyzeVideo, aspectRatioOf, findCaptionBand, findShorts, formatGrammar, formatShorts, pacingFor } from "./analyze.js";
@@ -214,8 +214,13 @@ describe("shorts", () => {
     expect(formatShorts(r)).toMatch(/short-1 .* score[\s\S]*claim_refs: video:talk\.mp4#t=/);
   });
 
-  it("turns chosen candidates into valid talking-head projects under shorts/<id>/", async () => {
+  it("turns chosen candidates into valid talking-head projects under shorts/<id>/, copying only their span", async () => {
     const { project } = await syntheticProject();
+    const ir = JSON.parse(await readFile(join(project, "source", "content-ir.json"), "utf8")) as ContentIR;
+    const full = ir.assets[0]!.media!.duration_sec;
+    // A real (tiny) recording for the trim: the transcript timeline is synthetic.
+    await mkdir(join(project, "source", "assets"), { recursive: true });
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", `color=c=gray:s=160x90:r=10:d=${full}`, "-f", "lavfi", "-i", `sine=frequency=220:sample_rate=48000:duration=${full}`, "-shortest", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", join(project, "source", "assets", "talk.mp4")]);
     const r = await findShorts(project, "asset-1", { min_sec: 8, max_sec: 16, count: 2 });
     const made = await makeShortProjects(project, r, { ids: [r.candidates[0]!.id] });
     expect(made).toHaveLength(1);
@@ -225,11 +230,23 @@ describe("shorts", () => {
     const spec = JSON.parse(await readFile(join(project, m.project_dir, "project", "video-spec.json"), "utf8"));
     expect(spec.voice).toEqual({ mode: "native" });
     expect(spec.scenes[0]).toMatchObject({ purpose: "hook", visual_strategy: "user_asset", voiceover: "", audio: { mode: "native" } });
-    expect(spec.scenes[0].footage.in_sec).toBeCloseTo(r.candidates[0]!.start_sec, 2);
-    expect(spec.scenes.at(-1).footage.out_sec).toBeCloseTo(r.candidates[0]!.end_sec, 2);
+    const offset = Math.max(0, r.candidates[0]!.start_sec - 1);
+    expect(spec.scenes[0].footage.in_sec).toBeCloseTo(r.candidates[0]!.start_sec - offset, 2);
+    expect(spec.scenes.at(-1).footage.out_sec).toBeCloseTo(r.candidates[0]!.end_sec - offset, 2);
     expect(spec.scenes.every((sc: { duration_sec: number }) => sc.duration_sec <= 12.5)).toBe(true);
     expect(spec.scenes.flatMap((sc: { claim_refs: string[] }) => sc.claim_refs)).toEqual(r.evidence_refs[r.candidates[0]!.id]);
-    expect((await readFile(join(project, m.project_dir, "source", "content-ir.json"), "utf8")).length).toBeGreaterThan(0);
+    // Only the span (± 1 s) was copied, as the short's single asset; footage times are relative to it.
+    const shortIr = JSON.parse(await readFile(join(project, m.project_dir, "source", "content-ir.json"), "utf8")) as ContentIR;
+    expect(shortIr.assets).toHaveLength(1);
+    const a = shortIr.assets[0]!;
+    expect(a.path).toBe(`source/assets/asset-1-${m.id}.mp4`);
+    const span = r.candidates[0]!.end_sec - r.candidates[0]!.start_sec;
+    expect(a.media!.duration_sec).toBeLessThan(span + 2.5);
+    expect(a.media!.duration_sec).toBeLessThan(full / 2);
+    expect(spec.scenes[0].footage.in_sec).toBeLessThanOrEqual(1.01);
+    await expect(readFile(join(project, m.project_dir, "source", "assets", "talk.mp4"))).rejects.toThrow();
+    const words = JSON.parse(await readFile(join(project, m.project_dir, "source", "transcripts", "asset-1.json"), "utf8")) as Array<{ start_ms: number }>;
+    expect(words[0]!.start_ms).toBeLessThan(1500);
   });
 
   it("needs a transcript", async () => {

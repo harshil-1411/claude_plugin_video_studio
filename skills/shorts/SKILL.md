@@ -57,6 +57,12 @@ written:
 Then refine each `shorts/<id>/project/video-spec.json`:
 - For horizontal footage in a vertical frame, add `footage.focus` on the
   speaker, or use `fit: "blur_pad"` if the user wants the whole frame.
+- **Screen shares and meetings:** look at the keyframes (Read the images) for
+  private material (inboxes, customer names, dashboards, chat panels). Hide it
+  with `footage.redact: [{x, y, w, h, mode: "blur", label}]` (fractions of the
+  source frame; add `from_sec`/`to_sec` in asset seconds if it only shows for a
+  while). Never hand-make a blurred copy. Each `shorts/<id>/` holds only its own
+  span of the recording, so no unredacted full copy is ever left behind.
 - Optionally add a `lower_third` or `kinetic_text` block (`deterministic`)
   on the first scene with the speaker's name or a few words of the hook.
 - Add `cover.headline` from the hook's own words and `publish.<target>` copy.

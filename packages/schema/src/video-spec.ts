@@ -104,6 +104,19 @@ export const AudioLicense = z
   })
   .describe("Rights for an audio file; recorded in the manifest, video.lock and provenance.");
 
+export const RedactRegion = z
+  .strictObject({
+    x: z.number().min(0).max(1).describe("Left edge, as a fraction of the SOURCE frame width."),
+    y: z.number().min(0).max(1).describe("Top edge, as a fraction of the source frame height."),
+    w: z.number().gt(0).max(1),
+    h: z.number().gt(0).max(1),
+    from_sec: z.number().min(0).optional().describe("Asset time the region starts (default: always)."),
+    to_sec: z.number().positive().optional().describe("Asset time the region ends (default: always)."),
+    mode: z.enum(["blur", "box"]).optional().describe("blur (default, heavy) or an opaque box."),
+    label: z.string().optional().describe("What is hidden, for the render record, e.g. 'customer inbox'."),
+  })
+  .describe("A region of the footage to make unreadable (private data, faces, inboxes).");
+
 export const FootageClip = z
   .strictObject({
     asset: Id.describe("ContentIR asset id of a video (or image) the user supplied or recorded."),
@@ -113,6 +126,7 @@ export const FootageClip = z
     focus: z.strictObject({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).optional().describe("Crop centre for cover (0–1)."),
     speed: z.number().min(0.25).max(4).optional().describe("Playback rate (1 = normal)."),
     loop: z.boolean().optional().describe("Loop a clip shorter than the scene (default: hold the last frame)."),
+    redact: z.array(RedactRegion).max(12).optional().describe("Regions blurred or boxed in the source frame before it is fitted."),
   })
   .describe("A span of real footage shown in this scene.");
 
@@ -275,6 +289,7 @@ export type VoiceMode = z.infer<typeof VoiceMode>;
 export type AudioLicense = z.infer<typeof AudioLicense>;
 export type MusicBed = z.infer<typeof MusicBed>;
 export type FootageClip = z.infer<typeof FootageClip>;
+export type RedactRegion = z.infer<typeof RedactRegion>;
 export type SceneAudio = z.infer<typeof SceneAudio>;
 export type SoundEffect = z.infer<typeof SoundEffect>;
 export type AudioSettings = z.infer<typeof AudioSettings>;
@@ -664,6 +679,15 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
     }
     if (scene.footage) {
       const f = scene.footage;
+      (f.redact ?? []).forEach((r, j) => {
+        const p = `${at}.footage.redact.${j}`;
+        if (r.x + r.w > 1.0001 || r.y + r.h > 1.0001) {
+          errors.push({ path: p, message: `${sid}: redact region runs outside the frame (x+w ${r.x + r.w}, y+h ${r.y + r.h})`, fix: "keep x + w ≤ 1 and y + h ≤ 1 (fractions of the source frame)" });
+        }
+        if (r.from_sec !== undefined && r.to_sec !== undefined && r.to_sec <= r.from_sec) {
+          errors.push({ path: p, message: `${sid}: redact to_sec ${r.to_sec} is not after from_sec ${r.from_sec}`, fix: "set to_sec > from_sec, or omit both to redact the whole clip" });
+        }
+      });
       if (f.out_sec !== undefined && f.out_sec <= f.in_sec) {
         errors.push({ path: `${at}.footage.out_sec`, message: `${sid}: footage out_sec ${f.out_sec} is not after in_sec ${f.in_sec}`, fix: "set out_sec > in_sec, or omit it to use the scene's duration" });
       }

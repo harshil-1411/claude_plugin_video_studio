@@ -86,8 +86,8 @@ type Env = Record<string, string | undefined>;
 export const ENGINE_VERSION = "0.1.0";
 /** Bump when technical QA's checks change, so cached QA results are re-run. 2: background-aware black frames, intended silence. */
 export const QA_VERSION = 2;
-/** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). 4: the caption plate is its own ASS layer (no dark bars around highlighted words). */
-export const ASSEMBLY_VERSION = 4;
+/** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). 4: the caption plate is its own ASS layer (no dark bars around highlighted words). 5: loudness true peak −1.5 dBTP (headroom for the AAC encode). */
+export const ASSEMBLY_VERSION = 5;
 
 export type Quality = "preview" | "final";
 
@@ -718,7 +718,8 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
         segments: segments.map(({ path, duration_ms }) => ({ path, duration_ms })),
         ...(audio ? { audio } : {}),
         ...(sceneAudioOn ? { sceneAudio: { slots: sceneAudio!.slots, sfx: sceneAudio!.sfx } } : {}),
-        ...(audio || music || sceneAudioOn ? { loudness: { I: -14, TP: -1 } } : {}),
+        // −1.5 dBTP leaves headroom for the AAC encode, so the delivered file stays under the −1 dBTP QA limit.
+        ...(audio || music || sceneAudioOn ? { loudness: { I: -14, TP: -1.5 } } : {}),
         ...(music
           ? {
               music: {

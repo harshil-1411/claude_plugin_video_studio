@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { PROJECT_SCHEMA_VERSION, writeJsonAtomic } from "@video-studio/core";
-import { type TimedSentence, type TimedWord, groupSentences } from "@video-studio/media";
-import { type AspectRatio, SCHEMA_VERSION, type Scene, type ShortCandidate, ShortCandidates, type VideoSpec, defaultMaster } from "@video-studio/schema";
+import { PROJECT_SCHEMA_VERSION, hashFile, writeJsonAtomic } from "@video-studio/core";
+import { type TimedSentence, type TimedWord, ffprobe, groupSentences, runFfmpeg } from "@video-studio/media";
+import { type AspectRatio, ContentIR, type IrAsset, SCHEMA_VERSION, type Scene, type ShortCandidate, ShortCandidates, type VideoSpec, defaultMaster } from "@video-studio/schema";
 import { projectSpecPaths, validateSpecFile } from "./spec-validate.js";
 import { findMediaAsset, loadContentIr, loadTranscriptWords, mediaRefBase } from "./transcribe.js";
 
@@ -196,6 +196,65 @@ export function formatShorts(s: ShortCandidates & { evidence_refs?: Record<strin
 
 // ------------------------------------------------------------------------------------ short projects
 
+/** Seconds kept before and after a short's span in its trimmed copy (room to adjust the cut). */
+const SHORT_TRIM_MARGIN_SEC = 1;
+
+/**
+ * Write shorts/<id>/source/: the candidate's span (± margin) re-encoded from the base asset, its
+ * transcript words shifted to the new timeline, and a ContentIR holding only that asset (same id,
+ * same evidence refs, so claim_refs keep working) plus the base's sources and evidence.
+ */
+async function trimShortSource(root: string, dir: string, ir: ContentIR, c: ShortCandidate): Promise<{ offset_sec: number }> {
+  const asset = findMediaAsset(ir, c.asset);
+  const duration = asset.media?.duration_sec ?? c.end_sec + SHORT_TRIM_MARGIN_SEC;
+  const start = Math.max(0, c.start_sec - SHORT_TRIM_MARGIN_SEC);
+  const end = Math.min(duration, c.end_sec + SHORT_TRIM_MARGIN_SEC);
+  const ext = asset.kind === "audio" ? ".m4a" : ".mp4";
+  const rel = `source/assets/${asset.id}-${c.id}${ext}`;
+  const out = join(dir, rel);
+  await mkdir(join(dir, "source", "assets"), { recursive: true });
+  const codec = asset.kind === "audio" ? ["-vn", "-c:a", "aac", "-b:a", "192k"] : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"];
+  await runFfmpeg(["-y", "-ss", String(start), "-to", String(end), "-i", join(root, asset.path), ...codec, out]);
+  const probe = await ffprobe(out);
+  const words = (await loadTranscriptWords(root, asset))
+    .filter((w) => w.start_ms >= start * 1000 && w.end_ms <= end * 1000)
+    .map((w) => ({ ...w, start_ms: w.start_ms - Math.round(start * 1000), end_ms: w.end_ms - Math.round(start * 1000) }));
+  const tPath = `source/transcripts/${asset.id}.json`;
+  await mkdir(join(dir, "source", "transcripts"), { recursive: true });
+  await writeFile(join(dir, tPath), `${JSON.stringify(words)}\n`);
+  const shots = (asset.media?.shots ?? [])
+    .filter((sh) => sh.end_sec > start && sh.start_sec < end)
+    .map((sh) => ({ start_sec: Math.max(0, sh.start_sec - start), end_sec: Math.min(end, sh.end_sec) - start }));
+  const trimmedAsset: IrAsset = {
+    id: asset.id,
+    kind: asset.kind,
+    path: rel,
+    sha256: await hashFile(out),
+    ...(asset.source_ref ? { source_ref: asset.source_ref } : {}),
+    media: {
+      duration_sec: probe.duration_s,
+      ...(probe.width ? { width: probe.width } : {}),
+      ...(probe.height ? { height: probe.height } : {}),
+      ...(probe.fps ? { fps: probe.fps } : {}),
+      has_video: probe.has_video,
+      has_audio: probe.has_audio,
+      ...(shots.length ? { shots } : {}),
+      ...(asset.media?.transcript ? { transcript: { ...asset.media.transcript, path: tPath, words: words.length } } : {}),
+    },
+  };
+  const shortIr: ContentIR = ContentIR.parse({
+    ...ir,
+    assets: [trimmedAsset],
+    classification: {
+      ...ir.classification,
+      notes: [...ir.classification.notes, `short ${c.id}: only ${start.toFixed(1)}–${end.toFixed(1)} s of ${asset.id} was copied`],
+    },
+  });
+  await writeJsonAtomic(join(dir, "source", "content-ir.json"), shortIr);
+  if (existsSync(join(root, "source", "provenance.json"))) await cp(join(root, "source", "provenance.json"), join(dir, "source", "provenance.json"));
+  return { offset_sec: start };
+}
+
 /** Longest scene a short is split into (at sentence boundaries). */
 const SHORT_SCENE_MAX_SEC = 12;
 
@@ -230,10 +289,12 @@ export async function makeShortProjects(
   for (const c of result.candidates.filter((x) => !opts.ids || opts.ids.includes(x.id))) {
     const dir = join(root, "shorts", c.id);
     await mkdir(join(dir, "project"), { recursive: true });
-    for (const part of ["source", "input", "assets", "brand.yaml"]) {
-      await rm(join(dir, part), { recursive: true, force: true });
-      if (existsSync(join(root, part))) await cp(join(root, part), join(dir, part), { recursive: true });
-    }
+    // Only this clip leaves the base project: never copy the full recording (it can hold private
+    // material outside the span). The short gets a trimmed copy and a ContentIR for it alone.
+    for (const part of ["source", "input", "assets"]) await rm(join(dir, part), { recursive: true, force: true });
+    if (existsSync(join(root, "brand.yaml"))) await cp(join(root, "brand.yaml"), join(dir, "brand.yaml"));
+    const trimmed = await trimShortSource(root, dir, ir, c);
+    const offset = trimmed.offset_sec;
     // Sentences inside the span become scene chunks of at most SHORT_SCENE_MAX_SEC.
     const inside = spans.filter((e) => e.locator.time_start_sec! >= c.start_sec - 0.05 && (e.locator.time_end_sec ?? e.locator.time_start_sec!) <= c.end_sec + 0.05);
     const chunks: Array<{ start: number; end: number; refs: string[] }> = [];
@@ -257,7 +318,7 @@ export async function makeShortProjects(
       purpose: i === 0 ? "hook" : i === chunks.length - 1 && chunks.length > 1 ? "payoff" : "point",
       voiceover: "",
       visual_strategy: "user_asset",
-      footage: { asset: c.asset, in_sec: r2(ch.start), out_sec: r2(ch.end), fit: "cover" },
+      footage: { asset: c.asset, in_sec: r2(ch.start - offset), out_sec: r2(ch.end - offset), fit: "cover" },
       audio: { mode: "native" },
       visual_requirements: { continuity_refs: [] },
       claim_refs: ch.refs,

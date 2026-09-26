@@ -2,9 +2,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ffprobe, runFfmpeg } from "@video-studio/media";
+import { ffprobe, frameSsim, runFfmpeg } from "@video-studio/media";
 import type { FootageClip, MediaInfo, Scene } from "@video-studio/schema";
-import { FOOTAGE_RENDERER_ID, createFootageRenderer, planFootage } from "./footage.js";
+import { FOOTAGE_RENDERER_ID, createFootageRenderer, planFootage, redactChains } from "./footage.js";
 import { renderScenes, sceneCacheKey } from "./select.js";
 import { resolveTokens, targetForAspect } from "./tokens.js";
 import type { RenderTarget } from "./types.js";
@@ -179,6 +179,36 @@ describe("footage renderer", () => {
       expect((await lumas(out)).length).toBe(15);
     },
     T,
+  );
+});
+
+describe("redaction", () => {
+  it("builds blur and box chains with time windows in play time", () => {
+    const c = redactChains([{ x: 0.1, y: 0.2, w: 0.3, h: 0.4, from_sec: 12, to_sec: 14 }, { x: 0, y: 0, w: 1, h: 0.1, mode: "box" }], 10, 2, "[a]", "[b]");
+    expect(c.join(";")).toContain("crop=iw*0.3:ih*0.4:iw*0.1:ih*0.2,gblur=sigma=40");
+    expect(c.join(";")).toContain("enable='between(t,1,2)'"); // (12-10)/2 .. (14-10)/2
+    expect(c.at(-1)).toMatch(/^\[rd0\]drawbox=x=iw\*0:y=ih\*0:w=iw\*1:h=ih\*0\.1:color=black:t=fill\[b\]$/);
+    expect(redactChains([], 0, 1, "[a]", "[b]")).toEqual(["[a]null[b]"]);
+  });
+
+  it(
+    "makes the region unreadable and leaves the rest of the frame alone",
+    async () => {
+      const detail = join(tmp, "detail.mp4");
+      await runFfmpeg(["-y", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=15:d=2", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", detail]);
+      const media: MediaInfo = { duration_sec: 2, width: 320, height: 240, fps: 15, has_video: true, has_audio: false };
+      const plain = await render("detail-plain", scene({ asset: "a", in_sec: 0, fit: "contain" }), detail, media);
+      const red = await render("detail-red", scene({ asset: "a", in_sec: 0, fit: "contain", redact: [{ x: 0, y: 0, w: 0.5, h: 1, label: "left half" }] }), detail, media);
+      const half = async (video: string, side: "l" | "r") => {
+        const out = join(tmp, `${video.split("/").pop()}-${side}.png`);
+        // contain: the 320x240 source sits in the middle of the 180x320 frame (180x135).
+        await runFfmpeg(["-y", "-ss", "0.5", "-i", video, "-frames:v", "1", "-vf", `crop=90:135:${side === "l" ? 0 : 90}:92`, out]);
+        return out;
+      };
+      expect(await frameSsim(await half(plain.out, "r"), await half(red.out, "r"))).toBeGreaterThan(0.95);
+      expect(await frameSsim(await half(plain.out, "l"), await half(red.out, "l"))).toBeLessThan(0.7);
+    },
+    60_000,
   );
 });
 

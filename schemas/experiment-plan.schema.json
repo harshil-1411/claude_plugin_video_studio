@@ -206,6 +206,68 @@
                     "exclusiveMinimum": 0,
                     "type": "number"
                   },
+                  "redact": {
+                    "description": "Regions blurred or boxed in the source frame before it is fitted.",
+                    "items": {
+                      "description": "A region of the footage to make unreadable (private data, faces, inboxes).",
+                      "additionalProperties": false,
+                      "properties": {
+                        "from_sec": {
+                          "description": "Asset time the region starts (default: always).",
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        "h": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 1,
+                          "type": "number"
+                        },
+                        "label": {
+                          "description": "What is hidden, for the render record, e.g. 'customer inbox'.",
+                          "type": "string"
+                        },
+                        "mode": {
+                          "description": "blur (default, heavy) or an opaque box.",
+                          "enum": [
+                            "blur",
+                            "box"
+                          ],
+                          "type": "string"
+                        },
+                        "to_sec": {
+                          "description": "Asset time the region ends (default: always).",
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        },
+                        "w": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 1,
+                          "type": "number"
+                        },
+                        "x": {
+                          "description": "Left edge, as a fraction of the SOURCE frame width.",
+                          "maximum": 1,
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        "y": {
+                          "description": "Top edge, as a fraction of the source frame height.",
+                          "maximum": 1,
+                          "minimum": 0,
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y",
+                        "w",
+                        "h"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 12,
+                    "type": "array"
+                  },
                   "speed": {
                     "description": "Playback rate (1 = normal).",
                     "maximum": 4,

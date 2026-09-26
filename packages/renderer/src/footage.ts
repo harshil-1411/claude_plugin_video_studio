@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join } from "node:path";
 import { type FfmpegTools, FASTSTART, ffmpegFeatures, getTools, h264Args, resolveFfmpeg, runFfmpeg, runProcess } from "@video-studio/media";
-import type { DeterministicKind, FootageClip, MediaInfo } from "@video-studio/schema";
+import type { DeterministicKind, FootageClip, MediaInfo, RedactRegion } from "@video-studio/schema";
 import { type BuiltGraph, type Composition, type FfmpegEncodeSettings, type FontFiles, buildFilterGraph, composeScene, ffColor, frameCount } from "./ffmpeg-renderer.js";
 import { type FontResolver, createFontResolver } from "./tokens.js";
 import type { Availability, RenderTarget, SceneRenderRequest, SceneRenderResult, SceneRenderer } from "./types.js";
@@ -62,6 +62,38 @@ export interface FootagePlan {
 const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
 const n3 = (n: number) => String(Math.round(n * 1000) / 1000);
 
+/** Blur sigma for redacted regions: heavy enough that text of any size is unreadable. */
+export const REDACT_BLUR_SIGMA = 40;
+
+/**
+ * Chains that blur or box each redact region of the SOURCE frame (fractions of it), from
+ * `inLabel` to `outLabel`. Times are asset seconds; `inSec` is where the input starts in the
+ * asset (the input is seeked there, so its timestamps start at 0). Stills pass inSec 0 and no times.
+ */
+export function redactChains(regions: readonly RedactRegion[], inSec: number, speed: number, inLabel: string, outLabel: string): string[] {
+  if (regions.length === 0) return [`${inLabel}null${outLabel}`];
+  const chains: string[] = [];
+  let cur = inLabel;
+  regions.forEach((r, i) => {
+    const next = i === regions.length - 1 ? outLabel : `[rd${i}]`;
+    const from = r.from_sec !== undefined ? Math.max(0, (r.from_sec - inSec) / speed) : undefined;
+    const to = r.to_sec !== undefined ? Math.max(0, (r.to_sec - inSec) / speed) : undefined;
+    const enable = from !== undefined || to !== undefined ? `:enable='between(t,${n3(from ?? 0)},${n3(to ?? 1e6)})'` : "";
+    const [x, y, w, h] = [r.x, r.y, r.w, r.h].map(n3);
+    if (r.mode === "box") {
+      chains.push(`${cur}drawbox=x=iw*${x}:y=ih*${y}:w=iw*${w}:h=ih*${h}:color=black:t=fill${enable}${next}`);
+    } else {
+      chains.push(
+        `${cur}split=2[rb${i}][rc${i}]`,
+        `[rc${i}]crop=iw*${w}:ih*${h}:iw*${x}:ih*${y},gblur=sigma=${REDACT_BLUR_SIGMA}:steps=4,eq=brightness=-0.05[rx${i}]`,
+        `[rb${i}][rx${i}]overlay=x=main_w*${x}:y=main_h*${y}${enable}${next}`,
+      );
+    }
+    cur = next;
+  });
+  return chains;
+}
+
 /** Filter chains fitting `inLabel` into W×H as `outLabel`. */
 function fitChains(fit: NonNullable<FootageClip["fit"]>, W: number, H: number, focus: { x: number; y: number }, bg: string, inLabel: string, outLabel: string, tag: string): string[] {
   const cover = `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bicubic,crop=${W}:${H}:(iw-${W})*${n3(focus.x)}:(ih-${H})*${n3(focus.y)}`;
@@ -101,7 +133,8 @@ export function planFootage(clip: FootageClip, media: Pick<MediaInfo, "duration_
       kind: "still",
       input: ["-i", path],
       chains: [
-        ...fitChains(fit, W2, H2, focus, background, "[0:v]", "[kb]", "k"),
+        ...redactChains(clip.redact ?? [], 0, 1, "[0:v]", "[red]"),
+        ...fitChains(fit, W2, H2, focus, background, "[red]", "[kb]", "k"),
         `[kb]zoompan=z='${z}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=${frames}:s=${W}x${H}:fps=${fps},setsar=1,${tail.join(",")}[fg]`,
       ],
       frames,
@@ -129,7 +162,9 @@ export function planFootage(clip: FootageClip, media: Pick<MediaInfo, "duration_
     kind: "video",
     input: ["-ss", n3(clip.in_sec), "-t", n3(span), "-i", path],
     chains: [
-      `[0:v]setpts=PTS-STARTPTS${speed !== 1 ? `,setpts=PTS/${speed}` : ""},fps=${fps}[src]`,
+      `[0:v]setpts=PTS-STARTPTS${speed !== 1 ? `,setpts=PTS/${speed}` : ""},fps=${fps}[src0]`,
+      // Redaction before the fit, in source coordinates, so it stays on the content whatever the crop.
+      ...redactChains(clip.redact ?? [], clip.in_sec, speed, "[src0]", "[src]"),
       ...fitChains(fit, W, H, focus, background, "[src]", "[fit]", "b"),
       `[fit]${[...fillFilter, ...tail].join(",")}[fg]`,
     ],

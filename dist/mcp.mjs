@@ -232274,6 +232274,16 @@ const AudioLicense = strictObject({
 	source: string().optional().describe("Where the track came from (URL or description)."),
 	attribution: string().optional().describe("Credit line to show or post, when the licence requires one.")
 }).describe("Rights for an audio file; recorded in the manifest, video.lock and provenance.");
+const RedactRegion = strictObject({
+	x: number().min(0).max(1).describe("Left edge, as a fraction of the SOURCE frame width."),
+	y: number().min(0).max(1).describe("Top edge, as a fraction of the source frame height."),
+	w: number().gt(0).max(1),
+	h: number().gt(0).max(1),
+	from_sec: number().min(0).optional().describe("Asset time the region starts (default: always)."),
+	to_sec: number().positive().optional().describe("Asset time the region ends (default: always)."),
+	mode: _enum(["blur", "box"]).optional().describe("blur (default, heavy) or an opaque box."),
+	label: string().optional().describe("What is hidden, for the render record, e.g. 'customer inbox'.")
+}).describe("A region of the footage to make unreadable (private data, faces, inboxes).");
 const FootageClip = strictObject({
 	asset: Id.describe("ContentIR asset id of a video (or image) the user supplied or recorded."),
 	in_sec: number().nonnegative().describe("Start inside the asset."),
@@ -232288,7 +232298,8 @@ const FootageClip = strictObject({
 		y: number().min(0).max(1)
 	}).optional().describe("Crop centre for cover (0–1)."),
 	speed: number().min(.25).max(4).optional().describe("Playback rate (1 = normal)."),
-	loop: boolean().optional().describe("Loop a clip shorter than the scene (default: hold the last frame).")
+	loop: boolean().optional().describe("Loop a clip shorter than the scene (default: hold the last frame)."),
+	redact: array(RedactRegion).max(12).optional().describe("Regions blurred or boxed in the source frame before it is fitted.")
 }).describe("A span of real footage shown in this scene.");
 const SceneAudio = strictObject({
 	mode: _enum([
@@ -232835,6 +232846,19 @@ function validateVideoSpecSemantics(spec, ir) {
 		});
 		if (scene.footage) {
 			const f = scene.footage;
+			(f.redact ?? []).forEach((r, j) => {
+				const p = `${at}.footage.redact.${j}`;
+				if (r.x + r.w > 1.0001 || r.y + r.h > 1.0001) errors.push({
+					path: p,
+					message: `${sid}: redact region runs outside the frame (x+w ${r.x + r.w}, y+h ${r.y + r.h})`,
+					fix: "keep x + w ≤ 1 and y + h ≤ 1 (fractions of the source frame)"
+				});
+				if (r.from_sec !== void 0 && r.to_sec !== void 0 && r.to_sec <= r.from_sec) errors.push({
+					path: p,
+					message: `${sid}: redact to_sec ${r.to_sec} is not after from_sec ${r.from_sec}`,
+					fix: "set to_sec > from_sec, or omit both to redact the whole clip"
+				});
+			});
 			if (f.out_sec !== void 0 && f.out_sec <= f.in_sec) errors.push({
 				path: `${at}.footage.out_sec`,
 				message: `${sid}: footage out_sec ${f.out_sec} is not after in_sec ${f.in_sec}`,
@@ -239121,6 +239145,32 @@ function isStillPath(path) {
 }
 const even$1 = (n) => Math.max(2, Math.round(n / 2) * 2);
 const n3 = (n) => String(Math.round(n * 1e3) / 1e3);
+/**
+* Chains that blur or box each redact region of the SOURCE frame (fractions of it), from
+* `inLabel` to `outLabel`. Times are asset seconds; `inSec` is where the input starts in the
+* asset (the input is seeked there, so its timestamps start at 0). Stills pass inSec 0 and no times.
+*/
+function redactChains(regions, inSec, speed, inLabel, outLabel) {
+	if (regions.length === 0) return [`${inLabel}null${outLabel}`];
+	const chains = [];
+	let cur = inLabel;
+	regions.forEach((r, i) => {
+		const next = i === regions.length - 1 ? outLabel : `[rd${i}]`;
+		const from = r.from_sec !== void 0 ? Math.max(0, (r.from_sec - inSec) / speed) : void 0;
+		const to = r.to_sec !== void 0 ? Math.max(0, (r.to_sec - inSec) / speed) : void 0;
+		const enable = from !== void 0 || to !== void 0 ? `:enable='between(t,${n3(from ?? 0)},${n3(to ?? 1e6)})'` : "";
+		const [x, y, w, h] = [
+			r.x,
+			r.y,
+			r.w,
+			r.h
+		].map(n3);
+		if (r.mode === "box") chains.push(`${cur}drawbox=x=iw*${x}:y=ih*${y}:w=iw*${w}:h=ih*${h}:color=black:t=fill${enable}${next}`);
+		else chains.push(`${cur}split=2[rb${i}][rc${i}]`, `[rc${i}]crop=iw*${w}:ih*${h}:iw*${x}:ih*${y},gblur=sigma=40:steps=4,eq=brightness=-0.05[rx${i}]`, `[rb${i}][rx${i}]overlay=x=main_w*${x}:y=main_h*${y}${enable}${next}`);
+		cur = next;
+	});
+	return chains;
+}
 /** Filter chains fitting `inLabel` into W×H as `outLabel`. */
 function fitChains(fit, W, H, focus, bg, inLabel, outLabel, tag) {
 	const cover = `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bicubic,crop=${W}:${H}:(iw-${W})*${n3(focus.x)}:(ih-${H})*${n3(focus.y)}`;
@@ -239162,7 +239212,11 @@ function planFootage(clip, media, path, target, durationSec, background) {
 		return {
 			kind: "still",
 			input: ["-i", path],
-			chains: [...fitChains(fit, W2, H2, focus, background, "[0:v]", "[kb]", "k"), `[kb]zoompan=z='${z}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=${frames}:s=${W}x${H}:fps=${fps},setsar=1,${tail.join(",")}[fg]`],
+			chains: [
+				...redactChains(clip.redact ?? [], 0, 1, "[0:v]", "[red]"),
+				...fitChains(fit, W2, H2, focus, background, "[red]", "[kb]", "k"),
+				`[kb]zoompan=z='${z}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=${frames}:s=${W}x${H}:fps=${fps},setsar=1,${tail.join(",")}[fg]`
+			],
 			frames,
 			fill: "exact",
 			warnings
@@ -239189,7 +239243,8 @@ function planFootage(clip, media, path, target, durationSec, background) {
 			path
 		],
 		chains: [
-			`[0:v]setpts=PTS-STARTPTS${speed !== 1 ? `,setpts=PTS/${speed}` : ""},fps=${fps}[src]`,
+			`[0:v]setpts=PTS-STARTPTS${speed !== 1 ? `,setpts=PTS/${speed}` : ""},fps=${fps}[src0]`,
+			...redactChains(clip.redact ?? [], clip.in_sec, speed, "[src0]", "[src]"),
 			...fitChains(fit, W, H, focus, background, "[src]", "[fit]", "b"),
 			`[fit]${[...fillFilter, ...tail].join(",")}[fg]`
 		],
@@ -243149,6 +243204,101 @@ function formatShorts(s) {
 	}
 	return lines.join("\n");
 }
+/** Seconds kept before and after a short's span in its trimmed copy (room to adjust the cut). */
+const SHORT_TRIM_MARGIN_SEC = 1;
+/**
+* Write shorts/<id>/source/: the candidate's span (± margin) re-encoded from the base asset, its
+* transcript words shifted to the new timeline, and a ContentIR holding only that asset (same id,
+* same evidence refs, so claim_refs keep working) plus the base's sources and evidence.
+*/
+async function trimShortSource(root, dir, ir, c) {
+	const asset = findMediaAsset(ir, c.asset);
+	const duration = asset.media?.duration_sec ?? c.end_sec + SHORT_TRIM_MARGIN_SEC;
+	const start = Math.max(0, c.start_sec - SHORT_TRIM_MARGIN_SEC);
+	const end = Math.min(duration, c.end_sec + SHORT_TRIM_MARGIN_SEC);
+	const ext = asset.kind === "audio" ? ".m4a" : ".mp4";
+	const rel = `source/assets/${asset.id}-${c.id}${ext}`;
+	const out = join(dir, rel);
+	await mkdir(join(dir, "source", "assets"), { recursive: true });
+	const codec = asset.kind === "audio" ? [
+		"-vn",
+		"-c:a",
+		"aac",
+		"-b:a",
+		"192k"
+	] : [
+		"-c:v",
+		"libx264",
+		"-preset",
+		"veryfast",
+		"-crf",
+		"18",
+		"-pix_fmt",
+		"yuv420p",
+		"-c:a",
+		"aac",
+		"-b:a",
+		"192k",
+		"-movflags",
+		"+faststart"
+	];
+	await runFfmpeg([
+		"-y",
+		"-ss",
+		String(start),
+		"-to",
+		String(end),
+		"-i",
+		join(root, asset.path),
+		...codec,
+		out
+	]);
+	const probe = await ffprobe(out);
+	const words = (await loadTranscriptWords(root, asset)).filter((w) => w.start_ms >= start * 1e3 && w.end_ms <= end * 1e3).map((w) => ({
+		...w,
+		start_ms: w.start_ms - Math.round(start * 1e3),
+		end_ms: w.end_ms - Math.round(start * 1e3)
+	}));
+	const tPath = `source/transcripts/${asset.id}.json`;
+	await mkdir(join(dir, "source", "transcripts"), { recursive: true });
+	await writeFile(join(dir, tPath), `${JSON.stringify(words)}\n`);
+	const shots = (asset.media?.shots ?? []).filter((sh) => sh.end_sec > start && sh.start_sec < end).map((sh) => ({
+		start_sec: Math.max(0, sh.start_sec - start),
+		end_sec: Math.min(end, sh.end_sec) - start
+	}));
+	const trimmedAsset = {
+		id: asset.id,
+		kind: asset.kind,
+		path: rel,
+		sha256: await hashFile(out),
+		...asset.source_ref ? { source_ref: asset.source_ref } : {},
+		media: {
+			duration_sec: probe.duration_s,
+			...probe.width ? { width: probe.width } : {},
+			...probe.height ? { height: probe.height } : {},
+			...probe.fps ? { fps: probe.fps } : {},
+			has_video: probe.has_video,
+			has_audio: probe.has_audio,
+			...shots.length ? { shots } : {},
+			...asset.media?.transcript ? { transcript: {
+				...asset.media.transcript,
+				path: tPath,
+				words: words.length
+			} } : {}
+		}
+	};
+	const shortIr = ContentIR.parse({
+		...ir,
+		assets: [trimmedAsset],
+		classification: {
+			...ir.classification,
+			notes: [...ir.classification.notes, `short ${c.id}: only ${start.toFixed(1)}–${end.toFixed(1)} s of ${asset.id} was copied`]
+		}
+	});
+	await writeJsonAtomic(join(dir, "source", "content-ir.json"), shortIr);
+	if (existsSync(join(root, "source", "provenance.json"))) await cp(join(root, "source", "provenance.json"), join(dir, "source", "provenance.json"));
+	return { offset_sec: start };
+}
 /** Longest scene a short is split into (at sentence boundaries). */
 const SHORT_SCENE_MAX_SEC = 12;
 /**
@@ -243170,15 +243320,13 @@ async function makeShortProjects(projectDir, result, opts = {}) {
 		for (const part of [
 			"source",
 			"input",
-			"assets",
-			"brand.yaml"
-		]) {
-			await rm(join(dir, part), {
-				recursive: true,
-				force: true
-			});
-			if (existsSync(join(root, part))) await cp(join(root, part), join(dir, part), { recursive: true });
-		}
+			"assets"
+		]) await rm(join(dir, part), {
+			recursive: true,
+			force: true
+		});
+		if (existsSync(join(root, "brand.yaml"))) await cp(join(root, "brand.yaml"), join(dir, "brand.yaml"));
+		const offset = (await trimShortSource(root, dir, ir, c)).offset_sec;
 		const inside = spans.filter((e) => e.locator.time_start_sec >= c.start_sec - .05 && (e.locator.time_end_sec ?? e.locator.time_start_sec) <= c.end_sec + .05);
 		const chunks = [];
 		for (const e of inside) {
@@ -243209,8 +243357,8 @@ async function makeShortProjects(projectDir, result, opts = {}) {
 			visual_strategy: "user_asset",
 			footage: {
 				asset: c.asset,
-				in_sec: r2(ch.start),
-				out_sec: r2(ch.end),
+				in_sec: r2(ch.start - offset),
+				out_sec: r2(ch.end - offset),
 				fit: "cover"
 			},
 			audio: { mode: "native" },
@@ -248630,7 +248778,7 @@ async function renderProject(projectDir, o = {}) {
 	const burn = burnIn && !!captionFiles?.ass;
 	const assSha = captionFiles?.ass ? sha256Hex(await readFile(captionFiles.ass)) : null;
 	const assemblyKey = sha256Hex(canonicalJson({
-		v: 4,
+		v: 5,
 		target,
 		encode: encodePreset ?? null,
 		pad: tokens.color_background,
@@ -248687,7 +248835,7 @@ async function renderProject(projectDir, o = {}) {
 			} } : {},
 			...audio || music || sceneAudioOn ? { loudness: {
 				I: -14,
-				TP: -1
+				TP: -1.5
 			} } : {},
 			...music ? { music: {
 				bed: {
@@ -249968,7 +250116,7 @@ async function lockFromState(root, state, projectId, outputs) {
 		...state.content_ir_sha256 ? { content_ir_sha256: state.content_ir_sha256 } : {},
 		engine: {
 			engine: ENGINE_VERSION,
-			assembly: String(4),
+			assembly: String(5),
 			cover: String(3),
 			target_package: String(1),
 			zones: String(2),
