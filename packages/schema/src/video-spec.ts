@@ -150,6 +150,25 @@ export const SoundEffect = z
   })
   .describe("A one-shot sound effect.");
 
+/**
+ * Named motion patterns (a shared vocabulary for "how the shot moves"), applied to the whole
+ * scene frame by every renderer:
+ * - push_in: slow zoom towards the centre (focus, emphasis)
+ * - pull_out: slow zoom out (context, reveal of the whole)
+ * - punch: a quick scale pop on the first beat (energy, a stat landing)
+ * - reveal: the frame wipes in from one side (a new idea)
+ * - drift: a slow sideways pan (calm b-roll, ambient)
+ * - hold: deliberately still (let a line breathe)
+ */
+export const MotionPattern = z.enum(["push_in", "pull_out", "punch", "reveal", "drift", "hold"]);
+
+export const SceneMotion = z
+  .strictObject({
+    pattern: MotionPattern,
+    intensity: z.enum(["subtle", "normal", "strong"]).optional().describe("How far the move goes (default normal)."),
+  })
+  .describe("Camera-like motion of the whole scene frame.");
+
 export const Scene = z.strictObject({
   id: SceneId,
   duration_sec: z.number().positive().max(120),
@@ -164,6 +183,7 @@ export const Scene = z.strictObject({
   footage: FootageClip.optional().describe("Real footage for user_asset / screen_capture scenes; a deterministic block, if any, is drawn over it."),
   audio: SceneAudio.optional(),
   sfx: z.array(SoundEffect).max(8).optional(),
+  motion: SceneMotion.optional(),
 });
 
 export const VoiceMode = z
@@ -298,6 +318,8 @@ export type FootageClip = z.infer<typeof FootageClip>;
 export type RedactRegion = z.infer<typeof RedactRegion>;
 export type SceneAudio = z.infer<typeof SceneAudio>;
 export type SoundEffect = z.infer<typeof SoundEffect>;
+export type MotionPattern = z.infer<typeof MotionPattern>;
+export type SceneMotion = z.infer<typeof SceneMotion>;
 export type AudioSettings = z.infer<typeof AudioSettings>;
 export type CaptionSettings = z.infer<typeof CaptionSettings>;
 export type MasterCanvas = z.infer<typeof MasterCanvas>;

@@ -516,6 +516,36 @@
             "pattern": "^s\\d{2,}$",
             "type": "string"
           },
+          "motion": {
+            "description": "Camera-like motion of the whole scene frame.",
+            "additionalProperties": false,
+            "properties": {
+              "intensity": {
+                "description": "How far the move goes (default normal).",
+                "enum": [
+                  "subtle",
+                  "normal",
+                  "strong"
+                ],
+                "type": "string"
+              },
+              "pattern": {
+                "enum": [
+                  "push_in",
+                  "pull_out",
+                  "punch",
+                  "reveal",
+                  "drift",
+                  "hold"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "pattern"
+            ],
+            "type": "object"
+          },
           "on_screen_text": {
             "type": "string"
           },
