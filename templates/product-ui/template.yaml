@@ -16,12 +16,11 @@ beats:
     guidance: The one thing the UI lets the viewer do that they could not before, in one line.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: kinetic_text
-  - purpose: context
+  - purpose: problem
     share: 0.10
-    guidance: Name the product and who it is for with a lower third; no feature yet.
+    guidance: The pain the product removes, with a lower third naming the product and who it is for; no feature yet.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: lower_third
-    optional: true
   - purpose: demo
     share: 0.18
     guidance: Feature 1 on a real screenshot, with one or two callouts on the control that matters.

@@ -247,3 +247,175 @@ describe("lint: reading density for CJK, Devanagari and Arabic", () => {
     expect(r.findings.find((f) => f.id === "cover_headline")).toMatchObject({ message: expect.stringMatching(/19 characters; CJK covers read best at ≤ 16/) });
   });
 });
+
+describe("lint: caption, beat and on-screen timing", () => {
+  /** Word timings for `text`, `step` ms apart from `from` (scene-relative), each `len` ms long. */
+  const timed = (text: string, from: number, step = 400, len = 350) => text.split(/\s+/).map((word, i) => ({ word, start_ms: from + i * step, end_ms: from + i * step + len }));
+  const S1 = "Your captions hide under the app.";
+  const S2 = "Let lint place them in the safe zone.";
+
+  /**
+   * A rendered project: s01 (3 s) + s02 (5 s), voice tracks with the given word times and a
+   * captions.json whose lines are `[scene, first word, word count, start, end]` over those words
+   * placed on the video timeline.
+   */
+  function rendered(opts: {
+    tracks?: Array<{ scene_id: string; words: Array<{ word: string; start_ms: number; end_ms: number }> }>;
+    lines: Array<[string, number, number, number, number]>;
+    timing_source?: string;
+    edit?: (spec: Record<string, any>) => void;
+    extra?: Record<string, unknown>;
+  }): string {
+    const dir = project((s) => (delete s.captions.position, opts.edit?.(s)));
+    const tracks = opts.tracks ?? [
+      { scene_id: "s01", words: timed(S1, 200) },
+      { scene_id: "s02", words: timed(S2, 200) },
+    ];
+    const start: Record<string, number> = { s01: 0, s02: 3000 };
+    const words = tracks.flatMap((t) => t.words.map((w) => ({ word: w.word, start_ms: w.start_ms + start[t.scene_id]!, end_ms: w.end_ms + start[t.scene_id]!, scene_id: t.scene_id })));
+    const offset = (scene: string) => words.findIndex((w) => w.scene_id === scene);
+    const lines = opts.lines.map(([scene, first, count, s, e]) => {
+      const f = offset(scene) + first;
+      return { start_ms: s, end_ms: e, text: words.slice(f, f + count).map((w) => w.word).join(" "), first_word: f, word_count: count, rows: [], emphasis: [] };
+    });
+    mkdirSync(join(dir, "renders", "final", "captions"), { recursive: true });
+    mkdirSync(join(dir, "assets", "voice"), { recursive: true });
+    writeFileSync(join(dir, "renders", "final", "captions", "captions.json"), JSON.stringify({ version: 1, words, lines }));
+    writeFileSync(join(dir, "assets", "voice", "voice-tracks.json"), JSON.stringify(tracks.map((t) => ({ ...t, duration_ms: t.scene_id === "s01" ? 3000 : 5000, timing_source: "estimated", provider: "system-say" }))));
+    writeState(dir, {
+      target: { width: 1080, height: 1920, fps: 30, aspect_ratio: "9:16" },
+      duration_ms: 8000,
+      burn_in: true,
+      scenes: [
+        { scene_id: "s01", duration_ms: 3000 },
+        { scene_id: "s02", duration_ms: 5000 },
+      ],
+      captions: { json: "renders/final/captions/captions.json" },
+      voice: { timing_source: opts.timing_source ?? "estimated", tracks_path: "assets/voice/voice-tracks.json" },
+      ...opts.extra,
+    });
+    return dir;
+  }
+  const ids = (r: { findings: Array<{ id: string }> }, id: string) => r.findings.filter((f) => f.id === id);
+  const timingIds = ["caption_too_brief", "caption_sync", "caption_gap", "cut_off_beat", "onscreen_too_brief"];
+
+  // In sync: s01 words 200–2550 ms (400 ms apart), s02 3200–6350 ms; one caption per scene over its words.
+  const good: Array<[string, number, number, number, number]> = [
+    ["s01", 0, 6, 200, 2550],
+    ["s02", 0, 8, 3200, 6350],
+  ];
+
+  it("passes captions that match the voice", async () => {
+    const r = await lintProject(rendered({ lines: good }));
+    expect(r.findings.filter((f) => timingIds.includes(f.id))).toEqual([]);
+  });
+
+  it("caption_too_brief: a caption shorter than its reading time, with fewer-lines and rate fixes", async () => {
+    // 6 words need 6 × 0.25 + 0.3 = 1.8 s; shown 0.9 s.
+    const r = await lintProject(rendered({ lines: [["s01", 0, 6, 200, 1100], good[1]!], tracks: [{ scene_id: "s01", words: timed(S1, 200, 150, 140) }, { scene_id: "s02", words: timed(S2, 200) }] }));
+    expect(ids(r, "caption_too_brief")).toEqual([
+      expect.objectContaining({ severity: "warning", scene_id: "s01", message: expect.stringMatching(/shows for 0\.9s but needs 1\.8s/), fix: expect.stringMatching(/captions\.max_lines to 1.*voice\.rate_wpm 200 or lower/) }),
+    ]);
+    expect(ids(r, "caption_sync")).toEqual([]);
+  });
+
+  it("caption_too_brief counts CJK captions by characters", async () => {
+    const ja = [{ word: "意味で検索します。", start_ms: 200, end_ms: 700 }];
+    const r = await lintProject(rendered({ edit: (s) => (s.language = "ja"), tracks: [{ scene_id: "s01", words: ja }, { scene_id: "s02", words: timed(S2, 200) }], lines: [["s01", 0, 1, 200, 900], good[1]!] }));
+    // 8 characters / 9 per s + 0.3 = 1.19 s > 0.7 s shown.
+    expect(ids(r, "caption_too_brief")).toEqual([expect.objectContaining({ scene_id: "s01", message: expect.stringMatching(/needs 1\.19s \(1\/9 s per character/) })]);
+  });
+
+  it("caption_sync: early captions and speech with no caption", async () => {
+    const r = await lintProject(
+      rendered({
+        lines: [
+          ["s01", 0, 3, 200, 1350],
+          ["s01", 3, 3, 700, 2550], // first word at 1400: 700 ms early
+          ["s02", 0, 2, 3200, 3950], // s02 words 3..8 (4000–6350) have no caption
+        ],
+      }),
+    );
+    expect(ids(r, "caption_sync")).toEqual([
+      expect.objectContaining({ scene_id: "s01", message: expect.stringMatching(/1 caption\(s\) in s01 .*"under the app\." starts 700 ms before its first word/) }),
+      expect.objectContaining({ scene_id: "s02", message: "speech from 4s to 6.35s (2.35s) has no caption on screen" }),
+    ]);
+  });
+
+  it("caption_sync: late captions; short uncaptioned speech is fine; skipped for timing_source none", async () => {
+    // s02 words 7–8 (5600–6350, 0.75 s) are uncaptioned: under 1.5 s. The s01 caption stays 650 ms after its last word.
+    const r = await lintProject(rendered({ lines: [["s01", 0, 6, 200, 3000], ["s02", 0, 6, 3200, 5550]] }));
+    expect(ids(r, "caption_sync")).toEqual([expect.objectContaining({ scene_id: "s01", message: expect.stringMatching(/stays 450 ms after its last word/) })]);
+    const none = await lintProject(rendered({ lines: [["s01", 0, 6, 0, 3000], ["s02", 0, 2, 3000, 3500]], timing_source: "none" }));
+    expect(ids(none, "caption_sync")).toEqual([]);
+  });
+
+  it("caption_gap: flags captions separated by under 120 ms", async () => {
+    const r = await lintProject(rendered({ lines: [["s01", 0, 3, 200, 1340], ["s01", 3, 3, 1400, 2550], good[1]!] }));
+    expect(ids(r, "caption_gap")).toEqual([expect.objectContaining({ severity: "warning", scene_id: "s01", message: expect.stringMatching(/^minor: 1 caption change\(s\).*1\.34s \+60 ms/) })]);
+  });
+
+  it("cut_off_beat: a cut beat sync could not move, with the spec's tolerance", async () => {
+    const beats = [400, 1400, 2400, 3400, 4400, 5400, 6400, 7400];
+    const audio = (tol?: number) => (s: Record<string, any>) =>
+      (s.audio = { music: { file: "assets/m.wav", license: { id: "user-owned" } }, beat_sync: { enabled: true, ...(tol ? { tolerance_ms: tol } : {}) } });
+    const extra = { beat_sync: { bpm: 60, beats: 8, moved_cuts: 0, beat_times_ms: beats } };
+    const r = await lintProject(rendered({ lines: good, edit: audio(), extra }));
+    expect(ids(r, "cut_off_beat")).toEqual([
+      expect.objectContaining({ severity: "warning", scene_id: "s01", message: expect.stringMatching(/at 3s is 400 ms from the nearest beat \(3\.4s\); tolerance 250 ms/), fix: expect.stringMatching(/duration_sec to 3\.4/) }),
+    ]);
+    expect(ids(await lintProject(rendered({ lines: good, edit: audio(500), extra })), "cut_off_beat")).toEqual([]);
+    // Without recorded beat times (older renders) the check is skipped.
+    expect(ids(await lintProject(rendered({ lines: good, edit: audio(), extra: { beat_sync: { bpm: 60, beats: 8, moved_cuts: 0 } } })), "cut_off_beat")).toEqual([]);
+  });
+
+  it("onscreen_too_brief: unspoken on-screen text in a narrated scene; spoken text is fine", async () => {
+    const r = await lintProject(
+      project((s) => {
+        delete s.captions.position;
+        s.scenes[1].duration_sec = 2;
+        s.scenes[1].on_screen_text = "Seven unrelated words appear here for viewers";
+      }),
+    );
+    expect(ids(r, "onscreen_too_brief")).toEqual([
+      expect.objectContaining({ severity: "warning", scene_id: "s02", message: expect.stringMatching(/^13 on-screen words in 2s that the voiceover does not say/), fix: expect.stringMatching(/at most 3 words.*duration_sec to at least 5\.4$/) }),
+    ]);
+    const spoken = await lintProject(
+      project((s) => {
+        delete s.captions.position;
+        s.scenes[1].duration_sec = 2;
+        s.scenes[1].on_screen_text = "Let lint place them";
+        s.scenes[1].deterministic = { kind: "typography", props: { lines: ["in the safe zone"] } };
+      }),
+    );
+    expect(ids(spoken, "onscreen_too_brief")).toEqual([]);
+  });
+
+  it("does not double-report a silent scene reading_density already flagged", async () => {
+    const r = await lintProject(
+      project((s) => {
+        delete s.captions.position;
+        s.voice = { mode: "none" };
+        for (const sc of s.scenes) sc.voiceover = "";
+        s.scenes[0].duration_sec = 2;
+        s.scenes[0].on_screen_text = "one two three four five six seven eight nine ten";
+      }),
+    );
+    expect(ids(r, "reading_density").map((f) => (f as { scene_id?: string }).scene_id)).toEqual(["s01"]);
+    expect(ids(r, "onscreen_too_brief")).toEqual([]);
+  });
+
+  it("story_structure: no early tension and no payoff before the CTA", async () => {
+    const scene = (id: string, purpose: string) => ({ id, duration_sec: 3, purpose, voiceover: "Plain words here.", visual_strategy: "motion_graphic", visual_requirements: { continuity_refs: [] }, claim_refs: [] });
+    const weak = await lintProject(project((s) => (delete s.captions.position, (s.scenes = [scene("s01", "hook"), scene("s02", "point"), scene("s03", "point"), scene("s04", "cta")]))));
+    expect(ids(weak, "story_structure")).toEqual([
+      expect.objectContaining({ severity: "warning", message: expect.stringMatching(/no scene after the hook.*sets up tension.*last scene before the CTA \(s03\) is "point"/), fix: expect.stringMatching(/storytelling\.md/) }),
+    ]);
+    const strong = await lintProject(
+      project((s) => (delete s.captions.position, (s.scenes = [scene("s01", "hook"), scene("s02", "question"), scene("s03", "point"), scene("s04", "payoff"), scene("s05", "cta"), scene("s06", "end_card")]))),
+    );
+    expect(ids(strong, "story_structure")).toEqual([]);
+    // Two-scene videos have no room for an arc: not checked.
+    expect(ids(await lintProject(project((s) => delete s.captions.position)), "story_structure")).toEqual([]);
+  });
+});

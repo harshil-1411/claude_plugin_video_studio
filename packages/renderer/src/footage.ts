@@ -2,25 +2,44 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join } from "node:path";
 import { type FfmpegTools, FASTSTART, ffmpegFeatures, getTools, h264Args, resolveFfmpeg, runFfmpeg, runProcess } from "@video-studio/media";
-import type { DeterministicKind, FootageClip, MediaInfo, RedactRegion } from "@video-studio/schema";
-import { type BuiltGraph, type Composition, type FfmpegEncodeSettings, type FontFiles, buildFilterGraph, composeScene, ffColor, frameCount } from "./ffmpeg-renderer.js";
+import type { DeterministicKind, FootageClip, MediaInfo, RedactRegion, SceneMotion } from "@video-studio/schema";
+import {
+  type BuiltGraph,
+  type Composition,
+  type FfmpegEncodeSettings,
+  type FontFiles,
+  buildFilterGraph,
+  composeScene,
+  ffColor,
+  frameCount,
+  revealChains,
+  sceneMotionChains,
+  sceneMotionParams,
+  zoomPanExprs,
+  zoomPanFilter,
+} from "./ffmpeg-renderer.js";
 import { type FontResolver, createFontResolver } from "./tokens.js";
-import type { Availability, RenderTarget, SceneRenderRequest, SceneRenderResult, SceneRenderer } from "./types.js";
+import type { Availability, MotionTokens, RenderTarget, SceneRenderRequest, SceneRenderResult, SceneRenderer } from "./types.js";
 
 /**
  * Footage renderer: turns a span of a real video (or a still) into an exact-length, silent clip
  * at the target size and fps. The span is trimmed (`in_sec..out_sec`), re-timed (`speed`), fitted
  * (`cover` crops around `focus`, `contain` letterboxes on the background colour, `blur_pad` puts a
  * blurred, dimmed copy behind), and a clip shorter than the scene holds its last frame or loops.
- * Stills get a gentle Ken Burns push-in. Text kinds (lower third, kinetic text, typography,
- * quote, stat) are drawn over the footage with the FFmpeg renderer's layout and drawtext code, so
+ * Stills get a gentle Ken Burns push-in. `scene.motion` moves the fitted picture (after the fit,
+ * before any text is drawn, so titles stay put and text boxes are the rest pose lint checks);
+ * on a still it replaces the Ken Burns, and `hold` keeps the still still. Text kinds (lower
+ * third, kinetic text, typography, quote, stat) are drawn over the footage with the FFmpeg renderer's layout and drawtext code, so
  * text boxes reach lint exactly as for motion graphics. Audio is not touched: the pipeline mixes
  * the clip's own sound separately.
  */
 
 export const FOOTAGE_RENDERER_ID = "ffmpeg-footage";
-/** 0.2.0: crops baked-in letterbox bars (media.content_box) before the fit. */
-export const FOOTAGE_RENDERER_VERSION = "0.2.0";
+/**
+ * 0.2.0: crops baked-in letterbox bars (media.content_box) before the fit.
+ * 0.2.1: `scene.motion` moves the fitted picture; on stills it replaces the Ken Burns.
+ */
+export const FOOTAGE_RENDERER_VERSION = "0.2.1";
 
 /** Deterministic kinds drawn over footage. Others are ignored with a warning. */
 export const FOOTAGE_OVERLAY_KINDS = ["lower_third", "kinetic_text", "typography", "quote", "stat"] as const satisfies readonly DeterministicKind[];
@@ -43,6 +62,12 @@ export interface FootageRendererOptions {
   encode?: FfmpegEncodeSettings;
   tools?: FfmpegTools;
   keepTemp?: boolean;
+}
+
+/** `scene.motion` for the footage, with the style's easing (absent: ease-in-out). */
+export interface FootageCamera {
+  motion?: SceneMotion;
+  easing?: MotionTokens["easing"];
 }
 
 export interface FootagePlan {
@@ -121,7 +146,15 @@ function fitChains(fit: NonNullable<FootageClip["fit"]>, W: number, H: number, f
  * Pure plan of the footage part of the graph (exported for tests): input args and the chains that
  * end in `[fg]` with exactly `frames` frames at the target size and fps.
  */
-export function planFootage(clip: FootageClip, media: Pick<MediaInfo, "duration_sec" | "content_box">, path: string, target: RenderTarget, durationSec: number, background: string): FootagePlan {
+export function planFootage(
+  clip: FootageClip,
+  media: Pick<MediaInfo, "duration_sec" | "content_box">,
+  path: string,
+  target: RenderTarget,
+  durationSec: number,
+  background: string,
+  camera: FootageCamera = {},
+): FootagePlan {
   const { width: W, height: H, fps } = target;
   const frames = frameCount(durationSec, fps);
   const D = frames / fps;
@@ -129,12 +162,17 @@ export function planFootage(clip: FootageClip, media: Pick<MediaInfo, "duration_
   const focus = clip.focus ?? { x: 0.5, y: 0.5 };
   const warnings: string[] = [];
   const tail = [`format=yuv420p`, `trim=end_frame=${frames}`, "setpts=PTS-STARTPTS"];
+  const motion = camera.motion;
 
   if (isStillPath(path)) {
     // Fit at 2x so zoompan's integer steps stay sub-pixel on output, then push in towards the centre.
     const W2 = even(W * 2);
     const H2 = even(H * 2);
-    const z = `1+${KEN_BURNS_ZOOM}*on/${Math.max(1, frames - 1)}`;
+    // scene.motion replaces the Ken Burns: hold and reveal keep z = 1 (reveal then wipes in).
+    const move = motion
+      ? zoomPanFilter(zoomPanExprs(motion, frames, fps, camera.easing), target, frames)
+      : `zoompan=z='1+${KEN_BURNS_ZOOM}*on/${Math.max(1, frames - 1)}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=${frames}:s=${W}x${H}:fps=${fps}`;
+    const reveal = motion?.pattern === "reveal";
     return {
       kind: "still",
       input: ["-i", path],
@@ -142,7 +180,8 @@ export function planFootage(clip: FootageClip, media: Pick<MediaInfo, "duration_
         ...redactChains(clip.redact ?? [], 0, 1, "[0:v]", "[red]"),
         `[red]${contentCrop(media.content_box)}[cc]`,
         ...fitChains(fit, W2, H2, focus, background, "[cc]", "[kb]", "k"),
-        `[kb]zoompan=z='${z}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=${frames}:s=${W}x${H}:fps=${fps},setsar=1,${tail.join(",")}[fg]`,
+        `[kb]${move},setsar=1,${tail.join(",")}${reveal ? "[mv]" : "[fg]"}`,
+        ...(reveal ? revealChains(target, D, sceneMotionParams(motion, D).sec, background, camera.easing, "[mv]", "[fg]") : []),
       ],
       frames,
       fill: "exact",
@@ -164,6 +203,8 @@ export function planFootage(clip: FootageClip, media: Pick<MediaInfo, "duration_
     );
   }
   const clipFrames = Math.max(1, Math.floor(play * fps + 1e-6));
+  // scene.motion after the fit and fill, on the exact-length clip (hold: no chains).
+  const moveChains = motion ? sceneMotionChains(motion, target, frames, background, camera.easing, "[mv]", "[fg]") : [];
   const fillFilter = fill === "loop" ? [`loop=loop=-1:size=${clipFrames}:start=0`, "setpts=N/FRAME_RATE/TB"] : fill === "hold" ? [`tpad=stop_mode=clone:stop_duration=${n3(D)}`] : [];
   return {
     kind: "video",
@@ -175,7 +216,7 @@ export function planFootage(clip: FootageClip, media: Pick<MediaInfo, "duration_
       // Then drop baked-in black bars, so cover fills the frame with picture, not bars.
       `[src1]${contentCrop(media.content_box)}[src]`,
       ...fitChains(fit, W, H, focus, background, "[src]", "[fit]", "b"),
-      `[fit]${[...fillFilter, ...tail].join(",")}[fg]`,
+      ...(moveChains.length ? [`[fit]${[...fillFilter, ...tail].join(",")}[mv]`, ...moveChains] : [`[fit]${[...fillFilter, ...tail].join(",")}[fg]`]),
     ],
     frames,
     span_sec: Math.round(span * 1000) / 1000,
@@ -270,7 +311,10 @@ export function createFootageRenderer(opts: FootageRendererOptions = {}): SceneR
       if (!scene.footage) throw new Error(`scene ${scene.id} has no footage`);
       if (!req.footage) throw new Error(`scene ${scene.id}: footage asset "${scene.footage.asset}" was not resolved`);
       const tools = await getTools(opts.tools);
-      const plan = planFootage(scene.footage, req.footage.media, req.footage.path, target, scene.duration_sec, tokens.color_background);
+      const plan = planFootage(scene.footage, req.footage.media, req.footage.path, target, scene.duration_sec, tokens.color_background, {
+        ...(scene.motion ? { motion: scene.motion } : {}),
+        ...(tokens.motion ? { easing: tokens.motion.easing } : {}),
+      });
       const warnings = [...plan.warnings];
       const { comp, warnings: ow } = footageOverlay(req);
       warnings.push(...ow);

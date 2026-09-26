@@ -18,20 +18,19 @@ beats:
     guidance: The speaker's strongest opening line (pick the span from the transcript). A lower_third name card (name, role) over it.
     suggested_visual_strategy: user_asset
     suggested_deterministic_kind: lower_third
-  - purpose: point
+  - purpose: story
     share: 0.25
-    guidance: The main idea in the speaker's own words; one continuous span, no text overlay.
+    guidance: The setup in the speaker's own words (the problem, the moment or the question that makes the point matter); one continuous span, no text overlay.
     suggested_visual_strategy: user_asset
   - purpose: point
     share: 0.2
     guidance: The line worth remembering, with its key words as kinetic_text (emphasis on one word).
     suggested_visual_strategy: user_asset
     suggested_deterministic_kind: kinetic_text
-  - purpose: proof
+  - purpose: payoff
     share: 0.2
-    guidance: An example, number or story from the recording that backs the point.
+    guidance: The example, number or outcome from the recording that answers the setup and pays off the hook.
     suggested_visual_strategy: user_asset
-    optional: true
   - purpose: cta
     share: 0.2
     guidance: The speaker's ask, with the action as short kinetic_text (a URL or command).

@@ -83,3 +83,19 @@ For `motion_graphic` scenes, `{"continuity_refs": []}` is enough; add
 `whip`. Default `cut`. Use `crossfade` into/out of generated footage,
 `slide` for list steps, and at most one or two showy transitions
 (`zoom`, `whip`) per short video. Respect the brand's `transition_style`.
+
+## Motion
+
+`motion: {pattern, intensity?}` moves the whole scene frame like a camera
+(every renderer, footage included; on-screen text boxes are checked at rest).
+Use `push_in` to land a key line, `punch` (a 250 ms pop) when a stat or
+number lands, `reveal` (a 400 ms wipe from the left) to open a new idea,
+`drift` (a slow sideways pan) for b-roll and ambient footage, `pull_out` to
+show the whole after a detail, and `hold` for dense text, code or charts
+that must stay still (it also stops a still image's default push-in).
+`intensity` is `subtle`, `normal` (default) or `strong`; keep `strong` for
+one or two moments. One pattern per scene; leave `motion` out when unsure,
+and vary patterns so consecutive scenes do not repeat the same move.
+`punch` and `reveal` play in the scene's first 250–400 ms, so enter those
+scenes on a `cut` (or `whip`): a `crossfade` or `fade_black` into them
+blends over the move and hides it.

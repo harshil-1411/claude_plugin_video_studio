@@ -1,6 +1,6 @@
 ---
 name: lint
-description: Lint a video-studio project against its platform targets (TikTok, Instagram, YouTube Shorts, LinkedIn, Facebook Page API) - duration/fps/size envelopes, text cut off, text or captions under the app UI, contrast, caption reading speed, post caption and hashtag limits, cover, brand banned phrases - and fix what it finds by editing the spec and re-rendering. Use when the user runs /video-studio:lint, asks whether a video is ready for a platform, or after a render before publishing.
+description: Lint a video-studio project against its platform targets (TikTok, Instagram, YouTube Shorts, LinkedIn, Facebook Page API) - duration/fps/size envelopes, text cut off, text or captions under the app UI, contrast, caption reading speed and timing (captions too brief or out of sync with the voice, flicker), cuts off the beat, on-screen text too brief to read, story arc, post caption and hashtag limits, cover, brand banned phrases - and fix what it finds by editing the spec and re-rendering. Use when the user runs /video-studio:lint, asks whether a video is ready for a platform, or after a render before publishing.
 allowed-tools: mcp__plugin_video-studio_engine__lint mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status Read Edit
 ---
 
@@ -34,6 +34,33 @@ Run this loop when lint returns errors, or warnings the user wants cleared:
    - `envelope_*`: adjust durations, `master` or `targets` as the fix says; ask
      the user before dropping a target.
    - `brand_banned_phrase`: rewrite the named field without the phrase.
+   - Timing findings need a render (they read `renders/<quality>/render-state.json`,
+     `captions/captions.json` and the voice tracks):
+     - `caption_too_brief`: a caption is on screen for less than its
+       reading time (0.25 s/word + 0.3 s, min 0.7 s; CJK 9 characters/s).
+       Lower brand `captions.max_lines`, set a slower `voice.rate_wpm`, or
+       shorten the scene's voiceover.
+     - `caption_sync`: a caption starts over 250 ms before its first spoken
+       word or stays over 400 ms after its last (beyond the 0.8 s minimum
+       display), or speech runs over 1.5 s with no caption. Re-render first
+       (stale captions); then split long voiceover sentences. Not checked
+       when the voice has no timings (`timing_source: none`).
+     - `caption_gap` (minor): captions separated by under 120 ms flicker.
+       Re-render; if it stays, join the two phrases.
+     - `cut_off_beat`: with `audio.beat_sync` on, a cut further than the
+       tolerance (default 250 ms) from a beat, usually because moving it
+       would clip speech. Set the named `duration_sec`, shorten the
+       voiceover, or raise `audio.beat_sync.tolerance_ms`.
+     - `onscreen_too_brief`: on-screen text (`on_screen_text` + props) the
+       voiceover does not say needs more reading time than the scene has
+       (3 words/s after a 1 s settle). Cut the text, say it, or lengthen
+       the scene. Silent scenes already flagged by `reading_density` are
+       not repeated.
+   - `story_structure` (3+ scenes): no tension scene (question, problem,
+     contrarian_claim, story) in the first 40% after the hook, or the last
+     scene before the CTA/end card is not a payoff (payoff, result, reveal,
+     loop_back). Re-plan those beats with the plan skill's
+     `references/storytelling.md`; ask the user before restructuring.
 2. Run `mcp__plugin_video-studio_engine__spec_validate {project_dir}` and fix
    any errors it reports.
 3. Re-render with `mcp__plugin_video-studio_engine__render_submit` (same

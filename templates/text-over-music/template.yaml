@@ -19,9 +19,9 @@ beats:
     guidance: At most 6 words that stop the scroll; the whole message of the first card must be readable in 2 seconds.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: kinetic_text
-  - purpose: point
+  - purpose: problem
     share: 0.18
-    guidance: One claim or number as a stat card; label it in a few words. A number cites claim_refs.
+    guidance: The problem as one claim or number on a stat card; label it in a few words. A number cites claim_refs.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: stat
   - purpose: comparison

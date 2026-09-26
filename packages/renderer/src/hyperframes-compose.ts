@@ -1,6 +1,7 @@
 import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type DeterministicKind, type TextBox, type TextRole, propsText } from "@video-studio/schema";
+import { type DeterministicKind, type SceneMotion, type TextBox, type TextRole, propsText } from "@video-studio/schema";
+import { sceneMotionParams } from "./ffmpeg-renderer.js";
 import { codeLabel, escapeHtml, highlightLines, languageFamily } from "./hyperframes-highlight.js";
 import { type Script, baseDirection, dominantScript, htmlLang, languageScript, scriptsIn } from "./script.js";
 import { applyTextCase, estimateTextWidth, isComplexText, lineUnits, safeArea, wrapText } from "./text-layout.js";
@@ -1606,6 +1607,36 @@ function timelineScript(compositionId: string, duration: number): string {
 })();`;
 }
 
+/**
+ * `scene.motion` as a wrapper around the scene content plus its CSS: one paused CSS animation on
+ * the wrapper (`.vs-cam`), seeked by the runtime and the registered timeline like every other
+ * animation (no JS timers). The amounts are the FFmpeg renderer's (`sceneMotionParams`); camera
+ * moves never overshoot, so a spring style eases out. `hold` adds no wrapper and only stops the
+ * renderer's own image zoom (`.vs-zoom`). Text boxes stay the unmoved layout: lint checks the
+ * rest pose. Null without a motion (the page is then byte-for-byte what it was before).
+ */
+export function cameraMarkup(motion: SceneMotion | undefined, dur: number, W: number, easing?: MotionTokens["easing"]): { open: string; close: string; css: string } | null {
+  if (!motion) return null;
+  const m = sceneMotionParams(motion, dur);
+  const head = `\n/* scene motion: ${m.pattern} */\n`;
+  if (m.pattern === "hold") return { open: "", close: "", css: `${head}.vs-zoom { animation-name: none; }` };
+  const ease = EASING_CSS[easing === undefined ? "ease_in_out" : easing === "spring" ? "ease_out" : easing];
+  const len = m.pattern === "punch" || m.pattern === "reveal" ? m.sec : dur;
+  const frames: Record<Exclude<SceneMotion["pattern"], "hold">, string> = {
+    push_in: `from { transform: scale(1); } to { transform: scale(${fmtSec(1 + m.amount)}); }`,
+    pull_out: `from { transform: scale(${fmtSec(1 + m.amount)}); } to { transform: scale(1); }`,
+    punch: `0% { transform: scale(1); } 50% { transform: scale(${fmtSec(1 + m.amount)}); } 100% { transform: scale(1); }`,
+    reveal: "from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); }",
+    drift: `from { transform: translateX(${px((m.pan * W) / 2)}) scale(${fmtSec(m.zoom)}); } to { transform: translateX(${px((-m.pan * W) / 2)}) scale(${fmtSec(m.zoom)}); }`,
+  };
+  const timing = m.pattern === "punch" ? EASING_CSS.ease_in_out : ease;
+  return {
+    open: `<div class="vs-cam vs-cam-${m.pattern.replace(/_/g, "-")}" style="--md:${fmtSec(len)}s">\n`,
+    close: "\n</div>",
+    css: `${head}.vs-cam { position: absolute; left: 0; top: 0; width: 100%; height: 100%; transform-origin: 50% 50%; animation: vs-cam var(--md) ${timing} 0s 1 both paused; }\n@keyframes vs-cam { ${frames[m.pattern]} }`,
+  };
+}
+
 function resolveTokens(tokens: VisualTokens, warnings: string[]) {
   const colour = (key: "color_background" | "color_text" | "color_primary" | "color_secondary") => {
     const v = tokens[key]?.trim();
@@ -1747,6 +1778,7 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
   });
   const compositionId = compositionIdFor(scene.id);
   const d = fmtSec(dur);
+  const cam = cameraMarkup(scene.motion, dur, W, t.motion?.easing);
   const html = `<!doctype html>
 <html lang="${esc(pageLang)}"${rtl ? ' dir="rtl"' : ""}>
 <head>
@@ -1754,15 +1786,15 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
 <meta name="viewport" content="width=${W}, height=${H}">
 <title>${esc(`${scene.id} ${det.kind}`)}</title>
 <style>
-${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}
+${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}${cam ? cam.css : ""}
 </style>
 </head>
 <body>
 <div id="vs-root" data-composition-id="${compositionId}" data-start="0" data-duration="${d}" data-width="${W}" data-height="${H}" data-fps="${target.fps}">
 <div id="vs-scene" class="clip vs-kind-${det.kind.replace(/_/g, "-")}" data-start="0" data-duration="${d}" data-track-index="0">
-${safeOpen}
+${cam ? cam.open : ""}${safeOpen}
 ${content}
-</div>
+</div>${cam ? cam.close : ""}
 </div>
 </div>
 <script>

@@ -232485,6 +232485,21 @@ const SoundEffect = strictObject({
 	license: AudioLicense.optional(),
 	caption: string().optional().describe("Sound-event caption shown while it plays, e.g. \"[applause]\" (accessibility).")
 }).describe("A one-shot sound effect.");
+const SceneMotion = strictObject({
+	pattern: _enum([
+		"push_in",
+		"pull_out",
+		"punch",
+		"reveal",
+		"drift",
+		"hold"
+	]),
+	intensity: _enum([
+		"subtle",
+		"normal",
+		"strong"
+	]).optional().describe("How far the move goes (default normal).")
+}).describe("Camera-like motion of the whole scene frame.");
 const Scene = strictObject({
 	id: SceneId,
 	duration_sec: number().positive().max(120),
@@ -232498,7 +232513,8 @@ const Scene = strictObject({
 	transition: Transition.optional(),
 	footage: FootageClip.optional().describe("Real footage for user_asset / screen_capture scenes; a deterministic block, if any, is drawn over it."),
 	audio: SceneAudio.optional(),
-	sfx: array(SoundEffect).max(8).optional()
+	sfx: array(SoundEffect).max(8).optional(),
+	motion: SceneMotion.optional()
 });
 const VoiceMode = _enum([
 	"narrated",
@@ -237821,8 +237837,11 @@ function highlightLines(code, language) {
 * tokens, not the host toolchain.
 */
 const FFMPEG_RENDERER_ID = "ffmpeg-drawtext";
-/** 0.4.0: script fonts for CJK lines; Devanagari/Arabic/Hebrew lines drawn through libass (shaping + bidi). */
-const FFMPEG_RENDERER_VERSION = "0.4.0";
+/**
+* 0.4.0: script fonts for CJK lines; Devanagari/Arabic/Hebrew lines drawn through libass (shaping + bidi).
+* 0.4.1: `scene.motion` (push_in, pull_out, punch, reveal, drift, hold) moves the whole frame.
+*/
+const FFMPEG_RENDERER_VERSION = "0.4.1";
 const FFMPEG_RENDERER_KINDS = [
 	"typography",
 	"code",
@@ -239964,6 +239983,139 @@ function round3$1(n) {
 	return Math.round(n * 1e3) / 1e3;
 }
 /**
+* How far each scene motion pattern goes, per intensity: the zoom added for push_in / pull_out,
+* the peak of the punch pop, and the drift pan as a fraction of the frame width. Shared by the
+* FFmpeg, footage and HyperFrames renderers so every renderer moves the frame the same way.
+*/
+const SCENE_MOTION_AMOUNT = Object.freeze({
+	push_in: {
+		subtle: .03,
+		normal: .06,
+		strong: .12
+	},
+	pull_out: {
+		subtle: .03,
+		normal: .06,
+		strong: .12
+	},
+	punch: {
+		subtle: .04,
+		normal: .08,
+		strong: .14
+	},
+	drift: {
+		subtle: .015,
+		normal: .03,
+		strong: .06
+	}
+});
+/** Length of the punch pop (capped at half the scene). */
+const PUNCH_SEC = .25;
+/** Length of the reveal wipe (capped at half the scene). */
+const REVEAL_SEC = .4;
+/** Drift's constant zoom (at least pan + 1% of slack, so the pan never shows an edge). */
+const DRIFT_MIN_ZOOM = 1.04;
+function sceneMotionParams(motion, durationS) {
+	const i = motion.intensity ?? "normal";
+	const p = motion.pattern;
+	const amount = p === "push_in" || p === "pull_out" || p === "punch" ? SCENE_MOTION_AMOUNT[p][i] : 0;
+	const pan = p === "drift" ? SCENE_MOTION_AMOUNT.drift[i] : 0;
+	return {
+		pattern: p,
+		amount,
+		zoom: p === "drift" ? round3$1(Math.max(DRIFT_MIN_ZOOM, 1 + pan + .01)) : 1,
+		pan,
+		sec: round3$1(p === "punch" ? Math.min(PUNCH_SEC, durationS / 2) : p === "reveal" ? Math.min(REVEAL_SEC, durationS / 2) : 0)
+	};
+}
+/**
+* Camera curves as FFmpeg expressions of the progress `p` (0..1). Camera moves never overshoot
+* (a spring would expose an edge on pull_out), so spring uses the ease-out curve. Undefined
+* easing (no style motion tokens): ease-in-out. These match the CSS curves of the HyperFrames
+* renderer closely, not exactly.
+*/
+function cameraEaseExpr(easing, p) {
+	switch (easing) {
+		case "linear": return p;
+		case "ease_out":
+		case "spring": return `(1-pow(1-${p},3))`;
+		case "snap": return `(1-pow(1-${p},4))`;
+		default: return `(${p}*${p}*(3-2*${p}))`;
+	}
+}
+const CENTRE_X = "iw/2-iw/zoom/2";
+const CENTRE_Y = "ih/2-ih/zoom/2";
+/**
+* zoompan expressions for a scene of `frames` frames: push_in, pull_out, punch and drift; `hold`
+* and `reveal` do not zoom (z = 1). Zoom never drops below 1, so no edge is ever exposed.
+* Expressions contain commas but never colons, so they are safe inside single quotes.
+*/
+function zoomPanExprs(motion, frames, fps, easing) {
+	const m = sceneMotionParams(motion, frames / fps);
+	const e = cameraEaseExpr(easing, `min(1,on/${Math.max(1, frames - 1)})`);
+	switch (m.pattern) {
+		case "push_in": return {
+			z: `1+${m.amount}*${e}`,
+			x: CENTRE_X,
+			y: CENTRE_Y
+		};
+		case "pull_out": return {
+			z: `1+${m.amount}*(1-${e})`,
+			x: CENTRE_X,
+			y: CENTRE_Y
+		};
+		case "punch": {
+			const pf = Math.max(1, Math.round(m.sec * fps));
+			return {
+				z: `1+${m.amount}*sin(PI*min(1,on/${pf}))`,
+				x: CENTRE_X,
+				y: CENTRE_Y
+			};
+		}
+		case "drift": return {
+			z: String(m.zoom),
+			x: `${CENTRE_X}+iw/zoom*${m.pan}*(${e}-0.5)`,
+			y: CENTRE_Y
+		};
+		default: return {
+			z: "1",
+			x: CENTRE_X,
+			y: CENTRE_Y
+		};
+	}
+}
+/** `zoompan` for the given expressions; `d` frames per input frame (1 for video, all for a still). */
+function zoomPanFilter(ex, target, d) {
+	return `zoompan=z='${ex.z}':x='${ex.x}':y='${ex.y}':d=${d}:s=${target.width}x${target.height}:fps=${target.fps}`;
+}
+/**
+* Chains wiping `inLabel` in from the left over `sec` (a background-coloured plate slides off
+* to the right, uncovering the picture), then holding; timestamps must start at 0.
+*/
+function revealChains(target, durationS, sec, background, easing, inLabel, outLabel, tag = "rv") {
+	const e = cameraEaseExpr(easing, `min(1,t/${sec})`);
+	return [`color=c=${ffColor(background)}:s=${target.width}x${target.height}:r=${target.fps}:d=${(durationS + 1).toFixed(3)}[${tag}bg]`, `${inLabel}[${tag}bg]overlay=x='W*${e}':y=0:enable='lt(t,${sec})':eof_action=pass${outLabel}`];
+}
+/**
+* Chains applying `motion` to a whole composed frame stream (one frame in, one out, at the
+* target size and fps; timestamps from 0), from `inLabel` to `outLabel`. Zooms and pans run
+* zoompan on a 2x upscale, so steps stay at half an output pixel. Empty for `hold`.
+*/
+function sceneMotionChains(motion, target, frames, background, easing, inLabel, outLabel) {
+	const D = frames / target.fps;
+	if (motion.pattern === "hold") return [];
+	if (motion.pattern === "reveal") return revealChains(target, D, sceneMotionParams(motion, D).sec, background, easing, inLabel, outLabel);
+	const ex = zoomPanExprs(motion, frames, target.fps, easing);
+	const zoom = `scale=${target.width * 2}:${target.height * 2}:flags=bicubic,${zoomPanFilter(ex, target, 1)},setsar=1`;
+	if (motion.pattern !== "punch") return [`${inLabel}${zoom}${outLabel}`];
+	const sec = sceneMotionParams(motion, D).sec;
+	return [
+		`${inLabel}split=2[pca][pcb]`,
+		`[pcb]${zoom}[pcz]`,
+		`[pca][pcz]overlay=x=0:y=0:enable='lt(t,${sec})'${outLabel}`
+	];
+}
+/**
 * Route a line: lines with Devanagari, Arabic, Hebrew or other complex-script letters go through
 * libass; CJK and Hangul lines use drawtext with the script's font (which also covers Latin);
 * everything else keeps the role font.
@@ -240112,6 +240264,11 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 		}
 	}
 	flushAss();
+	if (gm.camera && gm.camera.pattern !== "hold") {
+		flush();
+		chains.push(...sceneMotionChains(gm.camera, target, frameCount(durationS, target.fps), gm.background ?? "#000000", motion?.easing, cur, "[cam]"));
+		cur = "[cam]";
+	}
 	const exit = motion && !gm.noExit ? round3$1(Math.min(exitFadeMs(motion) / 1e3, durationS * .2)) : 0;
 	if (exit >= .02) chain.push(f$1("fade", {
 		t: "out",
@@ -240507,7 +240664,8 @@ function createFfmpegRenderer(opts = {}) {
 				if (extra.ass) fonts.ass = extra.ass;
 				const built = buildFilterGraph(comp, target, frames / target.fps, fonts, tmp, {
 					...tokens.motion ? { motion: tokens.motion } : {},
-					background: tokens.color_background
+					background: tokens.color_background,
+					...scene.motion ? { camera: scene.motion } : {}
 				});
 				warnings.push(...built.warnings);
 				for (const [name, text] of built.textFiles) await writeFile(join(tmp, name), text, "utf8");
@@ -240542,14 +240700,19 @@ function createFfmpegRenderer(opts = {}) {
 * at the target size and fps. The span is trimmed (`in_sec..out_sec`), re-timed (`speed`), fitted
 * (`cover` crops around `focus`, `contain` letterboxes on the background colour, `blur_pad` puts a
 * blurred, dimmed copy behind), and a clip shorter than the scene holds its last frame or loops.
-* Stills get a gentle Ken Burns push-in. Text kinds (lower third, kinetic text, typography,
-* quote, stat) are drawn over the footage with the FFmpeg renderer's layout and drawtext code, so
+* Stills get a gentle Ken Burns push-in. `scene.motion` moves the fitted picture (after the fit,
+* before any text is drawn, so titles stay put and text boxes are the rest pose lint checks);
+* on a still it replaces the Ken Burns, and `hold` keeps the still still. Text kinds (lower
+* third, kinetic text, typography, quote, stat) are drawn over the footage with the FFmpeg renderer's layout and drawtext code, so
 * text boxes reach lint exactly as for motion graphics. Audio is not touched: the pipeline mixes
 * the clip's own sound separately.
 */
 const FOOTAGE_RENDERER_ID = "ffmpeg-footage";
-/** 0.2.0: crops baked-in letterbox bars (media.content_box) before the fit. */
-const FOOTAGE_RENDERER_VERSION = "0.2.0";
+/**
+* 0.2.0: crops baked-in letterbox bars (media.content_box) before the fit.
+* 0.2.1: `scene.motion` moves the fitted picture; on stills it replaces the Ken Burns.
+*/
+const FOOTAGE_RENDERER_VERSION = "0.2.1";
 /** Deterministic kinds drawn over footage. Others are ignored with a warning. */
 const FOOTAGE_OVERLAY_KINDS = [
 	"lower_third",
@@ -240629,7 +240792,7 @@ function fitChains(fit, W, H, focus, bg, inLabel, outLabel, tag) {
 * Pure plan of the footage part of the graph (exported for tests): input args and the chains that
 * end in `[fg]` with exactly `frames` frames at the target size and fps.
 */
-function planFootage(clip, media, path, target, durationSec, background) {
+function planFootage(clip, media, path, target, durationSec, background, camera = {}) {
 	const { width: W, height: H, fps } = target;
 	const frames = frameCount(durationSec, fps);
 	const D = frames / fps;
@@ -240644,10 +240807,12 @@ function planFootage(clip, media, path, target, durationSec, background) {
 		`trim=end_frame=${frames}`,
 		"setpts=PTS-STARTPTS"
 	];
+	const motion = camera.motion;
 	if (isStillPath(path)) {
 		const W2 = even$1(W * 2);
 		const H2 = even$1(H * 2);
-		const z = `1+${KEN_BURNS_ZOOM}*on/${Math.max(1, frames - 1)}`;
+		const move = motion ? zoomPanFilter(zoomPanExprs(motion, frames, fps, camera.easing), target, frames) : `zoompan=z='1+${KEN_BURNS_ZOOM}*on/${Math.max(1, frames - 1)}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=${frames}:s=${W}x${H}:fps=${fps}`;
+		const reveal = motion?.pattern === "reveal";
 		return {
 			kind: "still",
 			input: ["-i", path],
@@ -240655,7 +240820,8 @@ function planFootage(clip, media, path, target, durationSec, background) {
 				...redactChains(clip.redact ?? [], 0, 1, "[0:v]", "[red]"),
 				`[red]${contentCrop(media.content_box)}[cc]`,
 				...fitChains(fit, W2, H2, focus, background, "[cc]", "[kb]", "k"),
-				`[kb]zoompan=z='${z}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=${frames}:s=${W}x${H}:fps=${fps},setsar=1,${tail.join(",")}[fg]`
+				`[kb]${move},setsar=1,${tail.join(",")}${reveal ? "[mv]" : "[fg]"}`,
+				...reveal ? revealChains(target, D, sceneMotionParams(motion, D).sec, background, camera.easing, "[mv]", "[fg]") : []
 			],
 			frames,
 			fill: "exact",
@@ -240671,6 +240837,7 @@ function planFootage(clip, media, path, target, durationSec, background) {
 	const fill = short ? clip.loop ? "loop" : "hold" : play > D + .5 / fps ? "trim" : "exact";
 	if (short && D - play > Math.max(1.5 / fps, .1)) warnings.push(`footage: the clip gives ${n3(play)}s${speed !== 1 ? ` at speed ${speed}` : ""}, shorter than the ${n3(D)}s scene; ${clip.loop ? "looped" : "last frame held"}`);
 	const clipFrames = Math.max(1, Math.floor(play * fps + 1e-6));
+	const moveChains = motion ? sceneMotionChains(motion, target, frames, background, camera.easing, "[mv]", "[fg]") : [];
 	const fillFilter = fill === "loop" ? [`loop=loop=-1:size=${clipFrames}:start=0`, "setpts=N/FRAME_RATE/TB"] : fill === "hold" ? [`tpad=stop_mode=clone:stop_duration=${n3(D)}`] : [];
 	return {
 		kind: "video",
@@ -240687,7 +240854,7 @@ function planFootage(clip, media, path, target, durationSec, background) {
 			...redactChains(clip.redact ?? [], clip.in_sec, speed, "[src0]", "[src1]"),
 			`[src1]${contentCrop(media.content_box)}[src]`,
 			...fitChains(fit, W, H, focus, background, "[src]", "[fit]", "b"),
-			`[fit]${[...fillFilter, ...tail].join(",")}[fg]`
+			...moveChains.length ? [`[fit]${[...fillFilter, ...tail].join(",")}[mv]`, ...moveChains] : [`[fit]${[...fillFilter, ...tail].join(",")}[fg]`]
 		],
 		frames,
 		span_sec: Math.round(span * 1e3) / 1e3,
@@ -240820,7 +240987,10 @@ function createFootageRenderer(opts = {}) {
 			if (!scene.footage) throw new Error(`scene ${scene.id} has no footage`);
 			if (!req.footage) throw new Error(`scene ${scene.id}: footage asset "${scene.footage.asset}" was not resolved`);
 			const tools = await getTools(opts.tools);
-			const plan = planFootage(scene.footage, req.footage.media, req.footage.path, target, scene.duration_sec, tokens.color_background);
+			const plan = planFootage(scene.footage, req.footage.media, req.footage.path, target, scene.duration_sec, tokens.color_background, {
+				...scene.motion ? { motion: scene.motion } : {},
+				...tokens.motion ? { easing: tokens.motion.easing } : {}
+			});
 			const warnings = [...plan.warnings];
 			const { comp, warnings: ow } = footageOverlay(req);
 			warnings.push(...ow);
@@ -242750,6 +242920,39 @@ function timelineScript(compositionId, duration) {
   apply(0);
 })();`;
 }
+/**
+* `scene.motion` as a wrapper around the scene content plus its CSS: one paused CSS animation on
+* the wrapper (`.vs-cam`), seeked by the runtime and the registered timeline like every other
+* animation (no JS timers). The amounts are the FFmpeg renderer's (`sceneMotionParams`); camera
+* moves never overshoot, so a spring style eases out. `hold` adds no wrapper and only stops the
+* renderer's own image zoom (`.vs-zoom`). Text boxes stay the unmoved layout: lint checks the
+* rest pose. Null without a motion (the page is then byte-for-byte what it was before).
+*/
+function cameraMarkup(motion, dur, W, easing) {
+	if (!motion) return null;
+	const m = sceneMotionParams(motion, dur);
+	const head = `\n/* scene motion: ${m.pattern} */\n`;
+	if (m.pattern === "hold") return {
+		open: "",
+		close: "",
+		css: `${head}.vs-zoom { animation-name: none; }`
+	};
+	const ease = EASING_CSS[easing === void 0 ? "ease_in_out" : easing === "spring" ? "ease_out" : easing];
+	const len = m.pattern === "punch" || m.pattern === "reveal" ? m.sec : dur;
+	const frames = {
+		push_in: `from { transform: scale(1); } to { transform: scale(${fmtSec(1 + m.amount)}); }`,
+		pull_out: `from { transform: scale(${fmtSec(1 + m.amount)}); } to { transform: scale(1); }`,
+		punch: `0% { transform: scale(1); } 50% { transform: scale(${fmtSec(1 + m.amount)}); } 100% { transform: scale(1); }`,
+		reveal: "from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); }",
+		drift: `from { transform: translateX(${px(m.pan * W / 2)}) scale(${fmtSec(m.zoom)}); } to { transform: translateX(${px(-m.pan * W / 2)}) scale(${fmtSec(m.zoom)}); }`
+	};
+	const timing = m.pattern === "punch" ? EASING_CSS.ease_in_out : ease;
+	return {
+		open: `<div class="vs-cam vs-cam-${m.pattern.replace(/_/g, "-")}" style="--md:${fmtSec(len)}s">\n`,
+		close: "\n</div>",
+		css: `${head}.vs-cam { position: absolute; left: 0; top: 0; width: 100%; height: 100%; transform-origin: 50% 50%; animation: vs-cam var(--md) ${timing} 0s 1 both paused; }\n@keyframes vs-cam { ${frames[m.pattern]} }`
+	};
+}
 function resolveTokens(tokens, warnings) {
 	const colour = (key) => {
 		const v = tokens[key]?.trim();
@@ -242918,6 +243121,7 @@ function buildComposition(req, opts = {}) {
 	});
 	const compositionId = compositionIdFor(scene.id);
 	const d = fmtSec(dur);
+	const cam = cameraMarkup(scene.motion, dur, W, t.motion?.easing);
 	return {
 		composition_id: compositionId,
 		html: `<!doctype html>
@@ -242927,15 +243131,15 @@ function buildComposition(req, opts = {}) {
 <meta name="viewport" content="width=${W}, height=${H}">
 <title>${esc(`${scene.id} ${det.kind}`)}</title>
 <style>
-${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}
+${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}${cam ? cam.css : ""}
 </style>
 </head>
 <body>
 <div id="vs-root" data-composition-id="${compositionId}" data-start="0" data-duration="${d}" data-width="${W}" data-height="${H}" data-fps="${target.fps}">
 <div id="vs-scene" class="clip vs-kind-${det.kind.replace(/_/g, "-")}" data-start="0" data-duration="${d}" data-track-index="0">
-${safeOpen}
+${cam ? cam.open : ""}${safeOpen}
 ${content}
-</div>
+</div>${cam ? cam.close : ""}
 </div>
 </div>
 <script>
@@ -247146,6 +247350,18 @@ const CONTRAST_NORMAL = 4.5;
 * frame height once a 9:16 video fills the screen; applied to every aspect as an approximation.
 */
 const LARGE_TEXT_FRACTION = .045;
+/**
+* Caption timing (design rules). A caption needs about 0.25 s per word plus a 0.3 s settle to be
+* read, and never less than 0.7 s; CJK captions are read by characters at MAX_CJK_CHARS_PER_SEC,
+* and other word scripts scale the per-word time by their reading limit.
+*/
+const CAPTION_SEC_PER_WORD = .25;
+const CAPTION_SETTLE_SEC = .3;
+const CAPTION_MIN_SEC = .7;
+/** The tension (question, problem, claim, story) should be set up within this share of the video. */
+const STORY_SETUP_FRACTION = .4;
+/** Caption cues for sound events carry this scene_id prefix (pipeline SOUND_CUE_SCENE_PREFIX). */
+const SOUND_CUE_PREFIX = "sound:";
 /** Roles whose overflow or low contrast is an error (v2 design grid: hard failure for hook/caption). */
 const CRITICAL_ROLES = /* @__PURE__ */ new Set([
 	"hook",
@@ -247588,6 +247804,302 @@ function checkBanned(spec, brand, out) {
 		}
 	}
 }
+const sec = (ms) => `${round2(ms / 1e3)}s`;
+/** Seconds a caption needs on screen to be read (design rule; CJK by characters). */
+function captionReadSec(text, language) {
+	const script = readingScript(text, language);
+	if (script === "cjk") return Math.max(CAPTION_MIN_SEC, cjkCharCount(text) / 9 + CAPTION_SETTLE_SEC);
+	const perWord = CAPTION_SEC_PER_WORD * (script === "latin" ? 1 : MAX_WORDS_PER_SEC / (MAX_WORDS_PER_SEC_BY_SCRIPT[script] ?? 3.3));
+	return Math.max(CAPTION_MIN_SEC, wordCount(text) * perWord + CAPTION_SETTLE_SEC);
+}
+function sceneSpans(state) {
+	const scenes = state?.scenes;
+	if (!scenes?.length || scenes.some((s) => typeof s.duration_ms !== "number")) return void 0;
+	let t = 0;
+	return scenes.map((s) => {
+		const span = {
+			id: s.scene_id,
+			start: t,
+			end: t + s.duration_ms
+		};
+		t = span.end;
+		return span;
+	});
+}
+function captionLines(cap) {
+	const words = cap.words ?? [];
+	return (cap.lines ?? []).map((l) => {
+		const idx = Array.from({ length: Math.max(0, l.word_count) }, (_, k) => l.first_word + k).filter((i) => i >= 0 && i < words.length);
+		const scene = (idx.length ? words[idx[0]].scene_id : void 0) ?? "";
+		return {
+			start_ms: l.start_ms,
+			end_ms: l.end_ms,
+			text: l.text,
+			scene_id: scene,
+			words: idx,
+			cue: scene.startsWith(SOUND_CUE_PREFIX)
+		};
+	}).sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms);
+}
+/** Captions shown for less than their reading time: one finding per scene (worst caption named). */
+function checkCaptionBrief(spec, lines, brand, out) {
+	const byScene = /* @__PURE__ */ new Map();
+	for (const line of lines) {
+		if (line.cue) continue;
+		const shown = (line.end_ms - line.start_ms) / 1e3;
+		const need = captionReadSec(line.text, spec.language);
+		if (shown + 1e-6 >= need) continue;
+		byScene.set(line.scene_id, [...byScene.get(line.scene_id) ?? [], {
+			line,
+			shown,
+			need
+		}]);
+	}
+	const maxLines = brand?.captions?.max_lines ?? 2;
+	for (const s of spec.scenes) {
+		const bad = byScene.get(s.id);
+		if (!bad) continue;
+		const worst = [...bad].sort((a, b) => a.shown / a.need - b.shown / b.need)[0];
+		const cjk = readingScript(worst.line.text, spec.language) === "cjk";
+		const n = Math.max(1, wordCount(worst.line.text));
+		const wpm = Math.min(230, Math.max(110, Math.floor(60 * n / worst.need / 5) * 5));
+		const fewer = maxLines > 1 ? `set brand.yaml captions.max_lines to ${maxLines - 1} (fewer words per caption), ` : "";
+		const rule = cjk ? `1/9 s per character + ${CAPTION_SETTLE_SEC}s` : `${CAPTION_SEC_PER_WORD}s/word + ${CAPTION_SETTLE_SEC}s`;
+		out.push({
+			id: "caption_too_brief",
+			severity: "warning",
+			scene_id: s.id,
+			message: `${bad.length} caption(s) in ${s.id} are on screen for less than their reading time; "${snippet$1(worst.line.text)}" shows for ${round2(worst.shown)}s but needs ${round2(worst.need)}s (${rule}, min ${CAPTION_MIN_SEC}s)`,
+			fix: `${fewer}slow the voice with voice.rate_wpm ${cjk ? "lower" : `${wpm} or lower`}, or shorten scene ${s.id}'s voiceover`
+		});
+	}
+}
+/**
+* The spoken words on the video timeline, per scene (the truth for caption sync): voice-track
+* word times offset by the scene start and clamped to the scene, like the caption engine does.
+*/
+function spokenWords(tracks, spans) {
+	const out = /* @__PURE__ */ new Map();
+	for (const span of spans) {
+		const t = tracks.find((x) => x.scene_id === span.id);
+		if (!t?.words?.length) continue;
+		const end = span.start + Math.min(t.duration_ms || span.end - span.start, span.end - span.start);
+		const ws = t.words.filter((w) => w.word.trim()).map((w) => {
+			const a = Math.min(Math.round(span.start + w.start_ms), end);
+			return {
+				start: a,
+				end: Math.min(Math.max(Math.round(span.start + w.end_ms), a), end)
+			};
+		});
+		out.set(span.id, ws);
+	}
+	return out;
+}
+/** Captions that lead or trail the voice, and speech left uncaptioned. */
+function checkCaptionSync(spec, cap, lines, spoken, out) {
+	const words = cap.words ?? [];
+	const truth = /* @__PURE__ */ new Map();
+	const perScene = /* @__PURE__ */ new Map();
+	words.forEach((w, i) => {
+		if (!w.scene_id || w.scene_id.startsWith(SOUND_CUE_PREFIX)) return;
+		perScene.set(w.scene_id, [...perScene.get(w.scene_id) ?? [], i]);
+	});
+	for (const [id, idx] of perScene) {
+		const said = spoken.get(id);
+		if (!said || said.length !== idx.length) continue;
+		idx.forEach((i, k) => truth.set(i, said[k]));
+	}
+	const drift = /* @__PURE__ */ new Map();
+	for (const line of lines) {
+		if (line.cue || !line.words.length) continue;
+		const first = truth.get(line.words[0]);
+		const last = truth.get(line.words[line.words.length - 1]);
+		if (!first || !last) continue;
+		const early = first.start - line.start_ms;
+		const late = line.end_ms - Math.max(last.end + 400, first.start + 800);
+		const add = (what, ms) => drift.set(line.scene_id, [...drift.get(line.scene_id) ?? [], {
+			line,
+			what,
+			ms
+		}]);
+		if (early > 250) add(`starts ${Math.round(early)} ms before its first word`, early - 250);
+		else if (late > 0) add(`stays ${Math.round(line.end_ms - last.end)} ms after its last word`, late);
+	}
+	for (const s of spec.scenes) {
+		const bad = drift.get(s.id);
+		if (!bad) continue;
+		const worst = [...bad].sort((a, b) => b.ms - a.ms)[0];
+		out.push({
+			id: "caption_sync",
+			severity: "warning",
+			scene_id: s.id,
+			message: `${bad.length} caption(s) in ${s.id} are out of sync with the voice; "${snippet$1(worst.line.text)}" ${worst.what} (limits: 250 ms early, 400 ms late)`,
+			fix: `re-render so captions are rebuilt from the current voice tracks; if it persists, split scene ${s.id}'s voiceover into shorter sentences (estimated word timings drift over long ones) or use a voice with real word timings`
+		});
+	}
+	const all = spec.scenes.flatMap((s) => (spoken.get(s.id) ?? []).map((w) => ({
+		...w,
+		scene: s.id
+	})));
+	const covered = (w) => lines.some((l) => w.end > w.start ? l.start_ms < w.end && l.end_ms > w.start : l.start_ms <= w.start && l.end_ms >= w.start);
+	let run = [];
+	const flush = () => {
+		if (run.length) {
+			const from = run[0].start;
+			const to = run[run.length - 1].end;
+			if (to - from > 1500) out.push({
+				id: "caption_sync",
+				severity: "warning",
+				scene_id: run[0].scene,
+				message: `speech from ${sec(from)} to ${sec(to)} (${round2((to - from) / 1e3)}s) has no caption on screen`,
+				fix: `re-render so captions are rebuilt from the voice tracks (scene ${run[0].scene}'s voiceover may have changed since the captions were made); keep captions.burn_in on`
+			});
+		}
+		run = [];
+	};
+	for (const w of all) if (covered(w)) flush();
+	else run.push(w);
+	flush();
+}
+/** Captions separated by a hair-thin gap flicker off and on. */
+function checkCaptionGap(lines, out) {
+	const gaps = [];
+	for (let i = 1; i < lines.length; i++) {
+		const gap = lines[i].start_ms - lines[i - 1].end_ms;
+		if (gap > 0 && gap < 120) gaps.push({
+			at: lines[i - 1].end_ms,
+			ms: gap,
+			scene: lines[i].scene_id
+		});
+	}
+	if (!gaps.length) return;
+	const scene = gaps[0].scene;
+	out.push({
+		id: "caption_gap",
+		severity: "warning",
+		...scene && !scene.startsWith(SOUND_CUE_PREFIX) ? { scene_id: scene } : {},
+		message: `minor: ${gaps.length} caption change(s) leave a gap under 120 ms, which reads as flicker (${gaps.slice(0, 3).map((g) => `${sec(g.at)} +${Math.round(g.ms)} ms`).join(", ")}${gaps.length > 3 ? ", …" : ""})`,
+		fix: "re-render (the caption engine holds a caption across gaps under 250 ms); if the gaps persist, join the two phrases into one sentence in the voiceover"
+	});
+}
+/** Scene cuts that beat sync could not move onto a beat. */
+function checkBeatCuts(spec, state, spans, out) {
+	const beats = state?.beat_sync?.beat_times_ms;
+	if (!spec.audio?.beat_sync?.enabled || !beats?.length || !spans || spans.length < 2) return;
+	const tol = spec.audio.beat_sync.tolerance_ms ?? 250;
+	const lastBeat = Math.max(...beats);
+	for (let j = 0; j + 1 < spans.length; j++) {
+		const cut = spans[j].end;
+		if (cut > lastBeat + tol) break;
+		let near = beats[0];
+		for (const b of beats) if (Math.abs(b - cut) < Math.abs(near - cut)) near = b;
+		const off = Math.abs(near - cut);
+		if (off <= tol) continue;
+		const cur = spans[j];
+		const next = spans[j + 1];
+		const newDur = round2((cur.end - cur.start + (near - cut)) / 1e3);
+		out.push({
+			id: "cut_off_beat",
+			severity: "warning",
+			scene_id: cur.id,
+			message: `the cut from ${cur.id} to ${next.id} at ${sec(cut)} is ${Math.round(off)} ms from the nearest beat (${sec(near)}); tolerance ${tol} ms`,
+			fix: `set scene ${cur.id} duration_sec to ${newDur} so the cut lands on the beat at ${sec(near)}; beat sync does not move a cut into speech, so if ${near < cut ? cur.id : next.id}'s voiceover fills its scene, shorten it first (or raise audio.beat_sync.tolerance_ms)`
+		});
+	}
+}
+const tokens = (s) => s.toLowerCase().split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")).filter(Boolean);
+/** Share of the on-screen text the voiceover also says (words; characters for CJK). */
+function spokenShare(onScreen, voiceover, cjk) {
+	if (cjk) {
+		const said = new Set(Array.from(voiceover).filter((ch) => /[\p{L}\p{N}]/u.test(ch)));
+		const chars = Array.from(onScreen).filter((ch) => /[\p{L}\p{N}]/u.test(ch));
+		return chars.length ? chars.filter((ch) => said.has(ch)).length / chars.length : 1;
+	}
+	const said = new Set(tokens(voiceover));
+	const shown = [...new Set(tokens(onScreen))];
+	return shown.length ? shown.filter((w) => said.has(w)).length / shown.length : 1;
+}
+/**
+* On-screen text the viewer must read in the scene's time, in every voice mode, when the
+* voiceover does not say the same words. Scenes already flagged by reading_density are skipped.
+*/
+function checkOnScreenBrief(spec, state, out) {
+	const flagged = new Set(out.filter((f) => f.id === "reading_density" && /on-screen/.test(f.message)).map((f) => f.scene_id));
+	for (const s of spec.scenes) {
+		if (flagged.has(s.id)) continue;
+		const text = [s.on_screen_text ?? "", s.deterministic ? propsText(s.deterministic.props) : ""].join(" ").trim();
+		if (!text) continue;
+		const script = readingScript(text, spec.language);
+		const cjk = script === "cjk";
+		if (s.voiceover.trim() && spokenShare(text, s.voiceover, cjk) >= .6) continue;
+		const count = cjk ? cjkCharCount(text) : wordCount(text);
+		const unit = cjk ? "characters" : "words";
+		const limit = cjk ? 8 : (MAX_WORDS_PER_SEC_BY_SCRIPT[script] ?? 3.3) * 3 / MAX_WORDS_PER_SEC;
+		const rendered = state?.scenes?.find((x) => x.scene_id === s.id)?.duration_ms;
+		const dur = rendered !== void 0 ? rendered / 1e3 : s.duration_sec;
+		const floor = cjk ? 8 : 3;
+		const readable = Math.max(0, dur - 1) * limit;
+		if (count <= Math.max(floor, readable)) continue;
+		const needSec = Math.ceil((count / limit + 1) * 10) / 10;
+		out.push({
+			id: "onscreen_too_brief",
+			severity: "warning",
+			scene_id: s.id,
+			message: `${count} on-screen ${unit} in ${round2(dur)}s that the voiceover does not say; reading them takes about ${needSec}s (${round2(limit)} ${unit}/s after a 1s settle)`,
+			fix: `cut scene ${s.id}'s on-screen text (on_screen_text and deterministic.props) to at most ${Math.max(floor, Math.floor(readable))} ${unit}, make the voiceover say the same words, or raise duration_sec to at least ${needSec}`
+		});
+	}
+}
+const TENSION = /* @__PURE__ */ new Set([
+	"question",
+	"problem",
+	"contrarian_claim",
+	"story"
+]);
+const PAYOFF = /* @__PURE__ */ new Set([
+	"payoff",
+	"result",
+	"reveal",
+	"loop_back"
+]);
+const CLOSERS = /* @__PURE__ */ new Set(["cta", "end_card"]);
+/** A light story check: tension set up early, and a payoff as the last non-CTA scene. */
+function checkStory(spec, out) {
+	const scenes = spec.scenes;
+	if (scenes.length < 3) return;
+	const total = scenes.reduce((a, s) => a + s.duration_sec, 0);
+	const problems = [];
+	let t = 0;
+	const early = [];
+	scenes.forEach((s, i) => {
+		if (i > 0 && s.purpose !== "hook" && t < .4 * total) early.push(s.purpose);
+		t += s.duration_sec;
+	});
+	if (!early.some((p) => TENSION.has(p))) problems.push(`no scene after the hook in the first ${Math.round(STORY_SETUP_FRACTION * 100)}% sets up tension (purpose question, problem, contrarian_claim or story)`);
+	const last = [...scenes].reverse().find((s) => !CLOSERS.has(s.purpose));
+	if (last && !PAYOFF.has(last.purpose)) problems.push(`the last scene before the CTA (${last.id}) is "${last.purpose}", not a payoff (payoff, result, reveal or loop_back)`);
+	if (!problems.length) return;
+	out.push({
+		id: "story_structure",
+		severity: "warning",
+		message: `weak story arc: ${problems.join("; ")}`,
+		fix: "re-plan with skills/plan/references/storytelling.md: open a loop early (a question or problem the viewer wants answered), escalate, and close it in a payoff scene right before the CTA"
+	});
+}
+/** Caption and beat timing against the render: needs render-state.json (and its captions / voice files). */
+async function checkTiming(root, spec, state, brand, out) {
+	if (!state) return;
+	const spans = sceneSpans(state);
+	const cap = state.captions?.json ? await readOptionalJson(join(root, state.captions.json)) : void 0;
+	if (cap?.lines?.length) {
+		const lines = captionLines(cap);
+		checkCaptionBrief(spec, lines, brand, out);
+		const tracks = state.voice?.tracks_path ? await readOptionalJson(join(root, state.voice.tracks_path)) : void 0;
+		if (state.voice?.timing_source && state.voice.timing_source !== "none" && Array.isArray(tracks) && spans) checkCaptionSync(spec, cap, lines, spokenWords(tracks, spans), out);
+		checkCaptionGap(lines, out);
+	}
+	checkBeatCuts(spec, state, spans, out);
+}
 function formatMarkdown$1(r) {
 	const lines = [
 		`# Lint: ${r.status}`,
@@ -247648,6 +248160,10 @@ async function lintProject(projectDir, opts = {}) {
 	checkCaptions(spec, zones, state?.caption_layout?.box ?? state?.captions?.box ?? manifest?.captions?.box, burnIn, findings);
 	checkContrast(boxes, H, findings);
 	checkDensity(spec, findings);
+	checkOnScreenBrief(spec, state, findings);
+	const brand = await loadBrand$1(paths.root);
+	await checkTiming(paths.root, spec, state, brand, findings);
+	checkStory(spec, findings);
 	checkPostCopy(spec, contracts, findings);
 	checkCover(spec, contracts, state?.cover ? {
 		...state.cover.headline_box ? { headline_box: state.cover.headline_box } : {},
@@ -247662,7 +248178,7 @@ async function lintProject(projectDir, opts = {}) {
 			}
 		}))
 	} : manifest?.cover, findings);
-	checkBanned(spec, await loadBrand$1(paths.root), findings);
+	checkBanned(spec, brand, findings);
 	findings.sort((a, b) => a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1);
 	const errors = findings.filter((f) => f.severity === "error").length;
 	const warnings = findings.length - errors;
@@ -249959,6 +250475,7 @@ async function beatSyncDurations(scenes, adjusted, music, toleranceMs, trackById
 		if (t >= 0 && t <= total) beats.push(t);
 	}
 	beats.sort((a, b) => a - b);
+	summary.beat_times_ms = beats.slice(0, 1e3).map((t) => Math.round(t));
 	const cuts = [];
 	let acc = 0;
 	for (const d of durs.slice(0, -1)) cuts.push(acc += d);

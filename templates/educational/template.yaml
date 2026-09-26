@@ -16,9 +16,9 @@ beats:
     guidance: Pose the question the lesson answers, or show the end result the viewer will be able to produce.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: typography
-  - purpose: context
+  - purpose: problem
     share: 0.12
-    guidance: Say who this is for and what they need to know first, in one or two sentences.
+    guidance: Name the problem the lesson solves and who has it, in one or two sentences; add any prerequisite the viewer needs.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: typography
   - purpose: point

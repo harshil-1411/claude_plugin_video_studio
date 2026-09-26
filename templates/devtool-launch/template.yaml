@@ -21,22 +21,22 @@ beats:
     guidance: Show the before-state developers know, e.g. the boilerplate or error they are tired of.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: code
-  - purpose: demo
-    share: 0.26
-    guidance: Show the tool in use with real code or terminal output from the repo; keep it short enough to read.
-    suggested_visual_strategy: motion_graphic
-    suggested_deterministic_kind: code
-  - purpose: proof
-    share: 0.14
-    guidance: One verifiable fact from the source (benchmark, test count, adoption) cited in claim_refs.
-    suggested_visual_strategy: motion_graphic
-    suggested_deterministic_kind: chart
   - purpose: point
     share: 0.12
     guidance: Explain how it works in one sentence with a simple architecture diagram.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: diagram
     optional: true
+  - purpose: demo
+    share: 0.26
+    guidance: Show the tool in use with real code or terminal output from the repo; keep it short enough to read.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: code
+  - purpose: result
+    share: 0.14
+    guidance: The payoff of the problem scene. One verifiable fact from the source (benchmark, test count, adoption), cited in claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: chart
   - purpose: cta
     share: 0.14
     guidance: Show the install command or docs URL and say it aloud.

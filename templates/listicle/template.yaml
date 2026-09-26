@@ -16,12 +16,11 @@ beats:
     guidance: Promise the list and its payoff ("3 things that ..."). The count in the hook must match the number of items.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: typography
-  - purpose: context
+  - purpose: question
     share: 0.08
-    guidance: One line on why this list matters to this audience now.
+    guidance: Open a loop in one line - the question the list answers, or what this audience gets wrong today.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: typography
-    optional: true
   - purpose: point
     share: 0.18
     guidance: Item 1. Name it, then give one concrete example or reason. Number it on screen.

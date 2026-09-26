@@ -31,12 +31,12 @@ beats:
     guidance: Explain how it works or why it matters, building on the previous scene. One idea only.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: diagram
-  - purpose: proof
+    optional: true
+  - purpose: result
     share: 0.16
-    guidance: Ground the idea with evidence from the source (code, number or quote) and cite it in claim_refs.
+    guidance: Close the loop the hook opened. Show the idea working, with evidence from the source (code, number or quote), and cite it in claim_refs.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: code
-    optional: true
   - purpose: cta
     share: 0.14
     guidance: Give one clear next step that matches the brief's desired_action.

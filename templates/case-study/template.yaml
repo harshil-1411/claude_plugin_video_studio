@@ -31,17 +31,17 @@ beats:
     guidance: The approach - what they changed, as a short timeline or diagram.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: timeline
-  - purpose: result
-    share: 0.18
-    guidance: The measured result as a stat with its baseline in context. The number must cite claim_refs.
-    suggested_visual_strategy: motion_graphic
-    suggested_deterministic_kind: stat
   - purpose: testimonial
     share: 0.18
-    guidance: A real quote from the source with attribution. Never invent or paraphrase inside quote marks.
+    guidance: A real quote from the source about the change with attribution. Never invent or paraphrase inside quote marks.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: quote
     optional: true
+  - purpose: result
+    share: 0.18
+    guidance: The payoff - the measured result as a stat with its baseline in context. The number must cite claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: stat
   - purpose: cta
     share: 0.14
     guidance: One action (read the full case study, talk to us) that matches desired_action.

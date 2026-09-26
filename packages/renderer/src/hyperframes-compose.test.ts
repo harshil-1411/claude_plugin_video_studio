@@ -1,8 +1,8 @@
 import { runInNewContext } from "node:vm";
-import { DETERMINISTIC_PROPS_EXAMPLES, type DeterministicKind, type Scene } from "@video-studio/schema";
+import { DETERMINISTIC_PROPS_EXAMPLES, type DeterministicKind, type MotionPattern, type Scene } from "@video-studio/schema";
 import { layoutZones } from "@video-studio/platforms";
 import { describe, expect, it } from "vitest";
-import { buildComposition, compositionIdFor, fmtNumber, HYPERFRAMES_KINDS, kineticChunks, layerNodes, sanitizeFontChain } from "./hyperframes-compose.js";
+import { buildComposition, cameraMarkup, compositionIdFor, fmtNumber, HYPERFRAMES_KINDS, kineticChunks, layerNodes, sanitizeFontChain } from "./hyperframes-compose.js";
 import { codeLabel, highlightLines, languageFamily, tokenize } from "./hyperframes-highlight.js";
 import { findStylesDir, getStyle } from "./styles.js";
 import { resolveTokens } from "./tokens.js";
@@ -605,5 +605,69 @@ describe("scripts: lang, dir and fonts", () => {
     // As one 19-em "word" it would have to fit a single line (≤ w/19 px); broken per character it wraps larger.
     expect(box.font_px).toBeGreaterThan((box.rect.w / 19) * 1.5);
     expect(box.truncated).toBe(false);
+  });
+});
+
+describe("buildComposition: scene motion", () => {
+  const PATTERNS: MotionPattern[] = ["push_in", "pull_out", "punch", "reveal", "drift", "hold"];
+  const moved = (pattern: MotionPattern, intensity?: "subtle" | "normal" | "strong", over: Partial<SceneRenderRequest> = {}, kind: DeterministicKind = "comparison") => {
+    const r = req(kind, DETERMINISTIC_PROPS_EXAMPLES[kind], over);
+    return buildComposition({ ...r, scene: { ...r.scene, motion: { pattern, ...(intensity ? { intensity } : {}) } } });
+  };
+
+  it("wraps the scene content in one paused, seekable CSS animation per pattern", () => {
+    const html = (p: MotionPattern, i?: "subtle" | "normal" | "strong") => moved(p, i).html;
+    expect(html("push_in")).toContain("@keyframes vs-cam { from { transform: scale(1); } to { transform: scale(1.06); } }");
+    expect(html("push_in", "subtle")).toContain("to { transform: scale(1.03); }");
+    expect(html("push_in", "strong")).toContain("to { transform: scale(1.12); }");
+    expect(html("pull_out")).toContain("@keyframes vs-cam { from { transform: scale(1.06); } to { transform: scale(1); } }");
+    expect(html("punch")).toContain("@keyframes vs-cam { 0% { transform: scale(1); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }");
+    expect(html("punch", "strong")).toContain("50% { transform: scale(1.14); }");
+    expect(html("reveal")).toContain("@keyframes vs-cam { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }");
+    // 3% of 1080 px, split either side of centre, at a 1.04 zoom (strong: 6% at 1.07).
+    expect(html("drift")).toContain("from { transform: translateX(16.2px) scale(1.04); } to { transform: translateX(-16.2px) scale(1.04); }");
+    expect(html("drift", "strong")).toContain("translateX(32.4px) scale(1.07)");
+    // Durations: the whole scene for zooms and drift; the pop and the wipe are short.
+    expect(html("push_in")).toContain('<div class="vs-cam vs-cam-push-in" style="--md:3s">');
+    expect(html("punch")).toContain('<div class="vs-cam vs-cam-punch" style="--md:0.25s">');
+    expect(html("reveal")).toContain('<div class="vs-cam vs-cam-reveal" style="--md:0.4s">');
+    for (const p of ["push_in", "pull_out", "punch", "reveal", "drift"] as const) {
+      const h = html(p);
+      expect(h).toMatch(/\.vs-cam \{ position: absolute; left: 0; top: 0; width: 100%; height: 100%; transform-origin: 50% 50%; animation: vs-cam var\(--md\) [^;]+ 0s 1 both paused; \}/);
+      // The wrapper sits inside the clip, around the safe area.
+      expect(h).toMatch(/data-track-index="0">\n<div class="vs-cam [^"]*" style="--md:[\d.]+s">\n<div class="vs-safe">/);
+    }
+  });
+
+  it("eases with the style's easing (ease-in-out without one; spring never overshoots)", () => {
+    const style = (easing: "linear" | "spring" | "snap") => ({ tokens: { ...TOKENS, motion: { personality: "calm", easing, enter_ms: 300, exit_ms: 0, stagger_ms: 80, transition: "cut", transition_ms: 0 } as const } });
+    expect(moved("push_in").html).toContain("animation: vs-cam var(--md) cubic-bezier(0.65, 0, 0.35, 1) 0s");
+    expect(moved("push_in", undefined, style("linear")).html).toContain("animation: vs-cam var(--md) linear 0s");
+    expect(moved("push_in", undefined, style("spring")).html).toContain("animation: vs-cam var(--md) cubic-bezier(0.22, 1, 0.36, 1) 0s");
+    expect(moved("reveal", undefined, style("snap")).html).toContain("animation: vs-cam var(--md) cubic-bezier(0.2, 0.9, 0.1, 1) 0s");
+  });
+
+  it("hold adds no wrapper and stops the renderer's own image zoom", () => {
+    const h = moved("hold", undefined, {}, "screenshot").html;
+    expect(h).not.toContain("vs-cam");
+    expect(h).toContain("/* scene motion: hold */\n.vs-zoom { animation-name: none; }");
+    expect(cameraMarkup(undefined, 3, 1080)).toBeNull();
+  });
+
+  it("keeps the unmoved text boxes (lint checks the rest pose)", () => {
+    const base = buildComposition(req("comparison", DETERMINISTIC_PROPS_EXAMPLES.comparison)).text_boxes;
+    for (const p of PATTERNS) expect(moved(p).text_boxes).toEqual(base);
+  });
+
+  it("passes the HyperFrames linter with zero errors for every pattern", async () => {
+    const lint = await loadLint();
+    if (!lint) return;
+    for (const p of PATTERNS) {
+      for (const kind of ["comparison", "screenshot", "kinetic_text"] as const) {
+        const r = await lint.lintHyperframeHtml(moved(p, "strong", {}, kind).html);
+        const errors = r.findings.filter((f) => f.severity === "error");
+        expect(errors, `${p}/${kind}: ${JSON.stringify(errors)}`).toEqual([]);
+      }
+    }
   });
 });

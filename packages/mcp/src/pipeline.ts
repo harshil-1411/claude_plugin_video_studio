@@ -280,7 +280,7 @@ interface RenderState {
   /** Sound effects mixed in, with their rights. */
   sfx?: Array<{ file: string; sha256: string; scenes: string[]; license?: AudioLicense }>;
   /** Beats detected in the music bed when beat_sync is on. */
-  beat_sync?: { bpm: number | null; beats: number; moved_cuts: number };
+  beat_sync?: { bpm: number | null; beats: number; moved_cuts: number; /** Beat times on the video timeline (ms, first 1000), for lint's cut_off_beat. */ beat_times_ms?: number[] };
   /** The music bed mixed in, with its rights. */
   music?: { ref: string; sha256: string; title?: string; license?: AudioLicense };
   /** Brand file the render read, project-relative (`external/<name>` when outside the project). */
@@ -1278,7 +1278,7 @@ async function beatSyncDurations(
   const durs = scenes.map((s) => Math.round((adjusted.get(s.id) ?? s.duration_sec) * 1000));
   const total = durs.reduce((a, b) => a + b, 0);
   const analysis = await detectBeats(music.path, signal ? { signal } : {});
-  const summary = { bpm: analysis.bpm, beats: analysis.beats_ms.length, moved_cuts: 0 };
+  const summary: NonNullable<RenderState["beat_sync"]> = { bpm: analysis.bpm, beats: analysis.beats_ms.length, moved_cuts: 0 };
   if (!analysis.beats_ms.length) return { adjustments: [], summary, warning: `beat_sync: no clear beat found in ${music.ref}; cuts unchanged` };
   const fileMs = Math.round((await ffprobe(music.path)).duration_s * 1000);
   const startMs = Math.round((music.bed.start_sec ?? 0) * 1000);
@@ -1291,6 +1291,7 @@ async function beatSyncDurations(
     }
   }
   beats.sort((a, b) => a - b);
+  summary.beat_times_ms = beats.slice(0, 1000).map((t) => Math.round(t));
   const cuts: number[] = [];
   let acc = 0;
   for (const d of durs.slice(0, -1)) cuts.push((acc += d));

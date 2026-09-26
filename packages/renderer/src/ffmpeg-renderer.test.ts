@@ -4,10 +4,29 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sha256Hex } from "@video-studio/core";
 import { ffprobe, runFfmpeg, runProcess, getTools } from "@video-studio/media";
-import type { DeterministicKind, Scene } from "@video-studio/schema";
+import type { DeterministicKind, MotionPattern, Scene } from "@video-studio/schema";
 import { DETERMINISTIC_PROPS_EXAMPLES } from "@video-studio/schema";
 import { layoutZones } from "@video-studio/platforms";
-import { type AssFont, type AssTextFonts, assFontRuns, buildFilterGraph, composeScene, createFfmpegRenderer, easingExpr, ffColor, frameCount, kineticChunks, motionTiming, textRoute } from "./ffmpeg-renderer.js";
+import {
+  type AssFont,
+  type AssTextFonts,
+  FFMPEG_RENDERER_VERSION,
+  assFontRuns,
+  buildFilterGraph,
+  cameraEaseExpr,
+  composeScene,
+  createFfmpegRenderer,
+  easingExpr,
+  ffColor,
+  frameCount,
+  kineticChunks,
+  motionTiming,
+  revealChains,
+  sceneMotionChains,
+  sceneMotionParams,
+  textRoute,
+  zoomPanExprs,
+} from "./ffmpeg-renderer.js";
 import { findStylesDir, getStyle } from "./styles.js";
 import { applyTextCase } from "./text-layout.js";
 import { createFontResolver, resolveTokens, targetForAspect } from "./tokens.js";
@@ -504,4 +523,124 @@ describe("scripts (CJK, Devanagari, Arabic)", () => {
     const buf = await readFile(raw);
     expect(buf.filter((v) => v > 128).length).toBeGreaterThan(2000);
   }, T);
+});
+
+describe("scene motion", () => {
+  const FONTS = { heading: "/f/h.ttf", body: "/f/b.ttf", mono: "/f/m.ttf" };
+  const PATTERNS: MotionPattern[] = ["push_in", "pull_out", "punch", "reveal", "drift", "hold"];
+
+  it("resolves amounts per pattern and intensity", () => {
+    expect(FFMPEG_RENDERER_VERSION).toBe("0.4.1");
+    const amt = (pattern: MotionPattern, intensity?: "subtle" | "normal" | "strong") => sceneMotionParams({ pattern, ...(intensity ? { intensity } : {}) }, 4);
+    expect([amt("push_in", "subtle").amount, amt("push_in").amount, amt("push_in", "strong").amount]).toEqual([0.03, 0.06, 0.12]);
+    expect(amt("pull_out", "strong").amount).toBe(0.12);
+    expect([amt("punch", "subtle").amount, amt("punch").amount, amt("punch", "strong").amount]).toEqual([0.04, 0.08, 0.14]);
+    expect([amt("drift", "subtle").pan, amt("drift").pan, amt("drift", "strong").pan]).toEqual([0.015, 0.03, 0.06]);
+    // Drift's constant zoom always leaves room for the pan (pan <= zoom - 1).
+    expect([amt("drift", "subtle").zoom, amt("drift").zoom, amt("drift", "strong").zoom]).toEqual([1.04, 1.04, 1.07]);
+    for (const i of ["subtle", "normal", "strong"] as const) expect(amt("drift", i).pan).toBeLessThanOrEqual(amt("drift", i).zoom - 1);
+    expect(amt("punch").sec).toBe(0.25);
+    expect(amt("reveal").sec).toBe(0.4);
+    // Short scenes cap the pop and the wipe at half the scene.
+    expect(sceneMotionParams({ pattern: "reveal" }, 0.5).sec).toBe(0.25);
+  });
+
+  it("uses the style's easing for the camera curve (ease-in-out without one, no overshoot)", () => {
+    expect(cameraEaseExpr(undefined, "p")).toBe("(p*p*(3-2*p))");
+    expect(cameraEaseExpr("ease_in_out", "p")).toBe("(p*p*(3-2*p))");
+    expect(cameraEaseExpr("linear", "p")).toBe("p");
+    expect(cameraEaseExpr("ease_out", "p")).toBe("(1-pow(1-p,3))");
+    expect(cameraEaseExpr("spring", "p")).toBe(cameraEaseExpr("ease_out", "p"));
+    expect(cameraEaseExpr("snap", "p")).toBe("(1-pow(1-p,4))");
+  });
+
+  it("builds zoompan expressions per pattern and intensity", () => {
+    const e = cameraEaseExpr(undefined, "min(1,on/29)");
+    expect(zoomPanExprs({ pattern: "push_in" }, 30, 15)).toEqual({ z: `1+0.06*${e}`, x: "iw/2-iw/zoom/2", y: "ih/2-ih/zoom/2" });
+    expect(zoomPanExprs({ pattern: "push_in", intensity: "strong" }, 30, 15).z).toBe(`1+0.12*${e}`);
+    expect(zoomPanExprs({ pattern: "pull_out", intensity: "subtle" }, 30, 15).z).toBe(`1+0.03*(1-${e})`);
+    // 250 ms at 15 fps: 4 frames up and back.
+    expect(zoomPanExprs({ pattern: "punch" }, 30, 15).z).toBe("1+0.08*sin(PI*min(1,on/4))");
+    expect(zoomPanExprs({ pattern: "punch", intensity: "strong" }, 30, 30).z).toBe("1+0.14*sin(PI*min(1,on/8))");
+    expect(zoomPanExprs({ pattern: "drift" }, 30, 15)).toEqual({ z: "1.04", x: `iw/2-iw/zoom/2+iw/zoom*0.03*(${e}-0.5)`, y: "ih/2-ih/zoom/2" });
+    expect(zoomPanExprs({ pattern: "hold" }, 30, 15).z).toBe("1");
+    expect(zoomPanExprs({ pattern: "reveal" }, 30, 15).z).toBe("1");
+    // The style's easing reaches the curve.
+    expect(zoomPanExprs({ pattern: "push_in" }, 30, 15, "linear").z).toBe("1+0.06*min(1,on/29)");
+    // Expressions are single-quoted in the graph: no colons or quotes inside.
+    for (const p of PATTERNS) for (const v of Object.values(zoomPanExprs({ pattern: p }, 30, 15))) expect(v).not.toMatch(/[:']/);
+  });
+
+  it("chains zooms on a 2x upscale at the exact size and fps; reveal slides a background plate off; hold adds nothing", () => {
+    const zoom = sceneMotionChains({ pattern: "push_in" }, target, 15, "#112233", undefined, "[a]", "[b]");
+    expect(zoom).toEqual([`[a]scale=360:640:flags=bicubic,zoompan=z='${zoomPanExprs({ pattern: "push_in" }, 15, 15).z}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=180x320:fps=15,setsar=1[b]`]);
+    const rv = sceneMotionChains({ pattern: "reveal" }, target, 15, "#112233", "linear", "[a]", "[b]");
+    expect(rv).toEqual(revealChains(target, 1, 0.4, "#112233", "linear", "[a]", "[b]"));
+    expect(rv[0]).toBe("color=c=0x112233:s=180x320:r=15:d=2.000[rvbg]");
+    expect(rv[1]).toBe("[a][rvbg]overlay=x='W*min(1,t/0.4)':y=0:enable='lt(t,0.4)':eof_action=pass[b]");
+    expect(sceneMotionChains({ pattern: "hold" }, target, 15, "#112233", undefined, "[a]", "[b]")).toEqual([]);
+    // Punch zooms only during the pop; afterwards the untouched frame passes through.
+    const punch = sceneMotionChains({ pattern: "punch" }, target, 15, "#112233", undefined, "[a]", "[b]");
+    expect(punch[0]).toBe("[a]split=2[pca][pcb]");
+    expect(punch[1]).toMatch(/^\[pcb\]scale=360:640:flags=bicubic,zoompan=z='1\+0\.08\*sin\(PI\*min\(1,on\/4\)\)'/);
+    expect(punch[2]).toBe("[pca][pcz]overlay=x=0:y=0:enable='lt(t,0.25)'[b]");
+  });
+
+  it("applies the motion after the drawing and before the exit fade; without it (or with hold) the graph is unchanged", () => {
+    const comp = composeScene(scene("typography", PROPS.typography[0]!), target, tokens);
+    const base = buildFilterGraph(comp, target, 1, FONTS, "/tmp/x").filtergraph;
+    expect(buildFilterGraph(comp, target, 1, FONTS, "/tmp/x", { camera: { pattern: "hold" } }).filtergraph).toBe(base);
+    const moved = buildFilterGraph(comp, target, 1, FONTS, "/tmp/x", { camera: { pattern: "push_in" }, background: "#112233" }).filtergraph;
+    expect(moved).toMatch(/drawtext[^;]*\[b\d+\];\[b\d+\]scale=360:640:flags=bicubic,zoompan=[^;]*\[cam\];\[cam\]format=yuv420p\[vout\]$/);
+    const motion = { personality: "calm", easing: "snap", enter_ms: 300, exit_ms: 200, stagger_ms: 80, transition: "cut", transition_ms: 0 } as const;
+    const styled = buildFilterGraph(comp, target, 1, FONTS, "/tmp/x", { motion, camera: { pattern: "reveal" }, background: "#112233" }).filtergraph;
+    expect(styled).toContain("color=c=0x112233:s=180x320:r=15");
+    expect(styled).toContain(`overlay=x='W*${cameraEaseExpr("snap", "min(1,t/0.4)")}'`);
+    expect(styled).toMatch(/\[cam\]fade=t=out[^;]*,format=yuv420p\[vout\]$/);
+  });
+
+  describe("renders", () => {
+    const mot = (pattern: MotionPattern) => ({ ...scene("comparison", PROPS.comparison[0]!), motion: { pattern } });
+    const rgbFrames = async (path: string, w = target.width, h = target.height): Promise<Buffer[]> => {
+      const raw = join(dir, `frames-${Math.random().toString(36).slice(2)}.rgb`);
+      await runFfmpeg(["-y", "-i", path, "-f", "rawvideo", "-pix_fmt", "rgb24", raw]);
+      const buf = await readFile(raw);
+      const n = w * h * 3;
+      return Array.from({ length: buf.length / n }, (_, i) => buf.subarray(i * n, (i + 1) * n));
+    };
+    const meanDiff = (a: Buffer, b: Buffer) => {
+      let d = 0;
+      for (let i = 0; i < a.length; i++) d += Math.abs(a[i]! - b[i]!);
+      return d / a.length;
+    };
+    let baseline: Buffer[];
+
+    it("hold renders byte-identical to no motion", async () => {
+      const a = join(dir, "mo-none.mp4");
+      const b = join(dir, "mo-hold.mp4");
+      await renderer.render({ scene: scene("comparison", PROPS.comparison[0]!), target, tokens, out_path: a, project_dir: dir });
+      await renderer.render({ scene: mot("hold"), target, tokens, out_path: b, project_dir: dir });
+      expect(sha256Hex(await readFile(a))).toBe(sha256Hex(await readFile(b)));
+      baseline = await rgbFrames(a);
+      expect(baseline).toHaveLength(15);
+    }, T);
+
+    it.each(["push_in", "pull_out", "punch", "reveal", "drift"] as const)("%s → exact size and frames, and the frame moves", async (pattern) => {
+      const out = join(dir, `mo-${pattern}.mp4`);
+      const res = await renderer.render({ scene: mot(pattern), target, tokens, out_path: out, project_dir: dir });
+      // Text boxes are the rest pose, identical to the unmoved layout.
+      expect(res.text_boxes).toEqual(composeScene(scene("comparison", PROPS.comparison[0]!), target, tokens).text_boxes);
+      const p = await ffprobe(out);
+      expect([p.width, p.height, p.fps]).toEqual([180, 320, 15]);
+      const frames = await rgbFrames(out);
+      expect(frames).toHaveLength(15);
+      const diffs = frames.map((f, i) => meanDiff(f, baseline[i]!));
+      expect(Math.max(...diffs), pattern).toBeGreaterThan(0.5);
+      if (pattern === "punch") expect(diffs[14]!).toBeLessThan(0.5); // back to rest after 250 ms
+      if (pattern === "reveal") expect(diffs.slice(7).every((d) => d < 0.5)).toBe(true); // holds after 400 ms
+      if (process.env.VS_TEST_FRAMES_DIR && (pattern === "push_in" || pattern === "reveal")) {
+        await runFfmpeg(["-y", "-i", out, "-vf", "select=not(mod(n\\,3)),tile=5x1", "-frames:v", "1", join(process.env.VS_TEST_FRAMES_DIR, `motion-${pattern}.png`)]);
+      }
+    }, T);
+  });
 });

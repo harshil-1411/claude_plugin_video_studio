@@ -17,9 +17,9 @@ beats:
     share: 0.2
     guidance: The most satisfying motion starts on the first frame - no build-up, no text.
     suggested_visual_strategy: user_asset
-  - purpose: demo
+  - purpose: question
     share: 0.25
-    guidance: A second close-up of the same process from another angle.
+    guidance: The build-up - a second close-up of the process from another angle, still unfinished, so the viewer waits for it to land (the open loop).
     suggested_visual_strategy: user_asset
   - purpose: reveal
     share: 0.2

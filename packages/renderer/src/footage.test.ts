@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ffprobe, frameSsim, runFfmpeg } from "@video-studio/media";
-import type { FootageClip, MediaInfo, Scene } from "@video-studio/schema";
-import { FOOTAGE_RENDERER_ID, createFootageRenderer, planFootage, redactChains } from "./footage.js";
+import type { FootageClip, MediaInfo, MotionPattern, Scene } from "@video-studio/schema";
+import { FOOTAGE_RENDERER_ID, FOOTAGE_RENDERER_VERSION, createFootageRenderer, planFootage, redactChains } from "./footage.js";
+import { revealChains, sceneMotionChains, zoomPanExprs, zoomPanFilter } from "./ffmpeg-renderer.js";
 import { renderScenes, sceneCacheKey } from "./select.js";
 import { resolveTokens, targetForAspect } from "./tokens.js";
 import type { RenderTarget } from "./types.js";
@@ -269,6 +270,132 @@ describe("renderScenes with footage", () => {
       expect(b.scenes[0]).toMatchObject({ status: "cached", from_cache: true });
       const c = await renderScenes({ scenes: [s1] }, opts("bbb"));
       expect(c.scenes[0]!.status).toBe("rendered");
+    },
+    T,
+  );
+});
+
+describe("scene motion on footage", () => {
+  const PATTERNS: MotionPattern[] = ["push_in", "pull_out", "punch", "reveal", "drift", "hold"];
+  const stillMedia: MediaInfo = { duration_sec: 0, width: 320, height: 240, has_video: true, has_audio: false };
+  const gridMedia: MediaInfo = { duration_sec: 2, width: 320, height: 240, fps: 15, has_video: true, has_audio: false };
+  let grid: string;
+  let gridStill: string;
+  const W = target.width;
+  const H = target.height;
+
+  beforeAll(async () => {
+    // A static full-bleed picture (green with yellow lines): any motion changes frames, and any
+    // exposed edge would show black or the background colour instead of green/yellow.
+    const src = "color=c=0x00C000:s=320x240:r=15:d=2,drawgrid=w=32:h=32:t=3:c=0xFFFF00";
+    grid = join(tmp, "grid.mp4");
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", src, "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", grid]);
+    gridStill = join(tmp, "grid.png");
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", src, "-frames:v", "1", gridStill]);
+  });
+
+  const rgbFrames = async (path: string): Promise<Buffer[]> => {
+    const raw = join(tmp, `f-${Math.random().toString(36).slice(2)}.rgb`);
+    await runFfmpeg(["-y", "-i", path, "-f", "rawvideo", "-pix_fmt", "rgb24", raw]);
+    const buf = await readFile(raw);
+    const n = W * H * 3;
+    return Array.from({ length: buf.length / n }, (_, i) => buf.subarray(i * n, (i + 1) * n));
+  };
+  const meanDiff = (a: Buffer, b: Buffer) => {
+    let d = 0;
+    for (let i = 0; i < a.length; i++) d += Math.abs(a[i]! - b[i]!);
+    return d / a.length;
+  };
+  /** Every corner pixel is picture (green or yellow), not black and not the background. */
+  const cornersArePicture = (f: Buffer) =>
+    [
+      [0, 0],
+      [W - 1, 0],
+      [0, H - 1],
+      [W - 1, H - 1],
+    ].every(([x, y]) => {
+      const i = (y! * W + x!) * 3;
+      return f[i + 1]! > 120 && f[i + 2]! < 100;
+    });
+
+  it("folds the motion into the plan after the fit; without it the plan is unchanged", () => {
+    expect(FOOTAGE_RENDERER_VERSION).toBe("0.2.1");
+    const clip: FootageClip = { asset: "v", in_sec: 0 };
+    const base = planFootage(clip, rampMedia, ramp, target, 1, "#112233");
+    expect(planFootage(clip, rampMedia, ramp, target, 1, "#112233", {})).toEqual(base);
+    expect(base.chains.at(-1)).toBe("[fit]format=yuv420p,trim=end_frame=15,setpts=PTS-STARTPTS[fg]");
+    // hold on video: nothing to add.
+    expect(planFootage(clip, rampMedia, ramp, target, 1, "#112233", { motion: { pattern: "hold" } })).toEqual(base);
+    for (const pattern of ["push_in", "pull_out", "punch", "reveal", "drift"] as const) {
+      const p = planFootage(clip, rampMedia, ramp, target, 1, "#112233", { motion: { pattern, intensity: "strong" }, easing: "snap" });
+      const move = sceneMotionChains({ pattern, intensity: "strong" }, target, 15, "#112233", "snap", "[mv]", "[fg]");
+      expect(p.chains).toEqual([...base.chains.slice(0, -1), "[fit]format=yuv420p,trim=end_frame=15,setpts=PTS-STARTPTS[mv]", ...move]);
+    }
+  });
+
+  it("replaces the still's Ken Burns with the pattern; hold keeps the still still", () => {
+    const clip: FootageClip = { asset: "img", in_sec: 0 };
+    const kb = planFootage(clip, stillMedia, gridStill, target, 1, "#112233");
+    expect(kb.chains.at(-1)).toContain("zoompan=z='1+0.08*on/14'");
+    const plan = (pattern: MotionPattern) => planFootage(clip, stillMedia, gridStill, target, 1, "#112233", { motion: { pattern } });
+    expect(plan("hold").chains.at(-1)).toContain(zoomPanFilter(zoomPanExprs({ pattern: "hold" }, 15, 15), target, 15));
+    expect(plan("hold").chains.at(-1)).toContain("zoompan=z='1':");
+    expect(plan("push_in").chains.at(-1)).toContain(zoomPanFilter(zoomPanExprs({ pattern: "push_in" }, 15, 15), target, 15));
+    expect(plan("drift").chains.at(-1)).toMatch(/zoompan=z='1\.04':x='iw\/2-iw\/zoom\/2\+iw\/zoom\*0\.03\*/);
+    const rv = plan("reveal").chains;
+    expect(rv.at(-3)).toMatch(/zoompan=z='1':.*\[mv\]$/);
+    expect(rv.slice(-2)).toEqual(revealChains(target, 1, 0.4, "#112233", undefined, "[mv]", "[fg]"));
+    for (const p of PATTERNS) expect(plan(p).chains.at(-1)).not.toContain("0.08*on");
+  });
+
+  // hold first: its frames are the unmoved reference for punch's rest pose.
+  let holdFrames: Buffer[] = [];
+  it.each(["hold", "push_in", "pull_out", "punch", "reveal", "drift"] as const)(
+    "%s on video: exact size and frames, edges never exposed, moves unless hold",
+    async (pattern) => {
+      const { probe, out, res } = await render(`mo-${pattern}`, scene({ asset: "v", in_sec: 0 }, 1, { motion: { pattern } }), grid, gridMedia);
+      expect(res.renderer_version).toBe(FOOTAGE_RENDERER_VERSION);
+      expect([probe.width, probe.height, probe.fps]).toEqual([W, H, 15]);
+      const f = await rgbFrames(out);
+      expect(f).toHaveLength(15);
+      if (pattern === "reveal") {
+        expect(cornersArePicture(f[0]!)).toBe(false); // starts on the background
+        expect(f.slice(7).every(cornersArePicture)).toBe(true); // wiped in by 400 ms
+        expect(meanDiff(f[0]!, f[14]!)).toBeGreaterThan(20);
+        return;
+      }
+      expect(f.every(cornersArePicture), "an edge showed").toBe(true);
+      // Thresholds sit above the x264 noise of re-encoding a static source (~0.6).
+      if (pattern === "hold") {
+        expect(Math.max(...f.map((x) => meanDiff(x, f[0]!)))).toBeLessThan(1);
+        holdFrames = f;
+      } else if (pattern === "punch") {
+        expect(meanDiff(f[2]!, f[0]!)).toBeGreaterThan(2);
+        expect(meanDiff(f[14]!, holdFrames[14]!)).toBeLessThan(1); // back to the untouched frame
+      } else expect(meanDiff(f[14]!, f[0]!)).toBeGreaterThan(2);
+    },
+    T,
+  );
+
+  it.each(["hold", "push_in", "reveal"] as const)(
+    "%s on a still",
+    async (pattern) => {
+      const { probe, out } = await render(`still-${pattern}`, scene({ asset: "img", in_sec: 0 }, 1, { motion: { pattern } }), gridStill, stillMedia);
+      expect([probe.width, probe.height]).toEqual([W, H]);
+      const f = await rgbFrames(out);
+      expect(f).toHaveLength(15);
+      if (pattern === "hold") expect(Math.max(...f.map((x) => meanDiff(x, f[0]!)))).toBeLessThan(1);
+      if (pattern === "push_in") {
+        expect(f.every(cornersArePicture)).toBe(true);
+        expect(meanDiff(f[14]!, f[0]!)).toBeGreaterThan(2);
+      }
+      if (pattern === "reveal") {
+        expect(cornersArePicture(f[0]!)).toBe(false);
+        expect(cornersArePicture(f[14]!)).toBe(true);
+      }
+      if (process.env.VS_TEST_FRAMES_DIR && pattern !== "hold") {
+        await runFfmpeg(["-y", "-i", out, "-vf", "select=not(mod(n\\,3)),tile=5x1", "-frames:v", "1", join(process.env.VS_TEST_FRAMES_DIR, `footage-still-${pattern}.png`)]);
+      }
     },
     T,
   );

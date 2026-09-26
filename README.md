@@ -124,7 +124,7 @@ flowchart LR
 | **Audio** | 4 bundled CC0 music beds (ducked under speech), beat-synced cuts, native clip sound, crossfades, sound effects, −14 LUFS with true-peak headroom |
 | **Footage** | Crop, contain or blurred-pad fits, trim and speed, text overlays, automatic removal of baked-in letterbox bars, and `redact` regions to blur inboxes, names or dashboards in screen recordings |
 | **Captions** | 3–7 word phrases on plates, placed clear of each platform's UI, with keyword emphasis and sound-event cues like `[music]` |
-| **Looks** | Style packs (minimal, editorial, technical, energetic) and brand kits (colours, fonts, weights, motion, banned phrases); scene transitions (crossfade, fade to black, slide, zoom, whip) that keep narration in sync |
+| **Looks** | Style packs (minimal, editorial, technical, energetic) and brand kits (colours, fonts, weights, motion, banned phrases); scene transitions (crossfade, fade to black, slide, zoom, whip) that keep narration in sync; per-scene camera moves (push in, pull out, punch, reveal, drift, hold) |
 | **Languages** | `localize` translation sheets; bundled Noto fonts for Japanese, Devanagari and Arabic; CJK line breaking; right-to-left text |
 | **Trust** | `verify` claim coverage, `video.lock`, golden-frame `test`, `diff`, provenance, optional C2PA content credentials (`export sign`) |
 
@@ -144,7 +144,7 @@ flowchart LR
 | `/video-studio:create` | The whole flow, from a source or an idea to packages, with an approval step |
 | `/video-studio:plan` · `validate` | Brief, grounded spec and storyboard; explains every validation issue |
 | `/video-studio:render` · `qa` · `export` | Local render (preview, then final), technical QA, per-platform packages (`sign` for C2PA) |
-| `/video-studio:lint` · `verify` | Platform contract checks with a fix loop; claim coverage against the sources |
+| `/video-studio:lint` · `verify` | Platform contract checks with a fix loop (UI zones, caption readability and sync, cuts on the beat, story arc); claim coverage against the sources |
 | `/video-studio:test` · `diff` | Golden-frame regression tests; spec, lock and frame diffs between renders |
 | `/video-studio:variants` · `adapt` | Hook × cover A/B sets with an experiment manifest; new aspect, length or platform |
 | `/video-studio:localize` | Language versions from a translation sheet, re-timed for the language |

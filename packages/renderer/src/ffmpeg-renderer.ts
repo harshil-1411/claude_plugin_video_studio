@@ -16,7 +16,7 @@ import {
   runFfmpeg,
   runProcess,
 } from "@video-studio/media";
-import type { DeterministicKind, Scene, TextBox, TextRole } from "@video-studio/schema";
+import type { DeterministicKind, Scene, SceneMotion, TextBox, TextRole } from "@video-studio/schema";
 import {
   CHAR_EM_UPPER,
   type FitOptions,
@@ -55,8 +55,11 @@ import { exitFadeMs } from "./tokens.js";
  */
 
 export const FFMPEG_RENDERER_ID = "ffmpeg-drawtext";
-/** 0.4.0: script fonts for CJK lines; Devanagari/Arabic/Hebrew lines drawn through libass (shaping + bidi). */
-export const FFMPEG_RENDERER_VERSION = "0.4.0";
+/**
+ * 0.4.0: script fonts for CJK lines; Devanagari/Arabic/Hebrew lines drawn through libass (shaping + bidi).
+ * 0.4.1: `scene.motion` (push_in, pull_out, punch, reveal, drift, hold) moves the whole frame.
+ */
+export const FFMPEG_RENDERER_VERSION = "0.4.1";
 
 export const FFMPEG_RENDERER_KINDS = [
   "typography",
@@ -1367,6 +1370,141 @@ function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
 
+// ------------------------------------------------------------------------------- scene motion
+
+type Intensity = NonNullable<SceneMotion["intensity"]>;
+
+/**
+ * How far each scene motion pattern goes, per intensity: the zoom added for push_in / pull_out,
+ * the peak of the punch pop, and the drift pan as a fraction of the frame width. Shared by the
+ * FFmpeg, footage and HyperFrames renderers so every renderer moves the frame the same way.
+ */
+export const SCENE_MOTION_AMOUNT: Readonly<Record<"push_in" | "pull_out" | "punch" | "drift", Readonly<Record<Intensity, number>>>> = Object.freeze({
+  push_in: { subtle: 0.03, normal: 0.06, strong: 0.12 },
+  pull_out: { subtle: 0.03, normal: 0.06, strong: 0.12 },
+  punch: { subtle: 0.04, normal: 0.08, strong: 0.14 },
+  drift: { subtle: 0.015, normal: 0.03, strong: 0.06 },
+});
+/** Length of the punch pop (capped at half the scene). */
+export const PUNCH_SEC = 0.25;
+/** Length of the reveal wipe (capped at half the scene). */
+export const REVEAL_SEC = 0.4;
+/** Drift's constant zoom (at least pan + 1% of slack, so the pan never shows an edge). */
+export const DRIFT_MIN_ZOOM = 1.04;
+
+/** Resolved numbers of a scene motion (pure; exported for the other renderers and tests). */
+export interface SceneMotionParams {
+  pattern: SceneMotion["pattern"];
+  /** push_in / pull_out: zoom added over the scene; punch: peak zoom added. */
+  amount: number;
+  /** drift: constant zoom. */
+  zoom: number;
+  /** drift: total pan as a fraction of the frame width. */
+  pan: number;
+  /** punch / reveal: seconds of the move (then the frame holds). */
+  sec: number;
+}
+
+export function sceneMotionParams(motion: SceneMotion, durationS: number): SceneMotionParams {
+  const i: Intensity = motion.intensity ?? "normal";
+  const p = motion.pattern;
+  const amount = p === "push_in" || p === "pull_out" || p === "punch" ? SCENE_MOTION_AMOUNT[p][i] : 0;
+  const pan = p === "drift" ? SCENE_MOTION_AMOUNT.drift[i] : 0;
+  const zoom = p === "drift" ? round3(Math.max(DRIFT_MIN_ZOOM, 1 + pan + 0.01)) : 1;
+  const sec = p === "punch" ? Math.min(PUNCH_SEC, durationS / 2) : p === "reveal" ? Math.min(REVEAL_SEC, durationS / 2) : 0;
+  return { pattern: p, amount, zoom, pan, sec: round3(sec) };
+}
+
+/**
+ * Camera curves as FFmpeg expressions of the progress `p` (0..1). Camera moves never overshoot
+ * (a spring would expose an edge on pull_out), so spring uses the ease-out curve. Undefined
+ * easing (no style motion tokens): ease-in-out. These match the CSS curves of the HyperFrames
+ * renderer closely, not exactly.
+ */
+export function cameraEaseExpr(easing: MotionTokens["easing"] | undefined, p: string): string {
+  switch (easing) {
+    case "linear":
+      return p;
+    case "ease_out":
+    case "spring":
+      return `(1-pow(1-${p},3))`;
+    case "snap":
+      return `(1-pow(1-${p},4))`;
+    default:
+      return `(${p}*${p}*(3-2*${p}))`;
+  }
+}
+
+/** zoompan expressions (`on` = output frame index) for a zooming or panning pattern. */
+export interface ZoomPanExprs {
+  z: string;
+  x: string;
+  y: string;
+}
+
+const CENTRE_X = "iw/2-iw/zoom/2";
+const CENTRE_Y = "ih/2-ih/zoom/2";
+
+/**
+ * zoompan expressions for a scene of `frames` frames: push_in, pull_out, punch and drift; `hold`
+ * and `reveal` do not zoom (z = 1). Zoom never drops below 1, so no edge is ever exposed.
+ * Expressions contain commas but never colons, so they are safe inside single quotes.
+ */
+export function zoomPanExprs(motion: SceneMotion, frames: number, fps: number, easing?: MotionTokens["easing"]): ZoomPanExprs {
+  const m = sceneMotionParams(motion, frames / fps);
+  const last = Math.max(1, frames - 1);
+  const e = cameraEaseExpr(easing, `min(1,on/${last})`);
+  switch (m.pattern) {
+    case "push_in":
+      return { z: `1+${m.amount}*${e}`, x: CENTRE_X, y: CENTRE_Y };
+    case "pull_out":
+      return { z: `1+${m.amount}*(1-${e})`, x: CENTRE_X, y: CENTRE_Y };
+    case "punch": {
+      const pf = Math.max(1, Math.round(m.sec * fps));
+      return { z: `1+${m.amount}*sin(PI*min(1,on/${pf}))`, x: CENTRE_X, y: CENTRE_Y };
+    }
+    case "drift":
+      // The view slides right across the zoomed frame (the picture moves left) by pan × width.
+      return { z: String(m.zoom), x: `${CENTRE_X}+iw/zoom*${m.pan}*(${e}-0.5)`, y: CENTRE_Y };
+    default:
+      return { z: "1", x: CENTRE_X, y: CENTRE_Y };
+  }
+}
+
+/** `zoompan` for the given expressions; `d` frames per input frame (1 for video, all for a still). */
+export function zoomPanFilter(ex: ZoomPanExprs, target: RenderTarget, d: number): string {
+  return `zoompan=z='${ex.z}':x='${ex.x}':y='${ex.y}':d=${d}:s=${target.width}x${target.height}:fps=${target.fps}`;
+}
+
+/**
+ * Chains wiping `inLabel` in from the left over `sec` (a background-coloured plate slides off
+ * to the right, uncovering the picture), then holding; timestamps must start at 0.
+ */
+export function revealChains(target: RenderTarget, durationS: number, sec: number, background: string, easing: MotionTokens["easing"] | undefined, inLabel: string, outLabel: string, tag = "rv"): string[] {
+  const e = cameraEaseExpr(easing, `min(1,t/${sec})`);
+  return [
+    `color=c=${ffColor(background)}:s=${target.width}x${target.height}:r=${target.fps}:d=${(durationS + 1).toFixed(3)}[${tag}bg]`,
+    `${inLabel}[${tag}bg]overlay=x='W*${e}':y=0:enable='lt(t,${sec})':eof_action=pass${outLabel}`,
+  ];
+}
+
+/**
+ * Chains applying `motion` to a whole composed frame stream (one frame in, one out, at the
+ * target size and fps; timestamps from 0), from `inLabel` to `outLabel`. Zooms and pans run
+ * zoompan on a 2x upscale, so steps stay at half an output pixel. Empty for `hold`.
+ */
+export function sceneMotionChains(motion: SceneMotion, target: RenderTarget, frames: number, background: string, easing: MotionTokens["easing"] | undefined, inLabel: string, outLabel: string): string[] {
+  const D = frames / target.fps;
+  if (motion.pattern === "hold") return [];
+  if (motion.pattern === "reveal") return revealChains(target, D, sceneMotionParams(motion, D).sec, background, easing, inLabel, outLabel);
+  const ex = zoomPanExprs(motion, frames, target.fps, easing);
+  const zoom = `scale=${target.width * 2}:${target.height * 2}:flags=bicubic,${zoomPanFilter(ex, target, 1)},setsar=1`;
+  if (motion.pattern !== "punch") return [`${inLabel}${zoom}${outLabel}`];
+  // The pop is over after `sec`: from then on the untouched frame passes through (no resampling blur).
+  const sec = sceneMotionParams(motion, D).sec;
+  return [`${inLabel}split=2[pca][pcb]`, `[pcb]${zoom}[pcz]`, `[pca][pcz]overlay=x=0:y=0:enable='lt(t,${sec})'${outLabel}`];
+}
+
 export interface BuiltGraph {
   /** Extra `-i` inputs (images) after the colour source. */
   inputs: string[][];
@@ -1440,6 +1578,11 @@ export interface GraphMotion {
   base?: string;
   /** Skip the style's exit fade (footage keeps playing to the cut). */
   noExit?: boolean;
+  /**
+   * `scene.motion`: moves the whole composed frame (before the exit fade). Text boxes stay the
+   * unmoved layout: lint checks the rest pose.
+   */
+  camera?: SceneMotion;
 }
 
 /** Build the filtergraph for a composition. `textDir` is where text files will be written. */
@@ -1543,6 +1686,12 @@ export function buildFilterGraph(comp: Pick<Composition, "elements">, target: Re
   }
   // Exit: the whole frame fades back to the background over the style's exit_ms, ending on the last frame.
   flushAss();
+  // Scene motion moves the composed frame (text boxes stay the unmoved rest pose).
+  if (gm.camera && gm.camera.pattern !== "hold") {
+    flush();
+    chains.push(...sceneMotionChains(gm.camera, target, frameCount(durationS, target.fps), gm.background ?? "#000000", motion?.easing, cur, "[cam]"));
+    cur = "[cam]";
+  }
   const exit = motion && !gm.noExit ? round3(Math.min(exitFadeMs(motion) / 1000, durationS * 0.2)) : 0;
   if (exit >= 0.02) chain.push(f("fade", { t: "out", st: round3(Math.max(0, durationS - 1 / target.fps - exit)), d: exit, color: ffColor(gm.background ?? "#000000") }));
   chain.push("format=yuv420p");
@@ -1915,7 +2064,11 @@ export function createFfmpegRenderer(opts: FfmpegRendererOptions = {}): SceneRen
         warnings.push(...extra.warnings);
         if (extra.scripts) fonts.scripts = extra.scripts;
         if (extra.ass) fonts.ass = extra.ass;
-        const built = buildFilterGraph(comp, target, frames / target.fps, fonts, tmp, { ...(tokens.motion ? { motion: tokens.motion } : {}), background: tokens.color_background });
+        const built = buildFilterGraph(comp, target, frames / target.fps, fonts, tmp, {
+          ...(tokens.motion ? { motion: tokens.motion } : {}),
+          background: tokens.color_background,
+          ...(scene.motion ? { camera: scene.motion } : {}),
+        });
         warnings.push(...built.warnings);
         for (const [name, text] of built.textFiles) await writeFile(join(tmp, name), text, "utf8");
         await mkdir(dirname(req.out_path), { recursive: true });

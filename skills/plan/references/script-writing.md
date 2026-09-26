@@ -22,8 +22,9 @@
 - Budget check: total words ≈ `target_duration_sec × 2.5` minus silent
   scenes. A 30 s video holds about 65-75 spoken words; 45 s about 100-110.
 - Hook ≤ 3.5 s. First idea lands by ~5 s. CTA 3-5 s. End card 1.5-2.5 s, silent.
-- Short-form (≤ 60 s): scenes of 2.5-8 s; change the visual at least every
-  ~4 s (a new line of text, a highlight, a cut).
+- Short-form (≤ 60 s): scenes of 2.5-8 s; change the visual every 2-4 s (a
+  new line of text, a highlight, a `motion` pattern, a cut). Scenes over
+  ~4 s need an internal change or a split (`storytelling.md`).
 - Scene durations must sum to within ±10% of `target_duration_sec`.
 
 ## No voiceover (`voice.mode: "none"`)
@@ -51,10 +52,14 @@ Text-over-music reels (`text-over-music`, or any template with
   the voiceover.
 - Order: follow the template's beats (e.g. hook → problem → point/demo →
   proof → CTA). Build the beat list first, then write scenes into it.
+- Within the beats, escalate: least surprising point first, strongest last,
+  then the payoff that answers the hook's question, then the CTA
+  (`storytelling.md`).
 
 ## CTA rules
 
 - Exactly one ask, matching the brief's `desired_action`.
+- It comes after the payoff, never before the promised answer.
 - Concrete verb + object: "Run the doctor", "Read the docs", "Try it
   locally". Not "Check it out!" or "Smash that like button".
 - If the brand has `cta.allowed`, use one of those phrasings.
@@ -102,4 +107,6 @@ Also add everything in the brand's `voice.avoid`, and respect
 
 1. One idea? 2. Speakable in its duration at 2.3-2.8 wps? 3. On-screen text
 ≤ 6 words and not a transcript? 4. Every fact has a real ref? 5. No hype
-words, no provider or model names? 6. Tone matches the brief?
+words, no provider or model names? 6. Tone matches the brief? 7. Does
+something change on screen within 4 s? 8. Does it move the story (open,
+escalate or close the loop)?

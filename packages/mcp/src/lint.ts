@@ -60,6 +60,32 @@ export const LARGE_TEXT_FRACTION = 0.045;
 export const COVER_HEADLINE_MAX_WORDS = 7;
 export const COVER_HEADLINE_MAX_CHARS = 40;
 
+/**
+ * Caption timing (design rules). A caption needs about 0.25 s per word plus a 0.3 s settle to be
+ * read, and never less than 0.7 s; CJK captions are read by characters at MAX_CJK_CHARS_PER_SEC,
+ * and other word scripts scale the per-word time by their reading limit.
+ */
+export const CAPTION_SEC_PER_WORD = 0.25;
+export const CAPTION_SETTLE_SEC = 0.3;
+export const CAPTION_MIN_SEC = 0.7;
+/** A caption may lead its first spoken word by at most this much, and trail its last by at most CAPTION_LATE_MS. */
+export const CAPTION_EARLY_MS = 250;
+export const CAPTION_LATE_MS = 400;
+/** The caption engine keeps every caption up at least this long (media `minDisplayMs` default); not drift. */
+export const CAPTION_MIN_DISPLAY_MS = 800;
+/** Speech with no caption on screen for longer than this, while captions are on, is a gap. */
+export const UNCAPTIONED_SPEECH_MS = 1500;
+/** Two captions separated by less than this flicker; they should touch. */
+export const CAPTION_FLICKER_MS = 120;
+/** Default beat-sync tolerance (spec audio.beat_sync.tolerance_ms overrides it). */
+export const BEAT_TOLERANCE_MS = 250;
+/** On-screen text counts as "said" when this share of its words is in the scene's voiceover. */
+export const ONSCREEN_SPOKEN_SHARE = 0.6;
+/** The tension (question, problem, claim, story) should be set up within this share of the video. */
+export const STORY_SETUP_FRACTION = 0.4;
+/** Caption cues for sound events carry this scene_id prefix (pipeline SOUND_CUE_SCENE_PREFIX). */
+const SOUND_CUE_PREFIX = "sound:";
+
 /** Roles whose overflow or low contrast is an error (v2 design grid: hard failure for hook/caption). */
 const CRITICAL_ROLES: ReadonlySet<TextRole> = new Set(["hook", "headline", "caption", "cta"]);
 
@@ -99,11 +125,27 @@ interface RenderStateView {
   target?: { width: number; height: number; fps: number; aspect_ratio: string };
   duration_ms?: number;
   burn_in?: boolean;
-  scenes?: Array<{ scene_id: string; text_boxes?: TextBox[] }>;
-  captions?: { box?: PxBox };
+  scenes?: Array<{ scene_id: string; duration_ms?: number; text_boxes?: TextBox[] }>;
+  captions?: { box?: PxBox; json?: string };
   /** Where the pipeline placed burned-in captions (RenderState.caption_layout). */
   caption_layout?: { box?: PxBox };
   cover?: { headline_box?: TextBox; crops?: Array<{ id: string; targets: string[]; x: number; y: number; w: number; h: number }> };
+  voice?: { timing_source?: string; tracks_path?: string };
+  voice_mode?: string;
+  beat_sync?: { bpm?: number | null; beats?: number; moved_cuts?: number; beat_times_ms?: number[] };
+}
+
+/** captions/captions.json (media `CaptionJson`): the words and the captions built from them. */
+interface CaptionJsonView {
+  words?: Array<{ word: string; start_ms: number; end_ms: number; scene_id?: string }>;
+  lines?: Array<{ start_ms: number; end_ms: number; text: string; first_word: number; word_count: number }>;
+}
+
+/** One entry of voice-tracks.json (schema `SceneVoiceTrack`): word times relative to the scene. */
+interface VoiceTrackView {
+  scene_id: string;
+  duration_ms: number;
+  words: Array<{ word: string; start_ms: number; end_ms: number }>;
 }
 
 /** A compiled cover's headline and the crops it must survive (from render-state or the manifest). */
@@ -600,6 +642,321 @@ function checkBanned(spec: VideoSpec, brand: Brand | undefined, out: LintFinding
   }
 }
 
+// ------------------------------------------------------------------------------------ timing
+
+const sec = (ms: number) => `${round2(ms / 1000)}s`;
+
+/** Seconds a caption needs on screen to be read (design rule; CJK by characters). */
+export function captionReadSec(text: string, language: string | undefined): number {
+  const script = readingScript(text, language);
+  if (script === "cjk") return Math.max(CAPTION_MIN_SEC, cjkCharCount(text) / MAX_CJK_CHARS_PER_SEC + CAPTION_SETTLE_SEC);
+  const perWord = CAPTION_SEC_PER_WORD * (script === "latin" ? 1 : MAX_WORDS_PER_SEC / (MAX_WORDS_PER_SEC_BY_SCRIPT[script] ?? MAX_WORDS_PER_SEC));
+  return Math.max(CAPTION_MIN_SEC, wordCount(text) * perWord + CAPTION_SETTLE_SEC);
+}
+
+/** Scene start/end on the rendered timeline (from render-state scene durations). */
+interface SceneSpan {
+  id: string;
+  start: number;
+  end: number;
+}
+
+function sceneSpans(state: RenderStateView | undefined): SceneSpan[] | undefined {
+  const scenes = state?.scenes;
+  if (!scenes?.length || scenes.some((s) => typeof s.duration_ms !== "number")) return undefined;
+  let t = 0;
+  return scenes.map((s) => {
+    const span = { id: s.scene_id, start: t, end: t + s.duration_ms! };
+    t = span.end;
+    return span;
+  });
+}
+
+interface TimedLine {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  scene_id: string;
+  /** Indices into CaptionJsonView.words. */
+  words: number[];
+  cue: boolean;
+}
+
+function captionLines(cap: CaptionJsonView): TimedLine[] {
+  const words = cap.words ?? [];
+  return (cap.lines ?? [])
+    .map((l) => {
+      const idx = Array.from({ length: Math.max(0, l.word_count) }, (_, k) => l.first_word + k).filter((i) => i >= 0 && i < words.length);
+      const scene = (idx.length ? words[idx[0]!]!.scene_id : undefined) ?? "";
+      return { start_ms: l.start_ms, end_ms: l.end_ms, text: l.text, scene_id: scene, words: idx, cue: scene.startsWith(SOUND_CUE_PREFIX) };
+    })
+    .sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms);
+}
+
+/** Captions shown for less than their reading time: one finding per scene (worst caption named). */
+function checkCaptionBrief(spec: VideoSpec, lines: readonly TimedLine[], brand: Brand | undefined, out: LintFinding[]): void {
+  const byScene = new Map<string, Array<{ line: TimedLine; shown: number; need: number }>>();
+  for (const line of lines) {
+    if (line.cue) continue; // sound-event labels ([music]) are glanced at, not read
+    const shown = (line.end_ms - line.start_ms) / 1000;
+    const need = captionReadSec(line.text, spec.language);
+    if (shown + 1e-6 >= need) continue;
+    byScene.set(line.scene_id, [...(byScene.get(line.scene_id) ?? []), { line, shown, need }]);
+  }
+  const maxLines = brand?.captions?.max_lines ?? 2;
+  for (const s of spec.scenes) {
+    const bad = byScene.get(s.id);
+    if (!bad) continue;
+    const worst = [...bad].sort((a, b) => a.shown / a.need - b.shown / b.need)[0]!;
+    const cjk = readingScript(worst.line.text, spec.language) === "cjk";
+    const n = Math.max(1, wordCount(worst.line.text));
+    // The speaking rate at which this caption's words would last its reading time.
+    const wpm = Math.min(230, Math.max(110, Math.floor((60 * n) / worst.need / 5) * 5));
+    const fewer = maxLines > 1 ? `set brand.yaml captions.max_lines to ${maxLines - 1} (fewer words per caption), ` : "";
+    const rule = cjk ? `1/${MAX_CJK_CHARS_PER_SEC} s per character + ${CAPTION_SETTLE_SEC}s` : `${CAPTION_SEC_PER_WORD}s/word + ${CAPTION_SETTLE_SEC}s`;
+    out.push({
+      id: "caption_too_brief",
+      severity: "warning",
+      scene_id: s.id,
+      message: `${bad.length} caption(s) in ${s.id} are on screen for less than their reading time; "${snippet(worst.line.text)}" shows for ${round2(worst.shown)}s but needs ${round2(worst.need)}s (${rule}, min ${CAPTION_MIN_SEC}s)`,
+      fix: `${fewer}slow the voice with voice.rate_wpm ${cjk ? "lower" : `${wpm} or lower`}, or shorten scene ${s.id}'s voiceover`,
+    });
+  }
+}
+
+/**
+ * The spoken words on the video timeline, per scene (the truth for caption sync): voice-track
+ * word times offset by the scene start and clamped to the scene, like the caption engine does.
+ */
+function spokenWords(tracks: readonly VoiceTrackView[], spans: readonly SceneSpan[]): Map<string, Array<{ start: number; end: number }>> {
+  const out = new Map<string, Array<{ start: number; end: number }>>();
+  for (const span of spans) {
+    const t = tracks.find((x) => x.scene_id === span.id);
+    if (!t?.words?.length) continue;
+    const end = span.start + Math.min(t.duration_ms || span.end - span.start, span.end - span.start);
+    const ws = t.words
+      .filter((w) => w.word.trim())
+      .map((w) => {
+        const a = Math.min(Math.round(span.start + w.start_ms), end);
+        return { start: a, end: Math.min(Math.max(Math.round(span.start + w.end_ms), a), end) };
+      });
+    out.set(span.id, ws);
+  }
+  return out;
+}
+
+/** Captions that lead or trail the voice, and speech left uncaptioned. */
+function checkCaptionSync(spec: VideoSpec, cap: CaptionJsonView, lines: readonly TimedLine[], spoken: Map<string, Array<{ start: number; end: number }>>, out: LintFinding[]): void {
+  const words = cap.words ?? [];
+  // Caption word i ↔ the k-th spoken word of its scene (same tokenisation; skipped when counts differ).
+  const truth = new Map<number, { start: number; end: number }>();
+  const perScene = new Map<string, number[]>();
+  words.forEach((w, i) => {
+    if (!w.scene_id || w.scene_id.startsWith(SOUND_CUE_PREFIX)) return;
+    perScene.set(w.scene_id, [...(perScene.get(w.scene_id) ?? []), i]);
+  });
+  for (const [id, idx] of perScene) {
+    const said = spoken.get(id);
+    if (!said || said.length !== idx.length) continue;
+    idx.forEach((i, k) => truth.set(i, said[k]!));
+  }
+  const drift = new Map<string, Array<{ line: TimedLine; what: string; ms: number }>>();
+  for (const line of lines) {
+    if (line.cue || !line.words.length) continue;
+    const first = truth.get(line.words[0]!);
+    const last = truth.get(line.words[line.words.length - 1]!);
+    if (!first || !last) continue;
+    const early = first.start - line.start_ms;
+    const late = line.end_ms - Math.max(last.end + CAPTION_LATE_MS, first.start + CAPTION_MIN_DISPLAY_MS);
+    const add = (what: string, ms: number) => drift.set(line.scene_id, [...(drift.get(line.scene_id) ?? []), { line, what, ms }]);
+    if (early > CAPTION_EARLY_MS) add(`starts ${Math.round(early)} ms before its first word`, early - CAPTION_EARLY_MS);
+    else if (late > 0) add(`stays ${Math.round(line.end_ms - last.end)} ms after its last word`, late);
+  }
+  for (const s of spec.scenes) {
+    const bad = drift.get(s.id);
+    if (!bad) continue;
+    const worst = [...bad].sort((a, b) => b.ms - a.ms)[0]!;
+    out.push({
+      id: "caption_sync",
+      severity: "warning",
+      scene_id: s.id,
+      message: `${bad.length} caption(s) in ${s.id} are out of sync with the voice; "${snippet(worst.line.text)}" ${worst.what} (limits: ${CAPTION_EARLY_MS} ms early, ${CAPTION_LATE_MS} ms late)`,
+      fix: `re-render so captions are rebuilt from the current voice tracks; if it persists, split scene ${s.id}'s voiceover into shorter sentences (estimated word timings drift over long ones) or use a voice with real word timings`,
+    });
+  }
+  // Speech with no caption on screen.
+  const all = spec.scenes.flatMap((s) => (spoken.get(s.id) ?? []).map((w) => ({ ...w, scene: s.id })));
+  const covered = (w: { start: number; end: number }) =>
+    lines.some((l) => (w.end > w.start ? l.start_ms < w.end && l.end_ms > w.start : l.start_ms <= w.start && l.end_ms >= w.start));
+  let run: typeof all = [];
+  const flush = () => {
+    if (run.length) {
+      const from = run[0]!.start;
+      const to = run[run.length - 1]!.end;
+      if (to - from > UNCAPTIONED_SPEECH_MS) {
+        out.push({
+          id: "caption_sync",
+          severity: "warning",
+          scene_id: run[0]!.scene,
+          message: `speech from ${sec(from)} to ${sec(to)} (${round2((to - from) / 1000)}s) has no caption on screen`,
+          fix: `re-render so captions are rebuilt from the voice tracks (scene ${run[0]!.scene}'s voiceover may have changed since the captions were made); keep captions.burn_in on`,
+        });
+      }
+    }
+    run = [];
+  };
+  for (const w of all) {
+    if (covered(w)) flush();
+    else run.push(w);
+  }
+  flush();
+}
+
+/** Captions separated by a hair-thin gap flicker off and on. */
+function checkCaptionGap(lines: readonly TimedLine[], out: LintFinding[]): void {
+  const gaps: Array<{ at: number; ms: number; scene: string }> = [];
+  for (let i = 1; i < lines.length; i++) {
+    const gap = lines[i]!.start_ms - lines[i - 1]!.end_ms;
+    if (gap > 0 && gap < CAPTION_FLICKER_MS) gaps.push({ at: lines[i - 1]!.end_ms, ms: gap, scene: lines[i]!.scene_id });
+  }
+  if (!gaps.length) return;
+  const scene = gaps[0]!.scene;
+  out.push({
+    id: "caption_gap",
+    severity: "warning",
+    ...(scene && !scene.startsWith(SOUND_CUE_PREFIX) ? { scene_id: scene } : {}),
+    message: `minor: ${gaps.length} caption change(s) leave a gap under ${CAPTION_FLICKER_MS} ms, which reads as flicker (${gaps
+      .slice(0, 3)
+      .map((g) => `${sec(g.at)} +${Math.round(g.ms)} ms`)
+      .join(", ")}${gaps.length > 3 ? ", …" : ""})`,
+    fix: "re-render (the caption engine holds a caption across gaps under 250 ms); if the gaps persist, join the two phrases into one sentence in the voiceover",
+  });
+}
+
+/** Scene cuts that beat sync could not move onto a beat. */
+function checkBeatCuts(spec: VideoSpec, state: RenderStateView | undefined, spans: readonly SceneSpan[] | undefined, out: LintFinding[]): void {
+  const beats = state?.beat_sync?.beat_times_ms;
+  if (!spec.audio?.beat_sync?.enabled || !beats?.length || !spans || spans.length < 2) return;
+  const tol = spec.audio.beat_sync.tolerance_ms ?? BEAT_TOLERANCE_MS;
+  const lastBeat = Math.max(...beats);
+  for (let j = 0; j + 1 < spans.length; j++) {
+    const cut = spans[j]!.end;
+    if (cut > lastBeat + tol) break; // beyond the recorded (capped) beat list
+    let near = beats[0]!;
+    for (const b of beats) if (Math.abs(b - cut) < Math.abs(near - cut)) near = b;
+    const off = Math.abs(near - cut);
+    if (off <= tol) continue;
+    const cur = spans[j]!;
+    const next = spans[j + 1]!;
+    const newDur = round2((cur.end - cur.start + (near - cut)) / 1000);
+    out.push({
+      id: "cut_off_beat",
+      severity: "warning",
+      scene_id: cur.id,
+      message: `the cut from ${cur.id} to ${next.id} at ${sec(cut)} is ${Math.round(off)} ms from the nearest beat (${sec(near)}); tolerance ${tol} ms`,
+      fix: `set scene ${cur.id} duration_sec to ${newDur} so the cut lands on the beat at ${sec(near)}; beat sync does not move a cut into speech, so if ${near < cut ? cur.id : next.id}'s voiceover fills its scene, shorten it first (or raise audio.beat_sync.tolerance_ms)`,
+    });
+  }
+}
+
+const tokens = (s: string) =>
+  s
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
+    .filter(Boolean);
+
+/** Share of the on-screen text the voiceover also says (words; characters for CJK). */
+function spokenShare(onScreen: string, voiceover: string, cjk: boolean): number {
+  if (cjk) {
+    const said = new Set(Array.from(voiceover).filter((ch) => /[\p{L}\p{N}]/u.test(ch)));
+    const chars = Array.from(onScreen).filter((ch) => /[\p{L}\p{N}]/u.test(ch));
+    return chars.length ? chars.filter((ch) => said.has(ch)).length / chars.length : 1;
+  }
+  const said = new Set(tokens(voiceover));
+  const shown = [...new Set(tokens(onScreen))];
+  return shown.length ? shown.filter((w) => said.has(w)).length / shown.length : 1;
+}
+
+/**
+ * On-screen text the viewer must read in the scene's time, in every voice mode, when the
+ * voiceover does not say the same words. Scenes already flagged by reading_density are skipped.
+ */
+function checkOnScreenBrief(spec: VideoSpec, state: RenderStateView | undefined, out: LintFinding[]): void {
+  const flagged = new Set(out.filter((f) => f.id === "reading_density" && /on-screen/.test(f.message)).map((f) => f.scene_id));
+  for (const s of spec.scenes) {
+    if (flagged.has(s.id)) continue;
+    const text = [s.on_screen_text ?? "", s.deterministic ? propsText(s.deterministic.props) : ""].join(" ").trim();
+    if (!text) continue;
+    const script = readingScript(text, spec.language);
+    const cjk = script === "cjk";
+    if (s.voiceover.trim() && spokenShare(text, s.voiceover, cjk) >= ONSCREEN_SPOKEN_SHARE) continue;
+    const count = cjk ? cjkCharCount(text) : wordCount(text);
+    const unit = cjk ? "characters" : "words";
+    const limit = cjk ? MAX_ONSCREEN_CJK_CHARS_PER_SEC : ((MAX_WORDS_PER_SEC_BY_SCRIPT[script] ?? MAX_WORDS_PER_SEC) * MAX_ONSCREEN_WORDS_PER_SEC) / MAX_WORDS_PER_SEC;
+    const rendered = state?.scenes?.find((x) => x.scene_id === s.id)?.duration_ms;
+    const dur = rendered !== undefined ? rendered / 1000 : s.duration_sec;
+    const floor = cjk ? 8 : 3;
+    const readable = Math.max(0, dur - ONSCREEN_SETTLE_SEC) * limit;
+    if (count <= Math.max(floor, readable)) continue;
+    const needSec = Math.ceil((count / limit + ONSCREEN_SETTLE_SEC) * 10) / 10;
+    out.push({
+      id: "onscreen_too_brief",
+      severity: "warning",
+      scene_id: s.id,
+      message: `${count} on-screen ${unit} in ${round2(dur)}s that the voiceover does not say; reading them takes about ${needSec}s (${round2(limit)} ${unit}/s after a ${ONSCREEN_SETTLE_SEC}s settle)`,
+      fix: `cut scene ${s.id}'s on-screen text (on_screen_text and deterministic.props) to at most ${Math.max(floor, Math.floor(readable))} ${unit}, make the voiceover say the same words, or raise duration_sec to at least ${needSec}`,
+    });
+  }
+}
+
+const TENSION: ReadonlySet<string> = new Set(["question", "problem", "contrarian_claim", "story"]);
+const PAYOFF: ReadonlySet<string> = new Set(["payoff", "result", "reveal", "loop_back"]);
+const CLOSERS: ReadonlySet<string> = new Set(["cta", "end_card"]);
+
+/** A light story check: tension set up early, and a payoff as the last non-CTA scene. */
+export function checkStory(spec: VideoSpec, out: LintFinding[]): void {
+  const scenes = spec.scenes;
+  if (scenes.length < 3) return;
+  const total = scenes.reduce((a, s) => a + s.duration_sec, 0);
+  const problems: string[] = [];
+  let t = 0;
+  const early: string[] = [];
+  scenes.forEach((s, i) => {
+    if (i > 0 && s.purpose !== "hook" && t < STORY_SETUP_FRACTION * total) early.push(s.purpose);
+    t += s.duration_sec;
+  });
+  if (!early.some((p) => TENSION.has(p))) {
+    problems.push(`no scene after the hook in the first ${Math.round(STORY_SETUP_FRACTION * 100)}% sets up tension (purpose question, problem, contrarian_claim or story)`);
+  }
+  const last = [...scenes].reverse().find((s) => !CLOSERS.has(s.purpose));
+  if (last && !PAYOFF.has(last.purpose)) problems.push(`the last scene before the CTA (${last.id}) is "${last.purpose}", not a payoff (payoff, result, reveal or loop_back)`);
+  if (!problems.length) return;
+  out.push({
+    id: "story_structure",
+    severity: "warning",
+    message: `weak story arc: ${problems.join("; ")}`,
+    fix: "re-plan with skills/plan/references/storytelling.md: open a loop early (a question or problem the viewer wants answered), escalate, and close it in a payoff scene right before the CTA",
+  });
+}
+
+/** Caption and beat timing against the render: needs render-state.json (and its captions / voice files). */
+async function checkTiming(root: string, spec: VideoSpec, state: RenderStateView | undefined, brand: Brand | undefined, out: LintFinding[]): Promise<void> {
+  if (!state) return;
+  const spans = sceneSpans(state);
+  const cap = state.captions?.json ? await readOptionalJson<CaptionJsonView>(join(root, state.captions.json)) : undefined;
+  if (cap?.lines?.length) {
+    const lines = captionLines(cap);
+    checkCaptionBrief(spec, lines, brand, out);
+    const tracks = state.voice?.tracks_path ? await readOptionalJson<VoiceTrackView[]>(join(root, state.voice.tracks_path)) : undefined;
+    if (state.voice?.timing_source && state.voice.timing_source !== "none" && Array.isArray(tracks) && spans) {
+      checkCaptionSync(spec, cap, lines, spokenWords(tracks, spans), out);
+    }
+    checkCaptionGap(lines, out);
+  }
+  checkBeatCuts(spec, state, spans, out);
+}
+
 // ------------------------------------------------------------------------------------ entry
 
 function formatMarkdown(r: Omit<LintResult, "report_json" | "report_md">): string {
@@ -664,6 +1021,10 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   checkCaptions(spec, zones, state?.caption_layout?.box ?? state?.captions?.box ?? manifest?.captions?.box, burnIn, findings);
   checkContrast(boxes, H, findings);
   checkDensity(spec, findings);
+  checkOnScreenBrief(spec, state, findings);
+  const brand = await loadBrand(paths.root);
+  await checkTiming(paths.root, spec, state, brand, findings);
+  checkStory(spec, findings);
   checkPostCopy(spec, contracts, findings);
   const coverView: CoverView | undefined = state?.cover
     ? {
@@ -672,7 +1033,7 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
       }
     : manifest?.cover;
   checkCover(spec, contracts, coverView, findings);
-  checkBanned(spec, await loadBrand(paths.root), findings);
+  checkBanned(spec, brand, findings);
 
   findings.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1));
   const errors = findings.filter((f) => f.severity === "error").length;

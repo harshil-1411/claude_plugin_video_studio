@@ -9,6 +9,7 @@ import { DETERMINISTIC_PROPS_EXAMPLES, VideoSpec, validateVideoSpecSemantics } f
 import { initProject } from "@video-studio/core";
 import { ingest } from "@video-studio/ingestion";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { checkStory, type LintFinding } from "./lint.js";
 import { allocateDurations, renderStoryboard, scaffoldSpec, scenePace, validateBrief } from "./plan.js";
 import { createServer } from "./server.js";
 import { validateSpecFile } from "./spec-validate.js";
@@ -126,6 +127,10 @@ describe("spec_scaffold", () => {
         expect(VideoSpec.safeParse(filled).success).toBe(true);
         const sem = validateVideoSpecSemantics(filled);
         expect(sem.errors, `${id}@${target}`).toEqual([]);
+        // Our own templates model a story arc: tension early, a payoff before the CTA.
+        const story: LintFinding[] = [];
+        checkStory(filled, story);
+        expect(story, `${id}@${target}`).toEqual([]);
       }
     }
   });
@@ -134,10 +139,10 @@ describe("spec_scaffold", () => {
     const root = await exampleProject("scaffold-brief");
     const r = await scaffoldSpec(root, templatesDir, { template_id: "explain" });
     expect(r.spec).toMatchObject({ goal: "explain", platform: "instagram_reels", aspect_ratio: "9:16", target_duration_sec: 30, brief_id: "brief-vector-db" });
-    expect(r.spec.scenes.map((s) => s.purpose)).toEqual(["hook", "problem", "point", "point", "proof", "cta"]);
+    expect(r.spec.scenes.map((s) => s.purpose)).toEqual(["hook", "problem", "point", "point", "result", "cta"]);
     expect(r.scene_guidance[0]!.word_budget).toBeGreaterThan(0);
     const short = await scaffoldSpec(root, templatesDir, { template_id: "explain", target_duration_sec: 20, platform: "youtube", aspect_ratio: "16:9" });
-    expect(short.spec.scenes.map((s) => s.purpose)).not.toContain("proof");
+    expect(short.spec.scenes.map((s) => s.purpose)).toEqual(["hook", "problem", "point", "result", "cta"]);
     expect(short.spec).toMatchObject({ platform: "youtube", aspect_ratio: "16:9" });
     expect(short.notes.join(" ")).toMatch(/dropped 1 optional beat/);
     expect(r.spec).toMatchObject({ master: { width: 1080, height: 1920, fps: 30 }, targets: ["instagram"] });

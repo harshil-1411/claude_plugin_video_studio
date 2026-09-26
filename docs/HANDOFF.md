@@ -151,11 +151,17 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
   - **Fixed from real runs:** caption plates without dark bars; demo capture at phone width; `footage.redact`; shorts copy only their span; true-peak headroom; strict letterbox cropping.
   - **Polish:** scene video transitions; natural voices (Premium/Enhanced picked automatically, `voice.rate_wpm`, default 160, doctor `system_voice`); the narrated hero video (`examples/readme-hero`); local `.html` ingest.
   - **New:** HyperFrames 0.8.78, and `tighten` (pauses, fillers and retakes → a new `<asset>-tight`).
+  - **Student-kit ideas (2026-09-26):**
+    - `scene.motion` {push_in, pull_out, punch, reveal, drift, hold} × {subtle, normal, strong} in all three renderers. The same amounts are used everywhere (`SCENE_MOTION_AMOUNT`). Versions: ffmpeg renderer 0.4.1, footage 0.2.1. Scenes without motion render byte-identically. Text boxes record the rest pose.
+    - Lint timing checks from `renders/final/render-state.json`: `caption_too_brief`, `caption_sync`, `caption_gap`, `cut_off_beat` (needs `beat_sync.beat_times_ms`, recorded from now on), `onscreen_too_brief`.
+    - `story_structure`: tension in the first 40% after the hook, and a payoff right before the CTA. All 18 templates were reworked to pass it at every length (a test in `plan.test.ts`).
+    - `skills/plan/references/storytelling.md` covers the arc and the story move → purpose/motion/transition map. `punch`/`reveal` are entered on a `cut`, because blending transitions hide them.
+    - A HyperFrames motion render is unverified in the sandbox (checklist).
   - **Next** (the user chooses):
     - the first real reel: the MSB Docs eBMR page for Instagram (`/video-studio:create ~/Downloads/"MSB Docs eBMR.html" …`)
     - Phase 7 (ElevenLabs first)
     - Phase 9 (publishing)
-    - more ideas from the HyperFrames student kit (motion vocabulary, caption and beat validators, storytelling beats)
+    - fix `examples/readme-hero` captions showing "L" / "L M": write "LLM" in the voiceover and put {"LLM": "L L M"} in brand `language.terminology`
 - **Done:**
   - Step 0 (Phase 4 closed).
   - Phase 5 step 1 (`489dbbd`): schema for the new purposes and kinds, `audio.music`, `voice.mode` and `Style`.

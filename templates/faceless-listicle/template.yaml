@@ -16,29 +16,33 @@ beats:
     guidance: Promise the count and the payoff ("3 numbers that ..."). The count must match the point scenes.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: kinetic_text
+  - purpose: question
+    share: 0.08
+    guidance: Open a loop in one short line - the gap or the common mistake the list resolves.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: kinetic_text
   - purpose: point
-    share: 0.20
+    share: 0.18
     guidance: Item 1 as a big number or word with one line of context. Number it on screen.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: stat
   - purpose: point
-    share: 0.20
+    share: 0.18
     guidance: Item 2 in the same shape as item 1 so the rhythm is predictable.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: kinetic_text
   - purpose: point
-    share: 0.20
+    share: 0.18
     guidance: Item 3, the strongest or most surprising; save it for last.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: stat
   - purpose: loop_back
     share: 0.14
-    guidance: Tie the list back to the hook's words so the ending flows into a rewatch.
+    guidance: Tie the list back to the hook's words so the ending pays off and flows into a rewatch.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: kinetic_text
-    optional: true
   - purpose: cta
-    share: 0.16
+    share: 0.14
     guidance: One action (save, follow for more) that matches desired_action.
     suggested_visual_strategy: motion_graphic
     suggested_deterministic_kind: cta

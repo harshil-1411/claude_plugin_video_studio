@@ -4,6 +4,12 @@ The hook is the first 1.5-3.5 s: one spoken line (≤ ~9 words) plus one
 on-screen phrase. Its only job is to make the right viewer stay for the next
 beat. Write at least three candidates with **different** mechanisms, then score.
 
+The decision to stay is made in the first 1-2 s, so the specific part (the
+promise, the tension or the number) goes first, not after a lead-in:
+"Captions hide under the app UI" beats "So, let's talk about captions". A good
+hook also opens the loop the payoff will close; note the question it raises
+and make sure a later scene answers it (`storytelling.md`).
+
 The examples below are illustrative patterns, not facts. Real hooks use only
 facts found in the project's ContentIR.
 
@@ -118,4 +124,5 @@ Pick the highest total. Ties: evidence strength, then clarity.
 - Two ideas in the hook.
 - Hype words (see `script-writing.md`), emojis read aloud, all-caps shouting.
 - A hook whose on-screen text just repeats the voiceover word for word.
+- A promise, question or number the video never pays off.
 - Borrowing another creator's words or format verbatim.

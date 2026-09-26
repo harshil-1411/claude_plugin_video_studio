@@ -17,6 +17,9 @@ Load references only when you reach the step that needs them:
 - `references/brief-and-spec-fields.md`: every field and exact enum value.
 - `references/hooks.md`: hook mechanisms, patterns, anti-patterns.
 - `references/script-writing.md`: voice, pacing math, CTA and grounding rules.
+- `references/storytelling.md`: the arc (hook, open loop, escalation,
+  payoff, callback, CTA), pattern interrupts, retention checks, and how they
+  map to `purpose`, `motion` and `transition`.
 - `references/visual-strategy.md`: scene content → `visual_strategy` + kind.
 
 ## Safety rules (always)
@@ -101,7 +104,8 @@ Read `references/hooks.md`. Write **at least 3** hook candidates, each with a
 **different mechanism**, each speakable in ≤ 3.5 s (≤ ~9 words). Score each
 0-10 on `relevance`, `clarity`, `curiosity`, `evidence_strength`,
 `visual_potential`. Pick the highest total; break ties on evidence strength,
-then clarity. A hook that states a fact must be backed by an evidence ref
+then clarity. The winner must land in the first 1-2 s: a specific promise,
+a tension or a sourced number, not a warm-up. A hook that states a fact must be backed by an evidence ref
 (`evidence_strength` ≤ 3 otherwise, and never choose it in strict mode).
 Prefer the template's `hook_mechanisms`.
 
@@ -131,6 +135,15 @@ points). Call `brief_validate {project_dir}` and fix every error before going on
 2. Fill every scene following `references/script-writing.md` and
    `references/visual-strategy.md`:
    - **One idea per scene.** A second idea means a second scene.
+   - **Story arc** (`references/storytelling.md`): after the hook, open a
+     loop within the first ~40% (a `question`, `problem`,
+     `contrarian_claim` or `story` scene), order the points from least to
+     most surprising, close the loop in a `payoff`/`result`/`reveal`/
+     `loop_back` scene that calls back to the hook, then one CTA. Plan a
+     visual change every 2-4 s with `motion {pattern, intensity?}`
+     (`push_in`, `pull_out`, `punch`, `reveal`, `drift`, `hold`) and
+     `transition`, varied rather than repeated. Lint warns
+     (`story_structure`) when the tension or the payoff is missing.
    - With `voice.mode: "none"`: every `voiceover` stays `""`, words go on
      screen within each scene's `word_budget`, numbers still need
      `claim_refs` (`references/script-writing.md`, "No voiceover").
@@ -173,7 +186,10 @@ points). Call `brief_validate {project_dir}` and fix every error before going on
      + `hashtags` (the post copy, one entry per target). Never copy one into
      another verbatim.
 3. Keep scene durations summing to within ±10% of `target_duration_sec`.
-4. Write `<project_dir>/project/video-spec.json`.
+4. Run the retention checks in `references/storytelling.md` (would a viewer
+   scroll at second 3? at the midpoint? is the loop closed before the CTA?)
+   and fix the weakest beat.
+5. Write `<project_dir>/project/video-spec.json`.
 
 ### 7. Validate and fix (loop)
 

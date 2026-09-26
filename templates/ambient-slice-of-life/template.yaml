@@ -28,9 +28,8 @@ beats:
     suggested_visual_strategy: user_asset
   - purpose: payoff
     share: 0.15
-    guidance: The quietest moment - light changing, steam rising - held without text.
+    guidance: The quietest moment - light changing, steam rising - held without text. It is what the long takes were waiting for.
     suggested_visual_strategy: user_asset
-    optional: true
   - purpose: end_card
     share: 0.2
     guidance: A still, wide last take with a quiet handle or name as typography.
