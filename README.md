@@ -25,6 +25,8 @@ Turning knowledge into short videos usually means a timeline editor, a caption t
 - **Grounded:** every claim on screen cites a line in your sources. `verify` shows what is covered.
 - **Platform-ready:** one `dist/<platform>/` package each for TikTok, Instagram Reels, YouTube Shorts, LinkedIn and Facebook, with the video, cover, captions, post copy and a QA report. `lint` checks captions and text against each app's UI.
 - **Made to be watched:** plans follow a story arc with timed "reads", each list item, step or number appears as the voice says it, and Claude reviews contact sheets of its own render before handing it over.
+- **Works with real footage:** ingest recordings or YouTube/Vimeo/Loom links, transcribe them locally in ~99 languages, find the best short clips, keep a moving speaker in frame for vertical video, cut away to graphics while they talk, and trim pauses and filler words.
+- **You stay in control:** Claude proposes and waits for your approval; paid voices, model downloads and screen recordings ask you through Claude Code's approval dialog and follow your `policy.yaml` spend limits; renders can be cancelled.
 - **Reproducible:** `video.lock` pins every tool, font, renderer and asset hash. Re-renders are cached scene by scene, and `diff` and `test` catch regressions.
 - **Local-first:** ffmpeg, system text-to-speech and local whisper.cpp. Claude writes the plan, so the plugin needs **no LLM API key**, and none of the features below need a paid service.
 
@@ -132,11 +134,13 @@ flowchart LR
 | **Scene kinds (15)** | typography · code · chart · stat · diagram · timeline · comparison · split_screen · quote · kinetic_text · lower_third · map · screenshot · cta · end_card, plus real footage with text overlays |
 | **Voice** | macOS `say` (automatically picks an installed Premium/Enhanced voice; with local whisper installed its word timings are aligned to the audio, so captions and cues land exactly) or espeak-ng, ElevenLabs (optional key), no voice (text over music), or the speech already in your footage; pace set with `voice.rate_wpm` (default 160) |
 | **Audio** | 4 bundled CC0 music beds (ducked under speech), beat-synced cuts, native clip sound, crossfades, sound effects, −14 LUFS with true-peak headroom |
-| **Footage** | Crop, contain or blurred-pad fits, trim and speed, text overlays, automatic removal of baked-in letterbox bars, and `redact` regions to blur inboxes, names or dashboards in screen recordings; cutaways from a talking head to a graphic while the speaker keeps talking |
-| **Captions** | 3–7 word phrases on plates, placed clear of each platform's UI, with keyword emphasis and sound-event cues like `[music]` |
+| **Footage** | Crop, contain or blurred-pad fits, trim and speed, text overlays, automatic removal of baked-in letterbox bars, and `redact` regions to blur inboxes, names or dashboards in screen recordings; subject tracking that keeps a moving speaker in frame when a landscape video becomes vertical (`footage_focus`, macOS Vision); `footage_look` shot sheets so Claude sees the footage before choosing clips; cutaways from a talking head to a graphic while the speaker keeps talking; quality warnings (dark or bright picture, clipped or unclear audio); rotated phone video and HDR handled |
+| **Captions** | 3–7 word phrases on plates, placed clear of each platform's UI, held long enough to read, broken at speaker changes, with keyword emphasis and sound-event cues like `[music]`; turn them off per scene where kinetic text already shows the words |
 | **Looks** | Style packs (minimal, editorial, technical, energetic) and brand kits (colours, fonts, weights, motion, a corner logo, forbidden treatments, banned phrases, pronunciation overrides such as `LLM` → "L L M" that keep captions as written); scene transitions (crossfade, fade to black, slide, zoom, whip) that keep narration in sync; per-scene camera moves (push in, pull out, punch, reveal, drift, hold); word cues that land each list item, step or number on the word that says it |
 | **Languages** | `localize` translation sheets; bundled Noto fonts for Japanese, Devanagari and Arabic; CJK line breaking; right-to-left text |
-| **Trust** | `verify` claim coverage, `video.lock`, golden-frame `test`, `diff`, provenance, optional C2PA content credentials (`export sign`) |
+| **Checks** | 30+ lint rules (platform UI zones, contrast, reading speed, caption timing, cues, story arc, cutaway rhythm, brand rules, footage quality), technical QA (loudness, black or frozen frames), `review` contact sheets with problem scenes bordered, an automatic review → fix → re-render loop, and `compare` before/after pages |
+| **Trust** | `verify` claim coverage, `video.lock`, golden-frame `test`, `diff`, provenance, optional C2PA content credentials (`export sign`); secrets found in sources are redacted |
+| **Control** | `policy.yaml` (allowed providers, spend limits, approval threshold), consent recorded in `project/consent.json`, `render_cancel`, one render per project at a time |
 
 ## Examples
 
@@ -153,13 +157,13 @@ flowchart LR
 |---|---|
 | `/video-studio:create` | The whole flow, from a source or an idea to packages, with an approval step |
 | `/video-studio:plan` · `validate` | Brief, grounded spec and storyboard, built on a story arc (hook, open loop, escalation, payoff, CTA); explains every validation issue |
-| `/video-studio:render` · `qa` · `export` | Local render (preview, then final), technical QA, per-platform packages (`sign` for C2PA) |
+| `/video-studio:render` · `qa` · `export` | Local render (preview, then final; cancel anytime), technical QA, per-platform packages (`sign` for C2PA) |
 | `/video-studio:lint` · `verify` | Platform contract checks with a fix loop (UI zones, caption readability and sync, cuts on the beat, story arc); claim coverage against the sources |
 | `/video-studio:review` · `compare` | Contact sheets, frame strips and crops of a render (lint findings bordered), so Claude looks at the video before handing it over; a before/after page that plays two versions in sync (side by side, stacked or wipe) |
 | `/video-studio:test` · `diff` | Golden-frame regression tests; spec, lock and frame diffs between renders |
 | `/video-studio:variants` · `adapt` | Hook × cover A/B sets with an experiment manifest; new aspect, length or platform |
 | `/video-studio:localize` | Language versions from a translation sheet, re-timed for the language |
-| `/video-studio:ingest` · `shorts` · `analyze` | Media ingest and local transcription; standalone clips from a long talk, with cutaways to graphics while the speaker talks; a reference video's format |
+| `/video-studio:ingest` · `shorts` · `analyze` | Documents, web pages, repos, media files and video URLs; local transcription (language detection, speaker turns); standalone clips from a long talk, with shot sheets, subject tracking and cutaways; a reference video's format |
 | `/video-studio:tighten` | Cleans up talking-head footage: shortens pauses, cuts filler words and drops retakes (dry run first, new asset on apply) |
 | `/video-studio:demo` | Records a scripted walk through **your** running app (inputs are blurred) |
 | `/video-studio:doctor` | Checks ffmpeg, fonts, Chrome, whisper, HyperFrames and keys |
@@ -170,6 +174,9 @@ flowchart LR
 - **No posting or analytics.** It produces packages and post copy; you upload them. Platform "trending sounds" are added in each app, and `post.json` reminds you of that.
 - **HyperFrames is optional.** The built-in ffmpeg renderer covers every scene kind. The richer HyperFrames renderer needs its own install and Google Chrome.
 - **Whisper models are downloaded only with your consent** (about 148 MB; 488 MB for the speaker-turn model). You can supply SRT/VTT captions instead.
+- **Speaker turns are English-only** and label two alternating speakers (S1/S2); rename them if there are more.
+- **Subject tracking is automatic on macOS only.** Elsewhere Claude marks the subject from shot sheets.
+- **No colour grading yet.** Dark or bright footage gets a warning, not a fix.
 - **Demo capture never starts your app.** You start it and give the URL, and every step is approved first.
 
 The roadmap is in [`docs/PLAN.md`](docs/PLAN.md) and the current state in [`docs/HANDOFF.md`](docs/HANDOFF.md).
