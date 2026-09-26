@@ -99,3 +99,61 @@ and vary patterns so consecutive scenes do not repeat the same move.
 `punch` and `reveal` play in the scene's first 250–400 ms, so enter those
 scenes on a `cut` (or `whip`): a `crossfade` or `fade_black` into them
 blends over the move and hides it.
+
+## Cutaways (talking head, interviews, shorts)
+
+A cutaway replaces the speaker's picture with a graphic while their voice
+keeps playing: keep the scene's `footage` span (its sound and transcript
+words still play and caption), add `cutaway: true` to it, and give the
+scene a `deterministic` graphic, usually with `cues` on the speaker's words.
+
+```json
+{"id": "s03", "purpose": "proof", "voiceover": "", "visual_strategy": "motion_graphic",
+ "footage": {"asset": "v1", "in_sec": 41.2, "out_sec": 46.0, "cutaway": true},
+ "deterministic": {"kind": "stat", "props": {"value": 40, "unit": "%", "label": "faster builds"}},
+ "cues": [{"word": "forty"}], "audio": {"mode": "native"}}
+```
+
+- Cut away when the line describes something to see: a number, a process,
+  a comparison, a product, a chapter change. Stay on the face for
+  personal, emotional or opinion lines, and for the hook's first second.
+- One idea per cutaway, 3–10 s, then give the face back for at least 2 s
+  (lint `cutaway_rhythm`). Two cutaway scenes in a row count as one.
+- Native cues match the transcript's spelling: whisper writes numbers as
+  it heard them ("forty" or "40"), so check the transcript first.
+
+## Word cues
+
+`cues: [{word, occurrence?, item?}]` lands the graphic's reveal items on
+spoken words, so a number appears as it is said instead of on a timer. Each
+kind reveals a fixed list of items, and cue k drives item k (or `item`):
+
+| Kind | Items, in order |
+|---|---|
+| typography | each line |
+| code | the block, then the highlight (with `highlight_lines`) |
+| diagram · timeline · map | each node · event · point |
+| chart | each series entry (or the value, for `type: stat`) |
+| screenshot | each callout |
+| comparison | left, right, verdict |
+| split_screen | left, right |
+| cta | headline, action |
+| end_card | title, subtitle |
+| quote | text, attribution |
+| stat | the number (its count-up finishes on the word), the label |
+| lower_third | the name card, the headline |
+| kinetic_text | each word (or phrase with `rhythm: phrase`) |
+
+- Cue the words that carry the item: the number for a stat, each step's
+  name for a timeline, "but" or "instead" for the right side of a
+  comparison. The word must be in the scene's `voiceover` (case and
+  punctuation are ignored; `occurrence` picks a repeated word, a short
+  phrase such as "40 percent" works too). `spec_validate` rejects others.
+- Only cue what matters: 1–4 cues per scene, at least 0.4 s apart (lint
+  `cue_too_close`). Uncued items keep the default stagger and never jump
+  ahead of an earlier cue.
+- In `voice.mode: native` the words come from the footage transcript and
+  are checked at render; `voice.mode: none` has no words, so no cues.
+- Timing is only as good as the word timings: exact with a transcript or a
+  provider voice, close (estimated) with the system voice, and ignored in
+  silent renders (lint `cue_unmatched`).

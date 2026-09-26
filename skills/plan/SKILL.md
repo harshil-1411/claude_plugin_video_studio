@@ -144,6 +144,10 @@ points). Call `brief_validate {project_dir}` and fix every error before going on
      (`push_in`, `pull_out`, `punch`, `reveal`, `drift`, `hold`) and
      `transition`, varied rather than repeated. Lint warns
      (`story_structure`) when the tension or the payoff is missing.
+   - **Land the graphic on the words** with `cues`
+     (`references/visual-strategy.md`, "Word cues"): the stat's number,
+     each timeline step, the second half of a comparison appear as they
+     are said. 1–4 cues per scene, on words in its voiceover.
    - With `voice.mode: "none"`: every `voiceover` stays `""`, words go on
      screen within each scene's `word_budget`, numbers still need
      `claim_refs` (`references/script-writing.md`, "No voiceover").

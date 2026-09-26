@@ -43,5 +43,6 @@ rules:
   - "Scene audio is native (the speaker's voice); keep speed 1 so speech sounds natural. Short crossfades (100–200 ms) between spans hide the jump."
   - "fit cover with focus on the face (focus.y about 0.35 for a centred speaker); blur_pad for landscape recordings you must not crop."
   - "On-screen text never repeats the captions word for word: a name card, one emphasised line, the CTA."
+  - "Cut away when a line describes something to see (a number, a process, a comparison): keep the footage span for its sound and words, set footage.cutaway true and give the scene a deterministic graphic (stat, timeline, comparison...) with cues on the speaker's words. Never in the hook's first second or on personal or emotional lines; 3-10 s each, at least 2 s of face between (lint cutaway_rhythm)."
   - "Only spans the speaker actually said: never re-order sentences so they change the meaning."
   - CTA must be an allowed brand CTA if a brand profile is present.

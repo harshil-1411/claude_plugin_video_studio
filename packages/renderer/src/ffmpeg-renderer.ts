@@ -16,7 +16,7 @@ import {
   runFfmpeg,
   runProcess,
 } from "@video-studio/media";
-import type { DeterministicKind, Scene, SceneMotion, TextBox, TextRole } from "@video-studio/schema";
+import { type DeterministicKind, type Scene, type SceneMotion, type TextBox, type TextRole, kineticUnits } from "@video-studio/schema";
 import {
   CHAR_EM_UPPER,
   type FitOptions,
@@ -35,7 +35,8 @@ import {
 } from "./text-layout.js";
 import { type Script, baseDirection, charScript, dominantScript, hasCjk, needsShaping, scriptFontFamilies, scriptsIn, textDirection } from "./script.js";
 import { BUNDLED_FONTS, type FontResolver, assFontSize, createFontResolver, findFontsDir, parseFontChain, prepareLibassFontsDir, readFontMetrics, scriptFirstChain } from "./tokens.js";
-import type { Availability, LayoutZones, MotionTokens, RenderTarget, SceneRenderRequest, SceneRenderResult, SceneRenderer, VisualTokens } from "./types.js";
+import type { Availability, LayoutZones, MotionTokens, RenderTarget, ResolvedCue, SceneRenderRequest, SceneRenderResult, SceneRenderer, VisualTokens } from "./types.js";
+import { countUpWindow, cueItemStarts } from "./cue-timing.js";
 import { exitFadeMs } from "./tokens.js";
 
 /**
@@ -58,8 +59,9 @@ export const FFMPEG_RENDERER_ID = "ffmpeg-drawtext";
 /**
  * 0.4.0: script fonts for CJK lines; Devanagari/Arabic/Hebrew lines drawn through libass (shaping + bidi).
  * 0.4.1: `scene.motion` (push_in, pull_out, punch, reveal, drift, hold) moves the whole frame.
+ * 0.4.2: word cues (`req.cues`) land each reveal item on its spoken word.
  */
-export const FFMPEG_RENDERER_VERSION = "0.4.1";
+export const FFMPEG_RENDERER_VERSION = "0.4.2";
 
 export const FFMPEG_RENDERER_KINDS = [
   "typography",
@@ -120,6 +122,8 @@ interface TextEl {
   rx?: number;
   y: number;
   beat: number;
+  /** `cueItems` index this element reveals with (absent: part of the card, never cued). */
+  item?: number;
   slide?: boolean;
   box?: { color: string; border: number };
 }
@@ -134,6 +138,7 @@ interface BoxEl {
   /** Omitted = filled. */
   thickness?: number;
   beat: number;
+  item?: number;
 }
 
 interface ImageEl {
@@ -144,6 +149,7 @@ interface ImageEl {
   w: number;
   h: number;
   beat: number;
+  item?: number;
 }
 
 type El = TextEl | BoxEl | ImageEl;
@@ -153,6 +159,8 @@ export interface Composition {
   warnings: string[];
   /** Every text block laid out, for lint (overflow, mask collisions, contrast). */
   text_boxes: TextBox[];
+  /** Item whose entrance finishes on its cue instead of starting there (a stat's value). */
+  count_item?: number;
 }
 
 /** What a per-kind layout returns; composeScene adds the recorded text boxes. */
@@ -227,7 +235,15 @@ const r = Math.round;
 function textLines(
   fit: FitResult,
   box: Rect,
-  o: { font: FontRole; color: string | ((line: string, i: number) => string); beat: number | ((i: number) => number); align?: "left" | "center"; valign?: "top" | "middle" | "bottom"; slide?: boolean },
+  o: {
+    font: FontRole;
+    color: string | ((line: string, i: number) => string);
+    beat: number | ((i: number) => number);
+    item?: number | ((i: number) => number);
+    align?: "left" | "center";
+    valign?: "top" | "middle" | "bottom";
+    slide?: boolean;
+  },
 ): TextEl[] {
   const mono = o.font === "mono";
   // Right-to-left paragraphs mirror a left alignment: their lines hang from the box's right edge.
@@ -244,12 +260,28 @@ function textLines(
       ...(rtl ? { rx: r(box.x + box.w) } : o.align === "left" ? {} : { cx: r(l.cx) }),
       y: l.y,
       beat: typeof o.beat === "function" ? o.beat(i) : o.beat,
+      ...(o.item === undefined ? {} : { item: typeof o.item === "function" ? o.item(i) : o.item }),
       slide: o.slide ?? true,
     }));
 }
 
 function asStr(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v : undefined;
+}
+
+/**
+ * Paragraph index of each fitted line (paragraphs wrap onto several lines), by consuming each
+ * paragraph's non-space characters; a truncated fit attributes what remains to the last one.
+ */
+function lineParagraphs(fit: FitResult, paras: readonly string[]): number[] {
+  const len = (t: string) => Array.from(t.replace(/\s+/g, "")).length;
+  let j = 0;
+  let left = len(paras[0] ?? "");
+  return fit.lines.map((line) => {
+    while (left <= 0 && j < paras.length - 1) left = len(paras[++j]!);
+    left -= len(line);
+    return j;
+  });
 }
 
 /** Record a text block for lint: the box it was fitted into, its size, truncation and colours. */
@@ -299,7 +331,9 @@ function fitHeading(c: Ctx, text: string | readonly string[], box: { w: number; 
 
 function typography(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
-  const lines = Array.isArray(p.lines) ? p.lines.filter((l): l is string => typeof l === "string" && l.trim() !== "").map((l) => headCase(c, l)) : [];
+  // Each drawn line keeps the index of its `lines` entry: that entry's cue item.
+  const src = Array.isArray(p.lines) ? p.lines.flatMap((l, i) => (typeof l === "string" && l.trim() !== "" ? [{ text: headCase(c, l), item: i }] : [])) : [];
+  const lines = src.map((l) => l.text);
   if (lines.length === 0) warnings.push("typography: no lines to draw");
   const emphasis = asStr(p.emphasis)?.trim();
   const box = inset(c.safe, r(c.u * 0.02));
@@ -316,7 +350,8 @@ function typography(p: Record<string, unknown>, c: Ctx): Layout {
     }
     return c.colors.text;
   };
-  const els = textLines(fit, box, { font: "heading", color, beat: (i) => i, align: c.align });
+  const para = lineParagraphs({ ...fit, lines: fit.lines.filter((l) => l.trim().length > 0) }, lines);
+  const els = textLines(fit, box, { font: "heading", color, beat: (i) => i, item: (i) => src[para[i] ?? 0]?.item ?? 0, align: c.align });
   note(c, c.main, lines.join("\n"), box, fit, c.colors.text);
   if (em && !hit) warnings.push(`typography: emphasis "${emphasis}" not found in lines`);
   if (em && hit) warnings.push("typography: emphasis colours the whole line containing it (no per-word styling in ffmpeg-drawtext)");
@@ -362,11 +397,12 @@ function code(p: Record<string, unknown>, c: Ctx): Layout {
       h: r(fit.lineAdvance),
       color: ffColor(c.colors.primary, 0.22),
       beat: 2,
+      item: 1,
     });
   }
   for (const l of placed) {
     if (!l.text.trim()) continue;
-    els.push({ type: "text", text: l.text, font: "mono", size: fit.fontSize, color: c.colors.text, x: l.x, y: l.y, beat: 1, slide: false });
+    els.push({ type: "text", text: l.text, font: "mono", size: fit.fontSize, color: c.colors.text, x: l.x, y: l.y, beat: 1, item: 0, slide: false });
   }
   return { elements: els, warnings };
 }
@@ -396,21 +432,22 @@ function comparison(p: Record<string, unknown>, c: Ctx): Layout {
   items.forEach(([s, accent], i) => {
     const pr = panels[i]!;
     const beat = i * 2;
-    els.push({ type: "box", ...pr, color: c.colors.panel, beat });
-    els.push({ type: "box", x: pr.x, y: pr.y, w: pr.w, h: Math.max(2, r(c.u * 0.008)), color: accent, beat });
+    const item = i;
+    els.push({ type: "box", ...pr, color: c.colors.panel, beat, item });
+    els.push({ type: "box", x: pr.x, y: pr.y, w: pr.w, h: Math.max(2, r(c.u * 0.008)), color: accent, beat, item });
     const lf = fitText(asStr(s.label) ?? "", { w: pr.w - 2 * pad, h: labelH - pad / 2 }, { maxSize: c.u * 0.06, minSize: c.u * 0.03, maxLines: 1 });
     const labelBox = { x: pr.x + pad, y: pr.y + pad, w: pr.w - 2 * pad, h: labelH - pad / 2 };
-    els.push(...textLines(lf, labelBox, { font: "heading", color: accent, beat, valign: "top" }));
+    els.push(...textLines(lf, labelBox, { font: "heading", color: accent, beat, item, valign: "top" }));
     note(c, "label", asStr(s.label) ?? "", labelBox, lf, accent, c.colors.panel);
     const bf = fitText(asStr(s.text) ?? "", bodyBoxes[i]!, { maxSize: bodySize, minSize: Math.min(bodySize, c.u * 0.03) });
     if (bf.truncated) warnings.push(`comparison: ${i === 0 ? "left" : "right"} text truncated to fit`);
-    els.push(...textLines(bf, bodyBoxes[i]!, { font: "body", color: c.colors.text, beat: beat + 1, valign: "top" }));
+    els.push(...textLines(bf, bodyBoxes[i]!, { font: "body", color: c.colors.text, beat: beat + 1, item, valign: "top" }));
     note(c, "body", asStr(s.text) ?? "", bodyBoxes[i]!, bf, c.colors.text, c.colors.panel);
   });
   if (verdict && verdictR) {
     const vf = fitHeading(c, verdict, verdictR, { maxSize: c.u * 0.06, minSize: c.u * 0.03 });
     if (vf.truncated) warnings.push("comparison: verdict truncated to fit");
-    els.push(...textLines(vf, verdictR, { font: "heading", color: c.colors.text, beat: 4, align: c.align }));
+    els.push(...textLines(vf, verdictR, { font: "heading", color: c.colors.text, beat: 4, item: 2, align: c.align }));
     note(c, "headline", verdict, verdictR, vf, c.colors.text);
   }
   return { elements: els, warnings };
@@ -434,7 +471,7 @@ function cta(p: Record<string, unknown>, c: Ctx): Layout {
     if (key === "headline") {
       const f = fitHeading(c, headline, rect, { maxSize: c.u * 0.11, minSize: c.u * 0.04 });
       if (f.truncated) warnings.push("cta: headline truncated to fit");
-      els.push(...textLines(f, rect, { font: "heading", color: c.colors.text, beat: 0, valign: "bottom", align: c.align }));
+      els.push(...textLines(f, rect, { font: "heading", color: c.colors.text, beat: 0, item: 0, valign: "bottom", align: c.align }));
       note(c, c.main === "hook" ? "hook" : "cta", headline, rect, f, c.colors.text);
     } else if (key === "action") {
       const maxW = r(rect.w * 0.9);
@@ -443,8 +480,8 @@ function cta(p: Record<string, unknown>, c: Ctx): Layout {
       const pillW = Math.min(maxW, r(f.width + c.u * 0.1));
       const pillH = r(f.fontSize * 2.1);
       const pill: Rect = { x: r(rect.x + (rect.w - pillW) / 2), y: r(rect.y + (rect.h - pillH) / 2), w: pillW, h: pillH };
-      els.push({ type: "box", ...pill, color: c.colors.primary, beat: 1 });
-      els.push(...textLines(f, pill, { font: "heading", color: c.colors.bg, beat: 1, slide: false }));
+      els.push({ type: "box", ...pill, color: c.colors.primary, beat: 1, item: 1 });
+      els.push(...textLines(f, pill, { font: "heading", color: c.colors.bg, beat: 1, item: 1, slide: false }));
       note(c, "cta", action!, pill, f, c.colors.bg, c.colors.primary);
     } else if (key === "command") {
       const pad = r(c.u * 0.03);
@@ -454,13 +491,14 @@ function cta(p: Record<string, unknown>, c: Ctx): Layout {
       const boxH = Math.min(rect.h, r(f.height + 2 * pad));
       const bw = Math.min(rect.w, r(f.width + 2 * pad));
       const panel: Rect = { x: r(rect.x + (rect.w - bw) / 2), y: r(rect.y + (rect.h - boxH) / 2), w: bw, h: boxH };
-      els.push({ type: "box", ...panel, color: c.colors.panel, beat: 2 });
-      els.push({ type: "box", ...panel, color: c.colors.panelEdge, thickness: Math.max(1, r(c.u * 0.003)), beat: 2 });
-      els.push(...textLines(f, inset(panel, pad), { font: "mono", color: c.colors.secondary, beat: 2, slide: false }));
+      // The command and url reveal with the action (one cue item).
+      els.push({ type: "box", ...panel, color: c.colors.panel, beat: 2, item: 1 });
+      els.push({ type: "box", ...panel, color: c.colors.panelEdge, thickness: Math.max(1, r(c.u * 0.003)), beat: 2, item: 1 });
+      els.push(...textLines(f, inset(panel, pad), { font: "mono", color: c.colors.secondary, beat: 2, item: 1, slide: false }));
       note(c, "code", text, inset(panel, pad), f, c.colors.secondary, c.colors.panel);
     } else {
       const f = fitText(url!, rect, { maxSize: c.u * 0.04, minSize: c.u * 0.02, maxLines: 2 });
-      els.push(...textLines(f, rect, { font: "body", color: c.colors.muted, beat: 3, valign: "top" }));
+      els.push(...textLines(f, rect, { font: "body", color: c.colors.muted, beat: 3, item: 1, valign: "top" }));
       note(c, "label", url!, rect, f, c.colors.muted);
     }
   });
@@ -492,16 +530,17 @@ function endCard(p: Record<string, unknown>, c: Ctx, logo: { path: string; width
       const s = Math.min(rect.w / logo.width, rect.h / logo.height);
       const w = Math.max(2, Math.floor((logo.width * s) / 2) * 2);
       const h = Math.max(2, Math.floor((logo.height * s) / 2) * 2);
-      els.push({ type: "image", path: logo.path, x: r(rect.x + (rect.w - w) / 2), y: r(rect.y + (rect.h - h) / 2), w, h, beat: 0 });
+      // A logo-only card is the single "card" item; otherwise the logo is part of the card.
+      els.push({ type: "image", path: logo.path, x: r(rect.x + (rect.w - w) / 2), y: r(rect.y + (rect.h - h) / 2), w, h, beat: 0, ...(title || subtitle ? {} : { item: 0 }) });
     } else if (key === "title") {
       const f = fitHeading(c, title!, rect, { maxSize: c.u * 0.12, minSize: c.u * 0.04 });
       if (f.truncated) warnings.push("end_card: title truncated to fit");
-      els.push(...textLines(f, rect, { font: "heading", color: c.colors.text, beat: 1, valign: parts.length === 1 ? "middle" : "bottom", align: c.align }));
+      els.push(...textLines(f, rect, { font: "heading", color: c.colors.text, beat: 1, item: 0, valign: parts.length === 1 ? "middle" : "bottom", align: c.align }));
       note(c, c.main, title!, rect, f, c.colors.text);
     } else {
       const f = fitText(subtitle!, rect, { maxSize: c.u * 0.055, minSize: c.u * 0.025 });
       if (f.truncated) warnings.push("end_card: subtitle truncated to fit");
-      els.push(...textLines(f, rect, { font: "body", color: c.colors.primary, beat: 2, valign: "top", align: c.align }));
+      els.push(...textLines(f, rect, { font: "body", color: c.colors.primary, beat: 2, item: title ? 1 : 0, valign: "top", align: c.align }));
       note(c, "body", subtitle!, rect, f, c.colors.primary);
     }
   });
@@ -513,20 +552,21 @@ function formatNumber(v: number): string {
   return String(Math.round(v * 100) / 100);
 }
 
-function statLayout(value: string, label: string | undefined, c: Ctx, warnings: string[]): Layout {
+/** A single chart value; `item` is its cue item (the label reveals with it). */
+function statLayout(value: string, label: string | undefined, c: Ctx, warnings: string[], item: number): Layout {
   const [numR, labelR] = label ? splitV(c.safe, [3, 2], r(c.u * 0.03)) : [c.safe, undefined];
   const els: El[] = [];
   const nf = fitHeading({ ...c, tokens: { ...c.tokens, text_case: "as_is" } }, value, numR!, { maxSize: c.u * 0.32, minSize: c.u * 0.06, maxLines: 1, lineHeight: 1.1 });
   if (nf.truncated) warnings.push("chart: value truncated to fit");
-  els.push(...textLines(nf, numR!, { font: "heading", color: c.colors.primary, beat: 0, valign: label ? "bottom" : "middle" }));
+  els.push(...textLines(nf, numR!, { font: "heading", color: c.colors.primary, beat: 0, item, valign: label ? "bottom" : "middle" }));
   note(c, c.main, value, numR!, nf, c.colors.primary);
   if (label && labelR) {
     const lf = fitText(label, labelR, { maxSize: c.u * 0.065, minSize: c.u * 0.03 });
     if (lf.truncated) warnings.push("chart: label truncated to fit");
-    els.push(...textLines(lf, labelR, { font: "body", color: c.colors.text, beat: 1, valign: "top" }));
+    els.push(...textLines(lf, labelR, { font: "body", color: c.colors.text, beat: 1, item, valign: "top" }));
     note(c, "label", label, labelR, lf, c.colors.text);
   }
-  return { elements: els, warnings };
+  return { elements: els, warnings, count_item: item };
 }
 
 const MAX_BARS = 12;
@@ -536,9 +576,11 @@ function chart(p: Record<string, unknown>, c: Ctx): Layout {
   const type = asStr(p.type) ?? "stat";
   const unit = typeof p.unit === "string" ? p.unit : "";
   const label = asStr(p.label);
-  const series = Array.isArray(p.series)
-    ? p.series.filter((s): s is { label: string; value: number } => !!s && typeof s === "object" && typeof (s as { value?: unknown }).value === "number")
-    : [];
+  // `item` is the entry's index in `props.series`: its cue item.
+  const rawSeries: unknown[] = Array.isArray(p.series) ? p.series : [];
+  const series = rawSeries.flatMap((s, item) =>
+    !!s && typeof s === "object" && typeof (s as { value?: unknown }).value === "number" ? [{ ...(s as { label: string; value: number }), item }] : [],
+  );
   const fmt = (v: number | string) => `${typeof v === "number" ? formatNumber(v) : v}${unit}`;
 
   if (type === "bar" && series.length > 0) {
@@ -569,16 +611,17 @@ function chart(p: Record<string, unknown>, c: Ctx): Layout {
     rows.forEach((s, i) => {
       const rr = rowRects[i]!;
       const beat = 1 + i * 0.5;
+      const item = s.item;
       const labelLines = wrapText(s.label || " ", labelSize, rr.w);
       const text = labelLines.length > 1 ? `${labelLines[0]}…` : (labelLines[0] ?? "");
-      if (text.trim()) els.push({ type: "text", text, font: "body", size: labelSize, color: c.colors.text, x: rr.x, y: rr.y, beat, slide: false });
+      if (text.trim()) els.push({ type: "text", text, font: "body", size: labelSize, color: c.colors.text, x: rr.x, y: rr.y, beat, item, slide: false });
       note(c, "label", s.label, { x: rr.x, y: rr.y, w: rr.w, h: labelSize * 1.35 }, { fontSize: labelSize, truncated: labelLines.length > 1 }, c.colors.text);
       const barY = r(rr.y + labelSize * 1.35);
       const barH = Math.max(2, r(Math.min(rr.h - labelSize * 1.35, c.u * 0.07)));
       const trackW = Math.max(2, rr.w - valueW);
-      els.push({ type: "box", x: rr.x, y: barY, w: trackW, h: barH, color: c.colors.panel, beat });
+      els.push({ type: "box", x: rr.x, y: barY, w: trackW, h: barH, color: c.colors.panel, beat, item });
       const bw = max > 0 ? r((Math.max(0, s.value) / max) * trackW) : 0;
-      if (bw >= 1) els.push({ type: "box", x: rr.x, y: barY, w: bw, h: barH, color: c.colors.primary, beat: beat + 0.25 });
+      if (bw >= 1) els.push({ type: "box", x: rr.x, y: barY, w: bw, h: barH, color: c.colors.primary, beat: beat + 0.25, item });
       els.push({
         type: "text",
         text: fmt(s.value),
@@ -588,6 +631,7 @@ function chart(p: Record<string, unknown>, c: Ctx): Layout {
         x: rr.x + trackW + r(c.u * 0.02),
         y: r(barY + (barH - labelSize) / 2),
         beat: beat + 0.25,
+        item,
         slide: false,
       });
     });
@@ -608,7 +652,8 @@ function chart(p: Record<string, unknown>, c: Ctx): Layout {
     warnings.push("chart: nothing to draw (no value or series)");
     return { elements: [], warnings };
   }
-  return statLayout(fmt(value), statLabel, c, warnings);
+  // With series but an unsupported type, `cueItems` lists the entries; the drawn stat is the last one.
+  return statLayout(fmt(value), statLabel, c, warnings, type !== "stat" && rawSeries.length ? rawSeries.length - 1 : 0);
 }
 
 function diagram(p: Record<string, unknown>, c: Ctx): Layout {
@@ -619,6 +664,9 @@ function diagram(p: Record<string, unknown>, c: Ctx): Layout {
     : [];
   const n = nodes.length;
   if (n === 0) return { elements: [], warnings: [...warnings, "diagram: no nodes"] };
+  // Cue item of each node: its first index in `props.nodes` (drawn nodes are de-duplicated).
+  const rawNodes: unknown[] = p.nodes as unknown[];
+  const itemOf = (name: string) => rawNodes.indexOf(name);
   const landscape = c.target.width > c.target.height;
   const cols = landscape ? Math.min(n, 4) : n <= 4 ? 1 : 2;
   const rows = Math.ceil(n / cols);
@@ -643,12 +691,13 @@ function diagram(p: Record<string, unknown>, c: Ctx): Layout {
   const th = Math.max(2, r(c.u * 0.006));
   const head = th * 3;
   const els: El[] = [];
+  let item = 0;
   const line = (x1: number, y1: number, x2: number, y2: number, beat: number) => {
     const x = Math.min(x1, x2);
     const y = Math.min(y1, y2);
-    els.push({ type: "box", x: r(x - (x1 === x2 ? th / 2 : 0)), y: r(y - (y1 === y2 ? th / 2 : 0)), w: Math.max(th, r(Math.abs(x2 - x1))), h: Math.max(th, r(Math.abs(y2 - y1))), color: c.colors.muted, beat });
+    els.push({ type: "box", x: r(x - (x1 === x2 ? th / 2 : 0)), y: r(y - (y1 === y2 ? th / 2 : 0)), w: Math.max(th, r(Math.abs(x2 - x1))), h: Math.max(th, r(Math.abs(y2 - y1))), color: c.colors.muted, beat, item });
   };
-  const arrow = (x: number, y: number, beat: number) => els.push({ type: "box", x: r(x - head / 2), y: r(y - head / 2), w: head, h: head, color: c.colors.primary, beat });
+  const arrow = (x: number, y: number, beat: number) => els.push({ type: "box", x: r(x - head / 2), y: r(y - head / 2), w: head, h: head, color: c.colors.primary, beat, item });
   edges.forEach(([a, b], k) => {
     const A = pos.get(a);
     const B = pos.get(b);
@@ -661,6 +710,8 @@ function diagram(p: Record<string, unknown>, c: Ctx): Layout {
       return;
     }
     const beat = Math.max(A.i, B.i) + 0.5;
+    // An edge draws with its later node.
+    item = itemOf(A.i > B.i ? a : b);
     const ra = A.rect;
     const rb = B.rect;
     const acx = ra.x + ra.w / 2;
@@ -710,26 +761,28 @@ function diagram(p: Record<string, unknown>, c: Ctx): Layout {
   const size = Math.min(...nodes.map((name) => fitText(name, labelBox, { maxSize: c.u * 0.055, minSize: c.u * 0.022 }).fontSize));
   for (const name of nodes) {
     const { rect, i } = pos.get(name)!;
-    els.push({ type: "box", ...rect, color: c.colors.panel, beat: i });
-    els.push({ type: "box", ...rect, color: c.colors.primary, thickness: th, beat: i });
+    const item = itemOf(name);
+    els.push({ type: "box", ...rect, color: c.colors.panel, beat: i, item });
+    els.push({ type: "box", ...rect, color: c.colors.primary, thickness: th, beat: i, item });
     const f = fitText(name, labelBox, { maxSize: size, minSize: size });
     if (f.truncated) warnings.push(`diagram: label "${name}" truncated to fit`);
-    els.push(...textLines(f, inset(rect, pad), { font: "body", color: c.colors.text, beat: i, slide: false }));
+    els.push(...textLines(f, inset(rect, pad), { font: "body", color: c.colors.text, beat: i, item, slide: false }));
     note(c, "label", name, inset(rect, pad), f, c.colors.text, c.colors.panel);
   }
   return { elements: els, warnings };
 }
 
-type Callout = { text: string; x?: number; y?: number };
+/** `item`: index in `props.callouts` (its cue item). */
+type Callout = { text: string; x?: number; y?: number; item: number };
 
 function screenshot(p: Record<string, unknown>, c: Ctx, image: { path: string; width: number; height: number } | null): Layout {
   const warnings: string[] = [];
   const callouts: Callout[] = Array.isArray(p.callouts)
-    ? p.callouts.flatMap((co): Callout[] => {
-        if (typeof co === "string" && co.trim()) return [{ text: co }];
+    ? p.callouts.flatMap((co, item): Callout[] => {
+        if (typeof co === "string" && co.trim()) return [{ text: co, item }];
         if (co && typeof co === "object" && typeof (co as Callout).text === "string") {
           const o = co as Callout;
-          return [{ text: o.text, ...(typeof o.x === "number" ? { x: o.x } : {}), ...(typeof o.y === "number" ? { y: o.y } : {}) }];
+          return [{ text: o.text, ...(typeof o.x === "number" ? { x: o.x } : {}), ...(typeof o.y === "number" ? { y: o.y } : {}), item }];
         }
         return [];
       })
@@ -763,13 +816,14 @@ function screenshot(p: Record<string, unknown>, c: Ctx, image: { path: string; w
     const my = r(frame.y + Math.min(frame.h, Math.max(0, fy)));
     const m = Math.max(4, r(c.u * 0.03));
     const beat = 1 + i;
-    els.push({ type: "box", x: mx - r(m / 2), y: my - r(m / 2), w: m, h: m, color: c.colors.primary, beat });
+    const item = co.item;
+    els.push({ type: "box", x: mx - r(m / 2), y: my - r(m / 2), w: m, h: m, color: c.colors.primary, beat, item });
     const text = wrapText(co.text, size, c.safe.w * 0.6)[0] ?? co.text;
     const tw = estimateTextWidth(text, size);
     const border = r(size * 0.35);
     const rightX = mx + m;
     const x = rightX + tw + border * 2 > c.target.width - c.safe.x ? r(Math.max(border, mx - m - tw - border)) : rightX + border;
-    els.push({ type: "text", text, font: "body", size, color: c.colors.text, x, y: my - r(size / 2), beat, slide: false, box: { color: ffColor(c.colors.bg, 0.85), border } });
+    els.push({ type: "text", text, font: "body", size, color: c.colors.text, x, y: my - r(size / 2), beat, item, slide: false, box: { color: ffColor(c.colors.bg, 0.85), border } });
     note(c, "label", co.text, { x: x - border, y: my - r(size / 2) - border, w: tw + 2 * border, h: size + 2 * border }, { fontSize: size, truncated: text !== co.text }, c.colors.text);
   });
   if (listed.length && listR) {
@@ -777,12 +831,13 @@ function screenshot(p: Record<string, unknown>, c: Ctx, image: { path: string; w
     listed.forEach((co, i) => {
       const rr = rowsR[i]!;
       const beat = 1 + pinned.length + i;
+      const item = co.item;
       const bar = Math.max(2, r(c.u * 0.008));
-      els.push({ type: "box", x: rr.x, y: rr.y, w: bar, h: rr.h, color: c.colors.primary, beat });
+      els.push({ type: "box", x: rr.x, y: rr.y, w: bar, h: rr.h, color: c.colors.primary, beat, item });
       const tr: Rect = { x: rr.x + bar * 3, y: rr.y, w: rr.w - bar * 3, h: rr.h };
       const f = fitText(co.text, tr, { maxSize: c.u * 0.05, minSize: c.u * 0.022, maxLines: 2 });
       if (f.truncated) warnings.push(`screenshot: callout "${co.text.slice(0, 30)}" truncated`);
-      els.push(...textLines(f, tr, { font: "body", color: c.colors.text, beat, align: "left" }));
+      els.push(...textLines(f, tr, { font: "body", color: c.colors.text, beat, item, align: "left" }));
       note(c, "body", co.text, tr, f, c.colors.text);
     });
   }
@@ -860,19 +915,20 @@ function quote(p: Record<string, unknown>, c: Ctx): Layout {
   const els: El[] = [{ type: "text", text: "“", font: "heading", size: markSize, color: c.colors.primary, x: cx, cx, y: r(markY! - markSize * 0.12), beat: 0, slide: false }];
   note(c, "decorative", "“", { x: cx - markSize / 2, y: markY!, w: markSize, h: markH }, { fontSize: markSize, truncated: false }, c.colors.primary);
   const qRect: Rect = { x: r(c.safe.x + (c.safe.w - w) / 2), y: textY!, w, h: r(qf.height) };
-  els.push(...textLines(qf, qRect, { font: "heading", color: c.colors.text, beat: (i) => 0.5 + i * 0.5, align: c.align }));
+  els.push(...textLines(qf, qRect, { font: "heading", color: c.colors.text, beat: (i) => 0.5 + i * 0.5, item: 0, align: c.align }));
   note(c, c.main, text, qRect, qf, c.colors.text);
   let y = footY ?? 0;
   const beat = 1 + qf.lines.length * 0.5;
   if (af) {
     const rect: Rect = { x: qRect.x, y, w, h: r(af.height) };
-    els.push(...textLines(af, rect, { font: "body", color: c.colors.text, beat, align: c.align }));
+    els.push(...textLines(af, rect, { font: "body", color: c.colors.text, beat, item: 1, align: c.align }));
     note(c, "label", `— ${attribution}`, rect, af, c.colors.text);
     y += r(af.height + gap / 2);
   }
   if (sf) {
     const rect: Rect = { x: qRect.x, y, w, h: r(sf.height) };
-    els.push(...textLines(sf, rect, { font: "body", color: c.colors.muted, beat: beat + 0.5, align: c.align }));
+    // The source reveals with the attribution (the text's when there is none).
+    els.push(...textLines(sf, rect, { font: "body", color: c.colors.muted, beat: beat + 0.5, item: af ? 1 : 0, align: c.align }));
     note(c, "label", source!, rect, sf, c.colors.muted);
   }
   return { elements: els, warnings };
@@ -897,22 +953,22 @@ function stat(p: Record<string, unknown>, c: Ctx): Layout {
   const ys = vstack(c.safe, heights, gap);
   const els: El[] = [];
   const vRect: Rect = { x: c.safe.x, y: ys[0]!, w, h: r(vf.height) };
-  els.push(...textLines(vf, vRect, { font: "heading", color: c.colors.primary, beat: 0 }));
+  els.push(...textLines(vf, vRect, { font: "heading", color: c.colors.primary, beat: 0, item: 0 }));
   note(c, c.main, value, vRect, vf, c.colors.primary);
   const barW = r(c.u * 0.14);
-  els.push({ type: "box", x: r(c.safe.x + (w - barW) / 2), y: ys[1]!, w: barW, h: barH, color: c.colors.primary, beat: 0.5 });
+  els.push({ type: "box", x: r(c.safe.x + (w - barW) / 2), y: ys[1]!, w: barW, h: barH, color: c.colors.primary, beat: 0.5, item: 0 });
   let k = 2;
   if (lf) {
     const rect: Rect = { x: c.safe.x, y: ys[k++]!, w, h: r(lf.height) };
-    els.push(...textLines(lf, rect, { font: "heading", color: c.colors.text, beat: 1 }));
+    els.push(...textLines(lf, rect, { font: "heading", color: c.colors.text, beat: 1, item: 1 }));
     note(c, "label", label!, rect, lf, c.colors.text);
   }
   if (cf) {
     const rect: Rect = { x: c.safe.x, y: ys[k++]!, w, h: r(cf.height) };
-    els.push(...textLines(cf, rect, { font: "body", color: c.colors.muted, beat: 2 }));
+    els.push(...textLines(cf, rect, { font: "body", color: c.colors.muted, beat: 2, item: 1 }));
     note(c, "body", context!, rect, cf, c.colors.muted);
   }
-  return { elements: els, warnings };
+  return { elements: els, warnings, count_item: 0 };
 }
 
 const MAX_TIMELINE_EVENTS = 6;
@@ -920,12 +976,12 @@ const MAX_TIMELINE_EVENTS = 6;
 function timeline(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
   let events = Array.isArray(p.events)
-    ? p.events.flatMap((e): { label: string; text?: string }[] => {
+    ? p.events.flatMap((e, item): { label: string; text?: string; item: number }[] => {
         if (!e || typeof e !== "object") return [];
         const o = e as Record<string, unknown>;
         const label = asStr(o.label);
         const text = asStr(o.text);
-        return label ? [{ label, ...(text ? { text } : {}) }] : [];
+        return label ? [{ label, ...(text ? { text } : {}), item }] : [];
       })
     : [];
   if (events.length === 0) return { elements: [], warnings: ["timeline: no events"] };
@@ -949,8 +1005,9 @@ function timeline(p: Record<string, unknown>, c: Ctx): Layout {
   const els: El[] = [];
   const pushDot = (cx: number, cy: number, i: number) => {
     const s = i === cur ? big : dot;
-    if (i === cur) els.push({ type: "box", x: r(cx - s / 2 - th), y: r(cy - s / 2 - th), w: s + 2 * th, h: s + 2 * th, color: c.colors.bg, beat: i });
-    els.push({ type: "box", x: r(cx - s / 2), y: r(cy - s / 2), w: s, h: s, color: dotColor(i), beat: i });
+    const item = events[i]!.item;
+    if (i === cur) els.push({ type: "box", x: r(cx - s / 2 - th), y: r(cy - s / 2 - th), w: s + 2 * th, h: s + 2 * th, color: c.colors.bg, beat: i, item });
+    els.push({ type: "box", x: r(cx - s / 2), y: r(cy - s / 2), w: s, h: s, color: dotColor(i), beat: i, item });
   };
   // Text blocks are collected first so labels share one size (and texts another).
   const drawText = (labelBoxes: Rect[], textBoxes: Rect[], align: "left" | "center") => {
@@ -960,13 +1017,13 @@ function timeline(p: Record<string, unknown>, c: Ctx): Layout {
       const lb = labelBoxes[i]!;
       const lf = fitText(e.label, lb, { maxSize: lSize, minSize: lSize, maxLines: 2 });
       if (lf.truncated) warnings.push(`timeline: label "${e.label}" truncated to fit`);
-      els.push(...textLines(lf, lb, { font: "heading", color: labelColor(i), beat: i, align, valign: "top" }));
+      els.push(...textLines(lf, lb, { font: "heading", color: labelColor(i), beat: i, item: e.item, align, valign: "top" }));
       note(c, "label", e.label, lb, lf, labelColor(i));
       if (e.text) {
         const tb = { ...textBoxes[i]!, y: r(lb.y + lf.height + gap / 2) };
         const tf = fitText(e.text, tb, { maxSize: tSize, minSize: tSize, maxLines: 3 });
         if (tf.truncated) warnings.push(`timeline: text of "${e.label}" truncated to fit`);
-        els.push(...textLines(tf, tb, { font: "body", color: c.colors.muted, beat: i + 0.3, align, valign: "top" }));
+        els.push(...textLines(tf, tb, { font: "body", color: c.colors.muted, beat: i + 0.3, item: e.item, align, valign: "top" }));
         note(c, "body", e.text, tb, tf, c.colors.muted);
       }
     });
@@ -985,7 +1042,8 @@ function timeline(p: Record<string, unknown>, c: Ctx): Layout {
     const probe = Math.min(...events.map((e, i) => fitText(e.label, labelBoxes[i]!, { maxSize: c.u * 0.065, minSize: c.u * 0.028, maxLines: 2 }).fontSize));
     const cy = (i: number) => labelBoxes[i]!.y + probe * 0.6;
     els.push({ type: "box", x: r(lineX - th / 2), y: r(cy(0)), w: th, h: Math.max(th, r(cy(n - 1) - cy(0))), color: c.colors.panelEdge, beat: 0 });
-    if (cur !== undefined && cur > 0) els.push({ type: "box", x: r(lineX - th / 2), y: r(cy(0)), w: th, h: r(cy(cur) - cy(0)), color: c.colors.primary, beat: cur });
+    // The progress line reaches the current event as it appears.
+    if (cur !== undefined && cur > 0) els.push({ type: "box", x: r(lineX - th / 2), y: r(cy(0)), w: th, h: r(cy(cur) - cy(0)), color: c.colors.primary, beat: cur, item: events[cur]!.item });
     events.forEach((_, i) => pushDot(lineX, cy(i), i));
     drawText(labelBoxes, textBoxes, "left");
   } else {
@@ -997,7 +1055,7 @@ function timeline(p: Record<string, unknown>, c: Ctx): Layout {
     const lineY = r(top + big / 2);
     const cx = (i: number) => cols[i]!.x + cols[i]!.w / 2;
     els.push({ type: "box", x: r(cx(0)), y: r(lineY - th / 2), w: Math.max(th, r(cx(n - 1) - cx(0))), h: th, color: c.colors.panelEdge, beat: 0 });
-    if (cur !== undefined && cur > 0) els.push({ type: "box", x: r(cx(0)), y: r(lineY - th / 2), w: r(cx(cur) - cx(0)), h: th, color: c.colors.primary, beat: cur });
+    if (cur !== undefined && cur > 0) els.push({ type: "box", x: r(cx(0)), y: r(lineY - th / 2), w: r(cx(cur) - cx(0)), h: th, color: c.colors.primary, beat: cur, item: events[cur]!.item });
     events.forEach((_, i) => pushDot(cx(i), lineY, i));
     const labelBoxes = cols.map((col) => ({ x: col.x, y: r(top + big + gap), w: col.w, h: labelH }));
     drawText(labelBoxes, labelBoxes.map((b) => ({ ...b, h: textH })), "center");
@@ -1034,6 +1092,7 @@ function splitScreen(p: Record<string, unknown>, c: Ctx, images: { left?: Img | 
     const pr = panels[i]!;
     const beat = i * 2;
     const name = i === 0 ? "left" : "right";
+    const from = els.length;
     els.push({ type: "box", ...pr, color: c.colors.panel, beat });
     els.push({ type: "box", x: pr.x, y: pr.y, w: pr.w, h: Math.max(2, r(c.u * 0.01)), color: accents[i]!, beat });
     if (beforeAfter && i === 1) els.push({ type: "box", ...pr, color: c.colors.primary, thickness: th, beat });
@@ -1066,6 +1125,8 @@ function splitScreen(p: Record<string, unknown>, c: Ctx, images: { left?: Img | 
       note(c, "body", text, txtR, tf, c.colors.text, c.colors.panel);
     }
     if (!text && !imgR) warnings.push(`split_screen: ${name} panel has no text or asset`);
+    // Everything in a panel is its side's cue item.
+    for (let k = from; k < els.length; k++) els[k]!.item = i;
   });
   return { elements: els, warnings };
 }
@@ -1094,32 +1155,27 @@ function lowerThird(p: Record<string, unknown>, c: Ctx): Layout {
     const hr: Rect = { x: c.safe.x, y: c.safe.y, w: c.safe.w, h: Math.max(0, bar.y - gap - c.safe.y) };
     const hf = fitHeading(c, headline, hr, { maxSize: c.u * 0.1, minSize: c.u * 0.04 });
     if (hf.truncated) warnings.push("lower_third: headline truncated to fit");
-    els.push(...textLines(hf, hr, { font: "heading", color: c.colors.text, beat: 0, align: c.align }));
+    els.push(...textLines(hf, hr, { font: "heading", color: c.colors.text, beat: 0, item: 1, align: c.align }));
     note(c, c.main, headline, hr, hf, c.colors.text);
   }
-  els.push({ type: "box", ...bar, color: c.colors.panel, beat: 1 });
-  els.push({ type: "box", x: bar.x, y: bar.y, w: accentW, h: bar.h, color: c.colors.primary, beat: 1 });
+  // Cue items: the name card (bar, name, title) is item 0, the headline item 1.
+  els.push({ type: "box", ...bar, color: c.colors.panel, beat: 1, item: 0 });
+  els.push({ type: "box", x: bar.x, y: bar.y, w: accentW, h: bar.h, color: c.colors.primary, beat: 1, item: 0 });
   const tx = bar.x + accentW + pad;
   const nr: Rect = { x: tx, y: bar.y + pad, w: maxW, h: r(nf.height) };
-  els.push(...textLines(nf, nr, { font: "heading", color: c.colors.text, beat: 1, align: "left", valign: "top" }));
+  els.push(...textLines(nf, nr, { font: "heading", color: c.colors.text, beat: 1, item: 0, align: "left", valign: "top" }));
   note(c, headline ? "label" : c.main, name, nr, nf, c.colors.text, c.colors.panel);
   if (tf) {
     const trr: Rect = { x: tx, y: r(nr.y + nf.height + inner), w: maxW, h: r(tf.height) };
-    els.push(...textLines(tf, trr, { font: "body", color: c.colors.muted, beat: 1.5, align: "left", valign: "top" }));
+    els.push(...textLines(tf, trr, { font: "body", color: c.colors.muted, beat: 1.5, item: 0, align: "left", valign: "top" }));
     note(c, "label", title!, trr, tf, c.colors.muted, c.colors.panel);
   }
   return { elements: els, warnings };
 }
 
-/** Kinetic-text chunks: words, or phrases split after punctuation (exported for tests). */
+/** Kinetic-text chunks: exactly the cue items `kineticUnits` (exported for tests). */
 export function kineticChunks(text: string, rhythm: "word" | "phrase"): string[] {
-  const t = text.replace(/\s+/g, " ").trim();
-  if (!t) return [];
-  if (rhythm === "word") return t.split(" ");
-  return t
-    .split(/(?<=[.,;:!?…—])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return kineticUnits(text, rhythm);
 }
 
 function kineticText(p: Record<string, unknown>, c: Ctx): Layout {
@@ -1156,7 +1212,8 @@ function kineticText(p: Record<string, unknown>, c: Ctx): Layout {
       if (em) hit = true;
       if (rtl) x -= widths[j]! * scale;
       // RTL words hang from their right edge (libass measures Arabic ink wider than its advances).
-      els.push({ type: "text", text: w, font: "heading", size: fit.fontSize, color: em ? c.colors.primary : c.colors.text, x: r(x), ...(rtl ? { rx: r(x + widths[j]! * scale) } : {}), y: line.y, beat, slide: true });
+      // A chunk is a cue item, and its index is also its beat.
+      els.push({ type: "text", text: w, font: "heading", size: fit.fontSize, color: em ? c.colors.primary : c.colors.text, x: r(x), ...(rtl ? { rx: r(x + widths[j]! * scale) } : {}), y: line.y, beat, item: beat, slide: true });
       x += rtl ? -space * scale : (widths[j]! + space) * scale;
       // A hard-broken word spans several pieces: advance once the whole word is consumed.
       acc += w;
@@ -1176,11 +1233,12 @@ function map(p: Record<string, unknown>, c: Ctx): Layout {
   const titleRaw = asStr(p.title);
   const title = titleRaw ? headCase(c, titleRaw) : undefined;
   const clamp = (v: number) => Math.min(1, Math.max(0, v));
+  // `item`: the point's index in `props.points` (its cue item).
   let points = Array.isArray(p.points)
-    ? p.points.flatMap((pt): { label: string; x: number; y: number }[] => {
+    ? p.points.flatMap((pt, item): { label: string; x: number; y: number; item: number }[] => {
         if (!pt || typeof pt !== "object") return [];
         const o = pt as Record<string, unknown>;
-        return typeof o.x === "number" && typeof o.y === "number" ? [{ label: asStr(o.label) ?? "", x: clamp(o.x), y: clamp(o.y) }] : [];
+        return typeof o.x === "number" && typeof o.y === "number" ? [{ label: asStr(o.label) ?? "", x: clamp(o.x), y: clamp(o.y), item }] : [];
       })
     : [];
   if (points.length > 8) {
@@ -1220,7 +1278,8 @@ function map(p: Record<string, unknown>, c: Ctx): Layout {
       const n = Math.max(1, Math.min(60, Math.round(Math.hypot(b.px - a.px, b.py - a.py) / step)));
       for (let j = 1; j < n; j++) {
         const t = j / n;
-        els.push({ type: "box", x: r(a.px + (b.px - a.px) * t - d / 2), y: r(a.py + (b.py - a.py) * t - d / 2), w: d, h: d, color: c.colors.secondary, beat: i + 1.5 });
+        // The route into a point draws with it (half a beat ahead).
+        els.push({ type: "box", x: r(a.px + (b.px - a.px) * t - d / 2), y: r(a.py + (b.py - a.py) * t - d / 2), w: d, h: d, color: c.colors.secondary, beat: i + 1.5, item: b.item });
       }
     }
   } else if (p.route === true) warnings.push("map: route needs at least 2 points");
@@ -1230,8 +1289,9 @@ function map(p: Record<string, unknown>, c: Ctx): Layout {
   const border = r(size * 0.35);
   pos.forEach((pt, i) => {
     const beat = 1 + i;
-    els.push({ type: "box", x: pt.px - r(pin / 2) - ring, y: pt.py - r(pin / 2) - ring, w: pin + 2 * ring, h: pin + 2 * ring, color: c.colors.bg, beat });
-    els.push({ type: "box", x: pt.px - r(pin / 2), y: pt.py - r(pin / 2), w: pin, h: pin, color: c.colors.primary, beat });
+    const item = pt.item;
+    els.push({ type: "box", x: pt.px - r(pin / 2) - ring, y: pt.py - r(pin / 2) - ring, w: pin + 2 * ring, h: pin + 2 * ring, color: c.colors.bg, beat, item });
+    els.push({ type: "box", x: pt.px - r(pin / 2), y: pt.py - r(pin / 2), w: pin, h: pin, color: c.colors.primary, beat, item });
     if (!pt.label) return;
     const lines = wrapText(pt.label, size, c.safe.w * 0.5);
     const text = lines.length > 1 ? `${lines[0]}…` : (lines[0] ?? pt.label);
@@ -1239,7 +1299,7 @@ function map(p: Record<string, unknown>, c: Ctx): Layout {
     const right = pt.px + pin / 2 + ring + border * 2;
     const x = right + tw + border <= c.safe.x + c.safe.w ? r(right) : r(Math.max(c.safe.x + border, pt.px - pin / 2 - ring - border * 2 - tw));
     const y = r(Math.min(c.safe.y + c.safe.h - size - border, Math.max(c.safe.y + border, pt.py - size / 2)));
-    els.push({ type: "text", text, font: "body", size, color: c.colors.text, x, y, beat, slide: false, box: { color: ffColor(c.colors.bg, 0.85), border } });
+    els.push({ type: "text", text, font: "body", size, color: c.colors.text, x, y, beat, item, slide: false, box: { color: ffColor(c.colors.bg, 0.85), border } });
     note(c, "label", pt.label, { x: x - border, y: y - border, w: tw + 2 * border, h: size + 2 * border }, { fontSize: size, truncated: text !== pt.label }, c.colors.text);
   });
   return { elements: els, warnings };
@@ -1583,13 +1643,40 @@ export interface GraphMotion {
    * unmoved layout: lint checks the rest pose.
    */
   camera?: SceneMotion;
+  /** Word cues (`SceneRenderRequest.cues`): each lands its item's elements on the word. */
+  cues?: readonly ResolvedCue[];
+}
+
+/**
+ * Entrance start (seconds) of each element. Without cues: beat × step. With cues, each cue item
+ * starts where `cueItemStarts` puts it (its default is its earliest element), and all its
+ * elements move with it, keeping their offsets; the count item (a stat's value) instead ends its
+ * fade on the word (`countUpWindow` with the fade length). Elements outside any item keep beat × step.
+ */
+export function elementStarts(comp: Pick<Composition, "elements" | "count_item">, step: number, fade: number, cues?: readonly ResolvedCue[]): number[] {
+  const base = comp.elements.map((el) => round3(el.beat * step));
+  if (!cues?.length) return base;
+  const n = Math.max(0, ...comp.elements.map((el) => (el.item === undefined ? 0 : el.item + 1)));
+  const first: (number | undefined)[] = Array.from({ length: n }, () => undefined);
+  comp.elements.forEach((el, k) => {
+    if (el.item !== undefined) first[el.item] = Math.min(first[el.item] ?? Infinity, base[k]!);
+  });
+  // An item with nothing drawn (e.g. an entry past a kind's cap) holds its predecessor's time.
+  const defaults: number[] = [];
+  first.forEach((d, i) => defaults.push(d ?? (i > 0 ? defaults[i - 1]! : 0)));
+  const starts = cueItemStarts(defaults, cues, step);
+  const ci = comp.count_item;
+  const countCue = ci === undefined ? undefined : cues.find((cue) => cue.item === ci);
+  if (countCue && ci! < n) starts[ci!] = countUpWindow(countCue.at_s, fade).start;
+  return comp.elements.map((el, k) => (el.item === undefined || el.item >= n ? base[k]! : round3(base[k]! + starts[el.item]! - defaults[el.item]!)));
 }
 
 /** Build the filtergraph for a composition. `textDir` is where text files will be written. */
-export function buildFilterGraph(comp: Pick<Composition, "elements">, target: RenderTarget, durationS: number, fonts: FontFiles, textDir: string, gm: GraphMotion = {}): BuiltGraph {
+export function buildFilterGraph(comp: Pick<Composition, "elements" | "count_item">, target: RenderTarget, durationS: number, fonts: FontFiles, textDir: string, gm: GraphMotion = {}): BuiltGraph {
   const maxBeat = Math.max(0, ...comp.elements.map((e) => e.beat));
   const { motion } = gm;
   const { step, fade } = motionTiming(durationS, maxBeat, motion);
+  const starts = elementStarts(comp, step, fade, gm.cues);
   const slide = Math.max(2, r(Math.min(target.width, target.height) * 0.025));
   const inputs: string[][] = [];
   const textFiles = new Map<string, string>();
@@ -1623,8 +1710,8 @@ export function buildFilterGraph(comp: Pick<Composition, "elements">, target: Re
     warnings.push(w);
   };
 
-  for (const el of comp.elements) {
-    const start = round3(el.beat * step);
+  for (const [k, el] of comp.elements.entries()) {
+    const start = starts[k]!;
     const progress = `min(1,max(0,(t-${start})/${fade}))`;
     const ease = easingExpr(motion?.easing, progress);
     const route = el.type === "text" ? textRoute(el.text) : undefined;
@@ -2068,6 +2155,7 @@ export function createFfmpegRenderer(opts: FfmpegRendererOptions = {}): SceneRen
           ...(tokens.motion ? { motion: tokens.motion } : {}),
           background: tokens.color_background,
           ...(scene.motion ? { camera: scene.motion } : {}),
+          ...(req.cues?.length ? { cues: req.cues } : {}),
         });
         warnings.push(...built.warnings);
         for (const [name, text] of built.textFiles) await writeFile(join(tmp, name), text, "utf8");

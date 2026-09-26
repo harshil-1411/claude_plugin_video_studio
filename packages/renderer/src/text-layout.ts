@@ -328,8 +328,9 @@ export function applyTextCase(text: string, mode: "as_is" | "upper" | "title" | 
  * v6: script-aware widths and breaking (CJK per character with kinsoku, Devanagari/Arabic widths),
  *     right-aligned RTL lines, script fonts.
  * v7: no exit fade when the style blends scenes (crossfade/slide/zoom/whip); the assembly transition replaces it.
+ * v8: kinetic_text phrases split only after punctuation followed by a space (`kineticUnits`, shared with word cues).
  */
-export const LAYOUT_VERSION = 7;
+export const LAYOUT_VERSION = 8;
 
 /**
  * The content-safe rectangle of a target, in px (integers): `zones.content` when the pipeline

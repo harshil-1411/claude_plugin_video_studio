@@ -758,6 +758,42 @@ describe("footage scenes, scene audio, native voice and beat sync", () => {
   );
 
   it(
+    "a cutaway draws its graphic over the clip's sound, with word cues from the transcript",
+    async () => {
+      const s = nativeSpec();
+      s.audio = undefined;
+      s.scenes[1] = footageScene("s02", {
+        purpose: "cta",
+        visual_strategy: "motion_graphic",
+        footage: { asset: "v1", in_sec: 2, cutaway: true },
+        audio: { mode: "native" },
+        deterministic: { kind: "kinetic_text", props: { text: "Second clip", rhythm: "word" } },
+        cues: [{ word: "second" }, { word: "clip" }],
+      });
+      const dir = await footageProject("footage-cutaway", s);
+      const v = await validateSpecFile(join(dir, "project", "video-spec.json"), join(dir, "source", "content-ir.json"));
+      expect(v.errors).toEqual([]);
+      const r = await renderProject(dir, opts());
+      expect(r.placeholders).toEqual([]);
+      expect(r.warnings.filter((w) => w.startsWith("cues:"))).toEqual([]);
+      const state = JSON.parse(await readFile(join(dir, "renders", "preview", "render-state.json"), "utf8"));
+      expect(state.scenes[0].renderer).toBe("ffmpeg-footage");
+      expect(state.scenes[1].renderer).toBe("ffmpeg-drawtext");
+      // "Second" is at 2.1 s and "clip." at 2.5 s in the asset: 0.1 s and 0.5 s into the cutaway (in_sec 2).
+      expect(state.cues).toEqual([
+        { scene_id: "s02", word: "second", item: 0, at_ms: 100, status: "placed" },
+        { scene_id: "s02", word: "clip", item: 1, at_ms: 500, status: "placed" },
+      ]);
+      // The clip's sound and words still play under the graphic.
+      expect(state.scene_audio).toBe(true);
+      expect((await ffprobe(r.dist.reel)).has_audio).toBe(true);
+      const cj = JSON.stringify(JSON.parse(await readFile(join(dir, "renders", "preview", "captions", "captions.json"), "utf8")));
+      expect(cj).toContain("Second");
+    },
+    T,
+  );
+
+  it(
     "beat sync moves a cut onto the nearest beat and records a timing adjustment",
     async () => {
       const s: VideoSpec = structuredClone(spec);

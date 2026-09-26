@@ -1,12 +1,13 @@
 import { runInNewContext } from "node:vm";
-import { DETERMINISTIC_PROPS_EXAMPLES, type DeterministicKind, type MotionPattern, type Scene } from "@video-studio/schema";
+import { DETERMINISTIC_PROPS_EXAMPLES, type DeterministicKind, type MotionPattern, type Scene, cueItems, kineticUnits } from "@video-studio/schema";
+import { CUE_LEAD_S } from "./cue-timing.js";
 import { layoutZones } from "@video-studio/platforms";
 import { describe, expect, it } from "vitest";
 import { buildComposition, cameraMarkup, compositionIdFor, fmtNumber, HYPERFRAMES_KINDS, kineticChunks, layerNodes, sanitizeFontChain } from "./hyperframes-compose.js";
 import { codeLabel, highlightLines, languageFamily, tokenize } from "./hyperframes-highlight.js";
 import { findStylesDir, getStyle } from "./styles.js";
 import { resolveTokens } from "./tokens.js";
-import type { RenderTarget, SceneRenderRequest, VisualTokens } from "./types.js";
+import type { RenderTarget, ResolvedCue, SceneRenderRequest, VisualTokens } from "./types.js";
 
 const TOKENS: VisualTokens = {
   font_heading: "Inter, Helvetica, Arial, sans-serif",
@@ -670,4 +671,158 @@ describe("buildComposition: scene motion", () => {
       }
     }
   });
+});
+
+describe("buildComposition: word cues", () => {
+  /** `--t` (s) of each element whose class attribute starts with `cls`, in document order. */
+  const times = (html: string, cls: string): number[] =>
+    [...html.matchAll(new RegExp(`class="${cls}[^"]*" style="--t:([\\d.]+)s`, "g"))].map((m) => Number(m[1]));
+  const cued = (kind: DeterministicKind, props: Record<string, unknown>, cues: ResolvedCue[], over: Partial<SceneRenderRequest> = {}) =>
+    buildComposition(req(kind, props, { cues, ...over }, 6)).html;
+  const lead = (at: number) => Math.round((at - CUE_LEAD_S) * 1000) / 1000;
+
+  it("without cues (absent or empty) every kind builds byte-identical HTML", () => {
+    for (const kind of KINDS) {
+      const props = DETERMINISTIC_PROPS_EXAMPLES[kind];
+      const plain = buildComposition(req(kind, props)).html;
+      expect(buildComposition(req(kind, props, { cues: [] })).html, kind).toBe(plain);
+      expect(buildComposition(req(kind, props), { cues: [] }).html, kind).toBe(plain);
+      expect(plain).not.toContain("word cues");
+    }
+  });
+
+  it("typography: the cued line enters CUE_LEAD_S before its word, later lines follow in order", () => {
+    const html = cued("typography", { lines: ["One", "Two", "Three"] }, [{ item: 1, at_s: 2 }]);
+    const t = times(html, "vs-a vs-fade-up");
+    expect(t[0]).toBe(0.1);
+    expect(t[1]).toBe(lead(2));
+    expect(t[2]).toBeGreaterThan(t[1]!);
+  });
+
+  it("typography: item indexes count props.lines, including lines the renderer skips", () => {
+    const html = cued("typography", { lines: ["One", " ", "Three"] }, [{ item: 2, at_s: 2 }]);
+    expect(times(html, "vs-a vs-fade-up")).toEqual([0.1, lead(2)]);
+  });
+
+  it("timeline: cued event dot and text land on the word; uncued earlier events keep the stagger", () => {
+    const events = [{ label: "2019" }, { label: "2021" }, { label: "2024" }];
+    const plain = times(buildComposition(req("timeline", { events }, {}, 6)).html, "vs-tl-dot");
+    const html = cued("timeline", { events }, [{ item: 2, at_s: 3 }]);
+    const t = times(html, "vs-tl-dot");
+    expect(t.slice(0, 2)).toEqual(plain.slice(0, 2));
+    expect(t[2]).toBe(lead(3));
+    expect(times(html, "vs-a vs-slide-left")[2]).toBe(lead(3));
+    const first = times(cued("timeline", { events }, [{ item: 0, at_s: 2 }]), "vs-tl-dot");
+    expect(first[0]).toBe(lead(2));
+    expect(first[1]!).toBeGreaterThan(first[0]!);
+    expect(first[2]!).toBeGreaterThan(first[1]!);
+  });
+
+  it("comparison: right card and verdict follow their cues; an uncued verdict waits for the right card", () => {
+    const props = { left: { label: "A", text: "a" }, right: { label: "B", text: "b" }, verdict: "B wins" };
+    const html = cued("comparison", props, [{ item: 1, at_s: 2 }]);
+    expect(times(html, "vs-card vs-left")).toEqual([0.15]);
+    expect(times(html, "vs-card vs-right")).toEqual([lead(2)]);
+    expect(times(html, "vs-verdict")[0]).toBe(Math.round((lead(2) + 0.25) * 1000) / 1000);
+    expect(times(cued("comparison", props, [{ item: 2, at_s: 4 }]), "vs-verdict")).toEqual([lead(4)]);
+  });
+
+  it("chart bars: the cued bar, its label and value move together; items index props.series", () => {
+    const series = [{ label: "a", value: 1 }, { label: "skipped" }, { label: "c", value: 3 }];
+    const html = cued("chart", { type: "bar", series }, [{ item: 2, at_s: 2.5 }]);
+    const bars = times(html, "vs-a vs-grow-x");
+    expect(bars).toHaveLength(2);
+    expect(bars[1]).toBe(lead(2.5));
+    expect(times(html, "vs-axis")[1]).toBe(lead(2.5));
+    expect(times(html, "vs-value")[1]!).toBeGreaterThan(lead(2.5));
+  });
+
+  it("chart stat: the value's entrance ends on its word, the label keeps its offset", () => {
+    const html = cued("chart", { type: "stat", value: 42, label: "answers" }, [{ item: 0, at_s: 2 }]);
+    expect(times(html, "vs-stat-value")).toEqual([1.4]);
+    expect(times(html, "vs-stat-label")).toEqual([1.75]);
+  });
+
+  it("stat: the count-up finishes on the value's cue, then the label", () => {
+    const html = cued("stat", { value: 1234, label: "users" }, [{ item: 0, at_s: 2 }]);
+    // Count span at 6 s is 1.2 s: the frames run 0.8 → 2 and the final value shows at 2.
+    expect(html).toContain('<span class="vs-count"><span class="vs-a vs-fade" style="--t:2s;');
+    const frames = times(html, "vs-count-frame");
+    expect(frames[0]).toBe(0.8);
+    expect(frames.at(-1)!).toBeLessThan(2);
+    expect(times(html, "vs-stat-value")).toEqual([0.75]);
+    expect(times(html, "vs-stat-label")[0]!).toBeGreaterThanOrEqual(2 - CUE_LEAD_S);
+    const label = cued("stat", { value: 1234, label: "users" }, [{ item: 1, at_s: 3 }]);
+    expect(times(label, "vs-stat-label")).toEqual([lead(3)]);
+    expect(times(label, "vs-count-frame")[0]).toBe(0.1);
+  });
+
+  it("kinetic_text: chunks are exactly kineticUnits and the cued unit lands on its word", () => {
+    for (const text of ["Docs in, video out. Done!", "a,b c", "x – y — z", "wait… what—no. ok", "one  two\tthree", "¿Qué? sí."]) {
+      for (const rhythm of ["word", "phrase"] as const) {
+        const norm = text.replace(/\s+/g, " ").trim();
+        expect(kineticChunks(norm, rhythm).map((c) => c.text), `${rhythm}: ${text}`).toEqual(kineticUnits(text, rhythm));
+      }
+    }
+    const props = { text: "Docs in, video out. Done!", rhythm: "phrase" };
+    expect(cueItems("kinetic_text", props)).toHaveLength(3);
+    const t = times(cued("kinetic_text", props, [{ item: 2, at_s: 3 }]), "vs-kin-chunk");
+    expect(t).toHaveLength(3);
+    expect(t[2]).toBe(lead(3));
+    expect(t[1]!).toBeLessThan(t[2]!);
+  });
+
+  it("screenshot: pinned and listed callouts follow their cues", () => {
+    const callouts = ["listed one", { text: "pinned", x: 0.5, y: 0.5 }, "listed two"];
+    const html = cued("screenshot", { asset: "missing.png", callouts }, [{ item: 1, at_s: 2 }]);
+    expect(times(html, "vs-a vs-pop")).toEqual([lead(2)]);
+    const listed = times(html, "vs-callout vs-a");
+    expect(listed[0]).toBe(0.5);
+    expect(listed[1]!).toBeGreaterThan(lead(2));
+  });
+
+  it("map: the cued pin, its halo and label land on the word; items index props.points", () => {
+    const points = [{ label: "A", x: 0.1, y: 0.1 }, { label: "bad" }, { label: "C", x: 0.8, y: 0.8 }];
+    const html = cued("map", { points }, [{ item: 2, at_s: 2 }]);
+    expect(times(html, "vs-map-pin")).toEqual([0.3, lead(2)]);
+    expect(times(html, "vs-map-halo")).toEqual([0.3, lead(2)]);
+    expect(times(html, "vs-map-label")[1]).toBe(Math.round((lead(2) + 0.15) * 1000) / 1000);
+  });
+
+  it("code: a cued highlight fades in on its word; diagram edges draw with their later node", () => {
+    const code = cued("code", { language: "ts", code: "a\nb\nc", highlight_lines: [2] }, [{ item: 1, at_s: 3 }]);
+    expect(times(code, "vs-code-line vs-hl vs-a vs-hl-in")).toEqual([lead(3)]);
+    expect(code).toContain("@keyframes vs-hl-in");
+    const block = cued("code", { language: "ts", code: "a\nb", highlight_lines: [2] }, [{ item: 0, at_s: 2 }]);
+    expect(times(block, "vs-code-panel")).toEqual([lead(2)]);
+    expect(block).not.toContain("vs-hl-in");
+    const diagram = cued("diagram", { nodes: ["A", "B"], edges: [["A", "B"]] }, [{ item: 1, at_s: 3 }]);
+    expect(diagram).toContain(`style="--t:${Math.round((lead(3) + 0.1) * 1000) / 1000}s`);
+  });
+
+  it("cta, quote, split_screen, lower_third and end_card items follow their cues", () => {
+    const cta = cued("cta", { headline: "Try it", action: "Install", command: "npm i x" }, [{ item: 1, at_s: 3 }]);
+    expect(times(cta, "vs-action")).toEqual([lead(3)]);
+    expect(times(cta, "vs-command")[0]!).toBeGreaterThan(lead(3));
+    expect(times(cued("quote", { text: "Hi", attribution: "Me" }, [{ item: 1, at_s: 3 }]), "vs-quote-attr")).toEqual([lead(3)]);
+    const split = cued("split_screen", { left: { text: "a" }, right: { text: "b" }, mode: "before_after" }, [{ item: 1, at_s: 3 }]);
+    expect(times(split, "vs-split vs-right")).toEqual([lead(3)]);
+    expect(times(cued("lower_third", { name: "Ada", headline: "Hello" }, [{ item: 1, at_s: 3 }]), "vs-headline")).toEqual([lead(3)]);
+    expect(times(cued("end_card", { title: "Bye", subtitle: "see you" }, [{ item: 1, at_s: 3 }]), "vs-subtitle")).toEqual([lead(3)]);
+  });
+
+  it("cued compositions pass the HyperFrames linter with zero errors for every kind", async () => {
+    const lint = await loadLint();
+    expect(lint, "@hyperframes/producer lint must be resolvable for this test").not.toBeNull();
+    for (const kind of KINDS) {
+      const props = DETERMINISTIC_PROPS_EXAMPLES[kind];
+      const cues = cueItems(kind, props).map((_, i) => ({ item: i, at_s: 0.6 + i * 0.5 }));
+      const html = buildComposition(req(kind, props, { cues }, 6)).html;
+      const r = await lint!.lintHyperframeHtml(html);
+      const errors = r.findings.filter((f) => f.severity === "error");
+      expect(errors, `${kind}: ${JSON.stringify(errors)}`).toEqual([]);
+    }
+    const hl = buildComposition(req("code", { language: "ts", code: "a\nb", highlight_lines: [2] }, { cues: [{ item: 1, at_s: 2 }] }, 6)).html;
+    expect((await lint!.lintHyperframeHtml(hl)).findings.filter((f) => f.severity === "error")).toEqual([]);
+  }, 60_000);
 });

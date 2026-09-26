@@ -1,12 +1,13 @@
 import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type DeterministicKind, type SceneMotion, type TextBox, type TextRole, propsText } from "@video-studio/schema";
+import { type DeterministicKind, type SceneMotion, type TextBox, type TextRole, cueItems, propsText } from "@video-studio/schema";
+import { countUpWindow, cueItemStarts } from "./cue-timing.js";
 import { sceneMotionParams } from "./ffmpeg-renderer.js";
 import { codeLabel, escapeHtml, highlightLines, languageFamily } from "./hyperframes-highlight.js";
 import { type Script, baseDirection, dominantScript, htmlLang, languageScript, scriptsIn } from "./script.js";
 import { applyTextCase, estimateTextWidth, isComplexText, lineUnits, safeArea, wrapText } from "./text-layout.js";
 import { BUNDLED_FONTS, fontFaceCss, withScriptFonts } from "./tokens.js";
-import type { MotionTokens, SceneRenderRequest, VisualTokens } from "./types.js";
+import type { MotionTokens, ResolvedCue, SceneRenderRequest, VisualTokens } from "./types.js";
 import { exitFadeMs } from "./tokens.js";
 
 /**
@@ -56,6 +57,11 @@ export interface BuildCompositionOptions {
    * returns undefined, ids that look like project-relative paths are resolved against project_dir.
    */
   resolveAsset?: (id: string) => string | undefined;
+  /**
+   * Word cues (scene-local, sorted by `at_s`; item indexes follow `cueItems`). Defaults to the
+   * request's `cues`. Absent or empty: the default timing, byte-identical to a cue-less build.
+   */
+  cues?: readonly ResolvedCue[];
 }
 
 export const HYPERFRAMES_KINDS: readonly DeterministicKind[] = [
@@ -183,17 +189,22 @@ const ENTRANCES = new Set(["fade", "fade-up", "scale-in", "pop", "pop-center", "
 let activeMotion: MotionTokens | undefined;
 
 /** Entrance timing: `n` staggered items, all finished by ~60% of the scene. */
-function stagger(n: number, dur: number, first = 0.1): { at: (i: number) => number; len: number } {
+function stagger(n: number, dur: number, first = 0.1): { at: (i: number) => number; len: number; step: number } {
   if (activeMotion) {
     const len = Math.max(0.05, Math.min(activeMotion.enter_ms / 1000, dur * 0.3));
     const budget = Math.max(0, dur * 0.6 - first - len);
     const step = n > 1 ? Math.min(activeMotion.stagger_ms / 1000, budget / (n - 1)) : 0;
-    return { at: (i) => first + i * step, len };
+    return { at: (i) => first + i * step, len, step };
   }
   const len = Math.max(0.2, Math.min(0.6, dur * 0.25));
   const budget = Math.max(0, dur * 0.6 - first - len);
   const step = n > 1 ? Math.min(0.18, budget / (n - 1)) : 0;
-  return { at: (i) => first + i * step, len };
+  return { at: (i) => first + i * step, len, step };
+}
+
+/** Entrance length `anim` actually uses for `effect` given `len`. */
+function entranceLen(effect: string, len: number): number {
+  return activeMotion && ENTRANCES.has(effect) ? Math.max(0.05, activeMotion.enter_ms / 1000) : len;
 }
 
 /** Attributes for an animated element. Only computed numbers reach the style attribute. */
@@ -280,6 +291,38 @@ interface KindCtx {
   boxes: TextBox[];
   /** Style heading treatment: case transform and size multiplier (absent: as authored, 1). */
   head: { case?: VisualTokens["text_case"]; scale?: number };
+  /** Word cues (item indexes follow `cueItems`); absent without cues. */
+  cues?: readonly ResolvedCue[];
+  /** Number of `cueItems` of the scene (0 without cues). */
+  cueCount: number;
+  /** Extra stylesheet rules some cued reveals need (empty without cues). */
+  css: string[];
+}
+
+/**
+ * Word cues: entrance start of each shown reveal item. `shown[k]` is the `cueItems` index of shown
+ * element k (ascending: props the renderer skips have no element), `defaults[k]` its default
+ * start and `step` the kind's stagger step. Without cues the defaults come back unchanged.
+ */
+function cueStarts(ctx: KindCtx, shown: readonly number[], defaults: readonly number[], step: number): number[] {
+  if (!ctx.cues?.length) return [...defaults];
+  const n = Math.max(ctx.cueCount, ...shown.map((i) => i + 1));
+  // Items without an element take the default of the next shown one (the last after them).
+  const full = Array.from({ length: n }, (_, i) => {
+    const k = shown.findIndex((s) => s >= i);
+    return defaults[k < 0 ? defaults.length - 1 : k] ?? 0;
+  });
+  const out = cueItemStarts(full, ctx.cues, step);
+  return shown.map((i) => out[i]!);
+}
+
+/** Spoken time (scene-local s) of the first cue on `item`, if any. */
+function cueAt(ctx: KindCtx, item: number): number | undefined {
+  return ctx.cues?.find((c) => c.item === item)?.at_s;
+}
+
+function seq(n: number): number[] {
+  return Array.from({ length: n }, (_, i) => i);
 }
 
 /** Heading text with the style's case transform (hook/headline roles). */
@@ -343,7 +386,14 @@ function rec(
 
 function renderTypography(ctx: KindCtx): string {
   const { stage, props, warnings } = ctx;
-  const lines = Array.isArray(props.lines) ? props.lines.map(str).filter((l): l is string => Boolean(l)).map((l) => hc(ctx, l)) : [];
+  const lines: string[] = [];
+  const items: number[] = [];
+  (Array.isArray(props.lines) ? props.lines : []).forEach((v, i) => {
+    const l = str(v);
+    if (!l) return;
+    lines.push(hc(ctx, l));
+    items.push(i);
+  });
   if (lines.length === 0) warnings.push("typography: no `lines` to show");
   const emphasis = str(props.emphasis);
   const { u, safe } = stage;
@@ -351,6 +401,7 @@ function renderTypography(ctx: KindCtx): string {
   const fs = fit.fs;
   rec(ctx, ctx.main, lines.join("\n"), { y: safe.h * 0.05, w: safe.w, h: safe.h * 0.9 }, fit, ctx.colors.text);
   const st = stagger(lines.length, stage.dur);
+  const at = cueStarts(ctx, items, lines.map((_, i) => st.at(i)), st.step);
   let found = false;
   const body = lines
     .map((line, i) => {
@@ -365,7 +416,7 @@ function renderTypography(ctx: KindCtx): string {
             esc(line.slice(idx + emphasis.length));
         }
       }
-      return `<div ${anim("fade-up", st.at(i), st.len)}><span class="vs-line">${html}</span></div>`;
+      return `<div ${anim("fade-up", at[i]!, st.len)}><span class="vs-line">${html}</span></div>`;
     })
     .join("\n");
   if (emphasis && !found) warnings.push(`typography: emphasis "${emphasis}" does not occur in any line`);
@@ -400,15 +451,21 @@ function renderCode(ctx: KindCtx): string {
   const clipped = shown.length < allLines.length || maxLen * fs * 0.6 > innerW + 0.01;
   rec(ctx, "code", raw, { x: u * 3, y: (safe.h - panelH) / 2 + u * 3, w: innerW, h: panelH - u * 6 }, { fs: Math.round(fs * 100) / 100, fits: !clipped }, ctx.colors.text, ctx.colors.panel);
   const st = stagger(shown.length, stage.dur, 0.25);
+  // Items: the block (panel and rows), then the highlight, by default on with its first row.
+  const firstHl = shown.findIndex((_, i) => highlight.has(i + 1));
+  const [blockAt, hlAt] = cueStarts(ctx, [0, 1], [0, st.at(Math.max(0, firstHl))], st.step) as [number, number];
+  const hlCued = highlight.size > 0 && cueAt(ctx, 1) !== undefined;
+  if (hlCued) ctx.css.push(".vs-hl-in { animation-name: vs-hl-in; }", "@keyframes vs-hl-in { from { background-color: transparent; border-left-color: transparent; } }");
   const rows = shown
     .map((html, i) => {
       const n = i + 1;
       const hl = highlight.has(n);
-      return `<div ${anim("fade", st.at(i), st.len)}><div class="vs-code-line${hl ? " vs-hl" : ""}"><span class="vs-ln">${n}</span><span class="vs-src">${html || " "}</span></div></div>`;
+      const line = hl && hlCued ? anim("hl-in", hlAt, st.len, "vs-code-line vs-hl") : `class="vs-code-line${hl ? " vs-hl" : ""}"`;
+      return `<div ${anim("fade", st.at(i) + blockAt, st.len)}><div ${line}><span class="vs-ln">${n}</span><span class="vs-src">${html || " "}</span></div></div>`;
     })
     .join("\n");
   return [
-    `<div ${anim("scale-in", 0, 0.4, `vs-code-panel`)} data-language="${esc(language)}" data-family="${languageFamily(language)}">`,
+    `<div ${anim("scale-in", blockAt, 0.4, `vs-code-panel`)} data-language="${esc(language)}" data-family="${languageFamily(language)}">`,
     `<div class="vs-code-bar"><span></span><span></span><span></span>${codeLabel(language) ? `<em>${esc(codeLabel(language)!)}</em>` : ""}</div>`,
     `<div class="vs-code" style="font-size:${px(fs)}">`,
     rows,
@@ -420,6 +477,8 @@ function renderCode(ctx: KindCtx): string {
 interface SeriesPoint {
   label: string;
   value: number;
+  /** Index in `props.series` (the `cueItems` index). */
+  item: number;
 }
 
 function renderChart(ctx: KindCtx): string {
@@ -427,9 +486,9 @@ function renderChart(ctx: KindCtx): string {
   const type = str(props.type) ?? "stat";
   const series: SeriesPoint[] = Array.isArray(props.series)
     ? props.series
-        .map((p) => (p && typeof p === "object" ? (p as Record<string, unknown>) : {}))
-        .filter((p) => typeof p.value === "number" && Number.isFinite(p.value))
-        .map((p) => ({ label: typeof p.label === "string" ? p.label : "", value: p.value as number }))
+        .map((p, item) => ({ p: p && typeof p === "object" ? (p as Record<string, unknown>) : {}, item }))
+        .filter(({ p }) => typeof p.value === "number" && Number.isFinite(p.value))
+        .map(({ p, item }) => ({ label: typeof p.label === "string" ? p.label : "", value: p.value as number, item }))
     : [];
   const unit = str(props.unit) ?? "";
   const label = str(props.label);
@@ -446,10 +505,15 @@ function renderChart(ctx: KindCtx): string {
     const lfit = label ? fitFontInfo([label], safe.w, safe.h * 0.25, u * 7, u * 3) : undefined;
     rec(ctx, ctx.main, value + unit, { y: safe.h * 0.05, w: safe.w, h: safe.h * 0.45 }, vfit, ctx.colors.primary);
     if (label && lfit) rec(ctx, "label", label, { y: safe.h * 0.55, w: safe.w, h: safe.h * 0.25 }, lfit, ctx.colors.text);
+    // A cued value (the only item) lands on its word: its entrance ends there, like a count-up;
+    // the label keeps its offset after the value.
+    const cue = cueAt(ctx, 0);
+    const valueAt = cue === undefined ? 0.1 : countUpWindow(cue, entranceLen("scale-in", 0.6)).start;
+    const labelAt = cue === undefined ? 0.45 : valueAt + 0.35;
     return [
       `<div class="vs-stack vs-stat">`,
-      `<div ${anim("scale-in", 0.1, 0.6, `vs-stat-value`, `font-size:${px(fs)}`)}><span>${esc(value)}</span><span class="vs-stat-unit">${esc(unit)}</span></div>`,
-      label && lfit ? `<div ${anim("fade-up", 0.45, 0.5, `vs-stat-label`, `font-size:${px(lfit.fs)}`)}>${esc(label)}</div>` : "",
+      `<div ${anim("scale-in", valueAt, 0.6, `vs-stat-value`, `font-size:${px(fs)}`)}><span>${esc(value)}</span><span class="vs-stat-unit">${esc(unit)}</span></div>`,
+      label && lfit ? `<div ${anim("fade-up", labelAt, 0.5, `vs-stat-label`, `font-size:${px(lfit.fs)}`)}>${esc(label)}</div>` : "",
       `</div>`,
     ]
       .filter(Boolean)
@@ -467,10 +531,12 @@ function renderChart(ctx: KindCtx): string {
   const min = Math.min(0, ...series.map((s) => s.value));
   const span = max - min || 1;
   const st = stagger(series.length, stage.dur, 0.3);
+  const items = series.map((s) => s.item);
   const colour = (i: number) => (i % 2 === 0 ? "var(--vs-primary)" : "var(--vs-secondary)");
   let svg: string;
 
   if (type === "bar") {
+    const at = cueStarts(ctx, items, series.map((_, i) => st.at(i)), st.step);
     const rowH = chartH / series.length;
     const barH = Math.min(rowH * 0.6, u * 10);
     const labelW = chartW * 0.34;
@@ -483,9 +549,9 @@ function renderChart(ctx: KindCtx): string {
       const x = s.value >= 0 ? zeroX : zeroX - w;
       const cy = y + barH / 2;
       return [
-        `<text x="${r2(labelW - u * 2)}" y="${r2(cy)}" text-anchor="end" dominant-baseline="middle" ${anim("fade", st.at(i), st.len, `vs-axis`)}>${esc(s.label)}</text>`,
-        `<rect x="${r2(x)}" y="${r2(y)}" width="${r2(Math.max(1, w))}" height="${r2(barH)}" rx="${r2(Math.min(barH / 4, u))}" fill="${colour(i)}" ${anim(s.value >= 0 ? "grow-x" : "grow-x-rev", st.at(i), st.len)}/>`,
-        `<text x="${r2(labelW + trackW + u * 2)}" y="${r2(cy)}" dominant-baseline="middle" ${anim("fade", st.at(i) + st.len * 0.6, st.len, `vs-value`)}>${esc(fmtNumber(s.value) + unit)}</text>`,
+        `<text x="${r2(labelW - u * 2)}" y="${r2(cy)}" text-anchor="end" dominant-baseline="middle" ${anim("fade", at[i]!, st.len, `vs-axis`)}>${esc(s.label)}</text>`,
+        `<rect x="${r2(x)}" y="${r2(y)}" width="${r2(Math.max(1, w))}" height="${r2(barH)}" rx="${r2(Math.min(barH / 4, u))}" fill="${colour(i)}" ${anim(s.value >= 0 ? "grow-x" : "grow-x-rev", at[i]!, st.len)}/>`,
+        `<text x="${r2(labelW + trackW + u * 2)}" y="${r2(cy)}" dominant-baseline="middle" ${anim("fade", at[i]! + st.len * 0.6, st.len, `vs-value`)}>${esc(fmtNumber(s.value) + unit)}</text>`,
       ].join("");
     });
     svg = bars.join("\n");
@@ -504,8 +570,14 @@ function renderChart(ctx: KindCtx): string {
     const lineLen = Math.max(0.6, Math.min(stage.dur * 0.5, 1.6));
     const baseline = `<line x1="${r2(padL)}" y1="${r2(padT + innerH)}" x2="${r2(padL + innerW)}" y2="${r2(padT + innerH)}" class="vs-gridline"/>`;
     const path = `<path d="${d}" pathLength="1" fill="none" stroke="var(--vs-primary)" stroke-width="${r2(u * 1.1)}" stroke-linecap="round" stroke-linejoin="round" ${anim("draw", 0.3, lineLen)}/>`;
+    const dotAt = cueStarts(
+      ctx,
+      items,
+      pts.map((_, i) => 0.3 + (series.length === 1 ? 0 : (i / (series.length - 1)) * lineLen)),
+      series.length > 1 ? lineLen / (series.length - 1) : 0,
+    );
     const dots = pts.map((p, i) => {
-      const at = 0.3 + (series.length === 1 ? 0 : (i / (series.length - 1)) * lineLen);
+      const at = dotAt[i]!;
       return [
         `<circle cx="${r2(p.x)}" cy="${r2(p.y)}" r="${r2(u * 1.6)}" fill="var(--vs-secondary)" ${anim("pop", at, 0.3)}/>`,
         `<text x="${r2(p.x)}" y="${r2(p.y - fs * 0.9)}" text-anchor="middle" ${anim("fade", at, 0.3, `vs-value`)}>${esc(fmtNumber(p.s.value) + unit)}</text>`,
@@ -517,6 +589,7 @@ function renderChart(ctx: KindCtx): string {
     if (type !== "pie") warnings.push(`chart: unknown type "${type}"; drawn as pie`);
     const positive = series.filter((s) => s.value > 0);
     if (positive.length < series.length) warnings.push("chart: pie ignores zero and negative values");
+    const at = cueStarts(ctx, positive.map((s) => s.item), positive.map((_, i) => st.at(i)), st.step);
     const total = positive.reduce((a, s) => a + s.value, 0) || 1;
     const legendH = positive.length * fs * 1.6;
     const size = Math.min(chartW, chartH - legendH - u * 4);
@@ -537,9 +610,9 @@ function renderChart(ctx: KindCtx): string {
           : `<path d="M${r2(cx)} ${r2(cy)} L${r2(cx + rad * Math.cos(a0))} ${r2(cy + rad * Math.sin(a0))} A${r2(rad)} ${r2(rad)} 0 ${sweep > Math.PI ? 1 : 0} 1 ${r2(cx + rad * Math.cos(a1))} ${r2(cy + rad * Math.sin(a1))} Z"`;
       const ly = size + u * 4 + i * fs * 1.6;
       return [
-        `${shape} fill="${fill}" fill-opacity="${opacity}" stroke="var(--vs-bg)" stroke-width="${r2(u * 0.5)}" ${anim("pop-center", st.at(i), st.len)}/>`,
-        `<rect x="${r2(chartW * 0.2)}" y="${r2(ly - fs * 0.5)}" width="${r2(fs)}" height="${r2(fs)}" fill="${fill}" fill-opacity="${opacity}" ${anim("fade", st.at(i), st.len)}/>`,
-        `<text x="${r2(chartW * 0.2 + fs * 1.6)}" y="${r2(ly)}" dominant-baseline="middle" ${anim("fade", st.at(i), st.len, `vs-axis`)}>${esc(`${s.label} · ${fmtNumber(Math.round((s.value / total) * 1000) / 10)}%`)}</text>`,
+        `${shape} fill="${fill}" fill-opacity="${opacity}" stroke="var(--vs-bg)" stroke-width="${r2(u * 0.5)}" ${anim("pop-center", at[i]!, st.len)}/>`,
+        `<rect x="${r2(chartW * 0.2)}" y="${r2(ly - fs * 0.5)}" width="${r2(fs)}" height="${r2(fs)}" fill="${fill}" fill-opacity="${opacity}" ${anim("fade", at[i]!, st.len)}/>`,
+        `<text x="${r2(chartW * 0.2 + fs * 1.6)}" y="${r2(ly)}" dominant-baseline="middle" ${anim("fade", at[i]!, st.len, `vs-axis`)}>${esc(`${s.label} · ${fmtNumber(Math.round((s.value / total) * 1000) / 10)}%`)}</text>`,
       ].join("");
     });
     svg = slices.join("\n");
@@ -600,17 +673,21 @@ export function layerNodes(n: number, edges: ReadonlyArray<readonly [number, num
 
 function renderDiagram(ctx: KindCtx): string {
   const { stage, props, warnings } = ctx;
-  const labels = Array.isArray(props.nodes) ? props.nodes.map(str).filter((s): s is string => Boolean(s)) : [];
   const index = new Map<string, number>();
   const nodes: string[] = [];
-  for (const l of labels) {
+  /** `cueItems` index (position in `props.nodes`) of each drawn node. */
+  const items: number[] = [];
+  (Array.isArray(props.nodes) ? props.nodes : []).forEach((v, i) => {
+    const l = str(v);
+    if (!l) return;
     if (index.has(l)) {
       warnings.push(`diagram: duplicate node "${l}" drawn once`);
-      continue;
+      return;
     }
     index.set(l, nodes.length);
     nodes.push(l);
-  }
+    items.push(i);
+  });
   const edges: Array<[number, number]> = [];
   for (const e of Array.isArray(props.edges) ? props.edges : []) {
     const [a, b] = Array.isArray(e) ? e : [];
@@ -663,11 +740,14 @@ function renderDiagram(ctx: KindCtx): string {
     const fit = fitFontInfo([label], b.w - u * 2, b.h - u, fs, fs);
     rec(ctx, "label", label, { x: b.x + u, y: b.y + u / 2, w: b.w - u * 2, h: b.h - u }, { fs, fits: fit.fits }, ctx.colors.text, nodeBg);
   });
-  const layerTime = (l: number) => 0.15 + l * Math.min(0.45, Math.max(0.1, (stage.dur * 0.6 - 0.6) / Math.max(1, layerCount)));
+  const layerStep = Math.min(0.45, Math.max(0.1, (stage.dur * 0.6 - 0.6) / Math.max(1, layerCount)));
+  const layerTime = (l: number) => 0.15 + l * layerStep;
+  // Each node is an item; an edge draws with the later of its two nodes.
+  const nodeAt = cueStarts(ctx, items, nodes.map((_, i) => layerTime(layers[i]!)), layerStep);
   const nodeHtml = nodes
     .map((label, i) => {
       const b = boxes[i]!;
-      return `<div class="vs-node" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)};font-size:${px(fs)}"><div ${anim("scale-in", layerTime(layers[i]!), 0.45)}>${esc(label)}</div></div>`;
+      return `<div class="vs-node" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)};font-size:${px(fs)}"><div ${anim("scale-in", nodeAt[i]!, 0.45)}>${esc(label)}</div></div>`;
     })
     .join("\n");
   const stroke = Math.max(1.5, u * 0.45);
@@ -688,7 +768,7 @@ function renderDiagram(ctx: KindCtx): string {
       const ey = p1.y - uy * gap;
       const bx = ex - ux * head;
       const by = ey - uy * head;
-      const at = layerTime(Math.max(layers[a]!, layers[b]!)) + 0.1;
+      const at = (ctx.cues?.length ? Math.max(nodeAt[a]!, nodeAt[b]!) : layerTime(Math.max(layers[a]!, layers[b]!))) + 0.1;
       return [
         `<path d="M${r2(sx)} ${r2(sy)} L${r2(bx)} ${r2(by)}" pathLength="1" stroke="var(--vs-text)" stroke-opacity="0.7" stroke-width="${r2(stroke)}" fill="none" ${anim("draw", at, 0.4)}/>`,
         `<polygon points="${r2(ex)},${r2(ey)} ${r2(bx - uy * head * 0.55)},${r2(by + ux * head * 0.55)} ${r2(bx + uy * head * 0.55)},${r2(by - ux * head * 0.55)}" fill="var(--vs-text)" fill-opacity="0.7" ${anim("fade", at + 0.3, 0.2)}/>`,
@@ -733,16 +813,17 @@ function renderComparison(ctx: KindCtx): string {
   if (verdict && verdictFit) {
     rec(ctx, "headline", verdict, { x: u * 3, y: safe.h * 0.84, w: safe.w - u * 6, h: safe.h * 0.14 }, verdictFit, ctx.colors.text, mixHex(ctx.colors.bg, ctx.colors.primary, 0.18));
   }
+  const [leftAt, rightAt, verdictAt] = cueStarts(ctx, verdict ? [0, 1, 2] : [0, 1], [0.15, 0.4, ...(verdict ? [Math.min(0.9, stage.dur * 0.45)] : [])], 0.25) as [number, number, number?];
   const card = (s: { label: string; text: string }, cls: string, effect: string, at: number) =>
     `<div ${anim(effect, at, 0.5, `vs-card ${cls}`)}><div class="vs-card-label" style="font-size:${px(labelFs)}">${esc(s.label)}</div><div class="vs-card-text" style="font-size:${px(textFs)}">${esc(s.text)}</div></div>`;
   return [
     `<div class="vs-stack vs-comparison">`,
     `<div class="vs-compare ${columns ? "vs-columns" : "vs-rows"}">`,
-    card(left, "vs-left", columns ? "slide-right" : "fade-up", 0.15),
-    card(right, "vs-right", columns ? "slide-left" : "fade-up", 0.4),
+    card(left, "vs-left", columns ? "slide-right" : "fade-up", leftAt),
+    card(right, "vs-right", columns ? "slide-left" : "fade-up", rightAt),
     `</div>`,
     verdict && verdictFit
-      ? `<div ${anim("fade-up", Math.min(0.9, stage.dur * 0.45), 0.5, `vs-verdict`, `font-size:${px(verdictFit.fs)}`)}>${esc(verdict)}</div>`
+      ? `<div ${anim("fade-up", verdictAt!, 0.5, `vs-verdict`, `font-size:${px(verdictFit.fs)}`)}>${esc(verdict)}</div>`
       : "",
     `</div>`,
   ]
@@ -762,7 +843,9 @@ function renderCta(ctx: KindCtx): string {
   const url = str(props.url);
   const { u, safe } = stage;
   const st = stagger(2 + (command ? 1 : 0) + (url ? 1 : 0), stage.dur);
-  let i = 0;
+  // Items: the headline, then the action; the command and url keep their offset from the action.
+  const [headAt, actionAt] = cueStarts(ctx, [0, 1], [st.at(0), st.at(1)], st.step) as [number, number];
+  const shift = actionAt - st.at(1);
   const hf = headFit(ctx, [headline], safe.w, safe.h * 0.35, u * 10, u * 3.5, 1.1);
   const af = fitFontInfo([action], safe.w * 0.8, safe.h * 0.12, u * 6, u * 2.5);
   const cf = command ? fitFontInfo([command], safe.w - u * 8, safe.h * 0.12, u * 4.5, u * 1.8, 1.2, 0.62) : undefined;
@@ -781,12 +864,12 @@ function renderCta(ctx: KindCtx): string {
   return [
     `<div class="vs-stack vs-cta">`,
     logoHtml(ctx, 0),
-    `<div ${anim("fade-up", st.at(i++), st.len, `vs-headline`, `font-size:${px(hf.fs)}`)}>${esc(headline)}</div>`,
-    `<div class="vs-action-wrap"><div ${anim("pop", st.at(i++), st.len, `vs-action`, `font-size:${px(af.fs)}`)}>${esc(action)}</div></div>`,
+    `<div ${anim("fade-up", headAt, st.len, `vs-headline`, `font-size:${px(hf.fs)}`)}>${esc(headline)}</div>`,
+    `<div class="vs-action-wrap"><div ${anim("pop", actionAt, st.len, `vs-action`, `font-size:${px(af.fs)}`)}>${esc(action)}</div></div>`,
     command && cf
-      ? `<div ${anim("fade-up", st.at(i++), st.len, `vs-command`, `font-size:${px(cf.fs)}`)}><span class="vs-prompt">$</span> ${esc(command)}</div>`
+      ? `<div ${anim("fade-up", st.at(2) + shift, st.len, `vs-command`, `font-size:${px(cf.fs)}`)}><span class="vs-prompt">$</span> ${esc(command)}</div>`
       : "",
-    url && uf ? `<div ${anim("fade", st.at(i++), st.len, `vs-url`, `font-size:${px(uf.fs)}`)}>${esc(url)}</div>` : "",
+    url && uf ? `<div ${anim("fade", st.at(command && cf ? 3 : 2) + shift, st.len, `vs-url`, `font-size:${px(uf.fs)}`)}>${esc(url)}</div>` : "",
     `</div>`,
   ]
     .filter(Boolean)
@@ -804,12 +887,18 @@ function renderEndCard(ctx: KindCtx): string {
   const sf = subtitle ? fitFontInfo([subtitle], safe.w, safe.h * 0.15, u * 5, u * 2.2) : undefined;
   if (title && tf) rec(ctx, ctx.main, title, { y: safe.h * 0.25, w: safe.w, h: safe.h * 0.3 }, tf, ctx.colors.text);
   if (subtitle && sf) rec(ctx, "body", subtitle, { y: safe.h * 0.58, w: safe.w, h: safe.h * 0.15 }, sf, ctx.colors.text);
+  // Items: title and subtitle (those given); with neither, the card itself (logo and rule).
+  const defaults = [...(title ? [0.15] : []), ...(subtitle ? [0.45] : [])];
+  const starts = cueStarts(ctx, seq(Math.max(1, defaults.length)), defaults.length ? defaults : [0.05], 0.3);
+  const titleAt = title ? starts[0]! : 0.15;
+  const subtitleAt = subtitle ? starts[title ? 1 : 0]! : 0.45;
+  const cardShift = defaults.length ? 0 : starts[0]! - 0.05;
   return [
     `<div class="vs-stack vs-end">`,
-    logoHtml(ctx, 0.05),
-    title && tf ? `<div ${anim("scale-in", 0.15, 0.6, `vs-headline`, `font-size:${px(tf.fs)}`)}>${esc(title)}</div>` : "",
-    subtitle && sf ? `<div ${anim("fade-up", 0.45, 0.5, `vs-subtitle`, `font-size:${px(sf.fs)}`)}>${esc(subtitle)}</div>` : "",
-    `<div ${anim("grow-x-center", 0.6, 0.5, `vs-rule`)}></div>`,
+    logoHtml(ctx, 0.05 + cardShift),
+    title && tf ? `<div ${anim("scale-in", titleAt, 0.6, `vs-headline`, `font-size:${px(tf.fs)}`)}>${esc(title)}</div>` : "",
+    subtitle && sf ? `<div ${anim("fade-up", subtitleAt, 0.5, `vs-subtitle`, `font-size:${px(sf.fs)}`)}>${esc(subtitle)}</div>` : "",
+    `<div ${anim("grow-x-center", 0.6 + cardShift, 0.5, `vs-rule`)}></div>`,
     `</div>`,
   ]
     .filter(Boolean)
@@ -840,6 +929,7 @@ function renderScreenshot(ctx: KindCtx): string {
   const positioned: string[] = [];
   const listed: string[] = [];
   const st = stagger(callouts.length, stage.dur, 0.5);
+  const at = cueStarts(ctx, seq(callouts.length), callouts.map((_, i) => st.at(i)), st.step);
   const fs = Math.max(9, u * 3.4);
   callouts.forEach((c, i) => {
     const text = typeof c === "string" ? c : c && typeof c === "object" ? str((c as Record<string, unknown>).text) : undefined;
@@ -850,10 +940,10 @@ function renderScreenshot(ctx: KindCtx): string {
     if (x !== undefined && y !== undefined) {
       rec(ctx, "label", text, { x: (x / 100) * safe.w, y: (y / 100) * safe.h - fs, w: Math.min(safe.w, Array.from(text).length * fs * 0.56 + fs * 2.6), h: fs * 2 }, { fs: r2(fs), fits: true }, ctx.colors.bg, ctx.colors.primary);
       positioned.push(
-        `<div class="vs-pin" style="left:${x}%;top:${y}%"><div ${anim("pop", st.at(i), st.len)}><span class="vs-pin-dot"></span><span class="vs-callout">${esc(text)}</span></div></div>`,
+        `<div class="vs-pin" style="left:${x}%;top:${y}%"><div ${anim("pop", at[i]!, st.len)}><span class="vs-pin-dot"></span><span class="vs-callout">${esc(text)}</span></div></div>`,
       );
     } else {
-      listed.push(`<div ${anim("fade-up", st.at(i), st.len, `vs-callout`)}>${esc(text)}</div>`);
+      listed.push(`<div ${anim("fade-up", at[i]!, st.len, `vs-callout`)}>${esc(text)}</div>`);
       rec(ctx, "label", text, { y: safe.h - Math.min(safe.h * 0.35, callouts.length * fs * 2.6) + listed.length * fs * 1.6, w: safe.w, h: fs * 1.4 }, { fs: r2(fs), fits: true }, ctx.colors.bg, ctx.colors.primary);
     }
   });
@@ -922,15 +1012,17 @@ function renderQuote(ctx: KindCtx): string {
   if (attribution && attr) rec(ctx, "label", `— ${attribution}`, { y: ys[k++], w: safe.w, h: attr.h }, attr.fit, ctx.colors.primary);
   if (source && src) rec(ctx, "label", source, { y: ys[k++], w: safe.w, h: src.h }, src.fit, mutedHex(ctx));
   const st = stagger(heights.length, stage.dur);
-  let i = 0;
+  // Items: the text, then the attribution; the mark keeps its time, the source follows the last item.
+  const qAt = cueStarts(ctx, attr ? [0, 1] : [0], attr ? [st.at(1), st.at(2)] : [st.at(1)], st.step);
+  const shift = qAt[qAt.length - 1]! - st.at(qAt.length);
   return [
     `<div class="vs-stack vs-quote" style="gap:${px(gap)}">`,
-    `<div ${anim("pop", st.at(i++), st.len, `vs-quote-mark`, `height:${px(markH)};font-size:${px(markFs)}`)}>“</div>`,
-    `<div ${anim("fade-up", st.at(i++), st.len, `vs-quote-text`, `min-height:${px(body.h)};font-size:${px(body.fit.fs)}`)}>${esc(text)}</div>`,
+    `<div ${anim("pop", st.at(0), st.len, `vs-quote-mark`, `height:${px(markH)};font-size:${px(markFs)}`)}>“</div>`,
+    `<div ${anim("fade-up", qAt[0]!, st.len, `vs-quote-text`, `min-height:${px(body.h)};font-size:${px(body.fit.fs)}`)}>${esc(text)}</div>`,
     attribution && attr
-      ? `<div ${anim("fade-up", st.at(i++), st.len, `vs-quote-attr`, `min-height:${px(attr.h)};font-size:${px(attr.fit.fs)}`)}>— ${esc(attribution)}</div>`
+      ? `<div ${anim("fade-up", qAt[1]!, st.len, `vs-quote-attr`, `min-height:${px(attr.h)};font-size:${px(attr.fit.fs)}`)}>— ${esc(attribution)}</div>`
       : "",
-    source && src ? `<div ${anim("fade", st.at(i++), st.len, `vs-quote-source vs-muted`, `min-height:${px(src.h)};font-size:${px(src.fit.fs)}`)}>${esc(source)}</div>` : "",
+    source && src ? `<div ${anim("fade", st.at(attr ? 3 : 2) + shift, st.len, `vs-quote-source vs-muted`, `min-height:${px(src.h)};font-size:${px(src.fit.fs)}`)}>${esc(source)}</div>` : "",
     `</div>`,
   ]
     .filter(Boolean)
@@ -971,14 +1063,21 @@ function renderStat(ctx: KindCtx): string {
   if (label && lab) rec(ctx, "body", label, { y: ys[1], w: safe.w, h: lab.h }, lab.fit, ctx.colors.text);
   if (context && con) rec(ctx, "label", context, { y: ys[lab ? 2 : 1], w: safe.w, h: con.h }, con.fit, mutedHex(ctx));
   // Numbers count up to their value (discrete frames, a pure function of time); text values pop in.
-  const count = numeric !== undefined && numeric !== 0 ? countUp(numeric, 0.1, Math.max(0.4, Math.min(1.2, stage.dur * 0.35))) : undefined;
+  // A cued number's count-up finishes on its word (the entrance keeps its lead on the count).
+  const span = Math.max(0.4, Math.min(1.2, stage.dur * 0.35));
+  const counts = numeric !== undefined && numeric !== 0;
+  const valueCue = cueAt(ctx, 0);
+  const win = counts && valueCue !== undefined ? countUpWindow(valueCue, span) : undefined;
+  const count = counts ? countUp(numeric!, win ? win.start : 0.1, win ? win.end - win.start : span) : undefined;
   const digits = count
     ? `<span class="vs-count"><span ${anim("fade", count.done, 0.001)}>${esc(value)}</span>${count.frames}</span>`
     : `<span>${esc(value)}</span>`;
-  const labelAt = count ? Math.min(count.done, stage.dur * 0.5) : 0.45;
+  // Items: the value, then the label (the context keeps its offset from the label).
+  const [cuedValueAt, labelAt] = cueStarts(ctx, [0, 1], [0.05, count ? Math.min(count.done, stage.dur * 0.5) : 0.45], 0.4) as [number, number];
+  const valueAt = win ? Math.max(0, win.start - 0.05) : cuedValueAt;
   return [
     `<div class="vs-stack vs-stat" style="gap:${px(gap)}">`,
-    `<div ${anim("scale-in", 0.05, 0.5, `vs-stat-value`, `min-height:${px(valueH)};font-size:${px(vfit.fs)}`)}>${digits}${unit ? `<span class="vs-stat-unit">${esc(unit)}</span>` : ""}</div>`,
+    `<div ${anim("scale-in", valueAt, 0.5, `vs-stat-value`, `min-height:${px(valueH)};font-size:${px(vfit.fs)}`)}>${digits}${unit ? `<span class="vs-stat-unit">${esc(unit)}</span>` : ""}</div>`,
     label && lab ? `<div ${anim("fade-up", labelAt, 0.5, `vs-stat-label`, `min-height:${px(lab.h)};font-size:${px(lab.fit.fs)}`)}>${esc(label)}</div>` : "",
     context && con ? `<div ${anim("fade", labelAt + 0.25, 0.5, `vs-stat-context vs-muted`, `min-height:${px(con.h)};font-size:${px(con.fit.fs)}`)}>${esc(context)}</div>` : "",
     `</div>`,
@@ -991,7 +1090,7 @@ function renderTimeline(ctx: KindCtx): string {
   const { stage, props, warnings } = ctx;
   let events = (Array.isArray(props.events) ? props.events : [])
     .map((e) => (e && typeof e === "object" ? (e as Record<string, unknown>) : {}))
-    .map((e) => ({ label: str(e.label) ?? "", text: str(e.text) ?? "" }))
+    .map((e, item) => ({ label: str(e.label) ?? "", text: str(e.text) ?? "", item }))
     .filter((e) => e.label || e.text);
   if (events.length > 6) {
     warnings.push(`timeline: ${events.length} events do not fit; showing the first 6`);
@@ -1042,6 +1141,7 @@ function renderTimeline(ctx: KindCtx): string {
   const lf = sharedFit(events.map((e) => e.label), blocks[0]!.w, labelH, u * (vertical ? 6 : 5), u * 2.6, 1.15);
   const tf = sharedFit(events.map((e) => e.text), blocks[0]!.w, Math.max(1, textH), u * 4.2, u * 2.2, 1.3);
   const st = stagger(n, stage.dur, 0.3);
+  const at = cueStarts(ctx, events.map((e) => e.item), events.map((_, i) => st.at(i)), st.step);
   const lineDur = Math.max(0.3, st.at(n - 1) - 0.1 + st.len * 0.5);
   const muted = mutedHex(ctx, 0.6);
   const html: string[] = [
@@ -1056,8 +1156,8 @@ function renderTimeline(ctx: KindCtx): string {
     rec(ctx, "label", e.label, { x: b.x, y: b.y, w: b.w, h: labelH }, { fs: lf.fs, fits: lf.fits[i]! }, labelColour);
     if (hasText) rec(ctx, "body", e.text, { x: b.x, y: b.y + labelH, w: b.w, h: textH }, { fs: tf.fs, fits: tf.fits[i]! }, state === "vs-tl-future" ? muted : ctx.colors.text);
     html.push(
-      `<div class="vs-tl-pos" style="left:${px(d.x - r)};top:${px(d.y - r)};width:${px(r * 2)};height:${px(r * 2)}"><div ${anim("pop", st.at(i), st.len, `vs-tl-dot ${state}`)}></div></div>`,
-      `<div class="vs-tl-event ${state}${vertical ? "" : " vs-tl-under"}" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)}"><div ${anim(vertical ? "slide-left" : "fade-up", st.at(i), st.len)}>` +
+      `<div class="vs-tl-pos" style="left:${px(d.x - r)};top:${px(d.y - r)};width:${px(r * 2)};height:${px(r * 2)}"><div ${anim("pop", at[i]!, st.len, `vs-tl-dot ${state}`)}></div></div>`,
+      `<div class="vs-tl-event ${state}${vertical ? "" : " vs-tl-under"}" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)}"><div ${anim(vertical ? "slide-left" : "fade-up", at[i]!, st.len)}>` +
         `<div class="vs-tl-label" style="font-size:${px(lf.fs)}">${esc(e.label)}</div>` +
         (e.text ? `<div class="vs-tl-text" style="font-size:${px(tf.fs)}">${esc(e.text)}</div>` : "") +
         `</div></div>`,
@@ -1094,6 +1194,9 @@ function renderSplitScreen(ctx: KindCtx): string {
   const tfMedia = withMedia.length ? sharedFit(withMedia, innerW, ph * 0.2, u * 4.2, u * 2.2, 1.3) : undefined;
   const tfBare = bare.length ? sharedFit(bare, innerW, textH(hasMedia.indexOf(false)), u * 6, u * 2.4, 1.3) : undefined;
   const accents = beforeAfter ? [mutedHex(ctx), ctx.colors.primary] : [ctx.colors.primary, ctx.colors.secondary];
+  // Items: the left panel, then the right (the before → after arrow keeps its offset from it).
+  const defaults = [0, 1].map((i) => 0.15 + i * 0.3);
+  const panelAt = cueStarts(ctx, [0, 1], defaults, 0.3);
   const cards = panels.map((p, i) => {
     const r = rects[i]!;
     const tf = hasMedia[i] ? tfMedia! : tfBare!;
@@ -1115,7 +1218,7 @@ function renderSplitScreen(ctx: KindCtx): string {
     const side = i === 0 ? "vs-left" : "vs-right";
     const effect = columns ? (i === 0 ? "slide-right" : "slide-left") : "fade-up";
     return (
-      `<div class="vs-split-pos" style="left:${px(r.x)};top:${px(r.y)};width:${px(r.w)};height:${px(r.h)}"><div ${anim(effect, 0.15 + i * 0.3, 0.5, `vs-split ${side}${beforeAfter ? (i === 0 ? " vs-before" : " vs-after") : ""}`)}>` +
+      `<div class="vs-split-pos" style="left:${px(r.x)};top:${px(r.y)};width:${px(r.w)};height:${px(r.h)}"><div ${anim(effect, panelAt[i]!, 0.5, `vs-split ${side}${beforeAfter ? (i === 0 ? " vs-before" : " vs-after") : ""}`)}>` +
       (p.label ? `<div class="vs-split-label" style="height:${px(labelH)};font-size:${px(lf.fs)}">${esc(p.label)}</div>` : "") +
       media +
       (p.text ? `<div class="vs-split-text${hasMedia[i] ? "" : " vs-split-only"}" style="font-size:${px(fs)}">${esc(p.text)}</div>` : "") +
@@ -1129,7 +1232,7 @@ function renderSplitScreen(ctx: KindCtx): string {
     const cx = columns ? pw + gap / 2 : safe.w / 2;
     const cy = columns ? safe.h / 2 : ph + gap / 2;
     const rot = columns ? 0 : 90;
-    arrow = `<svg class="vs-split-arrow" width="${r2(s)}" height="${r2(s)}" viewBox="0 0 24 24" style="left:${px(cx - s / 2)};top:${px(cy - s / 2)}"><g ${anim("pop", 0.6, 0.4)}><circle cx="12" cy="12" r="12" fill="var(--vs-primary)"/><path d="M7 12h9M12.5 7.5L17 12l-4.5 4.5" transform="rotate(${rot} 12 12)" fill="none" stroke="var(--vs-bg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g></svg>`;
+    arrow = `<svg class="vs-split-arrow" width="${r2(s)}" height="${r2(s)}" viewBox="0 0 24 24" style="left:${px(cx - s / 2)};top:${px(cy - s / 2)}"><g ${anim("pop", 0.6 + (panelAt[1]! - defaults[1]!), 0.4)}><circle cx="12" cy="12" r="12" fill="var(--vs-primary)"/><path d="M7 12h9M12.5 7.5L17 12l-4.5 4.5" transform="rotate(${rot} 12 12)" fill="none" stroke="var(--vs-bg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g></svg>`;
   }
   return [...cards, arrow].filter(Boolean).join("\n");
 }
@@ -1152,15 +1255,17 @@ function renderLowerThird(ctx: KindCtx): string {
   const textX = stripe + pad;
   rec(ctx, "label", name, { x: textX, y: barY + pad, w: innerW, h: nb.h }, nb.fit, ctx.colors.text, ctx.colors.panel);
   if (title && tb) rec(ctx, "label", title, { x: textX, y: barY + pad + nb.h + u, w: innerW, h: tb.h }, tb.fit, mixHex(ctx.colors.panel, ctx.colors.text, 0.75), ctx.colors.panel);
+  // Items: the name card, then the headline (drawn first by default).
+  const [barAt, headAt] = cueStarts(ctx, headline ? [0, 1] : [0], headline ? [Math.min(0.6, stage.dur * 0.25), 0.1] : [0.1], 0.3) as [number, number?];
   let head = "";
   if (headline) {
     const room = barY - u * 6;
     const hb = headBlock(ctx, headline, safe.w, room, u * 10, u * 3.5, 1.1);
     const hy = Math.max(0, (room - hb.h) / 2);
     rec(ctx, ctx.main, headline, { y: hy, w: safe.w, h: hb.h }, hb.fit, ctx.colors.text);
-    head = `<div class="vs-lt-headline" style="left:0;top:${px(hy)};width:${px(safe.w)};height:${px(hb.h)}"><div ${anim("fade-up", 0.1, 0.6, `vs-headline`, `font-size:${px(hb.fit.fs)}`)}>${esc(headline)}</div></div>`;
+    head = `<div class="vs-lt-headline" style="left:0;top:${px(hy)};width:${px(safe.w)};height:${px(hb.h)}"><div ${anim("fade-up", headAt!, 0.6, `vs-headline`, `font-size:${px(hb.fit.fs)}`)}>${esc(headline)}</div></div>`;
   }
-  const at = headline ? Math.min(0.6, stage.dur * 0.25) : 0.1;
+  const at = barAt;
   return [
     head,
     `<div class="vs-lt-pos" style="left:0;top:${px(barY)};width:${px(barW)};height:${px(barH)}"><div ${anim("slide-right", at, 0.5, `vs-lt`)}>`,
@@ -1177,15 +1282,23 @@ function renderLowerThird(ctx: KindCtx): string {
 
 /** Chunks of `text` with their [start, end) offsets: words, or phrases split after punctuation. */
 export function kineticChunks(text: string, rhythm: "word" | "phrase"): Array<{ text: string; start: number; end: number }> {
-  const re = rhythm === "phrase" ? /[^.,;:!?…—–]+[.,;:!?…—–]*|[.,;:!?…—–]+/g : /\S+/g;
+  // The same boundaries as `kineticUnits` (the cue items): whitespace, or for phrases whitespace
+  // after [.,;:!?…—].
+  const sep = rhythm === "phrase" ? /(?<=[.,;:!?…—])\s+/g : /\s+/g;
   const out: Array<{ text: string; start: number; end: number }> = [];
-  for (const m of text.matchAll(re)) {
-    const lead = m[0].length - m[0].trimStart().length;
-    const t = m[0].trim();
-    if (!t) continue;
-    const start = m.index + lead;
+  const push = (from: number, to: number) => {
+    const seg = text.slice(from, to);
+    const t = seg.trim();
+    if (!t) return;
+    const start = from + seg.length - seg.trimStart().length;
     out.push({ text: t, start, end: start + t.length });
+  };
+  let pos = 0;
+  for (const m of text.matchAll(sep)) {
+    push(pos, m.index);
+    pos = m.index + m[0].length;
   }
+  push(pos, text.length);
   return out;
 }
 
@@ -1211,6 +1324,7 @@ function renderKineticText(ctx: KindCtx): string {
   const first = 0.15;
   const step = chunks.length > 1 ? Math.max(0.3, stage.dur * 0.65 - first) / chunks.length : 0;
   const len = Math.min(0.45, Math.max(0.15, step * 1.6 || 0.45));
+  const at = cueStarts(ctx, seq(chunks.length), chunks.map((_, i) => first + i * step), step);
   const spans = chunks.map((c, i) => {
     let html = esc(c.text);
     const a = Math.max(c.start, es);
@@ -1218,7 +1332,7 @@ function renderKineticText(ctx: KindCtx): string {
     if (es >= 0 && a < b) {
       html = esc(text.slice(c.start, a)) + `<span class="vs-em">${esc(text.slice(a, b))}</span>` + esc(text.slice(b, c.end));
     }
-    return `<span ${anim("kin", first + i * step, len, `vs-kin-chunk`)}>${html}</span>`;
+    return `<span ${anim("kin", at[i]!, len, `vs-kin-chunk`)}>${html}</span>`;
   });
   return `<div class="vs-stack vs-kinetic" data-rhythm="${rhythm}" style="font-size:${px(block.fit.fs)}">\n<div class="vs-kin-line">${spans.join(" ")}</div>\n</div>`;
 }
@@ -1229,13 +1343,13 @@ function renderMap(ctx: KindCtx): string {
   const title = titleRaw ? hc(ctx, titleRaw) : undefined;
   const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
   let points = (Array.isArray(props.points) ? props.points : [])
-    .map((p) => (p && typeof p === "object" ? (p as Record<string, unknown>) : {}))
-    .filter((p) => {
+    .map((p, item) => ({ p: p && typeof p === "object" ? (p as Record<string, unknown>) : {}, item }))
+    .filter(({ p }) => {
       const ok = typeof p.x === "number" && Number.isFinite(p.x) && typeof p.y === "number" && Number.isFinite(p.y);
       if (!ok) warnings.push(`map: point ${JSON.stringify(str(p.label) ?? "")} has no numeric x/y; skipped`);
       return ok;
     })
-    .map((p) => ({ label: str(p.label) ?? "", x: clamp01(p.x as number), y: clamp01(p.y as number) }));
+    .map(({ p, item }) => ({ label: str(p.label) ?? "", x: clamp01(p.x as number), y: clamp01(p.y as number), item }));
   if (points.length > 8) {
     warnings.push(`map: ${points.length} points do not fit; showing the first 8`);
     points = points.slice(0, 8);
@@ -1270,7 +1384,13 @@ function renderMap(ctx: KindCtx): string {
   const lineLen = Math.max(0.6, Math.min(stage.dur * 0.5, 1.6));
   let dist = 0;
   const cum = P.map((p, i) => (i === 0 ? 0 : (dist += Math.hypot(p.px - P[i - 1]!.px, p.py - P[i - 1]!.py))));
-  const pinAt = (i: number) => (route ? 0.3 + (dist ? (cum[i]! / dist) * lineLen : 0) : st.at(i));
+  const pinStarts = cueStarts(
+    ctx,
+    P.map((p) => p.item),
+    P.map((_, i) => (route ? 0.3 + (dist ? (cum[i]! / dist) * lineLen : 0) : st.at(i))),
+    route && P.length > 1 ? lineLen / (P.length - 1) : st.step,
+  );
+  const pinAt = (i: number) => pinStarts[i]!;
   const grid: string[] = [];
   const cell = u * 12;
   const inset = u * 3;
@@ -1752,9 +1872,25 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
   const t = req.tokens;
   const head: KindCtx["head"] = { ...(t.text_case ? { case: t.text_case } : {}), ...(t.heading_scale !== undefined ? { scale: t.heading_scale } : {}) };
   let content: string;
+  const cues = (opts.cues ?? req.cues)?.length ? (opts.cues ?? req.cues) : undefined;
+  const cueCss: string[] = [];
   activeMotion = t.motion;
   try {
-    content = render({ stage, props: det.props ?? {}, warnings, asset: addAsset, resolveAsset, logo, main, colors, boxes, head });
+    content = render({
+      stage,
+      props: det.props ?? {},
+      warnings,
+      asset: addAsset,
+      resolveAsset,
+      logo,
+      main,
+      colors,
+      boxes,
+      head,
+      ...(cues ? { cues } : {}),
+      cueCount: cues ? cueItems(det.kind, det.props ?? {}).length : 0,
+      css: cueCss,
+    });
   } finally {
     activeMotion = undefined;
   }
@@ -1786,7 +1922,7 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
 <meta name="viewport" content="width=${W}, height=${H}">
 <title>${esc(`${scene.id} ${det.kind}`)}</title>
 <style>
-${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}${cam ? cam.css : ""}
+${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}${cam ? cam.css : ""}${cueCss.length ? `\n/* word cues */\n${cueCss.join("\n")}` : ""}
 </style>
 </head>
 <body>

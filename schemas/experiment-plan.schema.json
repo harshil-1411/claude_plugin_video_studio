@@ -194,6 +194,10 @@
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
                     "type": "string"
                   },
+                  "cutaway": {
+                    "description": "Cut away from the footage: the scene's deterministic graphic fills the frame while the clip's sound and transcript words keep playing (B-roll over a talking head).",
+                    "type": "boolean"
+                  },
                   "fit": {
                     "description": "How the clip fills the frame: crop (default), letterbox, or a blurred copy behind it.",
                     "enum": [

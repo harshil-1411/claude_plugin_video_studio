@@ -363,7 +363,7 @@ export function createHyperframesRenderer(opts: HyperframesRendererOptions = {})
       if (!avail.ok || !avail.chromePath) throw new Error(`HyperFrames renderer unavailable: ${avail.reason}`);
 
       const assetIndex = await loadAssetIndex(req.project_dir);
-      const comp = buildComposition(req, { resolveAsset: (id) => assetIndex.get(id) });
+      const comp = buildComposition(req, { resolveAsset: (id) => assetIndex.get(id), ...(req.cues?.length ? { cues: req.cues } : {}) });
       const warnings = [...comp.warnings];
 
       const keep = opts.keepTmp || process.env.VS_KEEP_HYPERFRAMES_TMP === "1";

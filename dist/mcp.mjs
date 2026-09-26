@@ -232341,6 +232341,85 @@ function validateCreativeBriefSemantics(brief) {
 	};
 }
 //#endregion
+//#region ../schema/dist/cues.js
+/**
+* Word cues (`scene.cues`): each deterministic kind reveals a fixed, ordered list of items, and a
+* cue lands one item on a spoken word. This module is the single definition of those items,
+* shared by spec validation, the pipeline and both renderers.
+*/
+/** Words of kinetic_text in reveal order: words, or phrases split after punctuation. */
+function kineticUnits(text, rhythm) {
+	const t = text.replace(/\s+/g, " ").trim();
+	if (!t) return [];
+	if (rhythm === "word") return t.split(" ");
+	return t.split(/(?<=[.,;:!?…—])\s+/).map((s) => s.trim()).filter(Boolean);
+}
+const str$2 = (v) => typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
+const arr = (v) => Array.isArray(v) ? v : [];
+const label = (v) => typeof v === "object" && v !== null ? str$2(v.label) || str$2(v.text) : str$2(v);
+/**
+* The reveal items of a deterministic graphic, in order, as short labels. A cue with `item: i`
+* drives item i. Items:
+* - typography: each line · code: the block, then the highlight (with highlight_lines)
+* - diagram: each node (its incoming edges draw with it) · timeline: each event · map: each point
+* - chart: each series entry, or the value (stat type / no series) · screenshot: each callout
+* - comparison: left, right, verdict · split_screen: left, right
+* - cta: headline, action (with command and url) · end_card: title, subtitle
+* - quote: text, attribution · stat: the number (its count-up finishes on the cue), the label
+* - lower_third: the name card, the headline · kinetic_text: each word or phrase (`kineticUnits`)
+*/
+function cueItems(kind, props) {
+	switch (kind) {
+		case "typography": return arr(props.lines).map(str$2);
+		case "code": return arr(props.highlight_lines).length ? ["code", "highlight"] : ["code"];
+		case "diagram": return arr(props.nodes).map(str$2);
+		case "timeline": return arr(props.events).map(label);
+		case "map": return arr(props.points).map(label);
+		case "chart": return props.type !== "stat" && arr(props.series).length ? arr(props.series).map(label) : [str$2(props.value) || "value"];
+		case "screenshot": return arr(props.callouts).map(label);
+		case "comparison": return [
+			"left",
+			"right",
+			...str$2(props.verdict).trim() ? ["verdict"] : []
+		];
+		case "split_screen": return ["left", "right"];
+		case "cta": return ["headline", "action"];
+		case "end_card": {
+			const items = [...str$2(props.title).trim() ? ["title"] : [], ...str$2(props.subtitle).trim() ? ["subtitle"] : []];
+			return items.length ? items : ["card"];
+		}
+		case "quote": return ["text", ...str$2(props.attribution).trim() ? ["attribution"] : []];
+		case "stat": return ["value", "label"];
+		case "lower_third": return ["name", ...str$2(props.headline).trim() ? ["headline"] : []];
+		case "kinetic_text": return kineticUnits(str$2(props.text), props.rhythm === "phrase" ? "phrase" : "word");
+	}
+}
+/** A speech token for matching: NFKC, lower case, surrounding punctuation stripped. */
+function cueToken(s) {
+	return s.normalize("NFKC").toLowerCase().replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "");
+}
+/**
+* Index of the first speech word where the cue's word (or phrase) occurs for the
+* `occurrence`-th time, or -1. `words` are the scene's speech words in order.
+*/
+function matchCue(words, cue) {
+	const want = cue.word.split(/\s+/).map(cueToken).filter(Boolean);
+	if (!want.length) return -1;
+	const toks = words.map(cueToken);
+	let seen = 0;
+	for (let i = 0; i + want.length <= toks.length; i++) if (want.every((w, k) => toks[i + k] === w) && ++seen === (cue.occurrence ?? 1)) return i;
+	return -1;
+}
+/** The item each cue drives: `item` when given, else the one after the previous cue's (from 0). */
+function cueItemIndexes(cues) {
+	let next = 0;
+	return cues.map((c) => {
+		const i = c.item ?? next;
+		next = i + 1;
+		return i;
+	});
+}
+//#endregion
 //#region ../schema/dist/video-spec.js
 const ScenePurpose = _enum([
 	"hook",
@@ -232466,7 +232545,8 @@ const FootageClip = strictObject({
 	}).optional().describe("Crop centre for cover (0–1)."),
 	speed: number().min(.25).max(4).optional().describe("Playback rate (1 = normal)."),
 	loop: boolean().optional().describe("Loop a clip shorter than the scene (default: hold the last frame)."),
-	redact: array(RedactRegion).max(12).optional().describe("Regions blurred or boxed in the source frame before it is fitted.")
+	redact: array(RedactRegion).max(12).optional().describe("Regions blurred or boxed in the source frame before it is fitted."),
+	cutaway: boolean().optional().describe("Cut away from the footage: the scene's deterministic graphic fills the frame while the clip's sound and transcript words keep playing (B-roll over a talking head).")
 }).describe("A span of real footage shown in this scene.");
 const SceneAudio = strictObject({
 	mode: _enum([
@@ -232500,6 +232580,11 @@ const SceneMotion = strictObject({
 		"strong"
 	]).optional().describe("How far the move goes (default normal).")
 }).describe("Camera-like motion of the whole scene frame.");
+const SceneCue = strictObject({
+	word: NonEmptyString.describe("A word or short phrase of this scene's speech (voiceover, or the footage transcript in voice.mode native). Matched case-insensitively, ignoring punctuation."),
+	occurrence: int().min(1).optional().describe("Which occurrence of the word in the scene's speech (default 1)."),
+	item: int().min(0).optional().describe("Reveal item it drives (see cueItems for each kind); default: the item after the previous cue's, starting at 0.")
+}).describe("Lands one reveal item of the scene's graphic on a spoken word.");
 const Scene = strictObject({
 	id: SceneId,
 	duration_sec: number().positive().max(120),
@@ -232514,7 +232599,8 @@ const Scene = strictObject({
 	footage: FootageClip.optional().describe("Real footage for user_asset / screen_capture scenes; a deterministic block, if any, is drawn over it."),
 	audio: SceneAudio.optional(),
 	sfx: array(SoundEffect).max(8).optional(),
-	motion: SceneMotion.optional()
+	motion: SceneMotion.optional(),
+	cues: array(SceneCue).max(12).optional().describe("Word cues: each reveal item of the deterministic graphic appears as its word is spoken. Items without a cue keep the default stagger, never ahead of an earlier cue.")
 });
 const VoiceMode = _enum([
 	"narrated",
@@ -233028,6 +233114,11 @@ function validateVideoSpecSemantics(spec, ir) {
 			message: `${sid}: visual_strategy "${scene.visual_strategy}" needs footage {asset, in_sec}`,
 			fix: "add footage: {asset: <ContentIR video asset id>, in_sec: <start>, out_sec?: <end>} (ingest the video file first)"
 		});
+		if (scene.footage?.cutaway && !scene.deterministic) errors.push({
+			path: `${at}.footage.cutaway`,
+			message: `${sid}: a cutaway shows the scene's graphic instead of the footage, but the scene has no deterministic {kind, props}`,
+			fix: "add deterministic {kind, props} (the graphic to cut away to), or remove cutaway"
+		});
 		if (scene.footage) {
 			const f = scene.footage;
 			(f.redact ?? []).forEach((r, j) => {
@@ -233211,6 +233302,54 @@ function validateVideoSpecSemantics(spec, ir) {
 			fix: "add audio.music {file: \"bundled:<id>\"} (see the music catalogue), give footage scenes audio.mode \"native\", or keep it silent on purpose"
 		});
 	}
+	spec.scenes.forEach((scene, i) => {
+		const cues = scene.cues;
+		if (!cues?.length) return;
+		const path = `scenes.${i}.cues`;
+		if (!scene.deterministic) {
+			errors.push({
+				path,
+				message: `scene ${scene.id} has cues but no deterministic graphic to reveal`,
+				fix: "add deterministic {kind, props}, or remove cues"
+			});
+			return;
+		}
+		const mode = voiceMode(spec);
+		if (mode === "none") {
+			errors.push({
+				path,
+				message: `scene ${scene.id} has cues, but voice.mode is "none" (no words are spoken)`,
+				fix: "remove cues (items keep their default stagger), or narrate the scene"
+			});
+			return;
+		}
+		const items = cueItems(scene.deterministic.kind, scene.deterministic.props);
+		const idx = cueItemIndexes(cues);
+		const seen = /* @__PURE__ */ new Set();
+		idx.forEach((item, k) => {
+			if (item >= items.length) errors.push({
+				path: `${path}.${k}`,
+				message: `cue "${cues[k].word}" drives item ${item}, but ${scene.deterministic.kind} has ${items.length} item(s): ${items.map((t, j) => `${j} ${t}`).join(", ")}`,
+				fix: "set item to one of those indexes, or drop the cue"
+			});
+			else if (seen.has(item)) errors.push({
+				path: `${path}.${k}`,
+				message: `two cues drive item ${item} (${items[item]})`,
+				fix: "give each item at most one cue"
+			});
+			seen.add(item);
+		});
+		if (mode === "narrated") {
+			const words = scene.voiceover.split(/\s+/).filter(Boolean);
+			cues.forEach((c, k) => {
+				if (matchCue(words, c) < 0) errors.push({
+					path: `${path}.${k}.word`,
+					message: `cue word "${c.word}"${c.occurrence && c.occurrence > 1 ? ` (occurrence ${c.occurrence})` : ""} is not in scene ${scene.id}'s voiceover`,
+					fix: "use a word the voiceover says (case and punctuation are ignored), or fix occurrence"
+				});
+			});
+		}
+	});
 	const music = spec.audio?.music;
 	if (music && !music.file.startsWith("bundled:") && !music.license) warnings.push({
 		path: "audio.music.license",
@@ -237820,6 +237959,60 @@ function highlightLines(code, language) {
 	return lines;
 }
 //#endregion
+//#region ../renderer/dist/cue-timing.js
+/**
+* Word-cue timing shared by every renderer, so a cued item enters at the same moment everywhere.
+*
+* A cued item's entrance starts CUE_LEAD_S before its word: the eye reads a change slightly ahead
+* of the sound, so the item is landing as the word is heard. A stat's count-up instead finishes on
+* its word (`countUpWindow`).
+*/
+const CUE_LEAD_S = .12;
+/** Shortest count-up that still reads as counting. */
+const MIN_COUNT_UP_S = .4;
+/**
+* Entrance start (scene-local seconds) of each reveal item. `defaults` are the renderer's own
+* stagger times per item (index = `cueItems` index); `step` is its stagger step.
+* - A cued item starts at max(0, at_s − CUE_LEAD_S).
+* - An uncued item keeps its default, but never enters before the last earlier-indexed cued item
+*   plus one step per item in between, so the reveal order holds.
+* Without cues the defaults come back unchanged (same array values).
+*/
+function cueItemStarts(defaults, cues, step) {
+	if (!cues?.length) return [...defaults];
+	const at = /* @__PURE__ */ new Map();
+	for (const c of cues) if (c.item >= 0 && c.item < defaults.length && !at.has(c.item)) at.set(c.item, c.at_s);
+	const out = [];
+	let lastCued;
+	defaults.forEach((d, i) => {
+		const cue = at.get(i);
+		if (cue !== void 0) {
+			const start = round3$2(Math.max(0, cue - CUE_LEAD_S));
+			out.push(start);
+			lastCued = {
+				index: i,
+				start
+			};
+		} else out.push(lastCued ? round3$2(Math.max(d, lastCued.start + step * (i - lastCued.index))) : d);
+	});
+	return out;
+}
+/**
+* Count-up window for a cued stat value: it finishes on the word. `defaultLen` is the renderer's
+* usual count length; the window starts no earlier than 0 and lasts at least MIN_COUNT_UP_S
+* (ending later than the word only when the word comes too early for that).
+*/
+function countUpWindow(atS, defaultLen) {
+	const start = Math.max(0, atS - Math.max(MIN_COUNT_UP_S, defaultLen));
+	return {
+		start: round3$2(start),
+		end: round3$2(Math.max(atS, start + MIN_COUNT_UP_S))
+	};
+}
+function round3$2(x) {
+	return Math.round(x * 1e3) / 1e3;
+}
+//#endregion
 //#region ../renderer/dist/ffmpeg-renderer.js
 /**
 * Chrome-free fallback renderer for deterministic scenes: one `-f lavfi color=` source at the
@@ -237840,8 +238033,9 @@ const FFMPEG_RENDERER_ID = "ffmpeg-drawtext";
 /**
 * 0.4.0: script fonts for CJK lines; Devanagari/Arabic/Hebrew lines drawn through libass (shaping + bidi).
 * 0.4.1: `scene.motion` (push_in, pull_out, punch, reveal, drift, hold) moves the whole frame.
+* 0.4.2: word cues (`req.cues`) land each reveal item on its spoken word.
 */
-const FFMPEG_RENDERER_VERSION = "0.4.1";
+const FFMPEG_RENDERER_VERSION = "0.4.2";
 const FFMPEG_RENDERER_KINDS = [
 	"typography",
 	"code",
@@ -237915,11 +238109,26 @@ function textLines(fit, box, o) {
 		...rtl ? { rx: r(box.x + box.w) } : o.align === "left" ? {} : { cx: r(l.cx) },
 		y: l.y,
 		beat: typeof o.beat === "function" ? o.beat(i) : o.beat,
+		...o.item === void 0 ? {} : { item: typeof o.item === "function" ? o.item(i) : o.item },
 		slide: o.slide ?? true
 	}));
 }
 function asStr(v) {
 	return typeof v === "string" && v.trim() ? v : void 0;
+}
+/**
+* Paragraph index of each fitted line (paragraphs wrap onto several lines), by consuming each
+* paragraph's non-space characters; a truncated fit attributes what remains to the last one.
+*/
+function lineParagraphs(fit, paras) {
+	const len = (t) => Array.from(t.replace(/\s+/g, "")).length;
+	let j = 0;
+	let left = len(paras[0] ?? "");
+	return fit.lines.map((line) => {
+		while (left <= 0 && j < paras.length - 1) left = len(paras[++j]);
+		left -= len(line);
+		return j;
+	});
 }
 /** Record a text block for lint: the box it was fitted into, its size, truncation and colours. */
 function note(c, role, text, box, fit, color, background = c.colors.bg) {
@@ -237967,7 +238176,11 @@ function fitHeading(c, text, box, opts) {
 }
 function typography(p, c) {
 	const warnings = [];
-	const lines = Array.isArray(p.lines) ? p.lines.filter((l) => typeof l === "string" && l.trim() !== "").map((l) => headCase(c, l)) : [];
+	const src = Array.isArray(p.lines) ? p.lines.flatMap((l, i) => typeof l === "string" && l.trim() !== "" ? [{
+		text: headCase(c, l),
+		item: i
+	}] : []) : [];
+	const lines = src.map((l) => l.text);
 	if (lines.length === 0) warnings.push("typography: no lines to draw");
 	const emphasis = asStr(p.emphasis)?.trim();
 	const box = inset(c.safe, r(c.u * .02));
@@ -237987,10 +238200,15 @@ function typography(p, c) {
 		}
 		return c.colors.text;
 	};
+	const para = lineParagraphs({
+		...fit,
+		lines: fit.lines.filter((l) => l.trim().length > 0)
+	}, lines);
 	const els = textLines(fit, box, {
 		font: "heading",
 		color,
 		beat: (i) => i,
+		item: (i) => src[para[i] ?? 0]?.item ?? 0,
 		align: c.align
 	});
 	note(c, c.main, lines.join("\n"), box, fit, c.colors.text);
@@ -238088,7 +238306,8 @@ function code(p, c) {
 			w: panel.w - 2 * r(pad / 3),
 			h: r(fit.lineAdvance),
 			color: ffColor(c.colors.primary, .22),
-			beat: 2
+			beat: 2,
+			item: 1
 		});
 	}
 	for (const l of placed) {
@@ -238102,6 +238321,7 @@ function code(p, c) {
 			x: l.x,
 			y: l.y,
 			beat: 1,
+			item: 0,
 			slide: false
 		});
 	}
@@ -238138,11 +238358,13 @@ function comparison(p, c) {
 	items.forEach(([s, accent], i) => {
 		const pr = panels[i];
 		const beat = i * 2;
+		const item = i;
 		els.push({
 			type: "box",
 			...pr,
 			color: c.colors.panel,
-			beat
+			beat,
+			item
 		});
 		els.push({
 			type: "box",
@@ -238151,7 +238373,8 @@ function comparison(p, c) {
 			w: pr.w,
 			h: Math.max(2, r(c.u * .008)),
 			color: accent,
-			beat
+			beat,
+			item
 		});
 		const lf = fitText(asStr(s.label) ?? "", {
 			w: pr.w - 2 * pad,
@@ -238171,6 +238394,7 @@ function comparison(p, c) {
 			font: "heading",
 			color: accent,
 			beat,
+			item,
 			valign: "top"
 		}));
 		note(c, "label", asStr(s.label) ?? "", labelBox, lf, accent, c.colors.panel);
@@ -238183,6 +238407,7 @@ function comparison(p, c) {
 			font: "body",
 			color: c.colors.text,
 			beat: beat + 1,
+			item,
 			valign: "top"
 		}));
 		note(c, "body", asStr(s.text) ?? "", bodyBoxes[i], bf, c.colors.text, c.colors.panel);
@@ -238197,6 +238422,7 @@ function comparison(p, c) {
 			font: "heading",
 			color: c.colors.text,
 			beat: 4,
+			item: 2,
 			align: c.align
 		}));
 		note(c, "headline", verdict, verdictR, vf, c.colors.text);
@@ -238243,6 +238469,7 @@ function cta(p, c) {
 				font: "heading",
 				color: c.colors.text,
 				beat: 0,
+				item: 0,
 				valign: "bottom",
 				align: c.align
 			}));
@@ -238270,12 +238497,14 @@ function cta(p, c) {
 				type: "box",
 				...pill,
 				color: c.colors.primary,
-				beat: 1
+				beat: 1,
+				item: 1
 			});
 			els.push(...textLines(f, pill, {
 				font: "heading",
 				color: c.colors.bg,
 				beat: 1,
+				item: 1,
 				slide: false
 			}));
 			note(c, "cta", action, pill, f, c.colors.bg, c.colors.primary);
@@ -238304,19 +238533,22 @@ function cta(p, c) {
 				type: "box",
 				...panel,
 				color: c.colors.panel,
-				beat: 2
+				beat: 2,
+				item: 1
 			});
 			els.push({
 				type: "box",
 				...panel,
 				color: c.colors.panelEdge,
 				thickness: Math.max(1, r(c.u * .003)),
-				beat: 2
+				beat: 2,
+				item: 1
 			});
 			els.push(...textLines(f, inset(panel, pad), {
 				font: "mono",
 				color: c.colors.secondary,
 				beat: 2,
+				item: 1,
 				slide: false
 			}));
 			note(c, "code", text, inset(panel, pad), f, c.colors.secondary, c.colors.panel);
@@ -238330,6 +238562,7 @@ function cta(p, c) {
 				font: "body",
 				color: c.colors.muted,
 				beat: 3,
+				item: 1,
 				valign: "top"
 			}));
 			note(c, "label", url, rect, f, c.colors.muted);
@@ -238387,7 +238620,8 @@ function endCard(p, c, logo) {
 				y: r(rect.y + (rect.h - h) / 2),
 				w,
 				h,
-				beat: 0
+				beat: 0,
+				...title || subtitle ? {} : { item: 0 }
 			});
 		} else if (key === "title") {
 			const f = fitHeading(c, title, rect, {
@@ -238399,6 +238633,7 @@ function endCard(p, c, logo) {
 				font: "heading",
 				color: c.colors.text,
 				beat: 1,
+				item: 0,
 				valign: parts.length === 1 ? "middle" : "bottom",
 				align: c.align
 			}));
@@ -238413,6 +238648,7 @@ function endCard(p, c, logo) {
 				font: "body",
 				color: c.colors.primary,
 				beat: 2,
+				item: title ? 1 : 0,
 				valign: "top",
 				align: c.align
 			}));
@@ -238428,7 +238664,8 @@ function formatNumber(v) {
 	if (Number.isInteger(v)) return String(v);
 	return String(Math.round(v * 100) / 100);
 }
-function statLayout(value, label, c, warnings) {
+/** A single chart value; `item` is its cue item (the label reveals with it). */
+function statLayout(value, label, c, warnings, item) {
 	const [numR, labelR] = label ? splitV(c.safe, [3, 2], r(c.u * .03)) : [c.safe, void 0];
 	const els = [];
 	const nf = fitHeading({
@@ -238448,6 +238685,7 @@ function statLayout(value, label, c, warnings) {
 		font: "heading",
 		color: c.colors.primary,
 		beat: 0,
+		item,
 		valign: label ? "bottom" : "middle"
 	}));
 	note(c, c.main, value, numR, nf, c.colors.primary);
@@ -238461,13 +238699,15 @@ function statLayout(value, label, c, warnings) {
 			font: "body",
 			color: c.colors.text,
 			beat: 1,
+			item,
 			valign: "top"
 		}));
 		note(c, "label", label, labelR, lf, c.colors.text);
 	}
 	return {
 		elements: els,
-		warnings
+		warnings,
+		count_item: item
 	};
 }
 const MAX_BARS = 12;
@@ -238476,7 +238716,11 @@ function chart(p, c) {
 	const type = asStr(p.type) ?? "stat";
 	const unit = typeof p.unit === "string" ? p.unit : "";
 	const label = asStr(p.label);
-	const series = Array.isArray(p.series) ? p.series.filter((s) => !!s && typeof s === "object" && typeof s.value === "number") : [];
+	const rawSeries = Array.isArray(p.series) ? p.series : [];
+	const series = rawSeries.flatMap((s, item) => !!s && typeof s === "object" && typeof s.value === "number" ? [{
+		...s,
+		item
+	}] : []);
 	const fmt = (v) => `${typeof v === "number" ? formatNumber(v) : v}${unit}`;
 	if (type === "bar" && series.length > 0) {
 		let rows = series;
@@ -238518,6 +238762,7 @@ function chart(p, c) {
 		rows.forEach((s, i) => {
 			const rr = rowRects[i];
 			const beat = 1 + i * .5;
+			const item = s.item;
 			const labelLines = wrapText(s.label || " ", labelSize, rr.w);
 			const text = labelLines.length > 1 ? `${labelLines[0]}…` : labelLines[0] ?? "";
 			if (text.trim()) els.push({
@@ -238529,6 +238774,7 @@ function chart(p, c) {
 				x: rr.x,
 				y: rr.y,
 				beat,
+				item,
 				slide: false
 			});
 			note(c, "label", s.label, {
@@ -238550,7 +238796,8 @@ function chart(p, c) {
 				w: trackW,
 				h: barH,
 				color: c.colors.panel,
-				beat
+				beat,
+				item
 			});
 			const bw = max > 0 ? r(Math.max(0, s.value) / max * trackW) : 0;
 			if (bw >= 1) els.push({
@@ -238560,7 +238807,8 @@ function chart(p, c) {
 				w: bw,
 				h: barH,
 				color: c.colors.primary,
-				beat: beat + .25
+				beat: beat + .25,
+				item
 			});
 			els.push({
 				type: "text",
@@ -238571,6 +238819,7 @@ function chart(p, c) {
 				x: rr.x + trackW + r(c.u * .02),
 				y: r(barY + (barH - labelSize) / 2),
 				beat: beat + .25,
+				item,
 				slide: false
 			});
 		});
@@ -238596,7 +238845,7 @@ function chart(p, c) {
 			warnings
 		};
 	}
-	return statLayout(fmt(value), statLabel, c, warnings);
+	return statLayout(fmt(value), statLabel, c, warnings, type !== "stat" && rawSeries.length ? rawSeries.length - 1 : 0);
 }
 function diagram(p, c) {
 	const warnings = ["diagram: basic grid layout with orthogonal edges and square arrowheads (ffmpeg-drawtext)"];
@@ -238607,6 +238856,8 @@ function diagram(p, c) {
 		elements: [],
 		warnings: [...warnings, "diagram: no nodes"]
 	};
+	const rawNodes = p.nodes;
+	const itemOf = (name) => rawNodes.indexOf(name);
 	const cols = c.target.width > c.target.height ? Math.min(n, 4) : n <= 4 ? 1 : 2;
 	const rows = Math.ceil(n / cols);
 	const gx = r(c.u * .08);
@@ -238638,6 +238889,7 @@ function diagram(p, c) {
 	const th = Math.max(2, r(c.u * .006));
 	const head = th * 3;
 	const els = [];
+	let item = 0;
 	const line = (x1, y1, x2, y2, beat) => {
 		const x = Math.min(x1, x2);
 		const y = Math.min(y1, y2);
@@ -238648,7 +238900,8 @@ function diagram(p, c) {
 			w: Math.max(th, r(Math.abs(x2 - x1))),
 			h: Math.max(th, r(Math.abs(y2 - y1))),
 			color: c.colors.muted,
-			beat
+			beat,
+			item
 		});
 	};
 	const arrow = (x, y, beat) => els.push({
@@ -238658,7 +238911,8 @@ function diagram(p, c) {
 		w: head,
 		h: head,
 		color: c.colors.primary,
-		beat
+		beat,
+		item
 	});
 	edges.forEach(([a, b], k) => {
 		const A = pos.get(a);
@@ -238672,6 +238926,7 @@ function diagram(p, c) {
 			return;
 		}
 		const beat = Math.max(A.i, B.i) + .5;
+		item = itemOf(A.i > B.i ? a : b);
 		const ra = A.rect;
 		const rb = B.rect;
 		const acx = ra.x + ra.w / 2;
@@ -238722,18 +238977,21 @@ function diagram(p, c) {
 	}).fontSize));
 	for (const name of nodes) {
 		const { rect, i } = pos.get(name);
+		const item = itemOf(name);
 		els.push({
 			type: "box",
 			...rect,
 			color: c.colors.panel,
-			beat: i
+			beat: i,
+			item
 		});
 		els.push({
 			type: "box",
 			...rect,
 			color: c.colors.primary,
 			thickness: th,
-			beat: i
+			beat: i,
+			item
 		});
 		const f = fitText(name, labelBox, {
 			maxSize: size,
@@ -238744,6 +239002,7 @@ function diagram(p, c) {
 			font: "body",
 			color: c.colors.text,
 			beat: i,
+			item,
 			slide: false
 		}));
 		note(c, "label", name, inset(rect, pad), f, c.colors.text, c.colors.panel);
@@ -238755,14 +239014,18 @@ function diagram(p, c) {
 }
 function screenshot(p, c, image) {
 	const warnings = [];
-	const callouts = Array.isArray(p.callouts) ? p.callouts.flatMap((co) => {
-		if (typeof co === "string" && co.trim()) return [{ text: co }];
+	const callouts = Array.isArray(p.callouts) ? p.callouts.flatMap((co, item) => {
+		if (typeof co === "string" && co.trim()) return [{
+			text: co,
+			item
+		}];
 		if (co && typeof co === "object" && typeof co.text === "string") {
 			const o = co;
 			return [{
 				text: o.text,
 				...typeof o.x === "number" ? { x: o.x } : {},
-				...typeof o.y === "number" ? { y: o.y } : {}
+				...typeof o.y === "number" ? { y: o.y } : {},
+				item
 			}];
 		}
 		return [];
@@ -238824,6 +239087,7 @@ function screenshot(p, c, image) {
 		const my = r(frame.y + Math.min(frame.h, Math.max(0, fy)));
 		const m = Math.max(4, r(c.u * .03));
 		const beat = 1 + i;
+		const item = co.item;
 		els.push({
 			type: "box",
 			x: mx - r(m / 2),
@@ -238831,7 +239095,8 @@ function screenshot(p, c, image) {
 			w: m,
 			h: m,
 			color: c.colors.primary,
-			beat
+			beat,
+			item
 		});
 		const text = wrapText(co.text, size, c.safe.w * .6)[0] ?? co.text;
 		const tw = estimateTextWidth(text, size);
@@ -238847,6 +239112,7 @@ function screenshot(p, c, image) {
 			x,
 			y: my - r(size / 2),
 			beat,
+			item,
 			slide: false,
 			box: {
 				color: ffColor(c.colors.bg, .85),
@@ -238868,6 +239134,7 @@ function screenshot(p, c, image) {
 		listed.forEach((co, i) => {
 			const rr = rowsR[i];
 			const beat = 1 + pinned.length + i;
+			const item = co.item;
 			const bar = Math.max(2, r(c.u * .008));
 			els.push({
 				type: "box",
@@ -238876,7 +239143,8 @@ function screenshot(p, c, image) {
 				w: bar,
 				h: rr.h,
 				color: c.colors.primary,
-				beat
+				beat,
+				item
 			});
 			const tr = {
 				x: rr.x + bar * 3,
@@ -238894,6 +239162,7 @@ function screenshot(p, c, image) {
 				font: "body",
 				color: c.colors.text,
 				beat,
+				item,
 				align: "left"
 			}));
 			note(c, "body", co.text, tr, f, c.colors.text);
@@ -239058,6 +239327,7 @@ function quote(p, c) {
 		font: "heading",
 		color: c.colors.text,
 		beat: (i) => .5 + i * .5,
+		item: 0,
 		align: c.align
 	}));
 	note(c, c.main, text, qRect, qf, c.colors.text);
@@ -239074,6 +239344,7 @@ function quote(p, c) {
 			font: "body",
 			color: c.colors.text,
 			beat,
+			item: 1,
 			align: c.align
 		}));
 		note(c, "label", `— ${attribution}`, rect, af, c.colors.text);
@@ -239090,6 +239361,7 @@ function quote(p, c) {
 			font: "body",
 			color: c.colors.muted,
 			beat: beat + .5,
+			item: af ? 1 : 0,
 			align: c.align
 		}));
 		note(c, "label", source, rect, sf, c.colors.muted);
@@ -239159,7 +239431,8 @@ function stat$1(p, c) {
 	els.push(...textLines(vf, vRect, {
 		font: "heading",
 		color: c.colors.primary,
-		beat: 0
+		beat: 0,
+		item: 0
 	}));
 	note(c, c.main, value, vRect, vf, c.colors.primary);
 	const barW = r(c.u * .14);
@@ -239170,7 +239443,8 @@ function stat$1(p, c) {
 		w: barW,
 		h: barH,
 		color: c.colors.primary,
-		beat: .5
+		beat: .5,
+		item: 0
 	});
 	let k = 2;
 	if (lf) {
@@ -239183,7 +239457,8 @@ function stat$1(p, c) {
 		els.push(...textLines(lf, rect, {
 			font: "heading",
 			color: c.colors.text,
-			beat: 1
+			beat: 1,
+			item: 1
 		}));
 		note(c, "label", label, rect, lf, c.colors.text);
 	}
@@ -239197,26 +239472,29 @@ function stat$1(p, c) {
 		els.push(...textLines(cf, rect, {
 			font: "body",
 			color: c.colors.muted,
-			beat: 2
+			beat: 2,
+			item: 1
 		}));
 		note(c, "body", context, rect, cf, c.colors.muted);
 	}
 	return {
 		elements: els,
-		warnings
+		warnings,
+		count_item: 0
 	};
 }
 const MAX_TIMELINE_EVENTS = 6;
 function timeline(p, c) {
 	const warnings = [];
-	let events = Array.isArray(p.events) ? p.events.flatMap((e) => {
+	let events = Array.isArray(p.events) ? p.events.flatMap((e, item) => {
 		if (!e || typeof e !== "object") return [];
 		const o = e;
 		const label = asStr(o.label);
 		const text = asStr(o.text);
 		return label ? [{
 			label,
-			...text ? { text } : {}
+			...text ? { text } : {},
+			item
 		}] : [];
 	}) : [];
 	if (events.length === 0) return {
@@ -239243,6 +239521,7 @@ function timeline(p, c) {
 	const els = [];
 	const pushDot = (cx, cy, i) => {
 		const s = i === cur ? big : dot;
+		const item = events[i].item;
 		if (i === cur) els.push({
 			type: "box",
 			x: r(cx - s / 2 - th),
@@ -239250,7 +239529,8 @@ function timeline(p, c) {
 			w: s + 2 * th,
 			h: s + 2 * th,
 			color: c.colors.bg,
-			beat: i
+			beat: i,
+			item
 		});
 		els.push({
 			type: "box",
@@ -239259,7 +239539,8 @@ function timeline(p, c) {
 			w: s,
 			h: s,
 			color: dotColor(i),
-			beat: i
+			beat: i,
+			item
 		});
 	};
 	const drawText = (labelBoxes, textBoxes, align) => {
@@ -239285,6 +239566,7 @@ function timeline(p, c) {
 				font: "heading",
 				color: labelColor(i),
 				beat: i,
+				item: e.item,
 				align,
 				valign: "top"
 			}));
@@ -239304,6 +239586,7 @@ function timeline(p, c) {
 					font: "body",
 					color: c.colors.muted,
 					beat: i + .3,
+					item: e.item,
 					align,
 					valign: "top"
 				}));
@@ -239350,7 +239633,8 @@ function timeline(p, c) {
 			w: th,
 			h: r(cy(cur) - cy(0)),
 			color: c.colors.primary,
-			beat: cur
+			beat: cur,
+			item: events[cur].item
 		});
 		events.forEach((_, i) => pushDot(lineX, cy(i), i));
 		drawText(labelBoxes, textBoxes, "left");
@@ -239378,7 +239662,8 @@ function timeline(p, c) {
 			w: r(cx(cur) - cx(0)),
 			h: th,
 			color: c.colors.primary,
-			beat: cur
+			beat: cur,
+			item: events[cur].item
 		});
 		events.forEach((_, i) => pushDot(cx(i), lineY, i));
 		const labelBoxes = cols.map((col) => ({
@@ -239435,6 +239720,7 @@ function splitScreen(p, c, images) {
 		const pr = panels[i];
 		const beat = i * 2;
 		const name = i === 0 ? "left" : "right";
+		const from = els.length;
 		els.push({
 			type: "box",
 			...pr,
@@ -239531,6 +239817,7 @@ function splitScreen(p, c, images) {
 			note(c, "body", text, txtR, tf, c.colors.text, c.colors.panel);
 		}
 		if (!text && !imgR) warnings.push(`split_screen: ${name} panel has no text or asset`);
+		for (let k = from; k < els.length; k++) els[k].item = i;
 	});
 	return {
 		elements: els,
@@ -239591,6 +239878,7 @@ function lowerThird(p, c) {
 			font: "heading",
 			color: c.colors.text,
 			beat: 0,
+			item: 1,
 			align: c.align
 		}));
 		note(c, c.main, headline, hr, hf, c.colors.text);
@@ -239599,7 +239887,8 @@ function lowerThird(p, c) {
 		type: "box",
 		...bar,
 		color: c.colors.panel,
-		beat: 1
+		beat: 1,
+		item: 0
 	});
 	els.push({
 		type: "box",
@@ -239608,7 +239897,8 @@ function lowerThird(p, c) {
 		w: accentW,
 		h: bar.h,
 		color: c.colors.primary,
-		beat: 1
+		beat: 1,
+		item: 0
 	});
 	const tx = bar.x + accentW + pad;
 	const nr = {
@@ -239621,6 +239911,7 @@ function lowerThird(p, c) {
 		font: "heading",
 		color: c.colors.text,
 		beat: 1,
+		item: 0,
 		align: "left",
 		valign: "top"
 	}));
@@ -239636,6 +239927,7 @@ function lowerThird(p, c) {
 			font: "body",
 			color: c.colors.muted,
 			beat: 1.5,
+			item: 0,
 			align: "left",
 			valign: "top"
 		}));
@@ -239646,12 +239938,9 @@ function lowerThird(p, c) {
 		warnings
 	};
 }
-/** Kinetic-text chunks: words, or phrases split after punctuation (exported for tests). */
+/** Kinetic-text chunks: exactly the cue items `kineticUnits` (exported for tests). */
 function kineticChunks$1(text, rhythm) {
-	const t = text.replace(/\s+/g, " ").trim();
-	if (!t) return [];
-	if (rhythm === "word") return t.split(" ");
-	return t.split(/(?<=[.,;:!?…—])\s+/).map((s) => s.trim()).filter(Boolean);
+	return kineticUnits(text, rhythm);
 }
 function kineticText(p, c) {
 	const warnings = [];
@@ -239700,6 +239989,7 @@ function kineticText(p, c) {
 				...rtl ? { rx: r(x + widths[j] * scale) } : {},
 				y: line.y,
 				beat,
+				item: beat,
 				slide: true
 			});
 			x += rtl ? -space * scale : (widths[j] + space) * scale;
@@ -239722,13 +240012,14 @@ function map(p, c) {
 	const titleRaw = asStr(p.title);
 	const title = titleRaw ? headCase(c, titleRaw) : void 0;
 	const clamp = (v) => Math.min(1, Math.max(0, v));
-	let points = Array.isArray(p.points) ? p.points.flatMap((pt) => {
+	let points = Array.isArray(p.points) ? p.points.flatMap((pt, item) => {
 		if (!pt || typeof pt !== "object") return [];
 		const o = pt;
 		return typeof o.x === "number" && typeof o.y === "number" ? [{
 			label: asStr(o.label) ?? "",
 			x: clamp(o.x),
-			y: clamp(o.y)
+			y: clamp(o.y),
+			item
 		}] : [];
 	}) : [];
 	if (points.length > 8) {
@@ -239816,7 +240107,8 @@ function map(p, c) {
 					w: d,
 					h: d,
 					color: c.colors.secondary,
-					beat: i + 1.5
+					beat: i + 1.5,
+					item: b.item
 				});
 			}
 		}
@@ -239827,6 +240119,7 @@ function map(p, c) {
 	const border = r(size * .35);
 	pos.forEach((pt, i) => {
 		const beat = 1 + i;
+		const item = pt.item;
 		els.push({
 			type: "box",
 			x: pt.px - r(pin / 2) - ring,
@@ -239834,7 +240127,8 @@ function map(p, c) {
 			w: pin + 2 * ring,
 			h: pin + 2 * ring,
 			color: c.colors.bg,
-			beat
+			beat,
+			item
 		});
 		els.push({
 			type: "box",
@@ -239843,7 +240137,8 @@ function map(p, c) {
 			w: pin,
 			h: pin,
 			color: c.colors.primary,
-			beat
+			beat,
+			item
 		});
 		if (!pt.label) return;
 		const lines = wrapText(pt.label, size, c.safe.w * .5);
@@ -239861,6 +240156,7 @@ function map(p, c) {
 			x,
 			y,
 			beat,
+			item,
 			slide: false,
 			box: {
 				color: ffColor(c.colors.bg, .85),
@@ -240139,11 +240435,34 @@ function textRoute(text) {
 	};
 	return { kind: "drawtext" };
 }
+/**
+* Entrance start (seconds) of each element. Without cues: beat × step. With cues, each cue item
+* starts where `cueItemStarts` puts it (its default is its earliest element), and all its
+* elements move with it, keeping their offsets; the count item (a stat's value) instead ends its
+* fade on the word (`countUpWindow` with the fade length). Elements outside any item keep beat × step.
+*/
+function elementStarts(comp, step, fade, cues) {
+	const base = comp.elements.map((el) => round3$1(el.beat * step));
+	if (!cues?.length) return base;
+	const n = Math.max(0, ...comp.elements.map((el) => el.item === void 0 ? 0 : el.item + 1));
+	const first = Array.from({ length: n }, () => void 0);
+	comp.elements.forEach((el, k) => {
+		if (el.item !== void 0) first[el.item] = Math.min(first[el.item] ?? Infinity, base[k]);
+	});
+	const defaults = [];
+	first.forEach((d, i) => defaults.push(d ?? (i > 0 ? defaults[i - 1] : 0)));
+	const starts = cueItemStarts(defaults, cues, step);
+	const ci = comp.count_item;
+	const countCue = ci === void 0 ? void 0 : cues.find((cue) => cue.item === ci);
+	if (countCue && ci < n) starts[ci] = countUpWindow(countCue.at_s, fade).start;
+	return comp.elements.map((el, k) => el.item === void 0 || el.item >= n ? base[k] : round3$1(base[k] + starts[el.item] - defaults[el.item]));
+}
 /** Build the filtergraph for a composition. `textDir` is where text files will be written. */
 function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 	const maxBeat = Math.max(0, ...comp.elements.map((e) => e.beat));
 	const { motion } = gm;
 	const { step, fade } = motionTiming(durationS, maxBeat, motion);
+	const starts = elementStarts(comp, step, fade, gm.cues);
 	const slide = Math.max(2, r(Math.min(target.width, target.height) * .025));
 	const inputs = [];
 	const textFiles = /* @__PURE__ */ new Map();
@@ -240178,8 +240497,8 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 		noted.add(w);
 		warnings.push(w);
 	};
-	for (const el of comp.elements) {
-		const start = round3$1(el.beat * step);
+	for (const [k, el] of comp.elements.entries()) {
+		const start = starts[k];
 		const progress = `min(1,max(0,(t-${start})/${fade}))`;
 		const ease = easingExpr(motion?.easing, progress);
 		const route = el.type === "text" ? textRoute(el.text) : void 0;
@@ -240665,7 +240984,8 @@ function createFfmpegRenderer(opts = {}) {
 				const built = buildFilterGraph(comp, target, frames / target.fps, fonts, tmp, {
 					...tokens.motion ? { motion: tokens.motion } : {},
 					background: tokens.color_background,
-					...scene.motion ? { camera: scene.motion } : {}
+					...scene.motion ? { camera: scene.motion } : {},
+					...req.cues?.length ? { cues: req.cues } : {}
 				});
 				warnings.push(...built.warnings);
 				for (const [name, text] of built.textFiles) await writeFile(join(tmp, name), text, "utf8");
@@ -240711,8 +241031,9 @@ const FOOTAGE_RENDERER_ID = "ffmpeg-footage";
 /**
 * 0.2.0: crops baked-in letterbox bars (media.content_box) before the fit.
 * 0.2.1: `scene.motion` moves the fitted picture; on stills it replaces the Ken Burns.
+* 0.2.2: word cues (`req.cues`) time the overlay's reveal items.
 */
-const FOOTAGE_RENDERER_VERSION = "0.2.1";
+const FOOTAGE_RENDERER_VERSION = "0.2.2";
 /** Deterministic kinds drawn over footage. Others are ignored with a warning. */
 const FOOTAGE_OVERLAY_KINDS = [
 	"lower_third",
@@ -241007,7 +241328,8 @@ function createFootageRenderer(opts = {}) {
 						...tokens.motion ? { motion: tokens.motion } : {},
 						background: tokens.color_background,
 						base: "[fg]",
-						noExit: true
+						noExit: true,
+						...req.cues?.length ? { cues: req.cues } : {}
 					});
 					for (const [name, text] of overlay.textFiles) await writeFile(join(tmp, name), text, "utf8");
 				}
@@ -241094,10 +241416,10 @@ async function selectRenderer(kind, renderers, env = process.env, preference = "
 	};
 }
 /** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version. */
-function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage) {
+function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage, cues) {
 	return sha256Hex(canonicalJson({
 		v: 1,
-		layout: 7,
+		layout: 8,
 		scene,
 		tokens,
 		target,
@@ -241107,8 +241429,18 @@ function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zon
 			version: renderer.version
 		},
 		placeholder,
-		...footage ? { footage } : {}
+		...footage ? { footage } : {},
+		...cues?.length ? { cues } : {}
 	}));
+}
+/** The picture of a scene: for a cutaway (`footage.cutaway` with a graphic), the graphic alone. */
+function cutawayPicture(scene) {
+	if (!scene.footage?.cutaway || !scene.deterministic) return scene;
+	const { footage: _clip, ...rest } = scene;
+	return {
+		...rest,
+		visual_strategy: "motion_graphic"
+	};
 }
 /** The motion-graphic stand-in drawn for a scene that a provider must render. */
 function placeholderScene(scene) {
@@ -241155,7 +241487,8 @@ async function renderScenes(spec, o) {
 	const scenes = o.only ? spec.scenes.filter((s) => o.only.includes(s.id)) : spec.scenes;
 	const results = new Array(scenes.length);
 	let footageRenderer = o.footageRenderer;
-	const renderOne = async (orig) => {
+	const renderOne = async (given) => {
+		const orig = cutawayPicture(given);
 		const fr = orig.footage ? o.footage?.get(orig.id) : void 0;
 		const footage = fr && !("error" in fr) ? fr : void 0;
 		const footageError = orig.footage && !footage ? `footage asset "${orig.footage.asset}": ${fr && "error" in fr ? fr.error : "not resolved"}` : void 0;
@@ -241189,11 +241522,12 @@ async function renderScenes(spec, o) {
 			r = sel.renderer;
 			selReason = sel.reason;
 		}
+		const cues = placeholder ? void 0 : o.cues?.get(orig.id);
 		const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? {
 			sha256: footage.sha256,
 			duration_sec: footage.media.duration_sec,
 			...footage.media.content_box ? { content_box: footage.media.content_box } : {}
-		} : void 0);
+		} : void 0, cues);
 		const out = join(dir, `${orig.id}.mp4`);
 		const sidecarPath = join(dir, `${orig.id}.json`);
 		const base = {
@@ -241227,7 +241561,8 @@ async function renderScenes(spec, o) {
 				out_path: tmp,
 				project_dir: o.project_dir,
 				...o.zones ? { zones: o.zones } : {},
-				...footage ? { footage } : {}
+				...footage ? { footage } : {},
+				...cues?.length ? { cues } : {}
 			}, { signal: o.signal });
 			await rename(tmp, out);
 			await writeJsonAtomic(sidecarPath, {
@@ -241398,7 +241733,8 @@ function stagger(n, dur, first = .1) {
 		const step = n > 1 ? Math.min(activeMotion.stagger_ms / 1e3, budget / (n - 1)) : 0;
 		return {
 			at: (i) => first + i * step,
-			len
+			len,
+			step
 		};
 	}
 	const len = Math.max(.2, Math.min(.6, dur * .25));
@@ -241406,8 +241742,13 @@ function stagger(n, dur, first = .1) {
 	const step = n > 1 ? Math.min(.18, budget / (n - 1)) : 0;
 	return {
 		at: (i) => first + i * step,
-		len
+		len,
+		step
 	};
+}
+/** Entrance length `anim` actually uses for `effect` given `len`. */
+function entranceLen(effect, len) {
+	return activeMotion && ENTRANCES.has(effect) ? Math.max(.05, activeMotion.enter_ms / 1e3) : len;
 }
 /** Attributes for an animated element. Only computed numbers reach the style attribute. */
 function anim(effect, at, len, cls = "", style = "") {
@@ -241473,6 +241814,27 @@ function mixHex(a, b, t) {
 	const [p, q] = [ch(a), ch(b)];
 	return `#${p.map((v, i) => Math.round(v + (q[i] - v) * t).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 }
+/**
+* Word cues: entrance start of each shown reveal item. `shown[k]` is the `cueItems` index of shown
+* element k (ascending: props the renderer skips have no element), `defaults[k]` its default
+* start and `step` the kind's stagger step. Without cues the defaults come back unchanged.
+*/
+function cueStarts(ctx, shown, defaults, step) {
+	if (!ctx.cues?.length) return [...defaults];
+	const n = Math.max(ctx.cueCount, ...shown.map((i) => i + 1));
+	const out = cueItemStarts(Array.from({ length: n }, (_, i) => {
+		const k = shown.findIndex((s) => s >= i);
+		return defaults[k < 0 ? defaults.length - 1 : k] ?? 0;
+	}), ctx.cues, step);
+	return shown.map((i) => out[i]);
+}
+/** Spoken time (scene-local s) of the first cue on `item`, if any. */
+function cueAt(ctx, item) {
+	return ctx.cues?.find((c) => c.item === item)?.at_s;
+}
+function seq(n) {
+	return Array.from({ length: n }, (_, i) => i);
+}
 /** Heading text with the style's case transform (hook/headline roles). */
 function hc(ctx, text) {
 	return applyTextCase(text, ctx.head.case);
@@ -241528,7 +241890,14 @@ function rec(ctx, role, text, box, fit, color, background = ctx.colors.bg, abs =
 }
 function renderTypography(ctx) {
 	const { stage, props, warnings } = ctx;
-	const lines = Array.isArray(props.lines) ? props.lines.map(str$1).filter((l) => Boolean(l)).map((l) => hc(ctx, l)) : [];
+	const lines = [];
+	const items = [];
+	(Array.isArray(props.lines) ? props.lines : []).forEach((v, i) => {
+		const l = str$1(v);
+		if (!l) return;
+		lines.push(hc(ctx, l));
+		items.push(i);
+	});
 	if (lines.length === 0) warnings.push("typography: no `lines` to show");
 	const emphasis = str$1(props.emphasis);
 	const { u, safe } = stage;
@@ -241540,6 +241909,7 @@ function renderTypography(ctx) {
 		h: safe.h * .9
 	}, fit, ctx.colors.text);
 	const st = stagger(lines.length, stage.dur);
+	const at = cueStarts(ctx, items, lines.map((_, i) => st.at(i)), st.step);
 	let found = false;
 	const body = lines.map((line, i) => {
 		let html = esc(line);
@@ -241550,7 +241920,7 @@ function renderTypography(ctx) {
 				html = esc(line.slice(0, idx)) + `<span class="vs-em">${esc(line.slice(idx, idx + emphasis.length))}</span>` + esc(line.slice(idx + emphasis.length));
 			}
 		}
-		return `<div ${anim("fade-up", st.at(i), st.len)}><span class="vs-line">${html}</span></div>`;
+		return `<div ${anim("fade-up", at[i], st.len)}><span class="vs-line">${html}</span></div>`;
 	}).join("\n");
 	if (emphasis && !found) warnings.push(`typography: emphasis "${emphasis}" does not occur in any line`);
 	return `<div class="vs-stack vs-typography" style="font-size:${px(fs)}">\n${body}\n</div>`;
@@ -241591,13 +241961,18 @@ function renderCode(ctx) {
 		fits: !clipped
 	}, ctx.colors.text, ctx.colors.panel);
 	const st = stagger(shown.length, stage.dur, .25);
+	const firstHl = shown.findIndex((_, i) => highlight.has(i + 1));
+	const [blockAt, hlAt] = cueStarts(ctx, [0, 1], [0, st.at(Math.max(0, firstHl))], st.step);
+	const hlCued = highlight.size > 0 && cueAt(ctx, 1) !== void 0;
+	if (hlCued) ctx.css.push(".vs-hl-in { animation-name: vs-hl-in; }", "@keyframes vs-hl-in { from { background-color: transparent; border-left-color: transparent; } }");
 	const rows = shown.map((html, i) => {
 		const n = i + 1;
 		const hl = highlight.has(n);
-		return `<div ${anim("fade", st.at(i), st.len)}><div class="vs-code-line${hl ? " vs-hl" : ""}"><span class="vs-ln">${n}</span><span class="vs-src">${html || " "}</span></div></div>`;
+		const line = hl && hlCued ? anim("hl-in", hlAt, st.len, "vs-code-line vs-hl") : `class="vs-code-line${hl ? " vs-hl" : ""}"`;
+		return `<div ${anim("fade", st.at(i) + blockAt, st.len)}><div ${line}><span class="vs-ln">${n}</span><span class="vs-src">${html || " "}</span></div></div>`;
 	}).join("\n");
 	return [
-		`<div ${anim("scale-in", 0, .4, `vs-code-panel`)} data-language="${esc(language)}" data-family="${languageFamily(language)}">`,
+		`<div ${anim("scale-in", blockAt, .4, `vs-code-panel`)} data-language="${esc(language)}" data-family="${languageFamily(language)}">`,
 		`<div class="vs-code-bar"><span></span><span></span><span></span>${codeLabel(language) ? `<em>${esc(codeLabel(language))}</em>` : ""}</div>`,
 		`<div class="vs-code" style="font-size:${px(fs)}">`,
 		rows,
@@ -241608,9 +241983,13 @@ function renderCode(ctx) {
 function renderChart(ctx) {
 	const { stage, props, warnings } = ctx;
 	const type = str$1(props.type) ?? "stat";
-	const series = Array.isArray(props.series) ? props.series.map((p) => p && typeof p === "object" ? p : {}).filter((p) => typeof p.value === "number" && Number.isFinite(p.value)).map((p) => ({
+	const series = Array.isArray(props.series) ? props.series.map((p, item) => ({
+		p: p && typeof p === "object" ? p : {},
+		item
+	})).filter(({ p }) => typeof p.value === "number" && Number.isFinite(p.value)).map(({ p, item }) => ({
 		label: typeof p.label === "string" ? p.label : "",
-		value: p.value
+		value: p.value,
+		item
 	})) : [];
 	const unit = str$1(props.unit) ?? "";
 	const label = str$1(props.label);
@@ -241634,10 +242013,13 @@ function renderChart(ctx) {
 			w: safe.w,
 			h: safe.h * .25
 		}, lfit, ctx.colors.text);
+		const cue = cueAt(ctx, 0);
+		const valueAt = cue === void 0 ? .1 : countUpWindow(cue, entranceLen("scale-in", .6)).start;
+		const labelAt = cue === void 0 ? .45 : valueAt + .35;
 		return [
 			`<div class="vs-stack vs-stat">`,
-			`<div ${anim("scale-in", .1, .6, `vs-stat-value`, `font-size:${px(fs)}`)}><span>${esc(value)}</span><span class="vs-stat-unit">${esc(unit)}</span></div>`,
-			label && lfit ? `<div ${anim("fade-up", .45, .5, `vs-stat-label`, `font-size:${px(lfit.fs)}`)}>${esc(label)}</div>` : "",
+			`<div ${anim("scale-in", valueAt, .6, `vs-stat-value`, `font-size:${px(fs)}`)}><span>${esc(value)}</span><span class="vs-stat-unit">${esc(unit)}</span></div>`,
+			label && lfit ? `<div ${anim("fade-up", labelAt, .5, `vs-stat-label`, `font-size:${px(lfit.fs)}`)}>${esc(label)}</div>` : "",
 			`</div>`
 		].filter(Boolean).join("\n");
 	}
@@ -241658,9 +242040,11 @@ function renderChart(ctx) {
 	const min = Math.min(0, ...series.map((s) => s.value));
 	const span = max - min || 1;
 	const st = stagger(series.length, stage.dur, .3);
+	const items = series.map((s) => s.item);
 	const colour = (i) => i % 2 === 0 ? "var(--vs-primary)" : "var(--vs-secondary)";
 	let svg;
 	if (type === "bar") {
+		const at = cueStarts(ctx, items, series.map((_, i) => st.at(i)), st.step);
 		const rowH = chartH / series.length;
 		const barH = Math.min(rowH * .6, u * 10);
 		const labelW = chartW * .34;
@@ -241673,9 +242057,9 @@ function renderChart(ctx) {
 			const x = s.value >= 0 ? zeroX : zeroX - w;
 			const cy = y + barH / 2;
 			return [
-				`<text x="${r2(labelW - u * 2)}" y="${r2(cy)}" text-anchor="end" dominant-baseline="middle" ${anim("fade", st.at(i), st.len, `vs-axis`)}>${esc(s.label)}</text>`,
-				`<rect x="${r2(x)}" y="${r2(y)}" width="${r2(Math.max(1, w))}" height="${r2(barH)}" rx="${r2(Math.min(barH / 4, u))}" fill="${colour(i)}" ${anim(s.value >= 0 ? "grow-x" : "grow-x-rev", st.at(i), st.len)}/>`,
-				`<text x="${r2(labelW + trackW + u * 2)}" y="${r2(cy)}" dominant-baseline="middle" ${anim("fade", st.at(i) + st.len * .6, st.len, `vs-value`)}>${esc(fmtNumber(s.value) + unit)}</text>`
+				`<text x="${r2(labelW - u * 2)}" y="${r2(cy)}" text-anchor="end" dominant-baseline="middle" ${anim("fade", at[i], st.len, `vs-axis`)}>${esc(s.label)}</text>`,
+				`<rect x="${r2(x)}" y="${r2(y)}" width="${r2(Math.max(1, w))}" height="${r2(barH)}" rx="${r2(Math.min(barH / 4, u))}" fill="${colour(i)}" ${anim(s.value >= 0 ? "grow-x" : "grow-x-rev", at[i], st.len)}/>`,
+				`<text x="${r2(labelW + trackW + u * 2)}" y="${r2(cy)}" dominant-baseline="middle" ${anim("fade", at[i] + st.len * .6, st.len, `vs-value`)}>${esc(fmtNumber(s.value) + unit)}</text>`
 			].join("");
 		}).join("\n");
 	} else if (type === "line") {
@@ -241691,11 +242075,14 @@ function renderChart(ctx) {
 		}));
 		const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${r2(p.x)} ${r2(p.y)}`).join(" ");
 		const lineLen = Math.max(.6, Math.min(stage.dur * .5, 1.6));
+		const baseline = `<line x1="${r2(padL)}" y1="${r2(padT + innerH)}" x2="${r2(padL + innerW)}" y2="${r2(padT + innerH)}" class="vs-gridline"/>`;
+		const path = `<path d="${d}" pathLength="1" fill="none" stroke="var(--vs-primary)" stroke-width="${r2(u * 1.1)}" stroke-linecap="round" stroke-linejoin="round" ${anim("draw", .3, lineLen)}/>`;
+		const dotAt = cueStarts(ctx, items, pts.map((_, i) => .3 + (series.length === 1 ? 0 : i / (series.length - 1) * lineLen)), series.length > 1 ? lineLen / (series.length - 1) : 0);
 		svg = [
-			`<line x1="${r2(padL)}" y1="${r2(padT + innerH)}" x2="${r2(padL + innerW)}" y2="${r2(padT + innerH)}" class="vs-gridline"/>`,
-			`<path d="${d}" pathLength="1" fill="none" stroke="var(--vs-primary)" stroke-width="${r2(u * 1.1)}" stroke-linecap="round" stroke-linejoin="round" ${anim("draw", .3, lineLen)}/>`,
+			baseline,
+			path,
 			...pts.map((p, i) => {
-				const at = .3 + (series.length === 1 ? 0 : i / (series.length - 1) * lineLen);
+				const at = dotAt[i];
 				return [
 					`<circle cx="${r2(p.x)}" cy="${r2(p.y)}" r="${r2(u * 1.6)}" fill="var(--vs-secondary)" ${anim("pop", at, .3)}/>`,
 					`<text x="${r2(p.x)}" y="${r2(p.y - fs * .9)}" text-anchor="middle" ${anim("fade", at, .3, `vs-value`)}>${esc(fmtNumber(p.s.value) + unit)}</text>`,
@@ -241707,6 +242094,7 @@ function renderChart(ctx) {
 		if (type !== "pie") warnings.push(`chart: unknown type "${type}"; drawn as pie`);
 		const positive = series.filter((s) => s.value > 0);
 		if (positive.length < series.length) warnings.push("chart: pie ignores zero and negative values");
+		const at = cueStarts(ctx, positive.map((s) => s.item), positive.map((_, i) => st.at(i)), st.step);
 		const total = positive.reduce((a, s) => a + s.value, 0) || 1;
 		const legendH = positive.length * fs * 1.6;
 		const size = Math.min(chartW, chartH - legendH - u * 4);
@@ -241724,9 +242112,9 @@ function renderChart(ctx) {
 			const shape = positive.length === 1 ? `<circle cx="${r2(cx)}" cy="${r2(cy)}" r="${r2(rad)}"` : `<path d="M${r2(cx)} ${r2(cy)} L${r2(cx + rad * Math.cos(a0))} ${r2(cy + rad * Math.sin(a0))} A${r2(rad)} ${r2(rad)} 0 ${sweep > Math.PI ? 1 : 0} 1 ${r2(cx + rad * Math.cos(a1))} ${r2(cy + rad * Math.sin(a1))} Z"`;
 			const ly = size + u * 4 + i * fs * 1.6;
 			return [
-				`${shape} fill="${fill}" fill-opacity="${opacity}" stroke="var(--vs-bg)" stroke-width="${r2(u * .5)}" ${anim("pop-center", st.at(i), st.len)}/>`,
-				`<rect x="${r2(chartW * .2)}" y="${r2(ly - fs * .5)}" width="${r2(fs)}" height="${r2(fs)}" fill="${fill}" fill-opacity="${opacity}" ${anim("fade", st.at(i), st.len)}/>`,
-				`<text x="${r2(chartW * .2 + fs * 1.6)}" y="${r2(ly)}" dominant-baseline="middle" ${anim("fade", st.at(i), st.len, `vs-axis`)}>${esc(`${s.label} · ${fmtNumber(Math.round(s.value / total * 1e3) / 10)}%`)}</text>`
+				`${shape} fill="${fill}" fill-opacity="${opacity}" stroke="var(--vs-bg)" stroke-width="${r2(u * .5)}" ${anim("pop-center", at[i], st.len)}/>`,
+				`<rect x="${r2(chartW * .2)}" y="${r2(ly - fs * .5)}" width="${r2(fs)}" height="${r2(fs)}" fill="${fill}" fill-opacity="${opacity}" ${anim("fade", at[i], st.len)}/>`,
+				`<text x="${r2(chartW * .2 + fs * 1.6)}" y="${r2(ly)}" dominant-baseline="middle" ${anim("fade", at[i], st.len, `vs-axis`)}>${esc(`${s.label} · ${fmtNumber(Math.round(s.value / total * 1e3) / 10)}%`)}</text>`
 			].join("");
 		}).join("\n");
 	}
@@ -241779,17 +242167,21 @@ function layerNodes(n, edges) {
 }
 function renderDiagram(ctx) {
 	const { stage, props, warnings } = ctx;
-	const labels = Array.isArray(props.nodes) ? props.nodes.map(str$1).filter((s) => Boolean(s)) : [];
 	const index = /* @__PURE__ */ new Map();
 	const nodes = [];
-	for (const l of labels) {
+	/** `cueItems` index (position in `props.nodes`) of each drawn node. */
+	const items = [];
+	(Array.isArray(props.nodes) ? props.nodes : []).forEach((v, i) => {
+		const l = str$1(v);
+		if (!l) return;
 		if (index.has(l)) {
 			warnings.push(`diagram: duplicate node "${l}" drawn once`);
-			continue;
+			return;
 		}
 		index.set(l, nodes.length);
 		nodes.push(l);
-	}
+		items.push(i);
+	});
 	const edges = [];
 	for (const e of Array.isArray(props.edges) ? props.edges : []) {
 		const [a, b] = Array.isArray(e) ? e : [];
@@ -241855,10 +242247,12 @@ function renderDiagram(ctx) {
 			fits: fit.fits
 		}, ctx.colors.text, nodeBg);
 	});
-	const layerTime = (l) => .15 + l * Math.min(.45, Math.max(.1, (stage.dur * .6 - .6) / Math.max(1, layerCount)));
+	const layerStep = Math.min(.45, Math.max(.1, (stage.dur * .6 - .6) / Math.max(1, layerCount)));
+	const layerTime = (l) => .15 + l * layerStep;
+	const nodeAt = cueStarts(ctx, items, nodes.map((_, i) => layerTime(layers[i])), layerStep);
 	const nodeHtml = nodes.map((label, i) => {
 		const b = boxes[i];
-		return `<div class="vs-node" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)};font-size:${px(fs)}"><div ${anim("scale-in", layerTime(layers[i]), .45)}>${esc(label)}</div></div>`;
+		return `<div class="vs-node" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)};font-size:${px(fs)}"><div ${anim("scale-in", nodeAt[i], .45)}>${esc(label)}</div></div>`;
 	}).join("\n");
 	const stroke = Math.max(1.5, u * .45);
 	const head = Math.max(6, u * 2);
@@ -241877,7 +242271,7 @@ function renderDiagram(ctx) {
 		const ey = p1.y - uy * gap;
 		const bx = ex - ux * head;
 		const by = ey - uy * head;
-		const at = layerTime(Math.max(layers[a], layers[b])) + .1;
+		const at = (ctx.cues?.length ? Math.max(nodeAt[a], nodeAt[b]) : layerTime(Math.max(layers[a], layers[b]))) + .1;
 		return [`<path d="M${r2(sx)} ${r2(sy)} L${r2(bx)} ${r2(by)}" pathLength="1" stroke="var(--vs-text)" stroke-opacity="0.7" stroke-width="${r2(stroke)}" fill="none" ${anim("draw", at, .4)}/>`, `<polygon points="${r2(ex)},${r2(ey)} ${r2(bx - uy * head * .55)},${r2(by + ux * head * .55)} ${r2(bx + uy * head * .55)},${r2(by - ux * head * .55)}" fill="var(--vs-text)" fill-opacity="0.7" ${anim("fade", at + .3, .2)}/>`].join("");
 	}).join("\n");
 	return [
@@ -241934,14 +242328,23 @@ function renderComparison(ctx) {
 		w: safe.w - u * 6,
 		h: safe.h * .14
 	}, verdictFit, ctx.colors.text, mixHex(ctx.colors.bg, ctx.colors.primary, .18));
+	const [leftAt, rightAt, verdictAt] = cueStarts(ctx, verdict ? [
+		0,
+		1,
+		2
+	] : [0, 1], [
+		.15,
+		.4,
+		...verdict ? [Math.min(.9, stage.dur * .45)] : []
+	], .25);
 	const card = (s, cls, effect, at) => `<div ${anim(effect, at, .5, `vs-card ${cls}`)}><div class="vs-card-label" style="font-size:${px(labelFs)}">${esc(s.label)}</div><div class="vs-card-text" style="font-size:${px(textFs)}">${esc(s.text)}</div></div>`;
 	return [
 		`<div class="vs-stack vs-comparison">`,
 		`<div class="vs-compare ${columns ? "vs-columns" : "vs-rows"}">`,
-		card(left, "vs-left", columns ? "slide-right" : "fade-up", .15),
-		card(right, "vs-right", columns ? "slide-left" : "fade-up", .4),
+		card(left, "vs-left", columns ? "slide-right" : "fade-up", leftAt),
+		card(right, "vs-right", columns ? "slide-left" : "fade-up", rightAt),
 		`</div>`,
-		verdict && verdictFit ? `<div ${anim("fade-up", Math.min(.9, stage.dur * .45), .5, `vs-verdict`, `font-size:${px(verdictFit.fs)}`)}>${esc(verdict)}</div>` : "",
+		verdict && verdictFit ? `<div ${anim("fade-up", verdictAt, .5, `vs-verdict`, `font-size:${px(verdictFit.fs)}`)}>${esc(verdict)}</div>` : "",
 		`</div>`
 	].filter(Boolean).join("\n");
 }
@@ -241956,7 +242359,8 @@ function renderCta(ctx) {
 	const url = str$1(props.url);
 	const { u, safe } = stage;
 	const st = stagger(2 + (command ? 1 : 0) + (url ? 1 : 0), stage.dur);
-	let i = 0;
+	const [headAt, actionAt] = cueStarts(ctx, [0, 1], [st.at(0), st.at(1)], st.step);
+	const shift = actionAt - st.at(1);
 	const hf = headFit(ctx, [headline], safe.w, safe.h * .35, u * 10, u * 3.5, 1.1);
 	const af = fitFontInfo([action], safe.w * .8, safe.h * .12, u * 6, u * 2.5);
 	const cf = command ? fitFontInfo([command], safe.w - u * 8, safe.h * .12, u * 4.5, u * 1.8, 1.2, .62) : void 0;
@@ -241992,10 +242396,10 @@ function renderCta(ctx) {
 	return [
 		`<div class="vs-stack vs-cta">`,
 		logoHtml(ctx, 0),
-		`<div ${anim("fade-up", st.at(i++), st.len, `vs-headline`, `font-size:${px(hf.fs)}`)}>${esc(headline)}</div>`,
-		`<div class="vs-action-wrap"><div ${anim("pop", st.at(i++), st.len, `vs-action`, `font-size:${px(af.fs)}`)}>${esc(action)}</div></div>`,
-		command && cf ? `<div ${anim("fade-up", st.at(i++), st.len, `vs-command`, `font-size:${px(cf.fs)}`)}><span class="vs-prompt">$</span> ${esc(command)}</div>` : "",
-		url && uf ? `<div ${anim("fade", st.at(i++), st.len, `vs-url`, `font-size:${px(uf.fs)}`)}>${esc(url)}</div>` : "",
+		`<div ${anim("fade-up", headAt, st.len, `vs-headline`, `font-size:${px(hf.fs)}`)}>${esc(headline)}</div>`,
+		`<div class="vs-action-wrap"><div ${anim("pop", actionAt, st.len, `vs-action`, `font-size:${px(af.fs)}`)}>${esc(action)}</div></div>`,
+		command && cf ? `<div ${anim("fade-up", st.at(2) + shift, st.len, `vs-command`, `font-size:${px(cf.fs)}`)}><span class="vs-prompt">$</span> ${esc(command)}</div>` : "",
+		url && uf ? `<div ${anim("fade", st.at(command && cf ? 3 : 2) + shift, st.len, `vs-url`, `font-size:${px(uf.fs)}`)}>${esc(url)}</div>` : "",
 		`</div>`
 	].filter(Boolean).join("\n");
 }
@@ -242018,12 +242422,17 @@ function renderEndCard(ctx) {
 		w: safe.w,
 		h: safe.h * .15
 	}, sf, ctx.colors.text);
+	const defaults = [...title ? [.15] : [], ...subtitle ? [.45] : []];
+	const starts = cueStarts(ctx, seq(Math.max(1, defaults.length)), defaults.length ? defaults : [.05], .3);
+	const titleAt = title ? starts[0] : .15;
+	const subtitleAt = subtitle ? starts[title ? 1 : 0] : .45;
+	const cardShift = defaults.length ? 0 : starts[0] - .05;
 	return [
 		`<div class="vs-stack vs-end">`,
-		logoHtml(ctx, .05),
-		title && tf ? `<div ${anim("scale-in", .15, .6, `vs-headline`, `font-size:${px(tf.fs)}`)}>${esc(title)}</div>` : "",
-		subtitle && sf ? `<div ${anim("fade-up", .45, .5, `vs-subtitle`, `font-size:${px(sf.fs)}`)}>${esc(subtitle)}</div>` : "",
-		`<div ${anim("grow-x-center", .6, .5, `vs-rule`)}></div>`,
+		logoHtml(ctx, .05 + cardShift),
+		title && tf ? `<div ${anim("scale-in", titleAt, .6, `vs-headline`, `font-size:${px(tf.fs)}`)}>${esc(title)}</div>` : "",
+		subtitle && sf ? `<div ${anim("fade-up", subtitleAt, .5, `vs-subtitle`, `font-size:${px(sf.fs)}`)}>${esc(subtitle)}</div>` : "",
+		`<div ${anim("grow-x-center", .6 + cardShift, .5, `vs-rule`)}></div>`,
 		`</div>`
 	].filter(Boolean).join("\n");
 }
@@ -242056,6 +242465,7 @@ function renderScreenshot(ctx) {
 	const positioned = [];
 	const listed = [];
 	const st = stagger(callouts.length, stage.dur, .5);
+	const at = cueStarts(ctx, seq(callouts.length), callouts.map((_, i) => st.at(i)), st.step);
 	const fs = Math.max(9, u * 3.4);
 	callouts.forEach((c, i) => {
 		const text = typeof c === "string" ? c : c && typeof c === "object" ? str$1(c.text) : void 0;
@@ -242073,9 +242483,9 @@ function renderScreenshot(ctx) {
 				fs: r2(fs),
 				fits: true
 			}, ctx.colors.bg, ctx.colors.primary);
-			positioned.push(`<div class="vs-pin" style="left:${x}%;top:${y}%"><div ${anim("pop", st.at(i), st.len)}><span class="vs-pin-dot"></span><span class="vs-callout">${esc(text)}</span></div></div>`);
+			positioned.push(`<div class="vs-pin" style="left:${x}%;top:${y}%"><div ${anim("pop", at[i], st.len)}><span class="vs-pin-dot"></span><span class="vs-callout">${esc(text)}</span></div></div>`);
 		} else {
-			listed.push(`<div ${anim("fade-up", st.at(i), st.len, `vs-callout`)}>${esc(text)}</div>`);
+			listed.push(`<div ${anim("fade-up", at[i], st.len, `vs-callout`)}>${esc(text)}</div>`);
 			rec(ctx, "label", text, {
 				y: safe.h - Math.min(safe.h * .35, callouts.length * fs * 2.6) + listed.length * fs * 1.6,
 				w: safe.w,
@@ -242172,13 +242582,14 @@ function renderQuote(ctx) {
 		h: src.h
 	}, src.fit, mutedHex(ctx));
 	const st = stagger(heights.length, stage.dur);
-	let i = 0;
+	const qAt = cueStarts(ctx, attr ? [0, 1] : [0], attr ? [st.at(1), st.at(2)] : [st.at(1)], st.step);
+	const shift = qAt[qAt.length - 1] - st.at(qAt.length);
 	return [
 		`<div class="vs-stack vs-quote" style="gap:${px(gap)}">`,
-		`<div ${anim("pop", st.at(i++), st.len, `vs-quote-mark`, `height:${px(markH)};font-size:${px(markFs)}`)}>“</div>`,
-		`<div ${anim("fade-up", st.at(i++), st.len, `vs-quote-text`, `min-height:${px(body.h)};font-size:${px(body.fit.fs)}`)}>${esc(text)}</div>`,
-		attribution && attr ? `<div ${anim("fade-up", st.at(i++), st.len, `vs-quote-attr`, `min-height:${px(attr.h)};font-size:${px(attr.fit.fs)}`)}>— ${esc(attribution)}</div>` : "",
-		source && src ? `<div ${anim("fade", st.at(i++), st.len, `vs-quote-source vs-muted`, `min-height:${px(src.h)};font-size:${px(src.fit.fs)}`)}>${esc(source)}</div>` : "",
+		`<div ${anim("pop", st.at(0), st.len, `vs-quote-mark`, `height:${px(markH)};font-size:${px(markFs)}`)}>“</div>`,
+		`<div ${anim("fade-up", qAt[0], st.len, `vs-quote-text`, `min-height:${px(body.h)};font-size:${px(body.fit.fs)}`)}>${esc(text)}</div>`,
+		attribution && attr ? `<div ${anim("fade-up", qAt[1], st.len, `vs-quote-attr`, `min-height:${px(attr.h)};font-size:${px(attr.fit.fs)}`)}>— ${esc(attribution)}</div>` : "",
+		source && src ? `<div ${anim("fade", st.at(attr ? 3 : 2) + shift, st.len, `vs-quote-source vs-muted`, `min-height:${px(src.h)};font-size:${px(src.fit.fs)}`)}>${esc(source)}</div>` : "",
 		`</div>`
 	].filter(Boolean).join("\n");
 }
@@ -242231,12 +242642,17 @@ function renderStat(ctx) {
 		w: safe.w,
 		h: con.h
 	}, con.fit, mutedHex(ctx));
-	const count = numeric !== void 0 && numeric !== 0 ? countUp(numeric, .1, Math.max(.4, Math.min(1.2, stage.dur * .35))) : void 0;
+	const span = Math.max(.4, Math.min(1.2, stage.dur * .35));
+	const counts = numeric !== void 0 && numeric !== 0;
+	const valueCue = cueAt(ctx, 0);
+	const win = counts && valueCue !== void 0 ? countUpWindow(valueCue, span) : void 0;
+	const count = counts ? countUp(numeric, win ? win.start : .1, win ? win.end - win.start : span) : void 0;
 	const digits = count ? `<span class="vs-count"><span ${anim("fade", count.done, .001)}>${esc(value)}</span>${count.frames}</span>` : `<span>${esc(value)}</span>`;
-	const labelAt = count ? Math.min(count.done, stage.dur * .5) : .45;
+	const [cuedValueAt, labelAt] = cueStarts(ctx, [0, 1], [.05, count ? Math.min(count.done, stage.dur * .5) : .45], .4);
+	const valueAt = win ? Math.max(0, win.start - .05) : cuedValueAt;
 	return [
 		`<div class="vs-stack vs-stat" style="gap:${px(gap)}">`,
-		`<div ${anim("scale-in", .05, .5, `vs-stat-value`, `min-height:${px(valueH)};font-size:${px(vfit.fs)}`)}>${digits}${unit ? `<span class="vs-stat-unit">${esc(unit)}</span>` : ""}</div>`,
+		`<div ${anim("scale-in", valueAt, .5, `vs-stat-value`, `min-height:${px(valueH)};font-size:${px(vfit.fs)}`)}>${digits}${unit ? `<span class="vs-stat-unit">${esc(unit)}</span>` : ""}</div>`,
 		label && lab ? `<div ${anim("fade-up", labelAt, .5, `vs-stat-label`, `min-height:${px(lab.h)};font-size:${px(lab.fit.fs)}`)}>${esc(label)}</div>` : "",
 		context && con ? `<div ${anim("fade", labelAt + .25, .5, `vs-stat-context vs-muted`, `min-height:${px(con.h)};font-size:${px(con.fit.fs)}`)}>${esc(context)}</div>` : "",
 		`</div>`
@@ -242244,9 +242660,10 @@ function renderStat(ctx) {
 }
 function renderTimeline(ctx) {
 	const { stage, props, warnings } = ctx;
-	let events = (Array.isArray(props.events) ? props.events : []).map((e) => e && typeof e === "object" ? e : {}).map((e) => ({
+	let events = (Array.isArray(props.events) ? props.events : []).map((e) => e && typeof e === "object" ? e : {}).map((e, item) => ({
 		label: str$1(e.label) ?? "",
-		text: str$1(e.text) ?? ""
+		text: str$1(e.text) ?? "",
+		item
 	})).filter((e) => e.label || e.text);
 	if (events.length > 6) {
 		warnings.push(`timeline: ${events.length} events do not fit; showing the first 6`);
@@ -242322,6 +242739,7 @@ function renderTimeline(ctx) {
 	const lf = sharedFit(events.map((e) => e.label), blocks[0].w, labelH, u * (vertical ? 6 : 5), u * 2.6, 1.15);
 	const tf = sharedFit(events.map((e) => e.text), blocks[0].w, Math.max(1, textH), u * 4.2, u * 2.2, 1.3);
 	const st = stagger(n, stage.dur, .3);
+	const at = cueStarts(ctx, events.map((e) => e.item), events.map((_, i) => st.at(i)), st.step);
 	const lineDur = Math.max(.3, st.at(n - 1) - .1 + st.len * .5);
 	const muted = mutedHex(ctx, .6);
 	const html = [`<div ${anim(vertical ? "grow-y" : "grow-x", .1, lineDur, `vs-tl-line`, `left:${px(lineRect.x)};top:${px(lineRect.y)};width:${px(lineRect.w)};height:${px(lineRect.h)}`)}></div>`];
@@ -242349,7 +242767,7 @@ function renderTimeline(ctx) {
 			fs: tf.fs,
 			fits: tf.fits[i]
 		}, state === "vs-tl-future" ? muted : ctx.colors.text);
-		html.push(`<div class="vs-tl-pos" style="left:${px(d.x - r)};top:${px(d.y - r)};width:${px(r * 2)};height:${px(r * 2)}"><div ${anim("pop", st.at(i), st.len, `vs-tl-dot ${state}`)}></div></div>`, `<div class="vs-tl-event ${state}${vertical ? "" : " vs-tl-under"}" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)}"><div ${anim(vertical ? "slide-left" : "fade-up", st.at(i), st.len)}><div class="vs-tl-label" style="font-size:${px(lf.fs)}">${esc(e.label)}</div>` + (e.text ? `<div class="vs-tl-text" style="font-size:${px(tf.fs)}">${esc(e.text)}</div>` : "") + `</div></div>`);
+		html.push(`<div class="vs-tl-pos" style="left:${px(d.x - r)};top:${px(d.y - r)};width:${px(r * 2)};height:${px(r * 2)}"><div ${anim("pop", at[i], st.len, `vs-tl-dot ${state}`)}></div></div>`, `<div class="vs-tl-event ${state}${vertical ? "" : " vs-tl-under"}" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)}"><div ${anim(vertical ? "slide-left" : "fade-up", at[i], st.len)}><div class="vs-tl-label" style="font-size:${px(lf.fs)}">${esc(e.label)}</div>` + (e.text ? `<div class="vs-tl-text" style="font-size:${px(tf.fs)}">${esc(e.text)}</div>` : "") + `</div></div>`);
 	});
 	return html.join("\n");
 }
@@ -242394,6 +242812,8 @@ function renderSplitScreen(ctx) {
 	const tfMedia = withMedia.length ? sharedFit(withMedia, innerW, ph * .2, u * 4.2, u * 2.2, 1.3) : void 0;
 	const tfBare = bare.length ? sharedFit(bare, innerW, textH(hasMedia.indexOf(false)), u * 6, u * 2.4, 1.3) : void 0;
 	const accents = beforeAfter ? [mutedHex(ctx), ctx.colors.primary] : [ctx.colors.primary, ctx.colors.secondary];
+	const defaults = [0, 1].map((i) => .15 + i * .3);
+	const panelAt = cueStarts(ctx, [0, 1], defaults, .3);
 	const cards = panels.map((p, i) => {
 		const r = rects[i];
 		const fs = (hasMedia[i] ? tfMedia : tfBare).fs;
@@ -242437,7 +242857,7 @@ function renderSplitScreen(ctx) {
 		}
 		const side = i === 0 ? "vs-left" : "vs-right";
 		const effect = columns ? i === 0 ? "slide-right" : "slide-left" : "fade-up";
-		return `<div class="vs-split-pos" style="left:${px(r.x)};top:${px(r.y)};width:${px(r.w)};height:${px(r.h)}"><div ${anim(effect, .15 + i * .3, .5, `vs-split ${side}${beforeAfter ? i === 0 ? " vs-before" : " vs-after" : ""}`)}>` + (p.label ? `<div class="vs-split-label" style="height:${px(labelH)};font-size:${px(lf.fs)}">${esc(p.label)}</div>` : "") + media + (p.text ? `<div class="vs-split-text${hasMedia[i] ? "" : " vs-split-only"}" style="font-size:${px(fs)}">${esc(p.text)}</div>` : "") + `</div></div>`;
+		return `<div class="vs-split-pos" style="left:${px(r.x)};top:${px(r.y)};width:${px(r.w)};height:${px(r.h)}"><div ${anim(effect, panelAt[i], .5, `vs-split ${side}${beforeAfter ? i === 0 ? " vs-before" : " vs-after" : ""}`)}>` + (p.label ? `<div class="vs-split-label" style="height:${px(labelH)};font-size:${px(lf.fs)}">${esc(p.label)}</div>` : "") + media + (p.text ? `<div class="vs-split-text${hasMedia[i] ? "" : " vs-split-only"}" style="font-size:${px(fs)}">${esc(p.text)}</div>` : "") + `</div></div>`;
 	});
 	let arrow = "";
 	if (beforeAfter) {
@@ -242445,7 +242865,7 @@ function renderSplitScreen(ctx) {
 		const cx = columns ? pw + gap / 2 : safe.w / 2;
 		const cy = columns ? safe.h / 2 : ph + gap / 2;
 		const rot = columns ? 0 : 90;
-		arrow = `<svg class="vs-split-arrow" width="${r2(s)}" height="${r2(s)}" viewBox="0 0 24 24" style="left:${px(cx - s / 2)};top:${px(cy - s / 2)}"><g ${anim("pop", .6, .4)}><circle cx="12" cy="12" r="12" fill="var(--vs-primary)"/><path d="M7 12h9M12.5 7.5L17 12l-4.5 4.5" transform="rotate(${rot} 12 12)" fill="none" stroke="var(--vs-bg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g></svg>`;
+		arrow = `<svg class="vs-split-arrow" width="${r2(s)}" height="${r2(s)}" viewBox="0 0 24 24" style="left:${px(cx - s / 2)};top:${px(cy - s / 2)}"><g ${anim("pop", .6 + (panelAt[1] - defaults[1]), .4)}><circle cx="12" cy="12" r="12" fill="var(--vs-primary)"/><path d="M7 12h9M12.5 7.5L17 12l-4.5 4.5" transform="rotate(${rot} 12 12)" fill="none" stroke="var(--vs-bg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g></svg>`;
 	}
 	return [...cards, arrow].filter(Boolean).join("\n");
 }
@@ -242477,6 +242897,7 @@ function renderLowerThird(ctx) {
 		w: innerW,
 		h: tb.h
 	}, tb.fit, mixHex(ctx.colors.panel, ctx.colors.text, .75), ctx.colors.panel);
+	const [barAt, headAt] = cueStarts(ctx, headline ? [0, 1] : [0], headline ? [Math.min(.6, stage.dur * .25), .1] : [.1], .3);
 	let head = "";
 	if (headline) {
 		const room = barY - u * 6;
@@ -242487,9 +242908,9 @@ function renderLowerThird(ctx) {
 			w: safe.w,
 			h: hb.h
 		}, hb.fit, ctx.colors.text);
-		head = `<div class="vs-lt-headline" style="left:0;top:${px(hy)};width:${px(safe.w)};height:${px(hb.h)}"><div ${anim("fade-up", .1, .6, `vs-headline`, `font-size:${px(hb.fit.fs)}`)}>${esc(headline)}</div></div>`;
+		head = `<div class="vs-lt-headline" style="left:0;top:${px(hy)};width:${px(safe.w)};height:${px(hb.h)}"><div ${anim("fade-up", headAt, .6, `vs-headline`, `font-size:${px(hb.fit.fs)}`)}>${esc(headline)}</div></div>`;
 	}
-	const at = headline ? Math.min(.6, stage.dur * .25) : .1;
+	const at = barAt;
 	return [
 		head,
 		`<div class="vs-lt-pos" style="left:0;top:${px(barY)};width:${px(barW)};height:${px(barH)}"><div ${anim("slide-right", at, .5, `vs-lt`)}>`,
@@ -242503,19 +242924,25 @@ function renderLowerThird(ctx) {
 }
 /** Chunks of `text` with their [start, end) offsets: words, or phrases split after punctuation. */
 function kineticChunks(text, rhythm) {
-	const re = rhythm === "phrase" ? /[^.,;:!?…—–]+[.,;:!?…—–]*|[.,;:!?…—–]+/g : /\S+/g;
+	const sep = rhythm === "phrase" ? /(?<=[.,;:!?…—])\s+/g : /\s+/g;
 	const out = [];
-	for (const m of text.matchAll(re)) {
-		const lead = m[0].length - m[0].trimStart().length;
-		const t = m[0].trim();
-		if (!t) continue;
-		const start = m.index + lead;
+	const push = (from, to) => {
+		const seg = text.slice(from, to);
+		const t = seg.trim();
+		if (!t) return;
+		const start = from + seg.length - seg.trimStart().length;
 		out.push({
 			text: t,
 			start,
 			end: start + t.length
 		});
+	};
+	let pos = 0;
+	for (const m of text.matchAll(sep)) {
+		push(pos, m.index);
+		pos = m.index + m[0].length;
 	}
+	push(pos, text.length);
 	return out;
 }
 function renderKineticText(ctx) {
@@ -242543,12 +242970,13 @@ function renderKineticText(ctx) {
 	const first = .15;
 	const step = chunks.length > 1 ? Math.max(.3, stage.dur * .65 - first) / chunks.length : 0;
 	const len = Math.min(.45, Math.max(.15, step * 1.6 || .45));
+	const at = cueStarts(ctx, seq(chunks.length), chunks.map((_, i) => first + i * step), step);
 	const spans = chunks.map((c, i) => {
 		let html = esc(c.text);
 		const a = Math.max(c.start, es);
 		const b = Math.min(c.end, ee);
 		if (es >= 0 && a < b) html = esc(text.slice(c.start, a)) + `<span class="vs-em">${esc(text.slice(a, b))}</span>` + esc(text.slice(b, c.end));
-		return `<span ${anim("kin", first + i * step, len, `vs-kin-chunk`)}>${html}</span>`;
+		return `<span ${anim("kin", at[i], len, `vs-kin-chunk`)}>${html}</span>`;
 	});
 	return `<div class="vs-stack vs-kinetic" data-rhythm="${rhythm}" style="font-size:${px(block.fit.fs)}">\n<div class="vs-kin-line">${spans.join(" ")}</div>\n</div>`;
 }
@@ -242557,14 +242985,18 @@ function renderMap(ctx) {
 	const titleRaw = str$1(props.title);
 	const title = titleRaw ? hc(ctx, titleRaw) : void 0;
 	const clamp01 = (v) => Math.min(1, Math.max(0, v));
-	let points = (Array.isArray(props.points) ? props.points : []).map((p) => p && typeof p === "object" ? p : {}).filter((p) => {
+	let points = (Array.isArray(props.points) ? props.points : []).map((p, item) => ({
+		p: p && typeof p === "object" ? p : {},
+		item
+	})).filter(({ p }) => {
 		const ok = typeof p.x === "number" && Number.isFinite(p.x) && typeof p.y === "number" && Number.isFinite(p.y);
 		if (!ok) warnings.push(`map: point ${JSON.stringify(str$1(p.label) ?? "")} has no numeric x/y; skipped`);
 		return ok;
-	}).map((p) => ({
+	}).map(({ p, item }) => ({
 		label: str$1(p.label) ?? "",
 		x: clamp01(p.x),
-		y: clamp01(p.y)
+		y: clamp01(p.y),
+		item
 	}));
 	if (points.length > 8) {
 		warnings.push(`map: ${points.length} points do not fit; showing the first 8`);
@@ -242624,7 +243056,8 @@ function renderMap(ctx) {
 	const lineLen = Math.max(.6, Math.min(stage.dur * .5, 1.6));
 	let dist = 0;
 	const cum = P.map((p, i) => i === 0 ? 0 : dist += Math.hypot(p.px - P[i - 1].px, p.py - P[i - 1].py));
-	const pinAt = (i) => route ? .3 + (dist ? cum[i] / dist * lineLen : 0) : st.at(i);
+	const pinStarts = cueStarts(ctx, P.map((p) => p.item), P.map((_, i) => route ? .3 + (dist ? cum[i] / dist * lineLen : 0) : st.at(i)), route && P.length > 1 ? lineLen / (P.length - 1) : st.step);
+	const pinAt = (i) => pinStarts[i];
 	const grid = [];
 	const cell = u * 12;
 	const inset = u * 3;
@@ -243084,6 +243517,8 @@ function buildComposition(req, opts = {}) {
 		...t.heading_scale !== void 0 ? { scale: t.heading_scale } : {}
 	};
 	let content;
+	const cues = (opts.cues ?? req.cues)?.length ? opts.cues ?? req.cues : void 0;
+	const cueCss = [];
 	activeMotion = t.motion;
 	try {
 		content = render({
@@ -243096,7 +243531,10 @@ function buildComposition(req, opts = {}) {
 			main,
 			colors,
 			boxes,
-			head
+			head,
+			...cues ? { cues } : {},
+			cueCount: cues ? cueItems(det.kind, det.props ?? {}).length : 0,
+			css: cueCss
 		});
 	} finally {
 		activeMotion = void 0;
@@ -243131,7 +243569,7 @@ function buildComposition(req, opts = {}) {
 <meta name="viewport" content="width=${W}, height=${H}">
 <title>${esc(`${scene.id} ${det.kind}`)}</title>
 <style>
-${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}${cam ? cam.css : ""}
+${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}${cam ? cam.css : ""}${cueCss.length ? `\n/* word cues */\n${cueCss.join("\n")}` : ""}
 </style>
 </head>
 <body>
@@ -243466,7 +243904,10 @@ function createHyperframesRenderer(opts = {}) {
 			const avail = await check(process.env);
 			if (!avail.ok || !avail.chromePath) throw new Error(`HyperFrames renderer unavailable: ${avail.reason}`);
 			const assetIndex = await loadAssetIndex(req.project_dir);
-			const comp = buildComposition(req, { resolveAsset: (id) => assetIndex.get(id) });
+			const comp = buildComposition(req, {
+				resolveAsset: (id) => assetIndex.get(id),
+				...req.cues?.length ? { cues: req.cues } : {}
+			});
 			const warnings = [...comp.warnings];
 			const keep = opts.keepTmp || process.env.VS_KEEP_HYPERFRAMES_TMP === "1";
 			const dir = await mkdtemp(join(opts.tmpRoot ?? tmpdir(), `vs-hf-${scene.id}-`));
@@ -247360,6 +247801,13 @@ const CAPTION_SETTLE_SEC = .3;
 const CAPTION_MIN_SEC = .7;
 /** The tension (question, problem, claim, story) should be set up within this share of the video. */
 const STORY_SETUP_FRACTION = .4;
+/** Cutaway rhythm over a talking head: no cutaway in the hook's first second, 3–10 s each, 2 s of face between. */
+const CUTAWAY = {
+	hook_sec: 1,
+	min_sec: 3,
+	max_sec: 10,
+	face_gap_sec: 2
+};
 /** Caption cues for sound events carry this scene_id prefix (pipeline SOUND_CUE_SCENE_PREFIX). */
 const SOUND_CUE_PREFIX = "sound:";
 /** Roles whose overflow or low contrast is an error (v2 design grid: hard failure for hook/caption). */
@@ -248086,6 +248534,49 @@ function checkStory(spec, out) {
 		fix: "re-plan with skills/plan/references/storytelling.md: open a loop early (a question or problem the viewer wants answered), escalate, and close it in a payoff scene right before the CTA"
 	});
 }
+/** Cutaways (`footage.cutaway`): consecutive cutaway scenes form one block, timed on the spec. */
+function checkCutaways(spec, out) {
+	const blocks = [];
+	let t = 0;
+	let prevCut = false;
+	for (const s of spec.scenes) {
+		const cut = !!s.footage?.cutaway;
+		if (cut && prevCut) blocks[blocks.length - 1].end = t + s.duration_sec;
+		else if (cut) blocks.push({
+			start: t,
+			end: t + s.duration_sec,
+			first: s.id
+		});
+		prevCut = cut;
+		t += s.duration_sec;
+	}
+	const r1 = (x) => Math.round(x * 10) / 10;
+	blocks.forEach((b, i) => {
+		const len = b.end - b.start;
+		const problems = [];
+		const fixes = [];
+		if (b.start < CUTAWAY.hook_sec) {
+			problems.push(`it starts at ${r1(b.start)}s, inside the hook's first second`);
+			fixes.push("open on the speaker's face and cut away later");
+		}
+		if (len < CUTAWAY.min_sec || len > CUTAWAY.max_sec) {
+			problems.push(`it lasts ${r1(len)}s (aim for ${CUTAWAY.min_sec}–${CUTAWAY.max_sec}s, the length of one idea)`);
+			fixes.push(len < CUTAWAY.min_sec ? "lengthen it to cover the whole idea, or drop it" : "split it with a return to the speaker");
+		}
+		const prev = blocks[i - 1];
+		if (prev && b.start - prev.end < CUTAWAY.face_gap_sec) {
+			problems.push(`only ${r1(b.start - prev.end)}s of the speaker since the previous cutaway`);
+			fixes.push(`leave at least ${CUTAWAY.face_gap_sec}s of face between cutaways, or merge the two`);
+		}
+		if (problems.length) out.push({
+			id: "cutaway_rhythm",
+			severity: "warning",
+			scene_id: b.first,
+			message: `cutaway at ${b.first}: ${problems.join("; ")}`,
+			fix: fixes.join("; ")
+		});
+	});
+}
 /** Caption and beat timing against the render: needs render-state.json (and its captions / voice files). */
 async function checkTiming(root, spec, state, brand, out) {
 	if (!state) return;
@@ -248099,6 +248590,35 @@ async function checkTiming(root, spec, state, brand, out) {
 		checkCaptionGap(lines, out);
 	}
 	checkBeatCuts(spec, state, spans, out);
+	checkCues(state, out);
+}
+/** Word cues the render could not place, and cues too close together to follow. */
+function checkCues(state, out) {
+	const cues = state.cues ?? [];
+	for (const c of cues) {
+		if (c.status === "placed") continue;
+		out.push({
+			id: "cue_unmatched",
+			severity: "warning",
+			scene_id: c.scene_id,
+			message: c.status === "late" ? `cue "${c.word}" (item ${c.item}) is spoken after scene ${c.scene_id} ends, so the item kept its default timing` : `cue "${c.word}" (item ${c.item}) was not found in scene ${c.scene_id}'s spoken words, so the item kept its default timing`,
+			fix: c.status === "late" ? `move the word earlier in the voiceover, cue an earlier word, or lengthen scene ${c.scene_id}` : `cue a word the scene actually says (a native transcript may spell it differently), or render with a voice (silent renders have no word timings)`
+		});
+	}
+	const byScene = /* @__PURE__ */ new Map();
+	for (const c of cues) if (c.status === "placed" && c.at_ms !== void 0) byScene.set(c.scene_id, [...byScene.get(c.scene_id) ?? [], c.at_ms]);
+	for (const [scene, times] of byScene) {
+		const t = [...times].sort((a, b) => a - b);
+		const gaps = t.slice(1).map((x, i) => x - t[i]);
+		const min = Math.min(...gaps);
+		if (gaps.length && min < 400) out.push({
+			id: "cue_too_close",
+			severity: "warning",
+			scene_id: scene,
+			message: `two cues in scene ${scene} land ${Math.round(min)} ms apart; viewers follow about one change per 400 ms`,
+			fix: `cue words at least ${400 / 1e3}s apart: drop a cue (that item keeps the default stagger) or cue a later word`
+		});
+	}
 }
 function formatMarkdown$1(r) {
 	const lines = [
@@ -248164,6 +248684,7 @@ async function lintProject(projectDir, opts = {}) {
 	const brand = await loadBrand$1(paths.root);
 	await checkTiming(paths.root, spec, state, brand, findings);
 	checkStory(spec, findings);
+	checkCutaways(spec, findings);
 	checkPostCopy(spec, contracts, findings);
 	checkCover(spec, contracts, state?.cover ? {
 		...state.cover.headline_box ? { headline_box: state.cover.headline_box } : {},
@@ -249595,6 +250116,76 @@ async function renderProject(projectDir, o = {}) {
 		...s,
 		duration_sec: adjusted.get(s.id)
 	} : s);
+	const bounds = [0];
+	let acc = 0;
+	for (const s of planScenes) {
+		acc += s.duration_sec;
+		bounds.push(Math.round(acc * target.fps));
+	}
+	const frameMs = (f) => f * 1e3 / target.fps;
+	const slotMs = planScenes.map((_, i) => frameMs(bounds[i + 1] - bounds[i]));
+	const nativeTracks = /* @__PURE__ */ new Map();
+	if (mode === "native") {
+		for (const [i, s] of planScenes.entries()) {
+			const f = footage.byScene.get(s.id);
+			if (!s.footage || !f || "error" in f) continue;
+			const amode = s.audio?.mode ?? "native";
+			if (amode !== "native" && amode !== "mix") continue;
+			const words = await transcriptWords(root, footage.assets.get(s.footage.asset), s.footage, slotMs[i], warnings);
+			if (words.length) nativeTracks.set(s.id, {
+				scene_id: s.id,
+				duration_ms: Math.round(slotMs[i]),
+				words,
+				timing_source: "aligned",
+				provider: "native"
+			});
+		}
+		if (nativeTracks.size) timingSource = "aligned";
+	}
+	const sceneCues = /* @__PURE__ */ new Map();
+	const cueLog = [];
+	for (const [i, s] of planScenes.entries()) {
+		if (!s.cues?.length || !s.deterministic) continue;
+		const words = (nativeTracks.get(s.id) ?? trackById.get(s.id))?.words ?? [];
+		const items = cueItemIndexes(s.cues);
+		const placed = [];
+		s.cues.forEach((c, k) => {
+			const at = words.length ? matchCue(words.map((w) => w.word), c) : -1;
+			const entry = {
+				scene_id: s.id,
+				word: c.word,
+				item: items[k]
+			};
+			if (at < 0) {
+				cueLog.push({
+					...entry,
+					status: "unmatched"
+				});
+				warnings.push(`cues: ${s.id}: "${c.word}" ${words.length ? "is not in the spoken words" : "has no word timings (silent voice?)"}; item ${items[k]} keeps its default timing`);
+				return;
+			}
+			const atMs = words[at].start_ms;
+			if (atMs >= slotMs[i]) {
+				cueLog.push({
+					...entry,
+					at_ms: atMs,
+					status: "late"
+				});
+				warnings.push(`cues: ${s.id}: "${c.word}" is spoken after the scene ends; item ${items[k]} keeps its default timing`);
+				return;
+			}
+			cueLog.push({
+				...entry,
+				at_ms: atMs,
+				status: "placed"
+			});
+			placed.push({
+				item: items[k],
+				at_s: Math.round(atMs) / 1e3
+			});
+		});
+		if (placed.length) sceneCues.set(s.id, placed.sort((a, b) => a.at_s - b.at_s || a.item - b.item));
+	}
 	const rdir = renderDir(root, quality);
 	const scenesDir = join(rdir, "scenes");
 	const count = planScenes.length;
@@ -249632,7 +250223,8 @@ async function renderProject(projectDir, o = {}) {
 		env,
 		...signal ? { signal } : {},
 		footage: footage.byScene,
-		footageRenderer: o.footageRenderer ?? createFootageRenderer({ encodePreset: o.encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") })
+		footageRenderer: o.footageRenderer ?? createFootageRenderer({ encodePreset: o.encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") }),
+		...sceneCues.size ? { cues: sceneCues } : {}
 	};
 	const first = await renderScenes({ scenes: planScenes }, {
 		...baseOpts,
@@ -249669,32 +250261,6 @@ async function renderProject(projectDir, o = {}) {
 		stage: "captions",
 		message: "building captions"
 	});
-	const bounds = [0];
-	let acc = 0;
-	for (const s of planScenes) {
-		acc += s.duration_sec;
-		bounds.push(Math.round(acc * target.fps));
-	}
-	const frameMs = (f) => f * 1e3 / target.fps;
-	const slotMs = planScenes.map((_, i) => frameMs(bounds[i + 1] - bounds[i]));
-	const nativeTracks = /* @__PURE__ */ new Map();
-	if (mode === "native") {
-		for (const [i, s] of planScenes.entries()) {
-			const f = footage.byScene.get(s.id);
-			if (!s.footage || !f || "error" in f) continue;
-			const amode = s.audio?.mode ?? "native";
-			if (amode !== "native" && amode !== "mix") continue;
-			const words = await transcriptWords(root, footage.assets.get(s.footage.asset), s.footage, slotMs[i], warnings);
-			if (words.length) nativeTracks.set(s.id, {
-				scene_id: s.id,
-				duration_ms: Math.round(slotMs[i]),
-				words,
-				timing_source: "aligned",
-				provider: "native"
-			});
-		}
-		if (nativeTracks.size) timingSource = "aligned";
-	}
 	const placements = planScenes.map((s, i) => {
 		const dur = slotMs[i];
 		const track = nativeTracks.get(s.id) ?? trackById.get(s.id) ?? {
@@ -250043,6 +250609,7 @@ async function renderProject(projectDir, o = {}) {
 		...footage.used.length ? { footage: footage.used } : {},
 		...sceneAudio?.sfxState.length ? { sfx: sceneAudio.sfxState } : {},
 		...beatSync ? { beat_sync: beatSync } : {},
+		...cueLog.length ? { cues: cueLog } : {},
 		background: tokens.color_background,
 		...music ? { music: {
 			ref: music.ref,
@@ -251150,7 +251717,7 @@ async function lockFromState(root, state, projectId, outputs) {
 			cover: String(3),
 			target_package: String(1),
 			zones: String(2),
-			layout: String(7)
+			layout: String(8)
 		},
 		tools,
 		voice: {

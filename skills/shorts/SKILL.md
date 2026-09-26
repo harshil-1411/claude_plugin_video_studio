@@ -68,6 +68,11 @@ Then refine each `shorts/<id>/project/video-spec.json`:
   span of the recording, so no unredacted full copy is ever left behind.
 - Optionally add a `lower_third` or `kinetic_text` block (`deterministic`)
   on the first scene with the speaker's name or a few words of the hook.
+- Where the speaker describes something to see (a number, steps, a
+  before/after), split that span into its own scene and cut away to a
+  graphic: `footage.cutaway: true` plus a `deterministic` block with `cues`
+  on the speaker's words (plan skill `references/visual-strategy.md`,
+  "Cutaways"). One or two per short; never in the first second.
 - Add `cover.headline` from the hook's own words and `publish.<target>` copy.
 
 Run `spec_validate {project_dir: "<project_dir>/shorts/<id>"}` and fix what it

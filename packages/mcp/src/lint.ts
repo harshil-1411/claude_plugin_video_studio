@@ -84,6 +84,8 @@ export const BEAT_TOLERANCE_MS = 250;
 export const ONSCREEN_SPOKEN_SHARE = 0.6;
 /** The tension (question, problem, claim, story) should be set up within this share of the video. */
 export const STORY_SETUP_FRACTION = 0.4;
+/** Cutaway rhythm over a talking head: no cutaway in the hook's first second, 3–10 s each, 2 s of face between. */
+export const CUTAWAY = { hook_sec: 1, min_sec: 3, max_sec: 10, face_gap_sec: 2 } as const;
 /** Caption cues for sound events carry this scene_id prefix (pipeline SOUND_CUE_SCENE_PREFIX). */
 const SOUND_CUE_PREFIX = "sound:";
 
@@ -942,6 +944,42 @@ export function checkStory(spec: VideoSpec, out: LintFinding[]): void {
   });
 }
 
+/** Cutaways (`footage.cutaway`): consecutive cutaway scenes form one block, timed on the spec. */
+export function checkCutaways(spec: VideoSpec, out: LintFinding[]): void {
+  const blocks: Array<{ start: number; end: number; first: string }> = [];
+  let t = 0;
+  let prevCut = false;
+  for (const s of spec.scenes) {
+    const cut = !!s.footage?.cutaway;
+    if (cut && prevCut) blocks[blocks.length - 1]!.end = t + s.duration_sec;
+    else if (cut) blocks.push({ start: t, end: t + s.duration_sec, first: s.id });
+    prevCut = cut;
+    t += s.duration_sec;
+  }
+  const r1 = (x: number) => Math.round(x * 10) / 10;
+  blocks.forEach((b, i) => {
+    const len = b.end - b.start;
+    const problems: string[] = [];
+    const fixes: string[] = [];
+    if (b.start < CUTAWAY.hook_sec) {
+      problems.push(`it starts at ${r1(b.start)}s, inside the hook's first second`);
+      fixes.push("open on the speaker's face and cut away later");
+    }
+    if (len < CUTAWAY.min_sec || len > CUTAWAY.max_sec) {
+      problems.push(`it lasts ${r1(len)}s (aim for ${CUTAWAY.min_sec}–${CUTAWAY.max_sec}s, the length of one idea)`);
+      fixes.push(len < CUTAWAY.min_sec ? "lengthen it to cover the whole idea, or drop it" : "split it with a return to the speaker");
+    }
+    const prev = blocks[i - 1];
+    if (prev && b.start - prev.end < CUTAWAY.face_gap_sec) {
+      problems.push(`only ${r1(b.start - prev.end)}s of the speaker since the previous cutaway`);
+      fixes.push(`leave at least ${CUTAWAY.face_gap_sec}s of face between cutaways, or merge the two`);
+    }
+    if (problems.length) {
+      out.push({ id: "cutaway_rhythm", severity: "warning", scene_id: b.first, message: `cutaway at ${b.first}: ${problems.join("; ")}`, fix: fixes.join("; ") });
+    }
+  });
+}
+
 /** Caption and beat timing against the render: needs render-state.json (and its captions / voice files). */
 async function checkTiming(root: string, spec: VideoSpec, state: RenderStateView | undefined, brand: Brand | undefined, out: LintFinding[]): Promise<void> {
   if (!state) return;
@@ -1065,6 +1103,7 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   const brand = await loadBrand(paths.root);
   await checkTiming(paths.root, spec, state, brand, findings);
   checkStory(spec, findings);
+  checkCutaways(spec, findings);
   checkPostCopy(spec, contracts, findings);
   const coverView: CoverView | undefined = state?.cover
     ? {

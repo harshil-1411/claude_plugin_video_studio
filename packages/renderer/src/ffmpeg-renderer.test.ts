@@ -530,7 +530,7 @@ describe("scene motion", () => {
   const PATTERNS: MotionPattern[] = ["push_in", "pull_out", "punch", "reveal", "drift", "hold"];
 
   it("resolves amounts per pattern and intensity", () => {
-    expect(FFMPEG_RENDERER_VERSION).toBe("0.4.1");
+    expect(FFMPEG_RENDERER_VERSION).toBe("0.4.2");
     const amt = (pattern: MotionPattern, intensity?: "subtle" | "normal" | "strong") => sceneMotionParams({ pattern, ...(intensity ? { intensity } : {}) }, 4);
     expect([amt("push_in", "subtle").amount, amt("push_in").amount, amt("push_in", "strong").amount]).toEqual([0.03, 0.06, 0.12]);
     expect(amt("pull_out", "strong").amount).toBe(0.12);

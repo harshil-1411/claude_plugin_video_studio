@@ -70,3 +70,15 @@ describe("cue validation", () => {
     expect(cueErrors(spec)[0]!.message).toMatch(/voice.mode is "none"/);
   });
 });
+
+describe("cutaway validation", () => {
+  const example = JSON.parse(readFileSync(fileURLToPath(new URL("../examples/explain-vector-db.video-spec.json", import.meta.url)), "utf8"));
+  it("needs a graphic to cut away to", () => {
+    const spec = VideoSpec.parse({
+      ...example,
+      scenes: example.scenes.map((s: Record<string, unknown>, i: number) => (i === 1 ? { ...s, deterministic: undefined, footage: { asset: "v1", in_sec: 0, cutaway: true } } : s)),
+    });
+    const errs = validateVideoSpecSemantics(spec).errors.filter((e) => e.path.endsWith("footage.cutaway"));
+    expect(errs[0]!.message).toMatch(/no deterministic/);
+  });
+});

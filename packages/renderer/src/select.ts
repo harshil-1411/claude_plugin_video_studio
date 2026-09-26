@@ -180,6 +180,13 @@ export function sceneCacheKey(
   );
 }
 
+/** The picture of a scene: for a cutaway (`footage.cutaway` with a graphic), the graphic alone. */
+export function cutawayPicture(scene: Scene): Scene {
+  if (!scene.footage?.cutaway || !scene.deterministic) return scene;
+  const { footage: _clip, ...rest } = scene;
+  return { ...rest, visual_strategy: "motion_graphic" };
+}
+
 /** The motion-graphic stand-in drawn for a scene that a provider must render. */
 export function placeholderScene(scene: Scene): Scene {
   const vr = scene.visual_requirements;
@@ -223,7 +230,10 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
   const results: SceneRenderEntry[] = new Array(scenes.length);
 
   let footageRenderer: SceneRenderer | undefined = o.footageRenderer;
-  const renderOne = async (orig: Scene): Promise<SceneRenderEntry> => {
+  const renderOne = async (given: Scene): Promise<SceneRenderEntry> => {
+    // A cutaway draws its graphic instead of the footage (the clip only supplies sound and words),
+    // so its picture renders, and is cached, like a plain motion-graphic scene.
+    const orig = cutawayPicture(given);
     // Footage scenes render from the asset (any strategy); unresolved footage becomes a placeholder.
     const fr = orig.footage ? o.footage?.get(orig.id) : undefined;
     const footage = fr && !("error" in fr) ? fr : undefined;

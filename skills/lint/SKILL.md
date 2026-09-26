@@ -56,6 +56,16 @@ Run this loop when lint returns errors, or warnings the user wants cleared:
        (3 words/s after a 1 s settle). Cut the text, say it, or lengthen
        the scene. Silent scenes already flagged by `reading_density` are
        not repeated.
+     - `cue_unmatched`: a word cue could not be placed (the word is not in
+       the spoken words, the render is silent so there are no timings, or
+       it is spoken after the scene ends); that item kept its default
+       timing. Cue a word the scene says, render with a voice, or move the
+       word earlier.
+     - `cue_too_close`: two cues in a scene land under 0.4 s apart. Drop
+       one cue or cue a later word.
+   - `cutaway_rhythm`: a cutaway (`footage.cutaway`) starts inside the
+     hook's first second, lasts outside 3–10 s, or leaves under 2 s of the
+     speaker since the previous one. Move, lengthen, split or merge it.
    - `story_structure` (3+ scenes): no tension scene (question, problem,
      contrarian_claim, story) in the first 40% after the hook, or the last
      scene before the CTA/end card is not a payoff (payoff, result, reveal,

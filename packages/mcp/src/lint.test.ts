@@ -1,9 +1,10 @@
+import type { VideoSpec } from "@video-studio/schema";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TextBox } from "@video-studio/schema";
 import { describe, expect, it } from "vitest";
-import { type LintFinding, checkCues, contrastRatio, lintProject } from "./lint.js";
+import { type LintFinding, checkCues, checkCutaways, contrastRatio, lintProject } from "./lint.js";
 
 const FIXTURE = join(import.meta.dirname, "__fixtures__", "lint", "tiktok-low-captions");
 
@@ -438,5 +439,26 @@ describe("word cue checks", () => {
     );
     expect(out.map((f) => `${f.id}:${f.scene_id}`)).toEqual(["cue_unmatched:s01", "cue_unmatched:s02", "cue_too_close:s01"]);
     expect(out[2]!.message).toMatch(/250 ms apart/);
+  });
+});
+
+describe("cutaway rhythm", () => {
+  const sc = (id: string, dur: number, cut = false) =>
+    ({ id, duration_sec: dur, purpose: "point", voiceover: "", visual_strategy: "user_asset", footage: { asset: "v1", in_sec: 0, ...(cut ? { cutaway: true } : {}) }, visual_requirements: {}, claim_refs: [] }) as VideoSpec["scenes"][number];
+  const run = (scenes: VideoSpec["scenes"]) => {
+    const out: LintFinding[] = [];
+    checkCutaways({ scenes } as VideoSpec, out);
+    return out;
+  };
+
+  it("passes a face-cutaway-face rhythm and merges consecutive cutaway scenes", () => {
+    expect(run([sc("s1", 3), sc("s2", 2, true), sc("s3", 2, true), sc("s4", 3), sc("s5", 5, true), sc("s6", 2)])).toEqual([]);
+  });
+
+  it("flags a cutaway in the hook, bad lengths and too little face between", () => {
+    const out = run([sc("s1", 2, true), sc("s2", 1), sc("s3", 12, true), sc("s4", 3)]);
+    expect(out.map((f) => f.scene_id)).toEqual(["s1", "s3"]);
+    expect(out[0]!.message).toMatch(/inside the hook's first second.*lasts 2s/);
+    expect(out[1]!.message).toMatch(/lasts 12s.*only 1s of the speaker/);
   });
 });

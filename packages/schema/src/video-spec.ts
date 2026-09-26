@@ -128,6 +128,12 @@ export const FootageClip = z
     speed: z.number().min(0.25).max(4).optional().describe("Playback rate (1 = normal)."),
     loop: z.boolean().optional().describe("Loop a clip shorter than the scene (default: hold the last frame)."),
     redact: z.array(RedactRegion).max(12).optional().describe("Regions blurred or boxed in the source frame before it is fitted."),
+    cutaway: z
+      .boolean()
+      .optional()
+      .describe(
+        "Cut away from the footage: the scene's deterministic graphic fills the frame while the clip's sound and transcript words keep playing (B-roll over a talking head).",
+      ),
   })
   .describe("A span of real footage shown in this scene.");
 
@@ -718,6 +724,13 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
         path: `${at}.footage`,
         message: `${sid}: visual_strategy "${scene.visual_strategy}" needs footage {asset, in_sec}`,
         fix: "add footage: {asset: <ContentIR video asset id>, in_sec: <start>, out_sec?: <end>} (ingest the video file first)",
+      });
+    }
+    if (scene.footage?.cutaway && !scene.deterministic) {
+      errors.push({
+        path: `${at}.footage.cutaway`,
+        message: `${sid}: a cutaway shows the scene's graphic instead of the footage, but the scene has no deterministic {kind, props}`,
+        fix: "add deterministic {kind, props} (the graphic to cut away to), or remove cutaway",
       });
     }
     if (scene.footage) {
