@@ -230597,6 +230597,22 @@ function aacArgs() {
 	];
 }
 const FASTSTART = ["-movflags", "+faststart"];
+/** ffmpeg xfade names for the spec's transitions. */
+const XFADE = {
+	crossfade: "fade",
+	fade_black: "fadeblack",
+	slide: "slideleft",
+	zoom: "zoomin",
+	whip: "smoothleft"
+};
+/**
+* Transition length actually used: at most 40% of the incoming slot and at most 1.5 s, and at
+* least two frames; below that the join is a cut.
+*/
+function transitionSeconds(ms, incomingMs, fps) {
+	const d = Math.min(ms, incomingMs * .4, 1500) / 1e3;
+	return d >= 2 / fps ? Math.round(d * fps) / fps : 0;
+}
 const IMAGE_EXT$2 = /* @__PURE__ */ new Set([
 	".png",
 	".jpg",
@@ -230639,7 +230655,36 @@ async function concatVideos(segments, out, target, opts = {}) {
 		chains.push([`[${i}:v:0]${normalizeFilters(target, s.duration_ms).join(",")}[v${i}]`]);
 		frames += Math.max(1, Math.round(s.duration_ms * target.fps / 1e3));
 	});
-	chains.push([`${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0[vout]`]);
+	const joins = segments.map((s, i) => {
+		const t = i > 0 ? s.transition_in : void 0;
+		return t && t.kind !== "cut" ? {
+			kind: t.kind,
+			d: transitionSeconds(t.ms, s.duration_ms, target.fps)
+		} : {
+			kind: "cut",
+			d: 0
+		};
+	});
+	if (joins.every((j) => j.d === 0)) chains.push([`${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0[vout]`]);
+	else {
+		let acc = "[v0]";
+		let accFrames = Math.max(1, Math.round(segments[0].duration_ms * target.fps / 1e3));
+		segments.forEach((s, i) => {
+			if (i === 0) return;
+			const n = Math.max(1, Math.round(s.duration_ms * target.fps / 1e3));
+			const j = joins[i];
+			const out = i === segments.length - 1 ? "[vx]" : `[x${i}]`;
+			if (j.d === 0) chains.push([`${acc}[v${i}]concat=n=2:v=1:a=0${out}`]);
+			else {
+				chains.push([`${acc}tpad=stop_mode=clone:stop_duration=${j.d},settb=AVTB[p${i}]`]);
+				chains.push([`[v${i}]settb=AVTB[q${i}]`]);
+				chains.push([`[p${i}][q${i}]xfade=transition=${XFADE[j.kind]}:duration=${j.d}:offset=${(accFrames / target.fps).toFixed(4)}${out}`]);
+			}
+			acc = out;
+			accFrames += n;
+		});
+		chains.push([`[vx]fps=${target.fps},trim=end_frame=${frames},setpts=N/FRAME_RATE/TB[vout]`]);
+	}
 	await runFfmpeg([
 		"-y",
 		...inputs,
@@ -235678,6 +235723,22 @@ function targetForAspect(aspect, opts = {}) {
 		aspect_ratio: aspect
 	};
 }
+/** Transitions that blend two scenes during assembly (the outgoing picture must stay on screen). */
+const BLENDING_TRANSITIONS = /* @__PURE__ */ new Set([
+	"crossfade",
+	"slide",
+	"zoom",
+	"whip"
+]);
+/**
+* Exit fade length for a scene: the style's exit_ms, except when the style's transition blends
+* scenes: then the assembly's transition is the exit, and a fade to the background here would
+* leave it blending from an empty frame.
+*/
+function exitFadeMs(motion) {
+	if (!motion) return 0;
+	return BLENDING_TRANSITIONS.has(motion.transition) ? 0 : motion.exit_ms;
+}
 //#endregion
 //#region ../platforms/dist/registry.js
 /** Present in every `platform-specs/` directory, so it can be found before any contract exists. */
@@ -238781,7 +238842,7 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 		}
 	}
 	flushAss();
-	const exit = motion && !gm.noExit ? round3$1(Math.min(motion.exit_ms / 1e3, durationS * .2)) : 0;
+	const exit = motion && !gm.noExit ? round3$1(Math.min(exitFadeMs(motion) / 1e3, durationS * .2)) : 0;
 	if (exit >= .02) chain.push(f$1("fade", {
 		t: "out",
 		st: round3$1(Math.max(0, durationS - 1 / target.fps - exit)),
@@ -239596,7 +239657,7 @@ async function selectRenderer(kind, renderers, env = process.env, preference = "
 function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage) {
 	return sha256Hex(canonicalJson({
 		v: 1,
-		layout: 6,
+		layout: 7,
 		scene,
 		tokens,
 		target,
@@ -241567,7 +241628,7 @@ function buildComposition(req, opts = {}) {
 	} finally {
 		activeMotion = void 0;
 	}
-	const exitS = t.motion ? Math.min(t.motion.exit_ms / 1e3, dur * .2) : 0;
+	const exitS = t.motion ? Math.min(exitFadeMs(t.motion) / 1e3, dur * .2) : 0;
 	const exitAt = Math.max(0, dur - 1 / target.fps - exitS);
 	const safeOpen = exitS >= .02 ? `<div class="vs-safe vs-exit" style="--xt:${fmtSec(exitAt)}s;--xd:${fmtSec(exitS)}s">` : `<div class="vs-safe">`;
 	const look = {
@@ -248873,11 +248934,19 @@ async function renderProject(projectDir, o = {}) {
 	const sceneAudioOn = !!sceneAudio && (sceneAudio.slots.some((sl) => sl.layers.length > 0) || sceneAudio.sfx.length > 0);
 	const musicSpeech = useSceneAudio ? [...hasAudio ? speech : [], ...sceneAudio.speech] : hasAudio ? speech : [];
 	const musicMute = sceneAudio?.mute ?? [];
-	const segments = await Promise.all(ordered.map(async (e, i) => ({
-		path: e.out_path,
-		duration_ms: slotMs[i],
-		sha256: await hashFile(e.out_path)
-	})));
+	const transitionMs = tokens.motion?.transition_ms ?? 400;
+	const segments = await Promise.all(ordered.map(async (e, i) => {
+		const kind = planScenes[i].transition ?? tokens.motion?.transition;
+		return {
+			path: e.out_path,
+			duration_ms: slotMs[i],
+			sha256: await hashFile(e.out_path),
+			...i > 0 && kind && kind !== "cut" ? { transition_in: {
+				kind,
+				ms: transitionMs
+			} } : {}
+		};
+	}));
 	const slots = await Promise.all(placements.map(async (p, i) => {
 		const abs = p.track.audio_path ? join(root, p.track.audio_path) : void 0;
 		return {
@@ -248895,7 +248964,8 @@ async function renderProject(projectDir, o = {}) {
 		pad: tokens.color_background,
 		segments: segments.map((s) => ({
 			sha: s.sha256,
-			ms: s.duration_ms
+			ms: s.duration_ms,
+			...s.transition_in ? { tr: s.transition_in } : {}
 		})),
 		audio: hasAudio && !useSceneAudio ? slots.map((s) => ({
 			sha: s.sha256,
@@ -248935,9 +249005,10 @@ async function renderProject(projectDir, o = {}) {
 			fps: target.fps,
 			fit: "pad",
 			padColor: tokens.color_background,
-			segments: segments.map(({ path, duration_ms }) => ({
+			segments: segments.map(({ path, duration_ms, transition_in }) => ({
 				path,
-				duration_ms
+				duration_ms,
+				...transition_in ? { transition_in } : {}
 			})),
 			...audio ? { audio } : {},
 			...sceneAudioOn ? { sceneAudio: {
@@ -250231,7 +250302,7 @@ async function lockFromState(root, state, projectId, outputs) {
 			cover: String(3),
 			target_package: String(1),
 			zones: String(2),
-			layout: String(6)
+			layout: String(7)
 		},
 		tools,
 		voice: {

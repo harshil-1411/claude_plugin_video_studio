@@ -36,6 +36,7 @@ import {
 import { type Script, baseDirection, charScript, dominantScript, hasCjk, needsShaping, scriptFontFamilies, scriptsIn, textDirection } from "./script.js";
 import { BUNDLED_FONTS, type FontResolver, assFontSize, createFontResolver, findFontsDir, parseFontChain, prepareLibassFontsDir, readFontMetrics, scriptFirstChain } from "./tokens.js";
 import type { Availability, LayoutZones, MotionTokens, RenderTarget, SceneRenderRequest, SceneRenderResult, SceneRenderer, VisualTokens } from "./types.js";
+import { exitFadeMs } from "./tokens.js";
 
 /**
  * Chrome-free fallback renderer for deterministic scenes: one `-f lavfi color=` source at the
@@ -1542,7 +1543,7 @@ export function buildFilterGraph(comp: Pick<Composition, "elements">, target: Re
   }
   // Exit: the whole frame fades back to the background over the style's exit_ms, ending on the last frame.
   flushAss();
-  const exit = motion && !gm.noExit ? round3(Math.min(motion.exit_ms / 1000, durationS * 0.2)) : 0;
+  const exit = motion && !gm.noExit ? round3(Math.min(exitFadeMs(motion) / 1000, durationS * 0.2)) : 0;
   if (exit >= 0.02) chain.push(f("fade", { t: "out", st: round3(Math.max(0, durationS - 1 / target.fps - exit)), d: exit, color: ffColor(gm.background ?? "#000000") }));
   chain.push("format=yuv420p");
   const out = "[vout]";

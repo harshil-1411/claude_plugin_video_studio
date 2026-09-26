@@ -88,6 +88,8 @@ export const ENGINE_VERSION = "0.1.0";
 export const QA_VERSION = 2;
 /** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). 4: the caption plate is its own ASS layer (no dark bars around highlighted words). 5: loudness true peak −1.5 dBTP (headroom for the AAC encode). */
 export const ASSEMBLY_VERSION = 5;
+/** Scene transition length when neither the scene nor the style sets one (ms). */
+export const DEFAULT_TRANSITION_MS = 400;
 
 export type Quality = "preview" | "final";
 
@@ -671,8 +673,18 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   const musicMute = sceneAudio?.mute ?? [];
 
   // f. assembly (skipped when the inputs are unchanged)
+  // Scene transitions: the scene's own `transition`, else the style pack's default; cut without either.
+  const transitionMs = tokens.motion?.transition_ms ?? DEFAULT_TRANSITION_MS;
   const segments = await Promise.all(
-    ordered.map(async (e, i) => ({ path: e.out_path!, duration_ms: slotMs[i]!, sha256: await hashFile(e.out_path!) })),
+    ordered.map(async (e, i) => {
+      const kind = planScenes[i]!.transition ?? tokens.motion?.transition;
+      return {
+        path: e.out_path!,
+        duration_ms: slotMs[i]!,
+        sha256: await hashFile(e.out_path!),
+        ...(i > 0 && kind && kind !== "cut" ? { transition_in: { kind, ms: transitionMs } } : {}),
+      };
+    }),
   );
   const slots = await Promise.all(
     placements.map(async (p, i) => {
@@ -688,7 +700,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
       target,
       encode: encodePreset ?? null,
       pad: tokens.color_background,
-      segments: segments.map((s) => ({ sha: s.sha256, ms: s.duration_ms })),
+      segments: segments.map((s) => ({ sha: s.sha256, ms: s.duration_ms, ...(s.transition_in ? { tr: s.transition_in } : {}) })),
       audio: hasAudio && !useSceneAudio ? slots.map((s) => ({ sha: s.sha256, ms: s.duration_ms })) : null,
       music: music ? { sha: music.sha256, bed: music.bed, speech: musicSpeech, ...(musicMute.length ? { mute: musicMute } : {}) } : null,
       ...(useSceneAudio ? { scene_audio: sceneAudioOn ? sceneAudio!.key : null } : {}),
@@ -715,7 +727,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
         fps: target.fps,
         fit: "pad",
         padColor: tokens.color_background,
-        segments: segments.map(({ path, duration_ms }) => ({ path, duration_ms })),
+        segments: segments.map(({ path, duration_ms, transition_in }) => ({ path, duration_ms, ...(transition_in ? { transition_in } : {}) })),
         ...(audio ? { audio } : {}),
         ...(sceneAudioOn ? { sceneAudio: { slots: sceneAudio!.slots, sfx: sceneAudio!.sfx } } : {}),
         // −1.5 dBTP leaves headroom for the AAC encode, so the delivered file stays under the −1 dBTP QA limit.

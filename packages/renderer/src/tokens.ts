@@ -553,3 +553,16 @@ export function targetForAspect(aspect: AspectRatio, opts: { shortSide?: number;
   const height = aw <= ah ? even((s * ah) / aw) : even(s);
   return { width, height, fps: opts.fps ?? DEFAULT_FPS, aspect_ratio: aspect };
 }
+
+/** Transitions that blend two scenes during assembly (the outgoing picture must stay on screen). */
+const BLENDING_TRANSITIONS: ReadonlySet<string> = new Set(["crossfade", "slide", "zoom", "whip"]);
+
+/**
+ * Exit fade length for a scene: the style's exit_ms, except when the style's transition blends
+ * scenes: then the assembly's transition is the exit, and a fade to the background here would
+ * leave it blending from an empty frame.
+ */
+export function exitFadeMs(motion: VisualTokens["motion"]): number {
+  if (!motion) return 0;
+  return BLENDING_TRANSITIONS.has(motion.transition) ? 0 : motion.exit_ms;
+}

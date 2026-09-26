@@ -3563,7 +3563,7 @@ exports[`buildComposition: style tokens > snapshots one styled scene per core st
 <body>
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-typography" data-start="0" data-duration="3" data-track-index="0">
-<div class="vs-safe vs-exit" style="--xt:2.717s;--xd:0.25s">
+<div class="vs-safe">
 <div class="vs-stack vs-typography" style="font-size:118.8px">
 <div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.45s"><span class="vs-line"><span class="vs-em">Key</span> Line</span></div>
 </div>
@@ -3622,7 +3622,7 @@ exports[`buildComposition: style tokens > snapshots one styled scene per core st
 <body>
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-typography" data-start="0" data-duration="3" data-track-index="0">
-<div class="vs-safe vs-exit" style="--xt:2.847s;--xd:0.12s">
+<div class="vs-safe">
 <div class="vs-stack vs-typography" style="font-size:133.06px">
 <div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.35s"><span class="vs-line"><span class="vs-em">KEY</span> LINE</span></div>
 </div>
@@ -3681,7 +3681,7 @@ exports[`buildComposition: style tokens > snapshots one styled scene per core st
 <body>
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-typography" data-start="0" data-duration="3" data-track-index="0">
-<div class="vs-safe vs-exit" style="--xt:2.767s;--xd:0.2s">
+<div class="vs-safe">
 <div class="vs-stack vs-typography" style="font-size:104.54px">
 <div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line"><span class="vs-em">Key</span> line</span></div>
 </div>

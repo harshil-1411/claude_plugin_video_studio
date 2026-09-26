@@ -367,7 +367,9 @@ describe("style tokens", () => {
   });
 
   it("draws easing and the exit fade into the filtergraph only with motion tokens", async () => {
-    const t = await styled("energetic");
+    // A cut between scenes: the scene itself fades out. (Blending transitions skip it; see below.)
+    const e = await styled("energetic");
+    const t = { ...e, motion: { ...e.motion!, transition: "cut" as const } };
     const comp = composeScene(scene("typography", { lines: ["A", "B"] }), target, t);
     const g = buildFilterGraph(comp, target, 1, FONTS, "/tmp/x", { motion: t.motion!, background: t.color_background });
     expect(g.filtergraph).toContain("cos(3*PI*");
@@ -378,6 +380,9 @@ describe("style tokens", () => {
     const tech = await styled("technical");
     const g2 = buildFilterGraph(composeScene(scene("typography", { lines: ["A"] }), target, tech), target, 1, FONTS, "/tmp/x", { motion: tech.motion!, background: tech.color_background });
     expect(g2.filtergraph).not.toContain("fade=t=out");
+    // Energetic whips into the next scene during assembly: no exit fade to the background.
+    const whip = buildFilterGraph(composeScene(scene("typography", { lines: ["A"] }), target, e), target, 1, FONTS, "/tmp/x", { motion: e.motion!, background: e.color_background });
+    expect(whip.filtergraph).not.toContain("fade=t=out");
   });
 
   it("resolves heading/body font files at the style weights", async () => {
@@ -394,8 +399,9 @@ describe("style tokens", () => {
     expect(calls).toContainEqual([tokens.font_body, undefined]);
   }, T);
 
-  it("renders a styled clip whose last frame has faded to the background", async () => {
-    const t = await styled("energetic");
+  it("renders a styled clip whose last frame has faded to the background (cut transition)", async () => {
+    const e = await styled("energetic");
+    const t = { ...e, motion: { ...e.motion!, transition: "cut" as const } };
     const out = join(dir, "energetic.mp4");
     const res = await renderer.render({ scene: scene("typography", { lines: ["Big", "Energy"] }), target, tokens: t, out_path: out, project_dir: dir });
     expect(res.text_boxes?.[0]?.text).toBe("BIG\nENERGY");

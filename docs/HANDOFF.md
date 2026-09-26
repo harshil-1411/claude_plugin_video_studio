@@ -216,10 +216,10 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
 - Ducking uses the known speech intervals (scene voice slots), not a sidechain compressor, so it is exact and deterministic.
 - On-screen reading rule without narration: at most 3 words/s after a 1 s settle (a design constant in `lint.ts`).
 - Strict grounding now also reads viewer-facing props text (stat values, quotes), so a numeric stat card needs a `claim_ref`.
-- Style motion: `transition`/`transition_ms` are recorded but not drawn, because assembly still hard-cuts between scenes. Crossfades between scenes arrive with Phase 6's footage crossfades.
+- **Scene transitions (added 2026-09-26):** the assembly draws each scene's `transition` (crossfade, fade_black, slide, zoom, whip), or else the style pack's default, over `transition_ms`, clamped to 40% of the incoming scene. It is timeline-preserving: the incoming scene starts on its boundary while the outgoing last frame is held, so speech and captions stay in sync. Styles that blend skip the per-scene exit fade (`LAYOUT_VERSION` 7).
 - A style change is classified as creative in lock diffs (`tools.style`).
 - Video footage is always marked `contains_likeness` (there is no face detection).
-- `crossfade_ms` crossfades audio only; video still cuts.
+- `crossfade_ms` crossfades scene audio; video transitions come from `transition`.
 - Looped footage tails get no captions.
 - ingestion now depends on `@video-studio/media` through a hand-made symlink; **`pnpm-lock.yaml` needs `pnpm install` outside the sandbox** (checklist).
 - The whisper model pin is sha256 `a03779c8…d002` (`ggml-base.en.bin`, 147,964,211 bytes).

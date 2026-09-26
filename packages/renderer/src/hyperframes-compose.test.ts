@@ -500,10 +500,14 @@ describe("buildComposition: style tokens", () => {
     expect(html).toContain(">ONE</span>");
   });
 
-  it("exits: the safe area fades out over exit_ms ending on the last frame (none for technical)", async () => {
-    const e = buildComposition(req("typography", { lines: ["x"] }, { tokens: await styled("energetic") }));
+  it("exits: the safe area fades out over exit_ms ending on the last frame, only for cut transitions", async () => {
+    const en = await styled("energetic");
+    const cut = { ...en, motion: { ...en.motion!, transition: "cut" as const } };
+    const e = buildComposition(req("typography", { lines: ["x"] }, { tokens: cut }));
     expect(e.html).toContain('<div class="vs-safe vs-exit" style="--xt:2.847s;--xd:0.12s">');
     expect(e.html).toContain("@keyframes vs-exit");
+    // Energetic whips into the next scene during assembly, so the scene does not fade itself out.
+    expect(buildComposition(req("typography", { lines: ["x"] }, { tokens: en })).html).toContain('<div class="vs-safe">');
     const tech = buildComposition(req("typography", { lines: ["x"] }, { tokens: await styled("technical") }));
     expect(tech.html).toContain('<div class="vs-safe">');
     expect(tech.html).not.toContain("vs-exit");

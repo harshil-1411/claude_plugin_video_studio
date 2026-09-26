@@ -6,6 +6,7 @@ import { type Script, baseDirection, dominantScript, htmlLang, languageScript, s
 import { applyTextCase, estimateTextWidth, isComplexText, lineUnits, safeArea, wrapText } from "./text-layout.js";
 import { BUNDLED_FONTS, fontFaceCss, withScriptFonts } from "./tokens.js";
 import type { MotionTokens, SceneRenderRequest, VisualTokens } from "./types.js";
+import { exitFadeMs } from "./tokens.js";
 
 /**
  * Pure HTML composition builder for the HyperFrames renderer (pinned @hyperframes/producer 0.8.75).
@@ -1727,7 +1728,7 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
     activeMotion = undefined;
   }
   // Exit: the scene content fades out over the style's exit_ms at the end of the clip.
-  const exitS = t.motion ? Math.min(t.motion.exit_ms / 1000, dur * 0.2) : 0;
+  const exitS = t.motion ? Math.min(exitFadeMs(t.motion) / 1000, dur * 0.2) : 0;
   const exitAt = Math.max(0, dur - 1 / target.fps - exitS);
   const safeOpen = exitS >= 0.02 ? `<div class="vs-safe vs-exit" style="--xt:${fmtSec(exitAt)}s;--xd:${fmtSec(exitS)}s">` : `<div class="vs-safe">`;
   const look: Look = {

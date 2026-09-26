@@ -39,10 +39,32 @@ export interface ComposeOptions extends RunOptions {
   encode?: EncodeSettings;
 }
 
+export type SceneTransition = "cut" | "crossfade" | "fade_black" | "slide" | "zoom" | "whip";
+
 export interface VideoSegment {
   path: string;
   /** Exact slot length; shorter segments hold their last frame, longer ones are trimmed. */
   duration_ms: number;
+  /** Transition from the previous segment into this one (ignored on the first). Default: cut. */
+  transition_in?: { kind: SceneTransition; ms: number };
+}
+
+/** ffmpeg xfade names for the spec's transitions. */
+export const XFADE: Record<Exclude<SceneTransition, "cut">, string> = {
+  crossfade: "fade",
+  fade_black: "fadeblack",
+  slide: "slideleft",
+  zoom: "zoomin",
+  whip: "smoothleft",
+};
+
+/**
+ * Transition length actually used: at most 40% of the incoming slot and at most 1.5 s, and at
+ * least two frames; below that the join is a cut.
+ */
+export function transitionSeconds(ms: number, incomingMs: number, fps: number): number {
+  const d = Math.min(ms, incomingMs * 0.4, 1500) / 1000;
+  return d >= 2 / fps ? Math.round(d * fps) / fps : 0;
 }
 
 export type FitMode = "pad" | "crop";
@@ -106,7 +128,36 @@ export async function concatVideos(segments: readonly VideoSegment[], out: strin
     chains.push([`[${i}:v:0]${normalizeFilters(target, s.duration_ms).join(",")}[v${i}]`]);
     frames += Math.max(1, Math.round((s.duration_ms * target.fps) / 1000));
   });
-  chains.push([`${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0[vout]`]);
+  const joins = segments.map((s, i) => {
+    const t = i > 0 ? s.transition_in : undefined;
+    return t && t.kind !== "cut" ? { kind: t.kind, d: transitionSeconds(t.ms, s.duration_ms, target.fps) } : { kind: "cut" as const, d: 0 };
+  });
+  if (joins.every((j) => j.d === 0)) {
+    chains.push([`${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0[vout]`]);
+  } else {
+    // Timeline-preserving transitions: each incoming segment still starts on its slot boundary.
+    // The outgoing picture holds its last frame for the transition (tpad) and xfade blends from it
+    // into the incoming segment's first frames, so the total length (and audio/caption sync) is
+    // exactly the sum of the slots.
+    let acc = "[v0]";
+    let accFrames = Math.max(1, Math.round((segments[0]!.duration_ms * target.fps) / 1000));
+    segments.forEach((s, i) => {
+      if (i === 0) return;
+      const n = Math.max(1, Math.round((s.duration_ms * target.fps) / 1000));
+      const j = joins[i]!;
+      const out = i === segments.length - 1 ? "[vx]" : `[x${i}]`;
+      if (j.d === 0) {
+        chains.push([`${acc}[v${i}]concat=n=2:v=1:a=0${out}`]);
+      } else {
+        chains.push([`${acc}tpad=stop_mode=clone:stop_duration=${j.d},settb=AVTB[p${i}]`]);
+        chains.push([`[v${i}]settb=AVTB[q${i}]`]);
+        chains.push([`[p${i}][q${i}]xfade=transition=${XFADE[j.kind as Exclude<SceneTransition, "cut">]}:duration=${j.d}:offset=${(accFrames / target.fps).toFixed(4)}${out}`]);
+      }
+      acc = out;
+      accFrames += n;
+    });
+    chains.push([`[vx]fps=${target.fps},trim=end_frame=${frames},setpts=N/FRAME_RATE/TB[vout]`]);
+  }
   await runFfmpeg(
     ["-y", ...inputs, "-filter_complex", filterGraph(chains), "-map", "[vout]", "-r", String(target.fps), ...h264Args(opts.encode), "-an", ...FASTSTART, out],
     opts,

@@ -327,8 +327,9 @@ export function applyTextCase(text: string, mode: "as_is" | "upper" | "title" | 
  * v5: text shrinks until every whole word fits a line; words are only hard-broken at the minimum size.
  * v6: script-aware widths and breaking (CJK per character with kinsoku, Devanagari/Arabic widths),
  *     right-aligned RTL lines, script fonts.
+ * v7: no exit fade when the style blends scenes (crossfade/slide/zoom/whip); the assembly transition replaces it.
  */
-export const LAYOUT_VERSION = 6;
+export const LAYOUT_VERSION = 7;
 
 /**
  * The content-safe rectangle of a target, in px (integers): `zones.content` when the pipeline
