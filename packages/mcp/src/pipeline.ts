@@ -463,7 +463,7 @@ async function renderProjectLocked(projectDir: string, o: RenderProjectOptions):
   const encodePreset = o.encodePreset ?? (quality === "preview" ? "ultrafast" : undefined);
   signal?.throwIfAborted();
 
-  // c. voice (auto falls back to silent if the chosen backend fails at synthesis time)
+  // c. voice (auto falls back to system TTS, then silent, if the chosen backend fails at synthesis time)
   progress({ stage: "voice", message: `synthesizing voice (${voiceChoice})` });
   const backends: BackendSet = { ...defaultBackends(), ...o.voiceBackends };
   const voiceCacheDir = o.voiceCacheDir ?? join(resolveDataDir(env).cache, "voice");
@@ -492,8 +492,28 @@ async function renderProjectLocked(projectDir: string, o: RenderProjectOptions):
     if (!narrated || voiceChoice !== "auto" || sel.backend.id === "silent") {
       throw new Error(`voice backend "${sel.backend.id}" failed: ${errMsg(e)}. Re-run with voice "auto" or "silent", or run doctor.`);
     }
-    voiceReason = `${sel.reason}; but ${sel.backend.id} failed at synthesis (${errMsg(e).slice(0, 300)}); falling back to silent (no audio)`;
-    voice = await synthesizeSpec(spec, { projectDir: root, backend: "silent", brand: brand ?? null, env, cacheDir: voiceCacheDir, backends, ...(signal ? { signal } : {}) });
+    voiceReason = `${sel.reason}; but ${sel.backend.id} failed at synthesis (${errMsg(e).slice(0, 300)})`;
+    const synth = (backend: BackendChoice) => synthesizeSpec(spec, { projectDir: root, backend, brand: brand ?? null, env, cacheDir: voiceCacheDir, backends, ...(signal ? { signal } : {}) });
+    let fallback: SynthesizeSpecResult | undefined;
+    // auto's order holds after a synthesis failure too: ElevenLabs → system TTS → silent.
+    if (sel.backend.id === "elevenlabs") {
+      const a = await Promise.resolve(backends.system.available(env)).catch((err: unknown) => ({ ok: false, reason: errMsg(err) }));
+      if (!a.ok) voiceReason += `; system voice unavailable (${a.reason ?? "unknown"})`;
+      else {
+        try {
+          fallback = await synth("system");
+          voiceReason += `; fell back to the system voice (${a.reason ?? "available"})`;
+        } catch (e2) {
+          if (signal?.aborted) throw e2;
+          voiceReason += `; system also failed at synthesis (${errMsg(e2).slice(0, 300)})`;
+        }
+      }
+    }
+    if (!fallback) {
+      voiceReason += "; falling back to silent (no audio)";
+      fallback = await synth("silent");
+    }
+    voice = fallback;
   }
   // c1. exact word timings: whisper listens to estimated tracks (system TTS) when it is installed.
   if (narrated && spec.voice.align !== false && voice.tracks.some((t) => t.timing_source === "estimated" && t.audio_path)) {
@@ -655,7 +675,12 @@ async function renderProjectLocked(projectDir: string, o: RenderProjectOptions):
   const used = [...new Set(ordered.map((e) => e.renderer!).filter(Boolean))];
   const placeholders = ordered.filter((e) => e.placeholder).map((e) => e.scene_id);
   for (const e of ordered) for (const w of e.warnings) warnings.push(`${e.scene_id}: ${w}`);
-  if (placeholders.length) warnings.push(`placeholder cards for ${placeholders.join(", ")} (video providers (generated video, avatars) arrive in Phase 7; until then this is a placeholder card)`);
+  // Footage that could not be used (audio asset, missing file, ...) says exactly why; only scenes
+  // that wait for a video provider get the provider note.
+  const footageFailed = new Set(placeholders.filter((id) => { const f = footage.byScene.get(id); return f !== undefined && "error" in f; }));
+  for (const e of ordered) if (footageFailed.has(e.scene_id)) warnings.push(`${e.scene_id}: placeholder card instead of footage: ${e.reason ?? "footage not resolved"}`);
+  const providerPlaceholders = placeholders.filter((id) => !footageFailed.has(id));
+  if (providerPlaceholders.length) warnings.push(`placeholder cards for ${providerPlaceholders.join(", ")} (video providers (generated video, avatars) arrive in Phase 7; until then this is a placeholder card)`);
 
   // e. captions from the word timeline
   signal?.throwIfAborted();
@@ -1158,7 +1183,7 @@ async function loadFootageAsset(root: string, ir: ContentIR | undefined, irError
   if (!ir) throw new Error(irError ?? "no ContentIR");
   const a = ir.assets.find((x) => x.id === id);
   if (!a) throw new Error("not a ContentIR asset id");
-  if (a.kind === "audio") throw new Error("is an audio asset; footage needs a video or an image");
+  if (a.kind === "audio") throw new Error("is audio; footage needs a video or image asset");
   const abs = await resolveInsideProject(projectPaths(root), a.path);
   if (!(await exists(abs))) throw new Error(`file ${a.path} is missing`);
   const media = a.media ?? (await probeMedia(abs, a.kind));

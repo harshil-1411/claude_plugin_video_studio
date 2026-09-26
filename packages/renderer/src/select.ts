@@ -1,6 +1,6 @@
-import { rename, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
-import { canonicalJson, ensureDir, readJson, sha256Hex, writeJsonAtomic } from "@video-studio/core";
+import { readFile, rename, rm, stat } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
+import { canonicalJson, ensureDir, hashFile, readJson, sha256Hex, writeJsonAtomic } from "@video-studio/core";
 import type { LayoutZones } from "@video-studio/platforms";
 import type { DeterministicKind, Scene, TextBox, VideoSpec } from "@video-studio/schema";
 import type { Availability, RenderTarget, ResolvedCue, SceneRenderRequest, SceneRenderer, VisualTokens } from "./types.js";
@@ -161,6 +161,7 @@ export function sceneCacheKey(
   zones?: LayoutZones,
   footage?: { sha256: string; duration_sec?: number; content_box?: { x: number; y: number; w: number; h: number } },
   cues?: readonly ResolvedCue[],
+  images?: readonly SceneImage[],
 ): string {
   return sha256Hex(
     canonicalJson({
@@ -176,8 +177,81 @@ export function sceneCacheKey(
       ...(footage ? { footage } : {}),
       // Cue times move with the voice, so a re-voiced scene re-renders; absent keeps old keys.
       ...(cues?.length ? { cues } : {}),
+      // Images the scene draws are keyed by their bytes, so a replaced file under the same name
+      // re-renders; scenes that draw no image keep their old keys.
+      ...(images?.length ? { images } : {}),
     }),
   );
+}
+
+/** An image file a scene draws: its reference as written and the file's hash (null when unreadable). */
+export interface SceneImage {
+  ref: string;
+  sha256: string | null;
+}
+
+/**
+ * Every image reference a scene's picture draws: `asset` ids anywhere in the deterministic props
+ * (screenshot, split_screen panels, ...) and the brand logo for the kinds that show it.
+ */
+export function sceneImageRefs(scene: Scene, tokens: Pick<VisualTokens, "logo_path">): { assets: string[]; logo?: string } {
+  const assets = new Set<string>();
+  const walk = (v: unknown): void => {
+    if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") {
+      for (const [k, x] of Object.entries(v)) {
+        if (k === "asset" && typeof x === "string" && x) assets.add(x);
+        else walk(x);
+      }
+    }
+  };
+  const det = scene.deterministic;
+  if (det) walk(det.props);
+  const logo = det && tokens.logo_path && (det.kind === "end_card" || det.kind === "cta") ? tokens.logo_path : undefined;
+  return { assets: [...assets].sort(), ...(logo ? { logo } : {}) };
+}
+
+async function hashOrNull(path: string | undefined): Promise<string | null> {
+  if (!path) return null;
+  try {
+    return await hashFile(path);
+  } catch {
+    return null;
+  }
+}
+
+/** ContentIR asset id → project-relative path, from `<project>/source/content-ir.json` (empty when absent). */
+async function loadIrAssetPaths(projectDir: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  try {
+    const ir = JSON.parse(await readFile(join(projectDir, "source", "content-ir.json"), "utf8")) as { assets?: Array<{ id?: unknown; path?: unknown }> };
+    for (const a of ir.assets ?? []) if (typeof a.id === "string" && typeof a.path === "string") out.set(a.id, a.path);
+  } catch {
+    /* no ContentIR: ids that look like paths still resolve */
+  }
+  return out;
+}
+
+/**
+ * Hash every image file `scene` draws, resolved the way the renderers resolve them (ContentIR
+ * asset id, or an id that is itself a project path; the logo as written, relative to the project).
+ */
+export async function sceneImages(
+  scene: Scene,
+  tokens: Pick<VisualTokens, "logo_path">,
+  projectDir: string,
+  irAssets?: ReadonlyMap<string, string>,
+): Promise<SceneImage[]> {
+  const refs = sceneImageRefs(scene, tokens);
+  if (!refs.assets.length && !refs.logo) return [];
+  const index = irAssets ?? (refs.assets.length ? await loadIrAssetPaths(projectDir) : new Map<string, string>());
+  const out: SceneImage[] = [];
+  for (const id of refs.assets) {
+    const rel = index.get(id) ?? (/[/\\.]/.test(id) ? id : undefined);
+    out.push({ ref: `asset:${id}`, sha256: await hashOrNull(rel === undefined ? undefined : resolve(projectDir, rel)) });
+  }
+  if (refs.logo) out.push({ ref: `logo:${refs.logo}`, sha256: await hashOrNull(isAbsolute(refs.logo) ? refs.logo : resolve(projectDir, refs.logo)) });
+  return out;
 }
 
 /** The picture of a scene: for a cutaway (`footage.cutaway` with a graphic), the graphic alone. */
@@ -230,6 +304,7 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
   const results: SceneRenderEntry[] = new Array(scenes.length);
 
   let footageRenderer: SceneRenderer | undefined = o.footageRenderer;
+  let irAssets: Promise<Map<string, string>> | undefined;
   const renderOne = async (given: Scene): Promise<SceneRenderEntry> => {
     // A cutaway draws its graphic instead of the footage (the clip only supplies sound and words),
     // so its picture renders, and is cached, like a plain motion-graphic scene.
@@ -261,7 +336,10 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
       selReason = sel.reason;
     }
     const cues = placeholder ? undefined : o.cues?.get(orig.id);
-    const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? { sha256: footage.sha256, duration_sec: footage.media.duration_sec, ...(footage.media.content_box ? { content_box: footage.media.content_box } : {}) } : undefined, cues);
+    const refs = sceneImageRefs(scene, o.tokens);
+    if (refs.assets.length) irAssets ??= loadIrAssetPaths(o.project_dir);
+    const images = await sceneImages(scene, o.tokens, o.project_dir, refs.assets.length ? await irAssets : undefined);
+    const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? { sha256: footage.sha256, duration_sec: footage.media.duration_sec, ...(footage.media.content_box ? { content_box: footage.media.content_box } : {}) } : undefined, cues, images);
     const out = join(dir, `${orig.id}.mp4`);
     const sidecarPath = join(dir, `${orig.id}.json`);
     const base = { scene_id: orig.id, renderer: r.id, renderer_version: r.version, cache_key: key, ...(placeholder ? { placeholder: true, reason: pendingReason } : {}) };

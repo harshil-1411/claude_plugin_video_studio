@@ -19,9 +19,9 @@ Each of `a` and `b` is one of:
 - `{quality: "preview" | "final"}`: this project's render;
 - `{project_dir, quality?}`: another project's render, such as a variant
   or a short (absolute path);
-- `{file}`: a video inside the project, relative to it, such as
-  `assets/supplied/talk.mp4` against `assets/supplied/talk-tight.mp4` after
-  `tighten`.
+- `{file}`: a video inside the project, relative to it, such as the
+  original `assets/supplied/talk.mp4` against `source/assets/<asset>-tight.mp4`
+  (the file `tighten` writes; its result gives the exact path).
 
 Give each side a short `label` when the defaults (quality, project name or
 file name) would not tell the user which is which. `a` is the before or

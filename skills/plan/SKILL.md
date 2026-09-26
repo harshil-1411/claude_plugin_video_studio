@@ -43,6 +43,9 @@ Load references only when you reach the step that needs them:
 2. If `<project_dir>/source/content-ir.json` is missing, or the user gave new
    inputs, call `mcp__plugin_video-studio_engine__ingest`
    `{project_dir, inputs: [...]}` (follow the `ingest` skill's safety rules).
+   Ingesting again merges: earlier sources and their refs stay valid and a
+   changed file is refreshed in place. Pass `replace: true` only when the
+   user wants to start over (existing `claim_refs` may stop resolving).
    If the engine tools are missing, suggest `/video-studio:doctor` and stop.
 3. Read `source/content-ir.json`. For anything larger than a short note,
    delegate to the `source-researcher` agent for a research brief and use

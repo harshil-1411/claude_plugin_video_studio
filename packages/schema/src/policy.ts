@@ -75,7 +75,7 @@ export const Policy = z
     id: "Policy",
     title: "Policy",
     description:
-      "policy.yaml: provider allow/deny globs, data-class routing, residency, retention, likeness consent, spend limits and grounding. Enforced in engine code.",
+      "policy.yaml: provider allow/deny globs, data-class routing, residency, retention, likeness consent, spend limits and grounding. Only the parts listed in docs/HANDOFF.md are enforced by the engine; the rest is advisory until the provider phase.",
   });
 
 export type ProviderGlob = z.infer<typeof ProviderGlob>;

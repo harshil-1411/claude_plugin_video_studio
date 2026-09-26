@@ -23,8 +23,16 @@ Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixe
 
 - **Done:**
   - Step 0: `audit/` committed; per-run test temp root (`tests/setup/tmp-root.ts`, vitest `globalSetup`), so a full run leaks 0 folders; 3,885 leaked dirs (987 MB) removed.
+  - Step 1 (P0 correctness):
+    - Scene cache keys hash the image bytes (`sceneImages`, select.ts).
+    - `job_status` survives a restart: the ledger holds the full result, and `formatJob` tolerates the old summary shape.
+    - Voice fallback is ElevenLabs → system → silent, and an unexpanded `${user_config…}` key is rejected.
+    - Footage pointing at an audio asset gets a precise placeholder reason.
+    - Ingest merges into the existing ContentIR with stable ids (`replace: true` starts fresh).
+    - Missing paths, binary, image, credential and non-media files are refused.
+    - Unused provider keys are marked in `plugin.json`; stale skill text fixed.
 - **Next:**
-  - Step 1: P0 correctness (image-byte cache keys, `job_status` after restart, voice fallback, ingest merge, silent-wrong ingest, honest config).
+  - Step 2: P0 security (path confinement, SSRF guard, HTML cap, demo goto hosts, review label expansion, secret redaction).
 
 ## Where things stand
 

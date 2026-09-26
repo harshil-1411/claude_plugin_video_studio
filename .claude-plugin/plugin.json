@@ -10,7 +10,7 @@
     "runway_key": {
       "type": "string",
       "title": "Runway API key",
-      "description": "Optional. Runway API secret for generative video (exposed to the engine as RUNWAYML_API_SECRET).",
+      "description": "Not used yet (planned provider phase): Runway API secret for generative video. Setting it has no effect today (RUNWAYML_API_SECRET).",
       "sensitive": true,
       "required": false
     },
@@ -24,21 +24,21 @@
     "heygen_key": {
       "type": "string",
       "title": "HeyGen API key",
-      "description": "Optional. HeyGen v3 key for presenter videos (HEYGEN_API_KEY).",
+      "description": "Not used yet (planned provider phase): HeyGen v3 key for presenter videos. Setting it has no effect today (HEYGEN_API_KEY).",
       "sensitive": true,
       "required": false
     },
     "fal_key": {
       "type": "string",
       "title": "fal.ai API key",
-      "description": "Optional. fal.ai key for Kling, Veo and Hailuo models (FAL_KEY).",
+      "description": "Not used yet (planned provider phase): fal.ai key for Kling, Veo and Hailuo models. Setting it has no effect today (FAL_KEY).",
       "sensitive": true,
       "required": false
     },
     "kling_key": {
       "type": "string",
       "title": "Kling API key",
-      "description": "Optional. Direct Kling API key (KLINGAI_API_KEY).",
+      "description": "Not used yet (planned provider phase): direct Kling API key. Setting it has no effect today (KLINGAI_API_KEY).",
       "sensitive": true,
       "required": false
     }

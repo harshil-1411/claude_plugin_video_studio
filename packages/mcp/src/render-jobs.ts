@@ -18,10 +18,42 @@ export interface RenderJobView {
   started_at?: string;
   finished_at?: string;
   request: RenderJobRequest;
-  result?: RenderProjectResult;
+  /**
+   * The render result. After an engine restart it is read back from the ledger: the full result
+   * for jobs recorded by this version, or a {@link RenderJobSummary} for older records.
+   */
+  result?: RenderProjectResult | RenderJobSummary;
   error?: string;
   /** Spec validation errors when the render was refused. */
   spec_errors?: SpecInvalidError["errors"];
+}
+
+/** What older ledgers recorded for a succeeded job (before the full result was persisted). */
+export interface RenderJobSummary {
+  summary: true;
+  dist?: RenderProjectResult["dist"];
+  qa_status?: string;
+  voice_backend?: string;
+  renderers_used?: string[];
+}
+
+/** Ledger copy of a result: the full result, JSON-safe, with the warning list capped. */
+function ledgerResult(result: RenderProjectResult): unknown {
+  return JSON.parse(JSON.stringify({ ...result, warnings: result.warnings.slice(0, 100) }));
+}
+
+/** A ledger result back as a view result: a full result as is, an old summary tagged as one. */
+function restoredResult(raw: unknown): RenderProjectResult | RenderJobSummary | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  if (r.qa && typeof r.qa === "object" && r.voice && typeof r.voice === "object" && r.renderer && typeof r.renderer === "object") return raw as RenderProjectResult;
+  return {
+    summary: true,
+    ...(r.dist && typeof r.dist === "object" ? { dist: r.dist as RenderProjectResult["dist"] } : {}),
+    ...(typeof r.qa === "string" ? { qa_status: r.qa } : {}),
+    ...(typeof r.voice === "string" ? { voice_backend: r.voice } : {}),
+    ...(Array.isArray(r.renderer) ? { renderers_used: r.renderer.filter((x): x is string => typeof x === "string") } : {}),
+  };
 }
 
 export type RenderJobRequest = Pick<RenderProjectOptions, "voice" | "renderer" | "quality" | "placeholder" | "brandPath"> & { burn_in_captions?: boolean };
@@ -132,7 +164,7 @@ export class RenderJobManager {
       this.persist((l) =>
         l.updateJob(view.job_id, {
           status: "succeeded",
-          result: { dist: result.dist, qa: result.qa.status, voice: result.voice.backend, renderer: result.renderer.used },
+          result: ledgerResult(result),
         }),
       );
     } catch (e) {
@@ -159,6 +191,7 @@ export class RenderJobManager {
     if (!rec || rec.kind !== "render") return undefined;
     const req = (rec.request ?? {}) as RenderJobRequest & { project_dir?: string };
     const terminal = rec.status === "succeeded" || rec.status === "failed";
+    const result = terminal ? restoredResult(rec.result) : undefined;
     return {
       job_id: rec.id,
       project_dir: req.project_dir ?? rec.projectId,
@@ -167,7 +200,8 @@ export class RenderJobManager {
       submitted_at: rec.createdAt,
       request: req,
       ...(rec.error ? { error: rec.error } : {}),
-      ...(terminal && rec.result ? { result: rec.result as RenderProjectResult } : {}),
+      ...(terminal ? { finished_at: rec.updatedAt } : {}),
+      ...(result ? { result } : {}),
     };
   }
 

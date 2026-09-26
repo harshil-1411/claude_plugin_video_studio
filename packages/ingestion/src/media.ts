@@ -12,7 +12,9 @@ import type { ExtractInput, ExtractedAsset, ExtractedSource, Extractor } from ".
  * Video and audio files → a project copy of the file plus probe facts (duration, size, fps,
  * streams), shot boundaries from ffmpeg scene detection, one small keyframe JPEG per shot
  * (capped) and integrated loudness. Evidence comes later from the transcript (`transcribe`).
- * The file is only decoded by ffmpeg; nothing in it is executed.
+ * The file is only decoded by ffmpeg; nothing in it is executed. Files ffprobe cannot read,
+ * with no video/audio stream, with zero duration, or that are still images under a media
+ * extension (a PNG renamed .mp4) are refused with a clear error.
  */
 
 export const MEDIA_MAX_BYTES = 8 * 1024 * 1024 * 1024;
@@ -110,8 +112,19 @@ export const mediaExtractor: Extractor = {
     if (!st.isFile()) throw new Error(`not a regular file: ${input.uri}`);
     if (st.size > MEDIA_MAX_BYTES) throw new Error(`${basename(input.uri)} is ${st.size} bytes (limit ${MEDIA_MAX_BYTES})`);
     const sha256 = await hashFile(input.uri);
-    const probe = await ffprobe(input.uri);
+    let probe: ProbeResult;
+    try {
+      probe = await ffprobe(input.uri);
+    } catch (err) {
+      throw new Error(`${basename(input.uri)} is not a readable video or audio file (ffprobe: ${err instanceof Error ? err.message.split("\n")[0] : String(err)})`);
+    }
     if (!probe.has_video && !probe.has_audio) throw new Error(`${basename(input.uri)} has no video or audio stream ffprobe can read`);
+    // A still image renamed .mp4 probes as one "video" stream (png_pipe, image2…) with no
+    // duration: refuse it instead of ingesting a 0-second video.
+    if (/(?:_pipe|^image2)$/.test(probe.format_name ?? "")) {
+      throw new Error(`${basename(input.uri)} is a still image (${probe.format_name}), not a video or audio file; images are not a supported source type yet`);
+    }
+    if (!(probe.duration_s > 0)) throw new Error(`${basename(input.uri)} has zero duration: ffprobe found no playable video or audio in it`);
     // A file named .mp4 that only holds audio is ingested as audio (and vice versa).
     const kind: "video" | "audio" = probe.has_video ? "video" : "audio";
     const refBase = fileRef(kind, displayPath(input.uri, input.projectDir));

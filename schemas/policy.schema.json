@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:video-studio:schema:policy",
   "title": "Policy",
-  "description": "policy.yaml: provider allow/deny globs, data-class routing, residency, retention, likeness consent, spend limits and grounding. Enforced in engine code.",
+  "description": "policy.yaml: provider allow/deny globs, data-class routing, residency, retention, likeness consent, spend limits and grounding. Only the parts listed in docs/HANDOFF.md are enforced by the engine; the rest is advisory until the provider phase.",
   "additionalProperties": false,
   "properties": {
     "grounding": {

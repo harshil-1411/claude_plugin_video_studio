@@ -231795,7 +231795,9 @@ async function detectLetterbox(path, info, opts = {}) {
 * Video and audio files → a project copy of the file plus probe facts (duration, size, fps,
 * streams), shot boundaries from ffmpeg scene detection, one small keyframe JPEG per shot
 * (capped) and integrated loudness. Evidence comes later from the transcript (`transcribe`).
-* The file is only decoded by ffmpeg; nothing in it is executed.
+* The file is only decoded by ffmpeg; nothing in it is executed. Files ffprobe cannot read,
+* with no video/audio stream, with zero duration, or that are still images under a media
+* extension (a PNG renamed .mp4) are refused with a clear error.
 */
 const MEDIA_MAX_BYTES = 8589934592;
 /** Shots shorter than this are merged into the previous one (flashes, dissolves). */
@@ -231888,8 +231890,15 @@ const mediaExtractor = {
 		if (!st.isFile()) throw new Error(`not a regular file: ${input.uri}`);
 		if (st.size > 8589934592) throw new Error(`${basename(input.uri)} is ${st.size} bytes (limit ${MEDIA_MAX_BYTES})`);
 		const sha256 = await hashFile(input.uri);
-		const probe = await ffprobe(input.uri);
+		let probe;
+		try {
+			probe = await ffprobe(input.uri);
+		} catch (err) {
+			throw new Error(`${basename(input.uri)} is not a readable video or audio file (ffprobe: ${err instanceof Error ? err.message.split("\n")[0] : String(err)})`);
+		}
 		if (!probe.has_video && !probe.has_audio) throw new Error(`${basename(input.uri)} has no video or audio stream ffprobe can read`);
+		if (/(?:_pipe|^image2)$/.test(probe.format_name ?? "")) throw new Error(`${basename(input.uri)} is a still image (${probe.format_name}), not a video or audio file; images are not a supported source type yet`);
+		if (!(probe.duration_s > 0)) throw new Error(`${basename(input.uri)} has zero duration: ffprobe found no playable video or audio in it`);
 		const kind = probe.has_video ? "video" : "audio";
 		const refBase = fileRef(kind, displayPath(input.uri, input.projectDir));
 		const warnings = [];
@@ -234276,7 +234285,7 @@ strictObject({
 }).meta({
 	id: "Policy",
 	title: "Policy",
-	description: "policy.yaml: provider allow/deny globs, data-class routing, residency, retention, likeness consent, spend limits and grounding. Enforced in engine code."
+	description: "policy.yaml: provider allow/deny globs, data-class routing, residency, retention, likeness consent, spend limits and grounding. Only the parts listed in docs/HANDOFF.md are enforced by the engine; the rest is advisory until the provider phase."
 });
 //#endregion
 //#region ../schema/dist/capabilities.js
@@ -234584,6 +234593,47 @@ function toIso$1(now) {
 	if (now === void 0) return (/* @__PURE__ */ new Date()).toISOString();
 	return typeof now === "string" ? now : now.toISOString();
 }
+/** An extracted asset as an IR asset: refs remapped to the IR's refs, keyframe handles to asset ids. */
+function toIrAsset(a, id, remap, localIds) {
+	return {
+		id,
+		kind: a.kind,
+		path: a.path,
+		sha256: a.sha256,
+		...a.source_ref ? { source_ref: remap.get(a.source_ref) ?? a.source_ref } : {},
+		...a.media ? { media: {
+			...a.media,
+			...a.media.shots ? { shots: a.media.shots.map((s) => {
+				const { keyframe, ...rest } = s;
+				const kid = keyframe ? localIds.get(keyframe) : void 0;
+				return kid ? {
+					...rest,
+					keyframe: kid
+				} : rest;
+			}) } : {}
+		} } : {}
+	};
+}
+/** Classification of one extracted source; notes are prefixed with its source id. */
+function classifyPart(part, sourceId, imagesWithFaces) {
+	const { classification } = classifyText([
+		...part.source.title ? [part.source.title] : [],
+		...part.sections.map((s) => `${s.heading ?? ""}\n${s.text}`),
+		...part.evidence.map((e) => e.text)
+	], {
+		kind: part.source.kind,
+		imagesWithFaces
+	});
+	const hints = part.classificationHints;
+	return {
+		...classification,
+		contains_likeness: classification.contains_likeness || hints?.contains_likeness === true,
+		contains_secrets: classification.contains_secrets || hints?.contains_secrets === true,
+		contains_pii: classification.contains_pii || hints?.contains_pii === true,
+		data_class: maxDataClass(classification.data_class, hints?.contains_secrets ? "restricted" : hints?.contains_pii ? "confidential" : classification.data_class),
+		notes: [...classification.notes, ...hints?.notes ?? []].map((n) => `${sourceId}: ${n}`)
+	};
+}
 /**
 * Merge extractor outputs into one validated ContentIR: assign ids, attach
 * source ids, make refs unique across the IR, derive quantitative claims and
@@ -234633,46 +234683,13 @@ function buildContentIR(parts, opts = {}) {
 		part.assets.forEach((a, k) => {
 			if (a.local_id) localIds.set(a.local_id, `asset-${firstAsset + k + 1}`);
 		});
-		for (const a of part.assets) ir.assets.push({
-			id: `asset-${ir.assets.length + 1}`,
-			kind: a.kind,
-			path: a.path,
-			sha256: a.sha256,
-			...a.source_ref ? { source_ref: remap.get(a.source_ref) ?? a.source_ref } : {},
-			...a.media ? { media: {
-				...a.media,
-				...a.media.shots ? { shots: a.media.shots.map((s) => {
-					const { keyframe, ...rest } = s;
-					const id = keyframe ? localIds.get(keyframe) : void 0;
-					return id ? {
-						...rest,
-						keyframe: id
-					} : rest;
-				}) } : {}
-			} } : {}
-		});
+		for (const a of part.assets) ir.assets.push(toIrAsset(a, `asset-${ir.assets.length + 1}`, remap, localIds));
 		for (const w of part.warnings) ir.warnings.push({
 			...w,
 			source_id: sourceId
 		});
 		const faces = Array.isArray(opts.imagesWithFaces) ? opts.imagesWithFaces[idx] : opts.imagesWithFaces;
-		const { classification } = classifyText([
-			...part.source.title ? [part.source.title] : [],
-			...part.sections.map((s) => `${s.heading ?? ""}\n${s.text}`),
-			...part.evidence.map((e) => e.text)
-		], {
-			kind: part.source.kind,
-			imagesWithFaces: faces === true
-		});
-		const hints = part.classificationHints;
-		classifications.push({
-			...classification,
-			contains_likeness: classification.contains_likeness || hints?.contains_likeness === true,
-			contains_secrets: classification.contains_secrets || hints?.contains_secrets === true,
-			contains_pii: classification.contains_pii || hints?.contains_pii === true,
-			data_class: maxDataClass(classification.data_class, hints?.contains_secrets ? "restricted" : hints?.contains_pii ? "confidential" : classification.data_class),
-			notes: [...classification.notes, ...hints?.notes ?? []].map((n) => `${sourceId}: ${n}`)
-		});
+		classifications.push(classifyPart(part, sourceId, faces === true));
 	});
 	ir.classification = mergeClassifications(classifications);
 	ir.claims = deriveClaims(ir.evidence, opts.maxClaims ?? 200);
@@ -234680,6 +234697,224 @@ function buildContentIR(parts, opts = {}) {
 	const result = ContentIR.safeParse(ir);
 	if (!result.success) throw new ContentIRValidationError(formatIssues$1(result.error));
 	return result.data;
+}
+/** Heading `transcribe` gives the transcript section it adds (packages/mcp/src/transcribe.ts `transcriptHeading`). */
+const TRANSCRIPT_HEADING = /^Transcript \(.+\)$/;
+/** Sources ingest created (`src-N`). Sources added by other tools (`demo-<id>`, `<asset>-src`) are never matched or replaced. */
+const INGEST_SOURCE_ID = /^src-\d+$/;
+function nextNumber(ids, prefix) {
+	let max = 0;
+	const re = new RegExp(`^${prefix}-(\\d+)$`);
+	for (const id of ids) {
+		const m = re.exec(id);
+		if (m) max = Math.max(max, Number(m[1]));
+	}
+	return max + 1;
+}
+const refBase = (ref) => ref.split("#")[0];
+/**
+* Merge freshly extracted sources into an existing, valid ContentIR instead of replacing it,
+* so that earlier sources, transcripts, demo recordings and the refs a VideoSpec cites survive.
+*
+* - The IR `id` and `created_at` stay as they are.
+* - Existing sources, sections, evidence, claims, entities, assets and warnings are kept with
+*   their ids and refs unchanged.
+* - A part matches an existing ingest source (`src-N`) when its sha256 is the same (identical
+*   bytes, possibly from another path) or its uri and kind are the same (an updated file). It is
+*   refreshed IN PLACE: same source id; its ingest-produced sections, evidence, assets and
+*   warnings are replaced. Evidence refs are location-based (`markdown:README.md#L3-L7`,
+*   `pdf:x.pdf#p3`, …) and deterministic, so spans whose location did not change keep their ref;
+*   section ids are reused by heading, asset ids by sha256, and the source file's own asset
+*   (a video or audio file) keeps its id even when its bytes changed.
+* - What `transcribe` added to a refreshed media source (timed evidence, the `Transcript (…)`
+*   section, `media.transcript` on the asset) is kept when the bytes are unchanged, and dropped
+*   with a `transcript_dropped` warning when the file changed (the timings no longer apply).
+* - Anything else is new: `src-`, `sec-`, `asset-`, `claim-` and `ent-` numbers continue after
+*   the highest existing one, so a retired id is never reused for different content.
+* - Claims: an existing claim keeps its id while one of its spans still contains its sentence
+*   (refs into refreshed spans are re-checked); claims from new evidence are appended, or add
+*   their ref to an existing claim with the same sentence. Entities are re-derived and keep the
+*   id of an existing entity with the same name.
+* - Classification only ever escalates: the existing label is merged with the new parts'
+*   (a refreshed source's old `src-N:` notes are replaced).
+*/
+function mergeContentIR(existing, parts, opts = {}) {
+	if (parts.length === 0) throw new Error("mergeContentIR: at least one extracted source is required");
+	const ir = structuredClone(existing);
+	let nextSrc = nextNumber(ir.sources.map((s) => s.id), "src");
+	let nextSec = nextNumber(ir.sections.map((s) => s.id), "sec");
+	let nextAsset = nextNumber(ir.assets.map((a) => a.id), "asset");
+	let nextClaim = nextNumber(ir.claims.map((c) => c.id), "claim");
+	let nextEnt = nextNumber(ir.entities.map((e) => e.id), "ent");
+	const placed = [];
+	const classifications = [];
+	const dropNotePrefixes = [];
+	let added = [];
+	parts.forEach((part, idx) => {
+		const match = ir.sources.find((s) => INGEST_SOURCE_ID.test(s.id) && (s.sha256 === part.source.sha256 || s.uri === part.source.uri && s.kind === part.source.kind));
+		let sourceId;
+		let matchSha;
+		const reuseSections = /* @__PURE__ */ new Map();
+		const reuseAssets = /* @__PURE__ */ new Map();
+		if (match) {
+			sourceId = match.id;
+			matchSha = match.sha256;
+			const sameBytes = match.sha256 === part.source.sha256;
+			const isTranscriptSection = (heading) => heading !== void 0 && TRANSCRIPT_HEADING.test(heading);
+			const isTimed = (e) => e.locator.time_start_sec !== void 0;
+			const hadTranscript = ir.sections.some((s) => s.source_id === sourceId && isTranscriptSection(s.heading)) || ir.evidence.some((e) => e.source_id === sourceId && isTimed(e));
+			const oldSections = ir.sections.filter((s) => s.source_id === sourceId && !(sameBytes && isTranscriptSection(s.heading)));
+			for (const s of oldSections) {
+				const key = s.heading ?? "";
+				reuseSections.set(key, [...reuseSections.get(key) ?? [], s.id]);
+			}
+			ir.sections = ir.sections.filter((s) => !oldSections.includes(s));
+			const oldEvidence = ir.evidence.filter((e) => e.source_id === sourceId && !(sameBytes && isTimed(e)));
+			ir.evidence = ir.evidence.filter((e) => !oldEvidence.includes(e));
+			const ownedBases = new Set(oldEvidence.map((e) => refBase(e.ref)));
+			for (const a of ir.assets) if (a.sha256 === match.sha256 && a.source_ref) ownedBases.add(refBase(a.source_ref));
+			const oldAssets = ir.assets.filter((a) => a.sha256 === match.sha256 || a.source_ref !== void 0 && ownedBases.has(refBase(a.source_ref)));
+			for (const a of oldAssets) if (!reuseAssets.has(a.sha256)) reuseAssets.set(a.sha256, a);
+			ir.assets = ir.assets.filter((a) => !oldAssets.includes(a));
+			ir.warnings = ir.warnings.filter((w) => w.source_id !== sourceId);
+			dropNotePrefixes.push(`${sourceId}: `);
+			if (!sameBytes && hadTranscript) {
+				dropNotePrefixes.push(`${sourceId} (speech): `);
+				ir.warnings.push({
+					code: "transcript_dropped",
+					source_id: sourceId,
+					message: `${part.source.title ?? part.source.uri} changed since it was transcribed; its transcript was dropped: run transcribe again`
+				});
+			}
+			ir.sources = ir.sources.map((s) => s.id === sourceId ? {
+				id: sourceId,
+				...part.source
+			} : s);
+			placed.push({
+				source_id: sourceId,
+				status: "updated"
+			});
+		} else {
+			sourceId = `src-${nextSrc++}`;
+			ir.sources.push({
+				id: sourceId,
+				...part.source
+			});
+			placed.push({
+				source_id: sourceId,
+				status: "added"
+			});
+		}
+		for (const sec of part.sections) {
+			const id = reuseSections.get(sec.heading ?? "")?.shift() ?? `sec-${nextSec++}`;
+			ir.sections.push({
+				id,
+				source_id: sourceId,
+				...sec
+			});
+		}
+		const registry = new RefRegistry();
+		for (const e of ir.evidence) registry.claim(e.ref);
+		const remap = /* @__PURE__ */ new Map();
+		for (const span of part.evidence) {
+			const ref = registry.claim(span.ref);
+			if (!remap.has(span.ref)) remap.set(span.ref, ref);
+			const ev = {
+				ref,
+				source_id: sourceId,
+				text: span.text,
+				locator: span.locator
+			};
+			ir.evidence.push(ev);
+			added.push(ev);
+		}
+		const ids = part.assets.map((a) => {
+			const old = reuseAssets.get(a.sha256);
+			if (old && old.kind === a.kind) {
+				reuseAssets.delete(a.sha256);
+				return {
+					id: old.id,
+					old
+				};
+			}
+			const prevFile = matchSha !== void 0 && a.sha256 === part.source.sha256 ? reuseAssets.get(matchSha) : void 0;
+			if (prevFile && prevFile.kind === a.kind) {
+				reuseAssets.delete(matchSha);
+				return {
+					id: prevFile.id,
+					old: void 0
+				};
+			}
+			return {
+				id: `asset-${nextAsset++}`,
+				old: void 0
+			};
+		});
+		const localIds = /* @__PURE__ */ new Map();
+		part.assets.forEach((a, k) => {
+			if (a.local_id) localIds.set(a.local_id, ids[k].id);
+		});
+		part.assets.forEach((a, k) => {
+			const asset = toIrAsset(a, ids[k].id, remap, localIds);
+			const transcript = ids[k].old?.media?.transcript;
+			if (transcript && asset.media) asset.media = {
+				...asset.media,
+				transcript
+			};
+			ir.assets.push(asset);
+		});
+		for (const w of part.warnings) ir.warnings.push({
+			...w,
+			source_id: sourceId
+		});
+		const faces = Array.isArray(opts.imagesWithFaces) ? opts.imagesWithFaces[idx] : opts.imagesWithFaces;
+		classifications.push(classifyPart(part, sourceId, faces === true));
+	});
+	ir.classification = mergeClassifications([{
+		...ir.classification,
+		notes: ir.classification.notes.filter((n) => !dropNotePrefixes.some((p) => n.startsWith(p)))
+	}, ...classifications]);
+	const live = new Set(ir.evidence);
+	added = added.filter((e) => live.has(e));
+	const addedRefs = new Set(added.map((e) => e.ref));
+	const spans = new Map(ir.evidence.map((e) => [e.ref, e]));
+	const still = (ref, text) => {
+		const span = spans.get(ref);
+		if (!span) return false;
+		if (!addedRefs.has(ref)) return true;
+		return splitSentences(span.text).some((s) => s.toLowerCase() === text.toLowerCase());
+	};
+	ir.claims = ir.claims.map((c) => ({
+		...c,
+		evidence_refs: c.evidence_refs.filter((r) => still(r, c.text))
+	})).filter((c) => c.evidence_refs.length > 0);
+	const byText = new Map(ir.claims.map((c) => [c.text.toLowerCase(), c]));
+	let budget = opts.maxClaims ?? 200;
+	for (const c of deriveClaims(added, Number.MAX_SAFE_INTEGER)) {
+		const known = byText.get(c.text.toLowerCase());
+		if (known) {
+			for (const r of c.evidence_refs) if (!known.evidence_refs.includes(r)) known.evidence_refs.push(r);
+			continue;
+		}
+		if (budget-- <= 0) break;
+		const claim = {
+			...c,
+			id: `claim-${nextClaim++}`
+		};
+		ir.claims.push(claim);
+		byText.set(claim.text.toLowerCase(), claim);
+	}
+	const oldEnt = new Map(ir.entities.map((e) => [e.name.toLowerCase(), e.id]));
+	ir.entities = deriveEntities(ir.sources, ir.sections, ir.evidence).map((e) => ({
+		...e,
+		id: oldEnt.get(e.name.toLowerCase()) ?? `ent-${nextEnt++}`
+	}));
+	const result = ContentIR.safeParse(ir);
+	if (!result.success) throw new ContentIRValidationError(formatIssues$1(result.error));
+	return {
+		ir: result.data,
+		placed
+	};
 }
 //#endregion
 //#region ../ingestion/dist/detect.js
@@ -234708,6 +234943,201 @@ const EXTENSION_KINDS = {
 	".flac": "audio",
 	".ogg": "audio"
 };
+/** One line naming every supported input, for error messages. */
+const SUPPORTED_INPUTS = "Supported: Markdown (.md .markdown .mdx), plain text (.txt, or another text file such as .json .yaml .csv or source code), PDF (.pdf), Word (.docx), PowerPoint (.pptx), a saved web page (.html .htm), video (.mp4 .mov .webm .mkv .m4v), audio (.mp3 .wav .m4a .aac .flac .ogg), a repository folder, a folder of clips, an http(s) URL, or inline text.";
+/**
+* Extensions of files that are plain text and ingested as kind `text` (after a binary sniff).
+* Files with any other unknown extension are refused rather than guessed at.
+*/
+const TEXT_EXTENSIONS = /* @__PURE__ */ new Set([
+	".json",
+	".jsonl",
+	".yaml",
+	".yml",
+	".toml",
+	".ini",
+	".cfg",
+	".conf",
+	".csv",
+	".tsv",
+	".log",
+	".rst",
+	".adoc",
+	".asciidoc",
+	".org",
+	".tex",
+	".xml",
+	".srt",
+	".vtt",
+	".diff",
+	".patch",
+	".js",
+	".mjs",
+	".cjs",
+	".jsx",
+	".ts",
+	".mts",
+	".cts",
+	".tsx",
+	".py",
+	".rb",
+	".go",
+	".rs",
+	".java",
+	".kt",
+	".kts",
+	".swift",
+	".c",
+	".h",
+	".cc",
+	".cpp",
+	".hpp",
+	".cs",
+	".php",
+	".scala",
+	".sh",
+	".bash",
+	".zsh",
+	".fish",
+	".ps1",
+	".sql",
+	".graphql",
+	".proto",
+	".css",
+	".scss",
+	".less",
+	".vue",
+	".svelte",
+	".lua",
+	".r",
+	".jl",
+	".dart",
+	".ex",
+	".exs",
+	".erl",
+	".hs",
+	".ml",
+	".clj",
+	".el",
+	".vim",
+	".dockerfile",
+	".gradle",
+	".cmake",
+	".mk"
+]);
+/** Image files: not a source type yet (the extractors pull images out of PDFs, decks and pages themselves). */
+const IMAGE_EXTENSIONS = /* @__PURE__ */ new Set([
+	".png",
+	".jpg",
+	".jpeg",
+	".gif",
+	".webp",
+	".bmp",
+	".tif",
+	".tiff",
+	".heic",
+	".heif",
+	".avif",
+	".svg",
+	".ico"
+]);
+/** Expand a leading `~` / `~/` to the user's home directory (other `~user` forms are left alone). */
+function expandHome(p, home = homedir()) {
+	if (p === "~") return home;
+	if (p.startsWith("~/") || p.startsWith(`~${sep}`)) return join(home, p.slice(2));
+	return p;
+}
+/**
+* True when an input looks like a file path rather than inline text, so that a missing file is
+* an error instead of being ingested as its own literal text. A single token (no whitespace,
+* not an http(s) URL) is path-like when it has at least one of
+* - a path separator (`docs/missing.md`, `a\b`), or a leading `~`, `./`, `../` or `file://`;
+* - a file extension: a dot followed by 1–10 characters starting with a letter at the end
+*   (`notes.txt`, `report.PDF`; not `3.14` or `e.g.`).
+* A single line WITH spaces is path-like only when it is an explicit path with an extension:
+* it starts with `/`, `~/`, `./` or `../` (`/Users/me/My Notes.md`). Anything else with
+* whitespace, and anything with a newline (sentences, markdown, pasted content), is inline text.
+* Consequence: a single dotted or slashed word such as `Node.js` or `and/or` is treated as a
+* path; pass it inside a sentence (or as `{uri, content}`) to ingest it as text.
+*/
+function isPathLike(input) {
+	const t = input.trim();
+	if (t.length === 0 || t.length >= 4096 || /[\n\r]/.test(t)) return false;
+	if (/^https?:\/\//i.test(t)) return false;
+	const ext = /\.[A-Za-z][A-Za-z0-9]{0,9}$/;
+	if (/\s/.test(t)) return /^(?:\/|~\/|\.{1,2}\/)/.test(t) && ext.test(t);
+	if (/^file:\/\//i.test(t)) return true;
+	if (/[/\\]/.test(t) || t.startsWith("~")) return true;
+	return ext.test(t);
+}
+/**
+* Why `path` (absolute) is a credential location, or undefined. Ingest refuses these whatever
+* the caller asks, before checking that the file exists: anything under a `.ssh`, `.aws`,
+* `.gnupg`, `.config/gcloud` or `Library/Keychains` folder, and files named `.env` / `.env.*`,
+* `*.pem`, `*.key`, `id_rsa*` / `id_dsa*` / `id_ecdsa*` / `id_ed25519*`, `.netrc` / `_netrc`
+* or `.npmrc` (by name alone: an .npmrc often holds a registry token).
+*/
+function credentialReason(path) {
+	const lower = path.split(/[/\\]+/).filter(Boolean).map((x) => x.toLowerCase());
+	for (const dir of [
+		".ssh",
+		".aws",
+		".gnupg"
+	]) if (lower.slice(0, -1).includes(dir) || lower.at(-1) === dir) return `it is in a ${dir} folder`;
+	for (let i = 0; i + 1 < lower.length; i++) {
+		if (lower[i] === ".config" && lower[i + 1] === "gcloud") return "it is in .config/gcloud";
+		if (lower[i] === "library" && lower[i + 1] === "keychains") return "it is in Library/Keychains";
+	}
+	const name = (lower.at(-1) ?? "").toLowerCase();
+	if (name === ".env" || name.startsWith(".env.")) return "it is a .env file";
+	if (/\.(?:pem|key)$/.test(name)) return "it is a key file";
+	if (/^id_(?:rsa|dsa|ecdsa|ed25519)/.test(name)) return "it is an SSH key";
+	if (name === ".netrc" || name === "_netrc" || name === ".npmrc") return `it is a ${name} file`;
+}
+/** Throws "refusing to ingest a credential file" when {@link credentialReason} matches. */
+function assertNotCredential(path, label = path) {
+	const reason = credentialReason(path);
+	if (reason) throw new Error(`refusing to ingest a credential file: ${label} (${reason}); credentials never go into a ContentIR`);
+}
+/**
+* Why the first bytes of a file say it is not text (a NUL byte, or not valid UTF-8), or
+* undefined for text. Reads at most `bytes` bytes; a multi-byte character cut at the end of the
+* sample is not an error.
+*/
+function binaryReason(path, bytes = 8192) {
+	const buf = Buffer.alloc(bytes);
+	const fd = openSync(path, "r");
+	let n;
+	try {
+		n = readSync(fd, buf, 0, bytes, 0);
+	} finally {
+		closeSync(fd);
+	}
+	const head = buf.subarray(0, n);
+	if (head.includes(0)) return "it contains NUL bytes";
+	try {
+		new TextDecoder("utf-8", { fatal: true }).decode(head, { stream: true });
+	} catch {
+		return "it is not valid UTF-8 text";
+	}
+}
+/** Throws a clear error when a file that should be text is binary. */
+function assertTextFile(path) {
+	const why = binaryReason(path);
+	if (why) throw new Error(`not a text file: ${basename(path)} (${why}). ${SUPPORTED_INPUTS}`);
+}
+/**
+* Kind of an existing file whose extension is not a known source type: `text` for text
+* extensions and extension-less files that pass the binary sniff; otherwise an error naming
+* the supported types (images get their own message: they are not a source type yet).
+*/
+function unknownFileKind(path) {
+	const ext = extname(path).toLowerCase();
+	if (IMAGE_EXTENSIONS.has(ext)) throw new Error(`images are not a supported source type yet: ${basename(path)}. ${SUPPORTED_INPUTS}`);
+	if (ext && !TEXT_EXTENSIONS.has(ext)) throw new Error(`unsupported file type "${ext}": ${basename(path)}. ${SUPPORTED_INPUTS}`);
+	assertTextFile(path);
+	return "text";
+}
 /** `https://github.com/<owner>/<repo>` optionally followed by `.git`, `/`, `/tree/<ref>…`. */
 const GITHUB_REPO = /^https?:\/\/(?:www\.)?github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?(?:\.git)?(?:\/(?:tree\/[^?#]*)?)?(?:[?#].*)?$/i;
 /** True when `dir` looks like a code repository (has .git, package.json or a README at its root). */
@@ -234739,12 +235169,16 @@ function mediaFolderFiles(dir) {
 * Guess the SourceKind of an ingest input:
 * - `http(s)://` → `repo` for github.com/<owner>/<repo>, else `url`;
 * - an existing directory with .git / package.json / README → `repo`;
-* - a path (existing or path-like single token) → by extension, unknown
-*   extensions of existing files → `text`;
+* - an existing file → by extension; other text extensions (.json, .yaml, source code…) and
+*   extension-less files that pass a NUL-byte / UTF-8 sniff → `text`; images, archives,
+*   executables and other unknown or binary files throw with the list of supported types;
+* - a path-like single token that does not exist → by extension (a guess only:
+*   {@link resolveIngestInput} refuses missing paths);
 * - anything else is inline content: `markdown` if it has ATX headings or
 *   code fences, else `text`.
 *
-* Throws for an existing directory that does not look like a repository.
+* Throws for an existing directory that does not look like a repository, and for existing
+* files of an unsupported type (see above).
 */
 function detectKind(input) {
 	const trimmed = input.trim();
@@ -234765,7 +235199,7 @@ function detectKind(input) {
 			throw new Error(`"${path}" is a directory without .git, package.json or README; it is not a recognizable repository`);
 		}
 		const byExt = EXTENSION_KINDS[extname(path).toLowerCase()];
-		if (stat?.isFile()) return byExt ?? "text";
+		if (stat?.isFile()) return byExt ?? unknownFileKind(path);
 		if (byExt && !/\s/.test(path)) return byExt;
 	}
 	if (/^ {0,3}#{1,6}\s+\S/m.test(input) || /^ {0,3}(```|~~~)/m.test(input)) return "markdown";
@@ -234814,7 +235248,19 @@ function isExistingFile(p) {
 		return false;
 	}
 }
-/** Normalize a raw input into an ExtractInput (absolute paths, inline content detected). */
+/**
+* Normalize a raw input into an ExtractInput (absolute paths, inline content detected).
+*
+* Refuses, with a clear error:
+* - credential locations ({@link credentialReason}: `~/.ssh`, `~/.aws`, `.env`, `*.pem`, …),
+*   whatever kind the caller asks for, checked on the path as given and on its real path;
+* - a path-like input ({@link isPathLike}: `notes.txt`, `docs/missing.md`, `~/file.pdf`) that
+*   does not exist: `file not found: notes.txt (resolved to /abs/notes.txt)`. It is never
+*   ingested as its own literal text. Real inline text (sentences, markdown) still is;
+* - images, archives, executables and other binary or unknown files (see {@link detectKind}),
+*   and text/markdown files that fail the NUL-byte / UTF-8 sniff.
+* A leading `~/` is expanded to the home directory.
+*/
 function resolveIngestInput(raw, cwd) {
 	const item = typeof raw === "string" ? { uri: raw } : raw;
 	if (item.content !== void 0) {
@@ -234828,21 +235274,34 @@ function resolveIngestInput(raw, cwd) {
 	}
 	let uri = item.uri;
 	if (/^file:\/\//i.test(uri)) uri = fileURLToPath(uri);
-	const isUrl = /^https?:\/\//i.test(uri.trim()) && !/\s/.test(uri.trim());
-	const singleToken = !/[\n\r]/.test(uri) && uri.length < 4096;
-	const candidatePath = !isUrl && singleToken ? resolve(cwd, uri.trim()) : void 0;
-	const pathExists = candidatePath !== void 0 && existsSync(candidatePath);
-	const kind = item.kind ?? detectKind(pathExists ? candidatePath : uri);
-	if (kind === "url" || kind === "repo" && isUrl) return {
-		uri: uri.trim(),
-		kind
-	};
-	if (INLINE_KINDS.has(kind) && !(candidatePath && isExistingFile(candidatePath))) return {
-		uri,
-		kind,
-		content: uri
-	};
-	if (!candidatePath || !pathExists) throw new Error(`input not found: ${uri}`);
+	const trimmed = uri.trim();
+	if (/^https?:\/\//i.test(trimmed) && !/\s/.test(trimmed)) {
+		const kind = item.kind ?? detectKind(trimmed);
+		if (kind === "url" || kind === "repo") return {
+			uri: trimmed,
+			kind
+		};
+		throw new Error(`a ${kind} input must be a local file, got a URL: ${trimmed}`);
+	}
+	const candidatePath = !/[\n\r]/.test(uri) && uri.length < 4096 ? resolve(cwd, expandHome(trimmed)) : void 0;
+	if (candidatePath) assertNotCredential(candidatePath, trimmed);
+	if (!(candidatePath !== void 0 && existsSync(candidatePath))) {
+		if (candidatePath && isPathLike(trimmed)) throw new Error(`file not found: ${trimmed} (resolved to ${candidatePath})`);
+		const kind = item.kind ?? detectKind(uri);
+		if (INLINE_KINDS.has(kind)) return {
+			uri,
+			kind,
+			content: uri
+		};
+		throw new Error(`file not found: ${trimmed}${candidatePath ? ` (resolved to ${candidatePath})` : ""}`);
+	}
+	try {
+		assertNotCredential(realpathSync(candidatePath), trimmed);
+	} catch (err) {
+		if (err instanceof Error && err.message.startsWith("refusing")) throw err;
+	}
+	const kind = item.kind ?? detectKind(candidatePath);
+	if (INLINE_KINDS.has(kind) && isExistingFile(candidatePath)) assertTextFile(candidatePath);
 	return {
 		uri: candidatePath,
 		kind
@@ -234901,17 +235360,56 @@ function toIso(now) {
 	if (now === void 0) return (/* @__PURE__ */ new Date()).toISOString();
 	return typeof now === "string" ? now : now.toISOString();
 }
+/** The existing ContentIR at `irPath`, undefined when there is none; throws when it is invalid. */
+async function loadExistingIr(irPath) {
+	if (!existsSync(irPath)) return void 0;
+	let data;
+	try {
+		data = JSON.parse(await readFile(irPath, "utf8"));
+	} catch (err) {
+		throw new Error(`source/content-ir.json exists but is not valid JSON (${err instanceof Error ? err.message : String(err)}); fix it, or ingest with replace: true to start over`);
+	}
+	const r = ContentIR.safeParse(data);
+	if (!r.success) {
+		const issues = formatIssues$1(r.error).slice(0, 3).map((i) => `${i.path || "(root)"}: ${i.message}`).join("; ");
+		throw new Error(`source/content-ir.json exists but is not a valid ContentIR (${issues}); fix it, or ingest with replace: true to start over`);
+	}
+	return r.data;
+}
+/** The existing provenance when it belongs to `irId`; anything else is ignored (it is rebuilt). */
+async function loadExistingProvenance(path, irId) {
+	try {
+		const p = JSON.parse(await readFile(path, "utf8"));
+		return p && p.ir_id === irId && Array.isArray(p.sources) && Array.isArray(p.failures) ? p : void 0;
+	} catch {
+		return;
+	}
+}
 /**
 * Ingest inputs into `<projectDir>/source/content-ir.json`:
-* detect kind → (cache | extractor) → buildContentIR → atomic writes of the IR
-* and `source/provenance.json`. Inputs that fail are reported as
-* `ingest_failed` warnings; if every input fails an {@link IngestError} is thrown.
+* detect kind → (cache | extractor) → build or merge the ContentIR → atomic writes of the IR
+* and `source/provenance.json`. Inputs that fail are reported as `ingest_failed` warnings; if
+* every input fails an {@link IngestError} is thrown and nothing is written.
+*
+* Re-ingest MERGES (the plan skill ingests again when the user adds sources): when a valid
+* ContentIR already exists, earlier sources, evidence, claims, assets and whatever transcribe /
+* demo / tighten added are kept with their ids and refs, new sources are appended, and a source
+* ingested before (same sha256, or same uri and kind) is refreshed in place under its id
+* ({@link mergeContentIR}). The IR id stays the same; provenance entries are appended (a
+* refreshed source's entry is replaced) and failures accumulate. An existing but invalid
+* ContentIR is an error rather than being overwritten. `replace: true` restores the old
+* behaviour: a fresh ContentIR with only this call's inputs. With no existing ContentIR the
+* output is exactly {@link buildContentIR}'s.
 */
 async function ingest(inputs, options) {
 	if (inputs.length === 0) throw new Error("ingest: at least one input is required");
 	const projectDir = resolve(options.projectDir);
 	const cwd = options.cwd ?? process.cwd();
-	inputs = inputs.flatMap((raw) => typeof raw === "string" ? mediaFolderFiles(resolve(cwd, raw.trim())) ?? [raw] : [raw]);
+	const irPath = join(projectDir, "source", "content-ir.json");
+	const provPath = join(projectDir, "source", "provenance.json");
+	const existing = options.replace ? void 0 : await loadExistingIr(irPath);
+	const replacing = options.replace === true && existsSync(irPath);
+	inputs = inputs.flatMap((raw) => typeof raw === "string" ? mediaFolderFiles(resolve(cwd, expandHome(raw.trim()))) ?? [raw] : [raw]);
 	const now = toIso(options.now);
 	const registry = {
 		...createExtractors({
@@ -234977,22 +235475,43 @@ async function ingest(inputs, options) {
 		}
 	}
 	if (parts.length === 0) throw new IngestError(`nothing was ingested:\n${failures.map((f) => `  - ${f.uri}: ${f.error}`).join("\n")}`, failures);
-	const ir = buildContentIR(parts, { now });
+	let ir;
+	let placed;
+	if (existing) {
+		({ir, placed} = mergeContentIR(existing, parts));
+		const retried = new Set(inputs.map((raw) => inline(typeof raw === "string" ? raw : raw.uri || "(inline)")));
+		ir.warnings = ir.warnings.filter((w) => !(w.code === "ingest_failed" && [...retried].some((l) => w.message.startsWith(`${l}: `))));
+	} else {
+		ir = buildContentIR(parts, { now });
+		placed = ir.sources.map((s) => ({
+			source_id: s.id,
+			status: "added"
+		}));
+	}
 	for (const f of failures) ir.warnings.push({
 		code: "ingest_failed",
 		message: `${f.uri}: ${f.error}`
 	});
-	const irPath = join(projectDir, "source", "content-ir.json");
-	const provPath = join(projectDir, "source", "provenance.json");
-	const prov = {
+	const fresh = provenance.map((p, i) => ({
+		source_id: placed[i].source_id,
+		...p
+	}));
+	const previous = existing ? await loadExistingProvenance(provPath, existing.id) : void 0;
+	const touched = new Set(fresh.map((p) => p.source_id));
+	const prov = existing ? {
+		schema_version: 1,
+		ir_id: ir.id,
+		ir_schema_version: "1.0",
+		created_at: previous?.created_at ?? existing.created_at,
+		updated_at: now,
+		sources: lastPerSource([...(previous?.sources ?? []).filter((p) => !touched.has(p.source_id) && ir.sources.some((s) => s.id === p.source_id)), ...fresh]),
+		failures: [...previous?.failures ?? [], ...failures]
+	} : {
 		schema_version: 1,
 		ir_id: ir.id,
 		ir_schema_version: "1.0",
 		created_at: now,
-		sources: provenance.map((p, i) => ({
-			source_id: ir.sources[i].id,
-			...p
-		})),
+		sources: fresh,
 		failures
 	};
 	await writeJsonAtomic(irPath, ir);
@@ -235002,15 +235521,21 @@ async function ingest(inputs, options) {
 			ir_path: irPath,
 			provenance_path: provPath,
 			ir_id: ir.id,
-			sources: ir.sources.map((s, i) => ({
-				id: s.id,
-				kind: s.kind,
-				uri: s.uri,
-				...s.title ? { title: s.title } : {},
-				sections: ir.sections.filter((x) => x.source_id === s.id).length,
-				evidence: ir.evidence.filter((x) => x.source_id === s.id).length,
-				cache_hit: prov.sources[i].cache_hit
-			})),
+			mode: existing ? "merged" : replacing ? "replaced" : "created",
+			sources: fresh.map((p, i) => {
+				const s = ir.sources.find((x) => x.id === p.source_id);
+				return {
+					id: s.id,
+					kind: s.kind,
+					uri: s.uri,
+					...s.title ? { title: s.title } : {},
+					sections: ir.sections.filter((x) => x.source_id === s.id).length,
+					evidence: ir.evidence.filter((x) => x.source_id === s.id).length,
+					cache_hit: p.cache_hit,
+					status: placed[i].status
+				};
+			}),
+			total_sources: ir.sources.length,
 			sections: ir.sections.length,
 			evidence: ir.evidence.length,
 			claims: ir.claims.length,
@@ -235023,6 +235548,15 @@ async function ingest(inputs, options) {
 		provenance: prov
 	};
 }
+/** One provenance entry per source id: the last one wins (a file given twice in one call). */
+function lastPerSource(list) {
+	const by = /* @__PURE__ */ new Map();
+	for (const p of list) {
+		by.delete(p.source_id);
+		by.set(p.source_id, p);
+	}
+	return [...by.values()];
+}
 /** Short label for an input in messages: long inline text is abbreviated. */
 function inline(label) {
 	const oneLine = label.replace(/\s+/g, " ").trim();
@@ -235030,8 +235564,8 @@ function inline(label) {
 }
 /** Human-readable multi-line summary (MCP tool text output). */
 function formatIngestSummary(s) {
-	const lines = [`ContentIR ${s.ir_id} written to ${s.ir_path}`, `${s.sources.length} source(s), ${s.sections} sections, ${s.evidence} evidence spans, ${s.claims} claims, ${s.entities} entities, ${s.assets} assets`];
-	for (const src of s.sources) lines.push(`  ${src.id} [${src.kind}] ${src.title ? `"${src.title}" ` : ""}${inline(src.uri)} — ${src.sections} sections, ${src.evidence} spans${src.cache_hit ? " (cached)" : ""}`);
+	const lines = [`ContentIR ${s.ir_id} ${s.mode === "merged" ? "updated (merged into the existing one)" : s.mode === "replaced" ? "replaced (earlier sources discarded)" : "written"} to ${s.ir_path}`, `${s.sources.length} source(s) ingested now, ${s.total_sources} in total; ${s.sections} sections, ${s.evidence} evidence spans, ${s.claims} claims, ${s.entities} entities, ${s.assets} assets`];
+	for (const src of s.sources) lines.push(`  ${src.id}${src.status === "updated" ? " (updated in place)" : ""} [${src.kind}] ${src.title ? `"${src.title}" ` : ""}${inline(src.uri)} — ${src.sections} sections, ${src.evidence} spans${src.cache_hit ? " (cached)" : ""}`);
 	const c = s.classification;
 	lines.push(`classification: data_class=${c.data_class}, secrets=${c.contains_secrets}, pii=${c.contains_pii}, likeness=${c.contains_likeness}`);
 	for (const n of c.notes) lines.push(`  note: ${n}`);
@@ -235959,9 +236493,13 @@ var ElevenLabsError = class extends Error {
 		this.name = "ElevenLabsError";
 	}
 };
+/** An unset `${user_config.X}` may reach the env as the literal placeholder: that is not a key. */
+function isPlaceholder(v) {
+	return /^\$\{[^}]*\}$/.test(v);
+}
 function apiKey(env) {
-	const k = env.ELEVENLABS_API_KEY;
-	return k && k.trim() ? k.trim() : void 0;
+	const k = env.ELEVENLABS_API_KEY?.trim();
+	return k && !isPlaceholder(k) ? k : void 0;
 }
 /**
 * ElevenLabs `with-timestamps` TTS over plain fetch. Enabled only when ELEVENLABS_API_KEY is set.
@@ -235978,10 +236516,13 @@ function createElevenLabsBackend(options = {}) {
 	const baseUrl = (options.baseUrl ?? "https://api.elevenlabs.io").replace(/\/+$/, "");
 	const recentRequestIds = [];
 	const available = (env) => {
-		if (!apiKey(env)) return {
-			ok: false,
-			reason: "ELEVENLABS_API_KEY not set"
-		};
+		if (!apiKey(env)) {
+			const raw = env.ELEVENLABS_API_KEY?.trim();
+			return {
+				ok: false,
+				reason: raw && isPlaceholder(raw) ? "ELEVENLABS_API_KEY not set (unexpanded ${user_config...} placeholder)" : "ELEVENLABS_API_KEY not set"
+			};
+		}
 		if (!resolver("ffmpeg", env) || !resolver("ffprobe", env)) return {
 			ok: false,
 			reason: "ELEVENLABS_API_KEY set but ffmpeg/ffprobe missing"
@@ -241660,7 +242201,7 @@ async function selectRenderer(kind, renderers, env = process.env, preference = "
 	};
 }
 /** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version. */
-function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage, cues) {
+function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage, cues, images) {
 	return sha256Hex(canonicalJson({
 		v: 1,
 		layout: 10,
@@ -241674,8 +242215,67 @@ function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zon
 		},
 		placeholder,
 		...footage ? { footage } : {},
-		...cues?.length ? { cues } : {}
+		...cues?.length ? { cues } : {},
+		...images?.length ? { images } : {}
 	}));
+}
+/**
+* Every image reference a scene's picture draws: `asset` ids anywhere in the deterministic props
+* (screenshot, split_screen panels, ...) and the brand logo for the kinds that show it.
+*/
+function sceneImageRefs(scene, tokens) {
+	const assets = /* @__PURE__ */ new Set();
+	const walk = (v) => {
+		if (Array.isArray(v)) v.forEach(walk);
+		else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) if (k === "asset" && typeof x === "string" && x) assets.add(x);
+		else walk(x);
+	};
+	const det = scene.deterministic;
+	if (det) walk(det.props);
+	const logo = det && tokens.logo_path && (det.kind === "end_card" || det.kind === "cta") ? tokens.logo_path : void 0;
+	return {
+		assets: [...assets].sort(),
+		...logo ? { logo } : {}
+	};
+}
+async function hashOrNull(path) {
+	if (!path) return null;
+	try {
+		return await hashFile(path);
+	} catch {
+		return null;
+	}
+}
+/** ContentIR asset id → project-relative path, from `<project>/source/content-ir.json` (empty when absent). */
+async function loadIrAssetPaths(projectDir) {
+	const out = /* @__PURE__ */ new Map();
+	try {
+		const ir = JSON.parse(await readFile(join(projectDir, "source", "content-ir.json"), "utf8"));
+		for (const a of ir.assets ?? []) if (typeof a.id === "string" && typeof a.path === "string") out.set(a.id, a.path);
+	} catch {}
+	return out;
+}
+/**
+* Hash every image file `scene` draws, resolved the way the renderers resolve them (ContentIR
+* asset id, or an id that is itself a project path; the logo as written, relative to the project).
+*/
+async function sceneImages(scene, tokens, projectDir, irAssets) {
+	const refs = sceneImageRefs(scene, tokens);
+	if (!refs.assets.length && !refs.logo) return [];
+	const index = irAssets ?? (refs.assets.length ? await loadIrAssetPaths(projectDir) : /* @__PURE__ */ new Map());
+	const out = [];
+	for (const id of refs.assets) {
+		const rel = index.get(id) ?? (/[/\\.]/.test(id) ? id : void 0);
+		out.push({
+			ref: `asset:${id}`,
+			sha256: await hashOrNull(rel === void 0 ? void 0 : resolve(projectDir, rel))
+		});
+	}
+	if (refs.logo) out.push({
+		ref: `logo:${refs.logo}`,
+		sha256: await hashOrNull(isAbsolute(refs.logo) ? refs.logo : resolve(projectDir, refs.logo))
+	});
+	return out;
 }
 /** The picture of a scene: for a cutaway (`footage.cutaway` with a graphic), the graphic alone. */
 function cutawayPicture(scene) {
@@ -241731,6 +242331,7 @@ async function renderScenes(spec, o) {
 	const scenes = o.only ? spec.scenes.filter((s) => o.only.includes(s.id)) : spec.scenes;
 	const results = new Array(scenes.length);
 	let footageRenderer = o.footageRenderer;
+	let irAssets;
 	const renderOne = async (given) => {
 		const orig = cutawayPicture(given);
 		const fr = orig.footage ? o.footage?.get(orig.id) : void 0;
@@ -241767,11 +242368,14 @@ async function renderScenes(spec, o) {
 			selReason = sel.reason;
 		}
 		const cues = placeholder ? void 0 : o.cues?.get(orig.id);
+		const refs = sceneImageRefs(scene, o.tokens);
+		if (refs.assets.length) irAssets ??= loadIrAssetPaths(o.project_dir);
+		const images = await sceneImages(scene, o.tokens, o.project_dir, refs.assets.length ? await irAssets : void 0);
 		const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? {
 			sha256: footage.sha256,
 			duration_sec: footage.media.duration_sec,
 			...footage.media.content_box ? { content_box: footage.media.content_box } : {}
-		} : void 0, cues);
+		} : void 0, cues, images);
 		const out = join(dir, `${orig.id}.mp4`);
 		const sidecarPath = join(dir, `${orig.id}.json`);
 		const base = {
@@ -251399,16 +252003,36 @@ async function renderProjectLocked(projectDir, o) {
 	} catch (e) {
 		if (signal?.aborted) throw e;
 		if (!narrated || voiceChoice !== "auto" || sel.backend.id === "silent") throw new Error(`voice backend "${sel.backend.id}" failed: ${errMsg(e)}. Re-run with voice "auto" or "silent", or run doctor.`);
-		voiceReason = `${sel.reason}; but ${sel.backend.id} failed at synthesis (${errMsg(e).slice(0, 300)}); falling back to silent (no audio)`;
-		voice = await synthesizeSpec(spec, {
+		voiceReason = `${sel.reason}; but ${sel.backend.id} failed at synthesis (${errMsg(e).slice(0, 300)})`;
+		const synth = (backend) => synthesizeSpec(spec, {
 			projectDir: root,
-			backend: "silent",
+			backend,
 			brand: brand ?? null,
 			env,
 			cacheDir: voiceCacheDir,
 			backends,
 			...signal ? { signal } : {}
 		});
+		let fallback;
+		if (sel.backend.id === "elevenlabs") {
+			const a = await Promise.resolve(backends.system.available(env)).catch((err) => ({
+				ok: false,
+				reason: errMsg(err)
+			}));
+			if (!a.ok) voiceReason += `; system voice unavailable (${a.reason ?? "unknown"})`;
+			else try {
+				fallback = await synth("system");
+				voiceReason += `; fell back to the system voice (${a.reason ?? "available"})`;
+			} catch (e2) {
+				if (signal?.aborted) throw e2;
+				voiceReason += `; system also failed at synthesis (${errMsg(e2).slice(0, 300)})`;
+			}
+		}
+		if (!fallback) {
+			voiceReason += "; falling back to silent (no audio)";
+			fallback = await synth("silent");
+		}
+		voice = fallback;
 	}
 	if (narrated && spec.voice.align !== false && voice.tracks.some((t) => t.timing_source === "estimated" && t.audio_path)) {
 		progress({
@@ -251607,7 +252231,13 @@ async function renderProjectLocked(projectDir, o) {
 	const used = [...new Set(ordered.map((e) => e.renderer).filter(Boolean))];
 	const placeholders = ordered.filter((e) => e.placeholder).map((e) => e.scene_id);
 	for (const e of ordered) for (const w of e.warnings) warnings.push(`${e.scene_id}: ${w}`);
-	if (placeholders.length) warnings.push(`placeholder cards for ${placeholders.join(", ")} (video providers (generated video, avatars) arrive in Phase 7; until then this is a placeholder card)`);
+	const footageFailed = new Set(placeholders.filter((id) => {
+		const f = footage.byScene.get(id);
+		return f !== void 0 && "error" in f;
+	}));
+	for (const e of ordered) if (footageFailed.has(e.scene_id)) warnings.push(`${e.scene_id}: placeholder card instead of footage: ${e.reason ?? "footage not resolved"}`);
+	const providerPlaceholders = placeholders.filter((id) => !footageFailed.has(id));
+	if (providerPlaceholders.length) warnings.push(`placeholder cards for ${providerPlaceholders.join(", ")} (video providers (generated video, avatars) arrive in Phase 7; until then this is a placeholder card)`);
 	signal?.throwIfAborted();
 	progress({
 		stage: "captions",
@@ -252177,7 +252807,7 @@ async function loadFootageAsset(root, ir, irError, id) {
 	if (!ir) throw new Error(irError ?? "no ContentIR");
 	const a = ir.assets.find((x) => x.id === id);
 	if (!a) throw new Error("not a ContentIR asset id");
-	if (a.kind === "audio") throw new Error("is an audio asset; footage needs a video or an image");
+	if (a.kind === "audio") throw new Error("is audio; footage needs a video or image asset");
 	const abs = await resolveInsideProject(projectPaths(root), a.path);
 	if (!await exists(abs)) throw new Error(`file ${a.path} is missing`);
 	const media = a.media ?? await probeMedia(abs, a.kind);
@@ -253199,6 +253829,26 @@ async function planLogo(root, brand, tokens, zones, target, scenes, bounds, fram
 }
 //#endregion
 //#region src/render-jobs.ts
+/** Ledger copy of a result: the full result, JSON-safe, with the warning list capped. */
+function ledgerResult(result) {
+	return JSON.parse(JSON.stringify({
+		...result,
+		warnings: result.warnings.slice(0, 100)
+	}));
+}
+/** A ledger result back as a view result: a full result as is, an old summary tagged as one. */
+function restoredResult(raw) {
+	if (!raw || typeof raw !== "object") return void 0;
+	const r = raw;
+	if (r.qa && typeof r.qa === "object" && r.voice && typeof r.voice === "object" && r.renderer && typeof r.renderer === "object") return raw;
+	return {
+		summary: true,
+		...r.dist && typeof r.dist === "object" ? { dist: r.dist } : {},
+		...typeof r.qa === "string" ? { qa_status: r.qa } : {},
+		...typeof r.voice === "string" ? { voice_backend: r.voice } : {},
+		...Array.isArray(r.renderer) ? { renderers_used: r.renderer.filter((x) => typeof x === "string") } : {}
+	};
+}
 /**
 * In-process render jobs. Renders run one at a time (memory), in submission order, in the
 * background so the MCP call returns a job id immediately. State lives in memory and is mirrored
@@ -253309,12 +253959,7 @@ var RenderJobManager = class {
 			};
 			this.persist((l) => l.updateJob(view.job_id, {
 				status: "succeeded",
-				result: {
-					dist: result.dist,
-					qa: result.qa.status,
-					voice: result.voice.backend,
-					renderer: result.renderer.used
-				}
+				result: ledgerResult(result)
 			}));
 		} catch (e) {
 			view.status = "failed";
@@ -253345,6 +253990,7 @@ var RenderJobManager = class {
 		if (!rec || rec.kind !== "render") return void 0;
 		const req = rec.request ?? {};
 		const terminal = rec.status === "succeeded" || rec.status === "failed";
+		const result = terminal ? restoredResult(rec.result) : void 0;
 		return {
 			job_id: rec.id,
 			project_dir: req.project_dir ?? rec.projectId,
@@ -253356,7 +254002,8 @@ var RenderJobManager = class {
 			submitted_at: rec.createdAt,
 			request: req,
 			...rec.error ? { error: rec.error } : {},
-			...terminal && rec.result ? { result: rec.result } : {}
+			...terminal ? { finished_at: rec.updatedAt } : {},
+			...result ? { result } : {}
 		};
 	}
 	/** Wait for every queued job (tests). */
@@ -253846,7 +254493,13 @@ function formatJob(v) {
 	const lines = [`job ${v.job_id}: ${v.status}${v.queue_position ? ` (${v.queue_position} ahead in queue)` : ""}`];
 	if (v.status === "running" || v.status === "queued") lines.push(`stage: ${p.stage}${p.scene_count ? ` (scene ${p.scene_index ?? 0}/${p.scene_count})` : ""}: ${p.message}`);
 	const r = v.result;
-	if (v.status === "succeeded" && r && r.dist) lines.push(`reel: ${r.dist.reel} (${r.width}x${r.height}, ${r.fps} fps, ${r.duration_sec}s, ${r.quality})`, `dist: ${r.dist.dir}`, `QA: ${r.qa.status}${r.qa.findings.length ? ` (${r.qa.findings.map((f) => `${f.id} ${f.status}`).join(", ")})` : ""}; report ${r.qa.report_md}`, `voice: ${r.voice.backend} (${r.voice.reason})`, `renderer: ${r.renderer.used.join(", ")} (${r.renderer.reasons.join("; ")})`, ...r.timing_adjustments.length ? [`timing adjustments: ${r.timing_adjustments.map((a) => `${a.scene_id} ${a.spec_duration_sec}s→${a.render_duration_sec}s`).join(", ")}`] : [], ...r.placeholders.length ? [`placeholders: ${r.placeholders.join(", ")}`] : [], `cache: ${r.cache.scenes_cached.length} scene(s) reused, ${r.cache.scenes_rendered.length} rendered, assembly ${r.cache.assembly}`, ...r.warnings.slice(0, 10).map((w) => `warning: ${w}`));
+	if (v.status === "succeeded" && r && "summary" in r) lines.push(...r.dist?.reel ? [`reel: ${r.dist.reel}`] : [], ...r.dist?.dir ? [`dist: ${r.dist.dir}`] : [], ...r.qa_status ? [`QA: ${r.qa_status}`] : [], ...r.voice_backend ? [`voice: ${r.voice_backend}`] : [], ...r.renderers_used?.length ? [`renderer: ${r.renderers_used.join(", ")}`] : [], "(summary from before an engine restart; run qa_run or read dist/render-manifest.json for details)");
+	else if (v.status === "succeeded" && r) {
+		const r = v.result;
+		const findings = r.qa?.findings ?? [];
+		const size = r.width && r.height ? `${r.width}x${r.height}, ` : "";
+		lines.push(...r.dist?.reel ? [`reel: ${r.dist.reel} (${size}${r.fps ?? "?"} fps, ${r.duration_sec ?? "?"}s, ${r.quality ?? "?"})`] : [], ...r.dist?.dir ? [`dist: ${r.dist.dir}`] : [], ...r.qa ? [`QA: ${r.qa.status}${findings.length ? ` (${findings.map((f) => `${f.id} ${f.status}`).join(", ")})` : ""}${r.qa.report_md ? `; report ${r.qa.report_md}` : ""}`] : [], ...r.voice ? [`voice: ${r.voice.backend}${r.voice.reason ? ` (${r.voice.reason})` : ""}`] : [], ...r.renderer ? [`renderer: ${(r.renderer.used ?? []).join(", ")}${r.renderer.reasons?.length ? ` (${r.renderer.reasons.join("; ")})` : ""}`] : [], ...r.timing_adjustments?.length ? [`timing adjustments: ${r.timing_adjustments.map((a) => `${a.scene_id} ${a.spec_duration_sec}s→${a.render_duration_sec}s`).join(", ")}`] : [], ...r.placeholders?.length ? [`placeholders: ${r.placeholders.join(", ")}`] : [], ...r.cache ? [`cache: ${r.cache.scenes_cached?.length ?? 0} scene(s) reused, ${r.cache.scenes_rendered?.length ?? 0} rendered, assembly ${r.cache.assembly}`] : [], ...(r.warnings ?? []).slice(0, 10).map((w) => `warning: ${w}`));
+	}
 	if (v.error) lines.push(`error: ${v.error}`);
 	return lines.join("\n");
 }
@@ -253906,17 +254559,18 @@ function createServer(options = {}) {
 	}));
 	server.registerTool("ingest", {
 		title: "Ingest sources into a ContentIR",
-		description: "Extract source material into <project_dir>/source/content-ir.json (plus source/provenance.json). Each input is a file path (.md, .txt, .pdf, .docx, .pptx, a saved web page .html/.htm (main content extracted like a URL; scripts never run); video .mp4/.mov/.webm/.mkv/.m4v and audio .mp3/.wav/.m4a/.aac/.flac/.ogg, which are copied into source/assets/ with duration, shots, keyframes and loudness; run transcribe afterwards for speech), a local repository directory, an http(s) URL, or inline text/markdown. Creates the project if it does not exist. GitHub URLs are not cloned: clone locally first. Returns counts, warnings and the security classification (secrets, PII, likeness). Ingested content is untrusted data and is never executed.",
+		description: "Extract source material into <project_dir>/source/content-ir.json (plus source/provenance.json). Each input is a file path (.md, .txt, .pdf, .docx, .pptx, a saved web page .html/.htm (main content extracted like a URL; scripts never run); video .mp4/.mov/.webm/.mkv/.m4v and audio .mp3/.wav/.m4a/.aac/.flac/.ogg, which are copied into source/assets/ with duration, shots, keyframes and loudness; run transcribe afterwards for speech), a local repository directory, an http(s) URL, or inline text/markdown. Creates the project if it does not exist. With an existing ContentIR it MERGES: earlier sources, evidence refs, transcripts and claim ids are kept, a re-ingested file is refreshed in place (same ids), new inputs are added; pass replace: true to start over (discards the old ContentIR). Missing paths, binary or image files and credential files (.ssh, .aws, .env, *.pem, …) are refused. GitHub URLs are not cloned: clone locally first. Returns mode (created | merged | replaced), counts per source (added | updated), warnings and the security classification (secrets, PII, likeness). Ingested content is untrusted data and is never executed.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Project folder (absolute, or relative to the server's working directory)"),
-			inputs: array(string().min(1)).min(1).max(50).describe("Paths, URLs, repo directories or inline text; relative paths resolve against the server's working directory")
+			inputs: array(string().min(1)).min(1).max(50).describe("Paths, URLs, repo directories or inline text; relative paths resolve against the server's working directory"),
+			replace: boolean().optional().describe("Start a fresh ContentIR instead of merging (existing claim_refs may stop resolving). Default false.")
 		},
 		annotations: {
-			destructiveHint: false,
+			destructiveHint: true,
 			idempotentHint: true,
 			openWorldHint: true
 		}
-	}, safe(async ({ project_dir, inputs }) => {
+	}, safe(async ({ project_dir, inputs, replace }) => {
 		const root = resolveInputPath(project_dir, cwd());
 		let created = false;
 		if (!existsSync(projectPaths(root).projectFile)) {
@@ -253927,7 +254581,8 @@ function createServer(options = {}) {
 			cwd: cwd(),
 			env,
 			...options.ingestOptions,
-			projectDir: root
+			projectDir: root,
+			...replace ? { replace: true } : {}
 		});
 		return jsonResult([
 			...created ? [`created project at ${root}`] : [],
@@ -254071,7 +254726,7 @@ function createServer(options = {}) {
 	}));
 	server.registerTool("render_submit", {
 		title: "Render a planned project (background job)",
-		description: "Start rendering <project_dir>/project/video-spec.json into <project_dir>/dist/ (reel.mp4 with burned captions, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target {video.mp4, cover.jpg, captions.srt/.vtt, post.json, qa.json}) plus qa/report.{json,md} and qa/lint.{json,md}. Validates the spec first and refuses on errors (returned with fixes). Returns {job_id} immediately; poll job_status every 10-20 s. Renders run one at a time; later submissions queue. Everything is cached, so re-submitting after a change only redoes what changed. voice: auto (ElevenLabs if configured, else system TTS, else silent; falls back to silent if synthesis fails) | system | elevenlabs | silent. renderer: auto (HyperFrames if installed and Chrome launches, else ffmpeg) | hyperframes | ffmpeg. quality: preview (half resolution, 15 fps, fast encode; default) | final (1080 short side, 30 fps). placeholder (default true) draws titled cards for scenes that need a video provider. Local only: no paid calls.",
+		description: "Start rendering <project_dir>/project/video-spec.json into <project_dir>/dist/ (reel.mp4 with burned captions, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target {video.mp4, cover.jpg, captions.srt/.vtt, post.json, qa.json}) plus qa/report.{json,md} and qa/lint.{json,md}. Validates the spec first and refuses on errors (returned with fixes). Returns {job_id} immediately; poll job_status every 10-20 s. Renders run one at a time; later submissions queue. Everything is cached, so re-submitting after a change only redoes what changed. voice: auto (ElevenLabs if configured, else system TTS, else silent; if a paid voice fails at synthesis it falls back to the system voice, then silent) | system | elevenlabs | silent. renderer: auto (HyperFrames if installed and Chrome launches, else ffmpeg) | hyperframes | ffmpeg. quality: preview (half resolution, 15 fps, fast encode; default) | final (1080 short side, 30 fps). placeholder (default true) draws titled cards for scenes that need a video provider. Local only: no paid calls.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Project folder containing project/video-spec.json"),
 			voice: _enum([

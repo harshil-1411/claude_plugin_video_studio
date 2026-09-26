@@ -31,8 +31,12 @@ allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_
    `{ "project_dir": "<abs path>", "inputs": ["...", "..."] }`.
    If the tool is missing, the `engine` MCP server did not start: suggest
    `/video-studio:doctor` and `/mcp`, then stop.
+   A project that already has sources is merged into (`mode: merged`): earlier
+   sources and refs stay valid. Only when the user asks to start over, pass
+   `"replace": true`, and say it discards the previous sources.
 4. If the result is an error, show the message and the likely fix (missing
-   file, unsupported type, remote repo not cloned). Stop.
+   file, unsupported type, image files not supported yet, credential files
+   refused, remote repo not cloned). Stop.
 
 ## Video and audio files
 

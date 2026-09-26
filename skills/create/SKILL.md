@@ -34,7 +34,8 @@ Split what the user wrote into **inputs** and **creative direction**:
   `text-over-music` (short text cards on a bundled music bed; also for a
   music-only product demo). A named look ("minimal", "editorial",
   "technical", "energetic") is the `style`; a user's own music file needs
-  its licence. Talking-head videos need footage and are not available yet.
+  its licence. Talking-head videos need the user's footage: ingest the
+  video, `transcribe` it, then use the `talking-head` template or `shorts`.
 - **Only an idea** (e.g. "Explain vector DBs in 30s") with no sources: say
   in one line that video-studio grounds videos in sources and that you will
   proceed from your own short notes unless they give a document, URL or

@@ -149,9 +149,14 @@ export class ElevenLabsError extends Error {
   }
 }
 
+/** An unset `${user_config.X}` may reach the env as the literal placeholder: that is not a key. */
+function isPlaceholder(v: string): boolean {
+  return /^\$\{[^}]*\}$/.test(v);
+}
+
 function apiKey(env: Env): string | undefined {
-  const k = env.ELEVENLABS_API_KEY;
-  return k && k.trim() ? k.trim() : undefined;
+  const k = env.ELEVENLABS_API_KEY?.trim();
+  return k && !isPlaceholder(k) ? k : undefined;
 }
 
 /**
@@ -170,7 +175,10 @@ export function createElevenLabsBackend(options: ElevenLabsOptions = {}): Omit<V
   const recentRequestIds: string[] = [];
 
   const available = (env: Env): Availability => {
-    if (!apiKey(env)) return { ok: false, reason: "ELEVENLABS_API_KEY not set" };
+    if (!apiKey(env)) {
+      const raw = env.ELEVENLABS_API_KEY?.trim();
+      return { ok: false, reason: raw && isPlaceholder(raw) ? "ELEVENLABS_API_KEY not set (unexpanded ${user_config...} placeholder)" : "ELEVENLABS_API_KEY not set" };
+    }
     if (!resolver("ffmpeg", env) || !resolver("ffprobe", env)) {
       return { ok: false, reason: "ELEVENLABS_API_KEY set but ffmpeg/ffprobe missing" };
     }

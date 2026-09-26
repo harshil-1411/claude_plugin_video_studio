@@ -557,6 +557,40 @@ describe("render job tools (in-memory MCP client)", () => {
   );
 });
 
+describe("voice fallback after a synthesis failure", () => {
+  const failingEleven: VoiceBackend = {
+    id: "elevenlabs",
+    available: () => ({ ok: true, reason: "key set" }),
+    synthesize: async () => {
+      throw new Error("ElevenLabs 401 invalid api key");
+    },
+  };
+
+  it(
+    "auto: a failing ElevenLabs falls back to the system voice, not straight to silent",
+    async () => {
+      const dir = await makeProject("voice-fallback");
+      const r = await renderProject(dir, opts({ voice: "auto", voiceBackends: { system: longSystem, elevenlabs: failingEleven } }));
+      expect(r.voice.backend).toBe("system");
+      expect(r.voice.has_audio).toBe(true);
+      expect(r.voice.reason).toMatch(/using elevenlabs .*elevenlabs failed at synthesis \(ElevenLabs 401 invalid api key\); fell back to the system voice \(fake say\)/);
+      expect(r.voice.reason).not.toMatch(/silent/);
+    },
+    T,
+  );
+
+  it(
+    "auto: when the system voice fails too, the reason says so before falling back to silent",
+    async () => {
+      const dir = await makeProject("voice-fallback-silent");
+      const r = await renderProject(dir, opts({ voice: "auto", voiceBackends: { system: failingSystem, elevenlabs: failingEleven } }));
+      expect(r.voice.backend).toBe("silent");
+      expect(r.voice.reason).toMatch(/elevenlabs failed at synthesis .*; system also failed at synthesis \(say exited with code 1\); falling back to silent \(no audio\)/);
+    },
+    T,
+  );
+});
+
 describe("examples/text-to-motion-graphic", () => {
   it("is a valid, fully motion-graphic 30 s 9:16 project grounded in its committed ContentIR", async () => {
     const dir = join(import.meta.dirname, "../../../examples/text-to-motion-graphic");
@@ -747,12 +781,23 @@ describe("footage scenes, scene audio, native voice and beat sync", () => {
     "unresolvable footage renders as a placeholder with the reason",
     async () => {
       const s = nativeSpec();
+      // s02 points its footage at an audio asset.
+      s.scenes[1]!.footage = { asset: "a2", in_sec: 0 };
       const dir = await footageProject("footage-missing", s);
+      const irPath = join(dir, "source", "content-ir.json");
+      const ir = JSON.parse(await readFile(irPath, "utf8"));
+      ir.assets.push({ id: "a2", kind: "audio", path: "assets/sfx/pop.wav", sha256: "0".repeat(64), media: { duration_sec: 0.08, has_video: false, has_audio: true } });
+      await writeFile(irPath, JSON.stringify(ir, null, 2));
       await rm(join(dir, "assets", "supplied", "clip.mp4"));
       const r = await renderProject(dir, opts());
       expect(r.placeholders).toEqual(["s01", "s02"]);
       const state = JSON.parse(await readFile(join(dir, "renders", "preview", "render-state.json"), "utf8"));
       expect(state.scenes[0].reason).toMatch(/footage asset "v1": file assets\/supplied\/clip\.mp4 is missing/);
+      expect(state.scenes[1].reason).toBe('footage asset "a2": is audio; footage needs a video or image asset');
+      // The warnings say exactly why, never that a video provider is coming.
+      expect(r.warnings).toContain('s02: placeholder card instead of footage: footage asset "a2": is audio; footage needs a video or image asset');
+      expect(r.warnings.some((w) => w.startsWith("s01: placeholder card instead of footage:") && w.includes("is missing"))).toBe(true);
+      expect(r.warnings.join("\n")).not.toMatch(/Phase 7|provider/);
     },
     T,
   );

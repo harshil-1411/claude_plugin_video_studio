@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,14 +12,16 @@ import {
   writeJsonAtomic,
 } from "@video-studio/core";
 import {
+  ContentIR as ContentIRSchema,
   SCHEMA_VERSION,
+  formatIssues,
   type Classification,
   type ContentIR,
   type IrWarning,
   type SourceKind,
 } from "@video-studio/schema";
-import { buildContentIR } from "./builder.js";
-import { detectKind, mediaFolderFiles } from "./detect.js";
+import { buildContentIR, mergeContentIR } from "./builder.js";
+import { assertNotCredential, assertTextFile, detectKind, expandHome, isPathLike, mediaFolderFiles } from "./detect.js";
 import { type ExtractorRegistry, createExtractors } from "./extractors.js";
 import { displayPath } from "./refs.js";
 import type { FetchRepo } from "./repo.js";
@@ -50,6 +52,12 @@ export interface IngestOptions {
   fetchRepo?: FetchRepo;
   /** Replace or extend extractors (tests). */
   extractors?: ExtractorRegistry;
+  /**
+   * Start fresh: write a ContentIR (and provenance) holding only this call's inputs, discarding
+   * what an earlier ingest, transcribe or demo put in `source/content-ir.json`. By default
+   * (false) ingest MERGES into an existing ContentIR; see {@link ingest}.
+   */
+  replace?: boolean;
 }
 
 export interface SourceProvenance {
@@ -69,6 +77,8 @@ export interface Provenance {
   ir_id: string;
   ir_schema_version: string;
   created_at: string;
+  /** Time of the last merge into this ContentIR (absent until the first merge). */
+  updated_at?: string;
   sources: SourceProvenance[];
   failures: Array<{ uri: string; kind?: SourceKind; error: string }>;
 }
@@ -77,6 +87,12 @@ export interface IngestSummary {
   ir_path: string;
   provenance_path: string;
   ir_id: string;
+  /**
+   * `created`: no ContentIR existed; `merged`: this call's sources were added to (or refreshed
+   * in) an existing one; `replaced`: `replace: true` discarded an existing one.
+   */
+  mode: "created" | "merged" | "replaced";
+  /** The sources ingested by THIS call (counts below are for the whole ContentIR). */
   sources: Array<{
     id: string;
     kind: SourceKind;
@@ -85,7 +101,11 @@ export interface IngestSummary {
     sections: number;
     evidence: number;
     cache_hit: boolean;
+    /** `added` as a new source, or `updated` in place (same id) because it was ingested before. */
+    status: "added" | "updated";
   }>;
+  /** Sources in the whole ContentIR (earlier ones included). */
+  total_sources: number;
   sections: number;
   evidence: number;
   claims: number;
@@ -121,7 +141,19 @@ function isExistingFile(p: string): boolean {
   }
 }
 
-/** Normalize a raw input into an ExtractInput (absolute paths, inline content detected). */
+/**
+ * Normalize a raw input into an ExtractInput (absolute paths, inline content detected).
+ *
+ * Refuses, with a clear error:
+ * - credential locations ({@link credentialReason}: `~/.ssh`, `~/.aws`, `.env`, `*.pem`, …),
+ *   whatever kind the caller asks for, checked on the path as given and on its real path;
+ * - a path-like input ({@link isPathLike}: `notes.txt`, `docs/missing.md`, `~/file.pdf`) that
+ *   does not exist: `file not found: notes.txt (resolved to /abs/notes.txt)`. It is never
+ *   ingested as its own literal text. Real inline text (sentences, markdown) still is;
+ * - images, archives, executables and other binary or unknown files (see {@link detectKind}),
+ *   and text/markdown files that fail the NUL-byte / UTF-8 sniff.
+ * A leading `~/` is expanded to the home directory.
+ */
 export function resolveIngestInput(raw: string | IngestInput, cwd: string): ExtractInput {
   const item: IngestInput = typeof raw === "string" ? { uri: raw } : raw;
   if (item.content !== undefined) {
@@ -131,17 +163,30 @@ export function resolveIngestInput(raw: string | IngestInput, cwd: string): Extr
   }
   let uri = item.uri;
   if (/^file:\/\//i.test(uri)) uri = fileURLToPath(uri);
-  const isUrl = /^https?:\/\//i.test(uri.trim()) && !/\s/.test(uri.trim());
-  const singleToken = !/[\n\r]/.test(uri) && uri.length < 4096;
-  const candidatePath = !isUrl && singleToken ? resolve(cwd, uri.trim()) : undefined;
-  const pathExists = candidatePath !== undefined && existsSync(candidatePath);
-  const kind = item.kind ?? detectKind(pathExists ? candidatePath : uri);
-
-  if (kind === "url" || (kind === "repo" && isUrl)) return { uri: uri.trim(), kind };
-  if (INLINE_KINDS.has(kind) && !(candidatePath && isExistingFile(candidatePath))) {
-    return { uri, kind, content: uri }; // inline text
+  const trimmed = uri.trim();
+  const isUrl = /^https?:\/\//i.test(trimmed) && !/\s/.test(trimmed);
+  if (isUrl) {
+    const kind = item.kind ?? detectKind(trimmed);
+    if (kind === "url" || kind === "repo") return { uri: trimmed, kind };
+    throw new Error(`a ${kind} input must be a local file, got a URL: ${trimmed}`);
   }
-  if (!candidatePath || !pathExists) throw new Error(`input not found: ${uri}`);
+  const singleLine = !/[\n\r]/.test(uri) && uri.length < 4096;
+  const candidatePath = singleLine ? resolve(cwd, expandHome(trimmed)) : undefined;
+  if (candidatePath) assertNotCredential(candidatePath, trimmed);
+  const pathExists = candidatePath !== undefined && existsSync(candidatePath);
+  if (!pathExists) {
+    if (candidatePath && isPathLike(trimmed)) throw new Error(`file not found: ${trimmed} (resolved to ${candidatePath})`);
+    const kind = item.kind ?? detectKind(uri);
+    if (INLINE_KINDS.has(kind)) return { uri, kind, content: uri }; // inline text
+    throw new Error(`file not found: ${trimmed}${candidatePath ? ` (resolved to ${candidatePath})` : ""}`);
+  }
+  try {
+    assertNotCredential(realpathSync(candidatePath), trimmed); // a symlink into ~/.ssh
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("refusing")) throw err;
+  }
+  const kind = item.kind ?? detectKind(candidatePath);
+  if (INLINE_KINDS.has(kind) && isExistingFile(candidatePath)) assertTextFile(candidatePath);
   return { uri: candidatePath, kind };
 }
 
@@ -214,18 +259,60 @@ function toIso(now: Date | string | undefined): string {
   return typeof now === "string" ? now : now.toISOString();
 }
 
+/** The existing ContentIR at `irPath`, undefined when there is none; throws when it is invalid. */
+async function loadExistingIr(irPath: string): Promise<ContentIR | undefined> {
+  if (!existsSync(irPath)) return undefined;
+  let data: unknown;
+  try {
+    data = JSON.parse(await readFile(irPath, "utf8"));
+  } catch (err) {
+    throw new Error(`source/content-ir.json exists but is not valid JSON (${err instanceof Error ? err.message : String(err)}); fix it, or ingest with replace: true to start over`);
+  }
+  const r = ContentIRSchema.safeParse(data);
+  if (!r.success) {
+    const issues = formatIssues(r.error).slice(0, 3).map((i) => `${i.path || "(root)"}: ${i.message}`).join("; ");
+    throw new Error(`source/content-ir.json exists but is not a valid ContentIR (${issues}); fix it, or ingest with replace: true to start over`);
+  }
+  return r.data;
+}
+
+/** The existing provenance when it belongs to `irId`; anything else is ignored (it is rebuilt). */
+async function loadExistingProvenance(path: string, irId: string): Promise<Provenance | undefined> {
+  try {
+    const p = JSON.parse(await readFile(path, "utf8")) as Provenance;
+    return p && p.ir_id === irId && Array.isArray(p.sources) && Array.isArray(p.failures) ? p : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Ingest inputs into `<projectDir>/source/content-ir.json`:
- * detect kind → (cache | extractor) → buildContentIR → atomic writes of the IR
- * and `source/provenance.json`. Inputs that fail are reported as
- * `ingest_failed` warnings; if every input fails an {@link IngestError} is thrown.
+ * detect kind → (cache | extractor) → build or merge the ContentIR → atomic writes of the IR
+ * and `source/provenance.json`. Inputs that fail are reported as `ingest_failed` warnings; if
+ * every input fails an {@link IngestError} is thrown and nothing is written.
+ *
+ * Re-ingest MERGES (the plan skill ingests again when the user adds sources): when a valid
+ * ContentIR already exists, earlier sources, evidence, claims, assets and whatever transcribe /
+ * demo / tighten added are kept with their ids and refs, new sources are appended, and a source
+ * ingested before (same sha256, or same uri and kind) is refreshed in place under its id
+ * ({@link mergeContentIR}). The IR id stays the same; provenance entries are appended (a
+ * refreshed source's entry is replaced) and failures accumulate. An existing but invalid
+ * ContentIR is an error rather than being overwritten. `replace: true` restores the old
+ * behaviour: a fresh ContentIR with only this call's inputs. With no existing ContentIR the
+ * output is exactly {@link buildContentIR}'s.
  */
 export async function ingest(inputs: ReadonlyArray<string | IngestInput>, options: IngestOptions): Promise<IngestResult> {
   if (inputs.length === 0) throw new Error("ingest: at least one input is required");
   const projectDir = resolve(options.projectDir);
   const cwd = options.cwd ?? process.cwd();
+  const irPath = join(projectDir, "source", "content-ir.json");
+  const provPath = join(projectDir, "source", "provenance.json");
+  // Fail before extracting anything when the existing IR cannot be merged into.
+  const existing = options.replace ? undefined : await loadExistingIr(irPath);
+  const replacing = options.replace === true && existsSync(irPath);
   // A folder of clips (not a repository) stands for its video and audio files.
-  inputs = inputs.flatMap((raw): Array<string | IngestInput> => (typeof raw === "string" ? (mediaFolderFiles(resolve(cwd, raw.trim())) ?? [raw]) : [raw]));
+  inputs = inputs.flatMap((raw): Array<string | IngestInput> => (typeof raw === "string" ? (mediaFolderFiles(resolve(cwd, expandHome(raw.trim()))) ?? [raw]) : [raw]));
   const now = toIso(options.now);
   const registry: ExtractorRegistry = {
     ...createExtractors({
@@ -295,21 +382,45 @@ export async function ingest(inputs: ReadonlyArray<string | IngestInput>, option
     );
   }
 
-  const ir = buildContentIR(parts, { now });
+  let ir: ContentIR;
+  let placed: Array<{ source_id: string; status: "added" | "updated" }>;
+  if (existing) {
+    ({ ir, placed } = mergeContentIR(existing, parts));
+    // A retried input's earlier failure is stale: this call reports it afresh if it fails again.
+    const retried = new Set(inputs.map((raw) => inline(typeof raw === "string" ? raw : raw.uri || "(inline)")));
+    ir.warnings = ir.warnings.filter((w) => !(w.code === "ingest_failed" && [...retried].some((l) => w.message.startsWith(`${l}: `))));
+  } else {
+    ir = buildContentIR(parts, { now });
+    placed = ir.sources.map((s) => ({ source_id: s.id, status: "added" as const }));
+  }
   for (const f of failures) {
     ir.warnings.push({ code: "ingest_failed", message: `${f.uri}: ${f.error}` });
   }
 
-  const irPath = join(projectDir, "source", "content-ir.json");
-  const provPath = join(projectDir, "source", "provenance.json");
-  const prov: Provenance = {
-    schema_version: 1,
-    ir_id: ir.id,
-    ir_schema_version: SCHEMA_VERSION,
-    created_at: now,
-    sources: provenance.map((p, i) => ({ source_id: ir.sources[i]!.id, ...p })),
-    failures,
-  };
+  const fresh: SourceProvenance[] = provenance.map((p, i) => ({ source_id: placed[i]!.source_id, ...p }));
+  const previous = existing ? await loadExistingProvenance(provPath, existing.id) : undefined;
+  const touched = new Set(fresh.map((p) => p.source_id));
+  const prov: Provenance = existing
+    ? {
+        schema_version: 1,
+        ir_id: ir.id,
+        ir_schema_version: SCHEMA_VERSION,
+        created_at: previous?.created_at ?? existing.created_at,
+        updated_at: now,
+        sources: lastPerSource([
+          ...(previous?.sources ?? []).filter((p) => !touched.has(p.source_id) && ir.sources.some((s) => s.id === p.source_id)),
+          ...fresh,
+        ]),
+        failures: [...(previous?.failures ?? []), ...failures],
+      }
+    : {
+        schema_version: 1,
+        ir_id: ir.id,
+        ir_schema_version: SCHEMA_VERSION,
+        created_at: now,
+        sources: fresh,
+        failures,
+      };
   await writeJsonAtomic(irPath, ir);
   await writeJsonAtomic(provPath, prov);
 
@@ -317,15 +428,21 @@ export async function ingest(inputs: ReadonlyArray<string | IngestInput>, option
     ir_path: irPath,
     provenance_path: provPath,
     ir_id: ir.id,
-    sources: ir.sources.map((s, i) => ({
-      id: s.id,
-      kind: s.kind,
-      uri: s.uri,
-      ...(s.title ? { title: s.title } : {}),
-      sections: ir.sections.filter((x) => x.source_id === s.id).length,
-      evidence: ir.evidence.filter((x) => x.source_id === s.id).length,
-      cache_hit: prov.sources[i]!.cache_hit,
-    })),
+    mode: existing ? "merged" : replacing ? "replaced" : "created",
+    sources: fresh.map((p, i) => {
+      const s = ir.sources.find((x) => x.id === p.source_id)!;
+      return {
+        id: s.id,
+        kind: s.kind,
+        uri: s.uri,
+        ...(s.title ? { title: s.title } : {}),
+        sections: ir.sections.filter((x) => x.source_id === s.id).length,
+        evidence: ir.evidence.filter((x) => x.source_id === s.id).length,
+        cache_hit: p.cache_hit,
+        status: placed[i]!.status,
+      };
+    }),
+    total_sources: ir.sources.length,
     sections: ir.sections.length,
     evidence: ir.evidence.length,
     claims: ir.claims.length,
@@ -337,6 +454,16 @@ export async function ingest(inputs: ReadonlyArray<string | IngestInput>, option
   return { summary, ir, provenance: prov };
 }
 
+/** One provenance entry per source id: the last one wins (a file given twice in one call). */
+function lastPerSource(list: readonly SourceProvenance[]): SourceProvenance[] {
+  const by = new Map<string, SourceProvenance>();
+  for (const p of list) {
+    by.delete(p.source_id);
+    by.set(p.source_id, p);
+  }
+  return [...by.values()];
+}
+
 /** Short label for an input in messages: long inline text is abbreviated. */
 function inline(label: string): string {
   const oneLine = label.replace(/\s+/g, " ").trim();
@@ -346,12 +473,12 @@ function inline(label: string): string {
 /** Human-readable multi-line summary (MCP tool text output). */
 export function formatIngestSummary(s: IngestSummary): string {
   const lines = [
-    `ContentIR ${s.ir_id} written to ${s.ir_path}`,
-    `${s.sources.length} source(s), ${s.sections} sections, ${s.evidence} evidence spans, ${s.claims} claims, ${s.entities} entities, ${s.assets} assets`,
+    `ContentIR ${s.ir_id} ${s.mode === "merged" ? "updated (merged into the existing one)" : s.mode === "replaced" ? "replaced (earlier sources discarded)" : "written"} to ${s.ir_path}`,
+    `${s.sources.length} source(s) ingested now, ${s.total_sources} in total; ${s.sections} sections, ${s.evidence} evidence spans, ${s.claims} claims, ${s.entities} entities, ${s.assets} assets`,
   ];
   for (const src of s.sources) {
     lines.push(
-      `  ${src.id} [${src.kind}] ${src.title ? `"${src.title}" ` : ""}${inline(src.uri)} — ${src.sections} sections, ${src.evidence} spans${src.cache_hit ? " (cached)" : ""}`,
+      `  ${src.id}${src.status === "updated" ? " (updated in place)" : ""} [${src.kind}] ${src.title ? `"${src.title}" ` : ""}${inline(src.uri)} — ${src.sections} sections, ${src.evidence} spans${src.cache_hit ? " (cached)" : ""}`,
     );
   }
   const c = s.classification;

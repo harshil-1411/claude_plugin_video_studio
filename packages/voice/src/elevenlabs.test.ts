@@ -105,6 +105,13 @@ describe("elevenlabs backend (mocked fetch)", () => {
     expect(JSON.stringify(b.available({ ELEVENLABS_API_KEY: KEY }))).not.toContain(KEY);
   });
 
+  it("treats an unexpanded ${user_config...} placeholder as no key", () => {
+    const b = createElevenLabsBackend({ resolver: tools });
+    const a = b.available({ ELEVENLABS_API_KEY: "${user_config.elevenlabs_key}" });
+    expect(a).toMatchObject({ ok: false });
+    expect(a.reason).toMatch(/placeholder/);
+  });
+
   it("posts with-timestamps, decodes audio and returns provider timings", async () => {
     const fixture = JSON.parse(await readFile(fixturePath, "utf8")) as WithTimestampsResponse;
     const fetchMock = vi.fn(async () => jsonResponse(fixture, "req-1"));

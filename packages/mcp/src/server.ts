@@ -22,7 +22,7 @@ import { type ReviewOptions, formatReview, reviewRender } from "./review.js";
 import { type CompareSide, compareVideos, formatCompare } from "./compare.js";
 import { formatLint, lintProject } from "./lint.js";
 import { formatIssues, renderStoryboard, scaffoldSpec, validateBrief } from "./plan.js";
-import { type RenderProjectOptions, SpecInvalidError, exportProject, loadValidSpec, runQa } from "./pipeline.js";
+import { type RenderProjectOptions, type RenderProjectResult, SpecInvalidError, exportProject, loadValidSpec, runQa } from "./pipeline.js";
 import { type RenderJobView, RenderJobManager } from "./render-jobs.js";
 import { formatSpecValidation, projectSpecPaths, validateSpecFile } from "./spec-validate.js";
 import { findTemplatesDir, getTemplate, loadTemplates, requireTemplatesDir, summarizeTemplate } from "./templates.js";
@@ -71,17 +71,31 @@ function formatJob(v: RenderJobView): string {
     lines.push(`stage: ${p.stage}${p.scene_count ? ` (scene ${p.scene_index ?? 0}/${p.scene_count})` : ""}: ${p.message}`);
   }
   const r = v.result;
-  if (v.status === "succeeded" && r && r.dist) {
+  if (v.status === "succeeded" && r && "summary" in r) {
+    // A job recorded by an older engine before a restart: only a summary survived.
     lines.push(
-      `reel: ${r.dist.reel} (${r.width}x${r.height}, ${r.fps} fps, ${r.duration_sec}s, ${r.quality})`,
-      `dist: ${r.dist.dir}`,
-      `QA: ${r.qa.status}${r.qa.findings.length ? ` (${r.qa.findings.map((f) => `${f.id} ${f.status}`).join(", ")})` : ""}; report ${r.qa.report_md}`,
-      `voice: ${r.voice.backend} (${r.voice.reason})`,
-      `renderer: ${r.renderer.used.join(", ")} (${r.renderer.reasons.join("; ")})`,
-      ...(r.timing_adjustments.length ? [`timing adjustments: ${r.timing_adjustments.map((a) => `${a.scene_id} ${a.spec_duration_sec}s→${a.render_duration_sec}s`).join(", ")}`] : []),
-      ...(r.placeholders.length ? [`placeholders: ${r.placeholders.join(", ")}`] : []),
-      `cache: ${r.cache.scenes_cached.length} scene(s) reused, ${r.cache.scenes_rendered.length} rendered, assembly ${r.cache.assembly}`,
-      ...r.warnings.slice(0, 10).map((w) => `warning: ${w}`),
+      ...(r.dist?.reel ? [`reel: ${r.dist.reel}`] : []),
+      ...(r.dist?.dir ? [`dist: ${r.dist.dir}`] : []),
+      ...(r.qa_status ? [`QA: ${r.qa_status}`] : []),
+      ...(r.voice_backend ? [`voice: ${r.voice_backend}`] : []),
+      ...(r.renderers_used?.length ? [`renderer: ${r.renderers_used.join(", ")}`] : []),
+      "(summary from before an engine restart; run qa_run or read dist/render-manifest.json for details)",
+    );
+  } else if (v.status === "succeeded" && r) {
+    // Tolerate partial records (e.g. read back from the ledger): print what is there.
+    const r = v.result as Partial<RenderProjectResult>;
+    const findings = r.qa?.findings ?? [];
+    const size = r.width && r.height ? `${r.width}x${r.height}, ` : "";
+    lines.push(
+      ...(r.dist?.reel ? [`reel: ${r.dist.reel} (${size}${r.fps ?? "?"} fps, ${r.duration_sec ?? "?"}s, ${r.quality ?? "?"})`] : []),
+      ...(r.dist?.dir ? [`dist: ${r.dist.dir}`] : []),
+      ...(r.qa ? [`QA: ${r.qa.status}${findings.length ? ` (${findings.map((f) => `${f.id} ${f.status}`).join(", ")})` : ""}${r.qa.report_md ? `; report ${r.qa.report_md}` : ""}`] : []),
+      ...(r.voice ? [`voice: ${r.voice.backend}${r.voice.reason ? ` (${r.voice.reason})` : ""}`] : []),
+      ...(r.renderer ? [`renderer: ${(r.renderer.used ?? []).join(", ")}${r.renderer.reasons?.length ? ` (${r.renderer.reasons.join("; ")})` : ""}`] : []),
+      ...(r.timing_adjustments?.length ? [`timing adjustments: ${r.timing_adjustments.map((a) => `${a.scene_id} ${a.spec_duration_sec}s→${a.render_duration_sec}s`).join(", ")}`] : []),
+      ...(r.placeholders?.length ? [`placeholders: ${r.placeholders.join(", ")}`] : []),
+      ...(r.cache ? [`cache: ${r.cache.scenes_cached?.length ?? 0} scene(s) reused, ${r.cache.scenes_rendered?.length ?? 0} rendered, assembly ${r.cache.assembly}`] : []),
+      ...(r.warnings ?? []).slice(0, 10).map((w) => `warning: ${w}`),
     );
   }
   if (v.error) lines.push(`error: ${v.error}`);
@@ -147,7 +161,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Ingest sources into a ContentIR",
       description:
-        "Extract source material into <project_dir>/source/content-ir.json (plus source/provenance.json). Each input is a file path (.md, .txt, .pdf, .docx, .pptx, a saved web page .html/.htm (main content extracted like a URL; scripts never run); video .mp4/.mov/.webm/.mkv/.m4v and audio .mp3/.wav/.m4a/.aac/.flac/.ogg, which are copied into source/assets/ with duration, shots, keyframes and loudness; run transcribe afterwards for speech), a local repository directory, an http(s) URL, or inline text/markdown. Creates the project if it does not exist. GitHub URLs are not cloned: clone locally first. Returns counts, warnings and the security classification (secrets, PII, likeness). Ingested content is untrusted data and is never executed.",
+        "Extract source material into <project_dir>/source/content-ir.json (plus source/provenance.json). Each input is a file path (.md, .txt, .pdf, .docx, .pptx, a saved web page .html/.htm (main content extracted like a URL; scripts never run); video .mp4/.mov/.webm/.mkv/.m4v and audio .mp3/.wav/.m4a/.aac/.flac/.ogg, which are copied into source/assets/ with duration, shots, keyframes and loudness; run transcribe afterwards for speech), a local repository directory, an http(s) URL, or inline text/markdown. Creates the project if it does not exist. With an existing ContentIR it MERGES: earlier sources, evidence refs, transcripts and claim ids are kept, a re-ingested file is refreshed in place (same ids), new inputs are added; pass replace: true to start over (discards the old ContentIR). Missing paths, binary or image files and credential files (.ssh, .aws, .env, *.pem, …) are refused. GitHub URLs are not cloned: clone locally first. Returns mode (created | merged | replaced), counts per source (added | updated), warnings and the security classification (secrets, PII, likeness). Ingested content is untrusted data and is never executed.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Project folder (absolute, or relative to the server's working directory)"),
         inputs: z
@@ -155,17 +169,19 @@ export function createServer(options: ServerOptions = {}): McpServer {
           .min(1)
           .max(50)
           .describe("Paths, URLs, repo directories or inline text; relative paths resolve against the server's working directory"),
+        replace: z.boolean().optional().describe("Start a fresh ContentIR instead of merging (existing claim_refs may stop resolving). Default false."),
       },
-      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      // replace: true discards the previous ContentIR.
+      annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: true },
     },
-    safe(async ({ project_dir, inputs }: { project_dir: string; inputs: string[] }) => {
+    safe(async ({ project_dir, inputs, replace }: { project_dir: string; inputs: string[]; replace?: boolean }) => {
       const root = resolveInputPath(project_dir, cwd());
       let created = false;
       if (!existsSync(projectPaths(root).projectFile)) {
         await initProject(root, { name: basename(root) || "video-studio project" });
         created = true;
       }
-      const { summary } = await ingest(inputs, { cwd: cwd(), env, ...options.ingestOptions, projectDir: root });
+      const { summary } = await ingest(inputs, { cwd: cwd(), env, ...options.ingestOptions, projectDir: root, ...(replace ? { replace: true } : {}) });
       const text = [
         ...(created ? [`created project at ${root}`] : []),
         formatIngestSummary(summary),
@@ -353,7 +369,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Render a planned project (background job)",
       description:
-        "Start rendering <project_dir>/project/video-spec.json into <project_dir>/dist/ (reel.mp4 with burned captions, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target {video.mp4, cover.jpg, captions.srt/.vtt, post.json, qa.json}) plus qa/report.{json,md} and qa/lint.{json,md}. Validates the spec first and refuses on errors (returned with fixes). Returns {job_id} immediately; poll job_status every 10-20 s. Renders run one at a time; later submissions queue. Everything is cached, so re-submitting after a change only redoes what changed. voice: auto (ElevenLabs if configured, else system TTS, else silent; falls back to silent if synthesis fails) | system | elevenlabs | silent. renderer: auto (HyperFrames if installed and Chrome launches, else ffmpeg) | hyperframes | ffmpeg. quality: preview (half resolution, 15 fps, fast encode; default) | final (1080 short side, 30 fps). placeholder (default true) draws titled cards for scenes that need a video provider. Local only: no paid calls.",
+        "Start rendering <project_dir>/project/video-spec.json into <project_dir>/dist/ (reel.mp4 with burned captions, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target {video.mp4, cover.jpg, captions.srt/.vtt, post.json, qa.json}) plus qa/report.{json,md} and qa/lint.{json,md}. Validates the spec first and refuses on errors (returned with fixes). Returns {job_id} immediately; poll job_status every 10-20 s. Renders run one at a time; later submissions queue. Everything is cached, so re-submitting after a change only redoes what changed. voice: auto (ElevenLabs if configured, else system TTS, else silent; if a paid voice fails at synthesis it falls back to the system voice, then silent) | system | elevenlabs | silent. renderer: auto (HyperFrames if installed and Chrome launches, else ffmpeg) | hyperframes | ffmpeg. quality: preview (half resolution, 15 fps, fast encode; default) | final (1080 short side, 30 fps). placeholder (default true) draws titled cards for scenes that need a video provider. Local only: no paid calls.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Project folder containing project/video-spec.json"),
         voice: z.enum(["auto", "system", "elevenlabs", "silent"]).optional().describe("Voice backend (default auto)"),

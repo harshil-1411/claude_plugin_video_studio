@@ -27,8 +27,8 @@ describe("resolveIngestInput", () => {
     expect(resolveIngestInput({ uri: "notes", content: "plain words" }, tmp)).toMatchObject({ kind: "text", content: "plain words" });
   });
 
-  it("rejects missing binary documents", () => {
-    expect(() => resolveIngestInput("missing.pdf", tmp)).toThrow(/input not found/);
+  it("rejects missing files, whatever the extension", () => {
+    expect(() => resolveIngestInput("missing.pdf", tmp)).toThrow(/file not found: missing.pdf \(resolved to /);
   });
 });
 

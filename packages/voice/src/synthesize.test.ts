@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SceneVoiceTrack, VideoSpec } from "@video-studio/schema";
 import { estimateWordTimings, tokenize } from "./estimate.js";
 import { createSilentBackend } from "./silent.js";
+import { createElevenLabsBackend } from "./elevenlabs.js";
 import { selectBackend, synthesizeSpec, VoiceBackendUnavailableError, type BackendSet } from "./synthesize.js";
 import type { Availability, VoiceBackend } from "./types.js";
 
@@ -65,6 +66,14 @@ describe("selectBackend", () => {
     expect(sel.backend.id).toBe(expected);
     expect(sel.reason).toMatch(/^auto:/);
     if (!eleven) expect(sel.reason).toContain("ELEVENLABS_API_KEY not set");
+  });
+
+  it("auto does not pick elevenlabs when its key is an unexpanded placeholder", async () => {
+    const b = set({ eleven: false, system: true });
+    const backends: BackendSet = { ...b, elevenlabs: createElevenLabsBackend({ resolver: () => "/usr/bin/ffmpeg" }) };
+    const sel = await selectBackend("auto", { ELEVENLABS_API_KEY: "${user_config.elevenlabs_key}" }, backends);
+    expect(sel.backend.id).toBe("system");
+    expect(sel.reason).toMatch(/elevenlabs unavailable: .*placeholder/);
   });
 
   it("honours explicit choices and rejects unavailable ones", async () => {
