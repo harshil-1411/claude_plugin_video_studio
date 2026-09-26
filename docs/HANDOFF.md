@@ -1,12 +1,12 @@
-# Handoff: video-studio (2026-09-26)
+# Handoff: video-studio (2026-09-27)
 
-**Git:** branch `main`, pushed to https://github.com/harshil-1411/claude_plugin_video_studio (the only branch; no CI, by the user's choice). Latest commits:
-- `187e302` README: storytelling in plan, pronunciation overrides; re-rendered narrated hero video
-- `f3119eb` readme-hero: caption LLM as one word, spell it out for the voice via brand terminology
-- `309f3f9` Motion vocabulary, caption/beat/story lint, storytelling guidance
-- `c746147` Schema: scene motion vocabulary
+**Version 0.2.0** (tags `v0.1.0` = 3e4143d, `v0.2.0`). **Git:** branch `main`, pushed to https://github.com/harshil-1411/claude_plugin_video_studio (the only branch). There is no CI by the user's choice; the user's **pre-push hook is active** (`pnpm hooks`), so every `git push` runs `node scripts/check.mjs --push`, all 8 steps, about 4 min. Latest commits:
+- `d6604e7` Checklist: 0.2.0 items verified on the user's Mac
+- `a93ab1f` README: cover 0.2.0 features
+- `4679362` Release 0.2.0: audit P0-P2 fixed, footage features, CHANGELOG
+- `75ad6c4` Footage quality, rotation/HDR, automatic review loop, faster renders
 
-Untracked on purpose: `msb-docs-ebmr-explainer/` (the user's own reel project) and `t.sh` (the user's local helper script). Don't commit them unless asked.
+**The user's own projects stay local** and are ignored by git: `msb-docs-ebmr-explainer/`, `video-studio-*/`, `vs-interview/`. Never commit or modify them unless asked.
 
 Read this together with `.claude/CLAUDE.md` (architecture rules and commands) and `docs/PLAN.md` (the roadmap). The sections below the status table are the history of how each phase was built.
 
@@ -98,11 +98,12 @@ Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixe
 | 7 Paid providers | **Not started** (needs keys) |
 | 8 Localization/launch (local) | Done: script fonts, `localize`, sound-event captions, C2PA, contributor docs, README hero video |
 | 9 Publishing | **Not started** (needs accounts) |
+| Audit release 0.2.0 | Done 2026-09-26, verified on the user's Mac 2026-09-27: every P0–P2 finding from `audit/MASTER-PLUGIN-AUDIT.md`, plus video URLs, multilingual ASR, speaker turns, `footage_look`/`footage_focus` reframing, footage QA, policy/spend/consent, cancel, compact outputs, parallel renders (see `CHANGELOG.md`) |
 
-Since the loop (2026-09-26): scene transitions, natural macOS voices with `voice.rate_wpm`, `tighten`, camera moves (`scene.motion`), lint timing and story checks (`caption_too_brief`, `caption_sync`, `caption_gap`, `cut_off_beat`, `onscreen_too_brief`, `story_structure`), `skills/plan/references/storytelling.md`, and the narrated hero video. Details are in "Loop state" below.
+Before 0.2.0 (2026-09-26): scene transitions, natural macOS voices with `voice.rate_wpm`, `tighten`, camera moves (`scene.motion`), lint timing and story checks (`caption_too_brief`, `caption_sync`, `caption_gap`, `cut_off_beat`, `onscreen_too_brief`, `story_structure`), `skills/plan/references/storytelling.md`, and the narrated hero video. Details are in "Loop state" below.
 
-- **Checks (all green at the latest commit, `pnpm check`):** 1,174 tests pass, 5 skipped (env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1` need outside the sandbox; `VS_TEST_GOLDEN=1` runs anywhere and passes), smoke, both `plugin validate --strict`.
-- **MCP tools (34):** adapt, analyze, brief_validate, compare, demo, diff, doctor, footage_focus, footage_look, footage_notes, render_cancel, source_section, source_summary, export, ingest, job_status, lint, localize, project_init, qa_run, render_submit, review, schema_get, shorts, spec_scaffold, spec_validate, storyboard_render, template_get, template_list, test, tighten, transcribe, variants, verify.
+- **Checks (all green at the latest commit, `pnpm check`):** 1,174 tests pass, 11 skipped (env-gated: `VS_TEST_SAY=1`/`VS_TEST_RENDER=1` need outside the sandbox; `VS_TEST_WHISPER_DIR` points at downloaded whisper models; `VS_TEST_GOLDEN=1` runs anywhere and passes), smoke, both `plugin validate --strict`.
+- **MCP tools (34):** adapt, analyze, brief_validate, compare, demo, diff, doctor, export, footage_focus, footage_look, footage_notes, ingest, job_status, lint, localize, project_init, qa_run, render_cancel, render_submit, review, schema_get, shorts, source_section, source_summary, spec_scaffold, spec_validate, storyboard_render, template_get, template_list, test, tighten, transcribe, variants, verify.
 - **Skills (21):** adapt, analyze, compare, create, demo, diff, doctor, export, ingest, lint, localize, plan, qa, render, review, shorts, test, tighten, validate, variants, verify.
 - **Agents:** source-researcher, creative-director.
 
