@@ -51,6 +51,7 @@ ui_masks:
     rect: { x: 0, y: 0.8, w: 1, h: 0.2 }
     severity: error
 notes:
+  - "Re-verification attempted 2026-09-26 and not possible from India, where TikTok is banned: developers.tiktok.com answers HTTP 503 to scripts and renders blank in a desktop browser. Values unchanged; re-check from outside India."
   - "NOT re-verified: developers.tiktok.com returned HTTP 503 on 2026-09-25. Caption limit, cover-by-frame, 540x960 minimum, duration and the is_aigc field come from deep-research-report_v2.md (verified there on 2026-09-25; it cites TikTok's in-feed ad spec for 540x960 and TikTok Help for the 10/60-minute limits, whose URLs are not recorded here); MP4 + H.264 was confirmed from a search snippet of the Media Transfer Guide."
   - "aspect_ratios beyond 9:16 (1:1, 16:9) are listed from general knowledge of the app, unverified; 9:16 is the only recommended ratio."
   - "No fps or file-size limits are recorded because neither source in the v2 report states them; lint skips checks it has no data for."

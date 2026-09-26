@@ -1,0 +1,196 @@
+{
+  "schema_version": "1.0",
+  "id": "readme-hero",
+  "title": "video-studio: docs in, video out",
+  "goal": "launch",
+  "audience": "developers who use Claude Code",
+  "platform": "instagram_reels",
+  "aspect_ratio": "9:16",
+  "targets": [
+    "instagram",
+    "youtube-shorts"
+  ],
+  "target_duration_sec": 26.5,
+  "language": "en-US",
+  "grounding": "strict",
+  "voice": {},
+  "captions": {
+    "preset": "minimal",
+    "burn_in": true
+  },
+  "style": "technical",
+  "cover": {
+    "headline": "Docs in, video out",
+    "focal_time_sec": 1.8
+  },
+  "scenes": [
+    {
+      "id": "s01",
+      "duration_sec": 3.5,
+      "purpose": "hook",
+      "voiceover": "Turn a README into a finished short video.",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "kinetic_text",
+        "props": {
+          "text": "Docs in. Video out.",
+          "rhythm": "word",
+          "emphasis": "Video"
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": [
+        "markdown:input/README.md#L13"
+      ]
+    },
+    {
+      "id": "s02",
+      "duration_sec": 4.5,
+      "purpose": "problem",
+      "voiceover": "No timeline editor, caption tool or thumbnail tool. It compiles instead.",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "split_screen",
+        "props": {
+          "mode": "before_after",
+          "left": {
+            "text": "Editor, captions, thumbnails, checklists"
+          },
+          "right": {
+            "text": "One command"
+          }
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": [
+        "markdown:input/README.md#L23"
+      ]
+    },
+    {
+      "id": "s03",
+      "duration_sec": 4.5,
+      "purpose": "step",
+      "voiceover": "It reads your source, proposes a plan, and waits for your approval.",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "timeline",
+        "props": {
+          "events": [
+            {
+              "label": "Read"
+            },
+            {
+              "label": "Plan"
+            },
+            {
+              "label": "Approve"
+            },
+            {
+              "label": "Render"
+            },
+            {
+              "label": "Package"
+            }
+          ],
+          "current": 2
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": [
+        "markdown:input/README.md#L70"
+      ]
+    },
+    {
+      "id": "s04",
+      "duration_sec": 3.5,
+      "purpose": "point",
+      "voiceover": "Every claim on screen cites a line in your sources.",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "typography",
+        "props": {
+          "lines": [
+            "Every claim",
+            "cites a source"
+          ],
+          "emphasis": "cites"
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": [
+        "markdown:input/README.md#L25-L28"
+      ]
+    },
+    {
+      "id": "s05",
+      "duration_sec": 4.5,
+      "purpose": "point",
+      "voiceover": "You get one package per platform, with the video, cover, captions and post copy.",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "stat",
+        "props": {
+          "value": 1,
+          "unit": " package",
+          "label": "per platform",
+          "context": "video \u00b7 cover \u00b7 captions \u00b7 post copy"
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": [
+        "markdown:input/README.md#L25-L28"
+      ]
+    },
+    {
+      "id": "s06",
+      "duration_sec": 3,
+      "purpose": "payoff",
+      "voiceover": "And it needs no L L M API key.",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "kinetic_text",
+        "props": {
+          "text": "No LLM API key.",
+          "rhythm": "phrase",
+          "emphasis": "No"
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": [
+        "markdown:input/README.md#L25-L28"
+      ]
+    },
+    {
+      "id": "s07",
+      "duration_sec": 3,
+      "purpose": "cta",
+      "voiceover": "Try it on your own README.",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "cta",
+        "props": {
+          "headline": "Try it on your README",
+          "action": "/video-studio:create"
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": [
+        "markdown:input/README.md#L66-L68"
+      ]
+    }
+  ]
+}
