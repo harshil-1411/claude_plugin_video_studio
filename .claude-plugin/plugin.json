@@ -4,6 +4,8 @@
   "version": "0.1.0",
   "description": "Provider-neutral knowledge-to-video compiler: turns text, URLs, documents and repos into reproducible videos with captions, thumbnails and provenance.",
   "author": { "name": "Suparn Bector" },
+  "homepage": "https://github.com/harshil-1411/claude_plugin_video_studio",
+  "repository": "https://github.com/harshil-1411/claude_plugin_video_studio",
   "license": "Apache-2.0",
   "keywords": ["video", "knowledge-to-video", "ffmpeg", "captions", "mcp", "runway", "elevenlabs", "heygen"],
   "userConfig": {

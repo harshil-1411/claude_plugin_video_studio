@@ -56,40 +56,49 @@ The strips below are frames from preview renders (built-in ffmpeg renderer) made
 
 ## Quick start
 
-**Requirements:** Node.js 22.13+ and a system FFmpeg with libass and libx264 (`brew install ffmpeg` on macOS). Check with `/video-studio:doctor`.
+**Requirements:** Node.js 22.13+ and a system FFmpeg with libass and libx264 (`brew install ffmpeg` on macOS). Nothing else to install: the engine is a single bundled file. Check your setup with `/video-studio:doctor`.
 
-```sh
-git clone https://github.com/harshil-1411/claude_plugin_video_studio.git video-studio
-cd video-studio && pnpm install
-claude --plugin-dir .
-```
-
-Then, inside Claude Code:
-
-```
-/video-studio:create README.md as a 30-second 9:16 reel for tiktok, instagram and youtube-shorts
-```
-
-Claude reads the source, proposes a hook, a scene plan and a storyboard, and waits for your **approval**. It then renders a preview, then the final, and writes the packages:
-
-```text
-dist/
-├── reel.mp4  clean-master.mp4  captions.srt  captions.vtt  cover.jpg
-├── video.lock  render-manifest.json  provenance.json  video-spec.json
-├── tiktok/           video.mp4  cover.jpg  captions.*  post.json  qa.json
-├── instagram/        …
-└── youtube-shorts/   …
-```
-
-<details>
-<summary>Install from a marketplace, and optional keys</summary>
+Inside Claude Code:
 
 ```
 /plugin marketplace add harshil-1411/claude_plugin_video_studio
 /plugin install video-studio@video-studio-marketplace
 ```
 
-Provider keys (ElevenLabs, and later Runway, HeyGen, fal.ai) are optional. Set them in `/plugin` → video-studio → Configure. They are kept in the OS credential store and passed only to the plugin's MCP server.
+Then:
+
+```
+/video-studio:create README.md as a 30-second 9:16 reel for instagram and youtube-shorts
+```
+
+Claude reads the source, proposes a hook, a scene plan and a storyboard, and waits for your **approval**. It then renders a preview, looks at it, then the final, and writes the packages:
+
+```text
+dist/
+├── reel.mp4  clean-master.mp4  captions.srt  captions.vtt  cover.jpg
+├── video.lock  render-manifest.json  provenance.json  video-spec.json
+├── instagram/        video.mp4  cover.jpg  captions.*  post.json  qa.json
+└── youtube-shorts/   …
+```
+
+<details>
+<summary>Optional extras: natural voices, HyperFrames, video URLs, local transcription</summary>
+
+- **Voice:** macOS picks your best installed voice (add a Premium voice in System Settings → Accessibility → Spoken Content). An ElevenLabs key (`/plugin` → video-studio → Configure, stored in the OS credential store) is used only when your `policy.yaml` allows it or you ask for it.
+- **HyperFrames renderer:** richer motion graphics; needs Google Chrome and a one-time install (the render skill gives the command).
+- **Video URLs:** `brew install yt-dlp` to ingest YouTube, Vimeo or Loom videos (subtitles become the transcript).
+- **Transcription:** whisper.cpp (`brew install whisper-cpp`); models are downloaded only after you approve.
+
+</details>
+
+<details>
+<summary>Run from a clone (development)</summary>
+
+```sh
+git clone https://github.com/harshil-1411/claude_plugin_video_studio.git video-studio
+cd video-studio && pnpm install
+claude --plugin-dir .
+```
 
 </details>
 
