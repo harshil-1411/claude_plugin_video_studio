@@ -3,7 +3,7 @@ name: qa
 description: Re-run technical QA on a rendered video-studio project - resolution, aspect, duration, codecs, black and frozen frames, silence and loudness against -14 LUFS - and explain each finding with its fix. Use when the user runs /video-studio:qa or asks whether a rendered reel is ready to post.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+) and ffmpeg.
-allowed-tools: mcp__plugin_video-studio_engine__qa_run Read
+allowed-tools: mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__review Read
 ---
 
 # Check a rendered video

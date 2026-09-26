@@ -34,9 +34,9 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 
 Since the loop (2026-09-26): scene transitions, natural macOS voices with `voice.rate_wpm`, `tighten`, camera moves (`scene.motion`), lint timing and story checks (`caption_too_brief`, `caption_sync`, `caption_gap`, `cut_off_beat`, `onscreen_too_brief`, `story_structure`), `skills/plan/references/storytelling.md`, and the narrated hero video. Details are in "Loop state" below.
 
-- **Checks (all green at `187e302`):** 784 tests pass, 5 skipped (env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1` need outside the sandbox; `VS_TEST_GOLDEN=1` runs anywhere and passes), smoke, both `plugin validate --strict`.
-- **MCP tools (26):** adapt, analyze, brief_validate, demo, diff, doctor, export, ingest, job_status, lint, localize, project_init, qa_run, render_submit, schema_get, shorts, spec_scaffold, spec_validate, storyboard_render, template_get, template_list, test, tighten, transcribe, variants, verify.
-- **Skills (19):** adapt, analyze, create, demo, diff, doctor, export, ingest, lint, localize, plan, qa, render, shorts, test, tighten, validate, variants, verify.
+- **Checks (all green at the latest commit):** 836 tests pass, 5 skipped (env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1` need outside the sandbox; `VS_TEST_GOLDEN=1` runs anywhere and passes), smoke, both `plugin validate --strict`.
+- **MCP tools (27):** adapt, analyze, brief_validate, demo, diff, doctor, export, ingest, job_status, lint, localize, project_init, qa_run, render_submit, review, schema_get, shorts, spec_scaffold, spec_validate, storyboard_render, template_get, template_list, test, tighten, transcribe, variants, verify.
+- **Skills (20):** adapt, analyze, create, demo, diff, doctor, export, ingest, lint, localize, plan, qa, render, review, shorts, test, tighten, validate, variants, verify.
 - **Agents:** source-researcher, creative-director.
 
 ## What Phase 4 has built so far
@@ -166,6 +166,11 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
   - **Polish:** scene video transitions; natural voices (Premium/Enhanced picked automatically, `voice.rate_wpm`, default 160, doctor `system_voice`); the narrated hero video (`examples/readme-hero`); local `.html` ingest.
   - **New:** HyperFrames 0.8.78, and `tighten` (pauses, fillers and retakes → a new `<asset>-tight`).
   - **Hero video re-rendered (2026-09-26):** the narrated `docs/media/hero.mp4` captions "LLM" as one word; the voice spells it out through brand `language.terminology`.
+  - **From JohnHeibel/ClaudeAnimationBase (2026-09-26, ideas only):**
+    - The `review` tool and skill (`packages/mcp/src/review.ts`) write `qa/review/<mode>-<quality>[-<scene>].jpg`: `sheet` (each scene's in/mid/out), `strip` (every frame of a span, up to 48) or `crop` (a region as fractions of the frame). Tiles are labelled with the bundled Inter. The render skill now reviews before presenting (new step 4), and the create skill reviews before QA.
+    - The storytelling reference gained a "Time the reads" section, and plan step 6.4 lists each scene's reads.
+    - First real use found a bug in the hero video: HyperFrames count-ups drew "0package", because the wider "0" overlapped the unit. Fixed with tabular digits in `.vs-count` (`LAYOUT_VERSION` 9). Re-render the hero to pick it up.
+    - Remotion was evaluated and not adopted: its company licence would be needed by any user org over 3 people, and it duplicates HyperFrames. Only an opt-in "bring your own licence" renderer later, if asked.
   - **From Barty-Bart/motion-graphics (2026-09-26, ideas only, own code):**
     - **Word cues:** `scene.cues [{word, occurrence?, item?}]`. `cueItems(kind, props)` in `packages/schema/src/cues.ts` defines each kind's reveal items. Spec validation checks cue words against the voiceover. The pipeline resolves cues against voice or native transcript words; native tracks now resolve before the scene stage. Timing lives in `packages/renderer/src/cue-timing.ts`: a cued item starts 120 ms before its word, and a stat count-up ends on it. Both renderers support it; without cues the output is byte-identical (tested). Lint checks: `cue_unmatched`, `cue_too_close`. Silent renders have no word timings, so cues are skipped with a warning.
     - **Cutaways:** `footage.cutaway: true` plus a `deterministic` graphic. The picture renders as a plain graphic scene (`cutawayPicture` in `select.ts`), while the clip's sound and transcript words keep playing. Lint check: `cutaway_rhythm` (not in the first second, 3–10 s long, 2 s of face between). Covered by the talking-head template rule, the shorts skill and visual-strategy.md.

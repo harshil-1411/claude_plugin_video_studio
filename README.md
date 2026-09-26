@@ -145,6 +145,7 @@ flowchart LR
 | `/video-studio:plan` · `validate` | Brief, grounded spec and storyboard, built on a story arc (hook, open loop, escalation, payoff, CTA); explains every validation issue |
 | `/video-studio:render` · `qa` · `export` | Local render (preview, then final), technical QA, per-platform packages (`sign` for C2PA) |
 | `/video-studio:lint` · `verify` | Platform contract checks with a fix loop (UI zones, caption readability and sync, cuts on the beat, story arc); claim coverage against the sources |
+| `/video-studio:review` | Contact sheets, frame strips and crops of a render, so Claude looks at the video before handing it over |
 | `/video-studio:test` · `diff` | Golden-frame regression tests; spec, lock and frame diffs between renders |
 | `/video-studio:variants` · `adapt` | Hook × cover A/B sets with an experiment manifest; new aspect, length or platform |
 | `/video-studio:localize` | Language versions from a translation sheet, re-timed for the language |

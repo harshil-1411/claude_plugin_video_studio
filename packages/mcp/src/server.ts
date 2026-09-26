@@ -18,6 +18,7 @@ import { formatLocalize, localizeProject } from "./localize.js";
 import { formatTighten, tightenAsset } from "./tighten.js";
 import { diffProjects, formatDiff } from "./diff.js";
 import { formatGolden, testProject } from "./golden.js";
+import { type ReviewOptions, formatReview, reviewRender } from "./review.js";
 import { formatLint, lintProject } from "./lint.js";
 import { formatIssues, renderStoryboard, scaffoldSpec, validateBrief } from "./plan.js";
 import { type RenderProjectOptions, SpecInvalidError, exportProject, loadValidSpec, runQa } from "./pipeline.js";
@@ -513,6 +514,35 @@ export function createServer(options: ServerOptions = {}): McpServer {
     safe(async ({ project_dir, quality, update }: { project_dir: string; quality?: "preview" | "final"; update?: boolean }) => {
       const r = await testProject(resolveInputPath(project_dir, cwd()), { ...(quality ? { quality } : {}), ...(update ? { update } : {}) });
       return jsonResult(formatGolden(r), r as unknown as Record<string, unknown>);
+    }),
+  );
+
+  server.registerTool(
+    "review",
+    {
+      title: "Review frames of a render",
+      description:
+        "Write an image of <project_dir>'s rendered reel for you to Read and check before handing it over: mode sheet (default; every scene's opening, middle and closing frame), strip (every frame of a span: from_sec/to_sec or one scene; for motion, transitions and word cues) or crop (a region, as fractions of the frame, at full resolution: captions, small text, faces). Tiles are labelled with scene and time. Writes qa/review/<mode>-<quality>[-<scene>].jpg. Returns {image, tiles[{index, time_sec, scene_id, label}], notes}.",
+      inputSchema: {
+        project_dir: z.string().min(1).describe("Rendered project folder"),
+        quality: QUALITY.optional().describe("Which render (default: the latest)"),
+        mode: z.enum(["sheet", "strip", "crop"]).optional(),
+        scene: z.string().optional().describe("Limit to one scene (strip: its whole span)"),
+        times: z.array(z.number().nonnegative()).max(48).optional().describe("Exact times in seconds (sheet, crop)"),
+        from_sec: z.number().nonnegative().optional(),
+        to_sec: z.number().nonnegative().optional(),
+        crop: z
+          .object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), w: z.number().gt(0).max(1), h: z.number().gt(0).max(1) })
+          .optional()
+          .describe("Region as fractions of the frame (crop mode)"),
+        width: z.int().min(64).max(1080).optional().describe("Tile width in px"),
+        cols: z.int().min(1).max(12).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async ({ project_dir, ...o }: { project_dir: string } & ReviewOptions) => {
+      const r = await reviewRender(resolveInputPath(project_dir, cwd()), o);
+      return jsonResult(formatReview(r), r as unknown as Record<string, unknown>);
     }),
   );
 

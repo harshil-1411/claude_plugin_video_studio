@@ -241419,7 +241419,7 @@ async function selectRenderer(kind, renderers, env = process.env, preference = "
 function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage, cues) {
 	return sha256Hex(canonicalJson({
 		v: 1,
-		layout: 8,
+		layout: 9,
 		scene,
 		tokens,
 		target,
@@ -243266,7 +243266,7 @@ html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--
 .vs-quote-source { overflow-wrap: anywhere; }
 .vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
 .vs-stat-context { overflow-wrap: anywhere; }
-.vs-count { position: relative; display: inline-block; }
+.vs-count { position: relative; display: inline-block; font-variant-numeric: tabular-nums; }
 .vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
 .vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
 .vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }
@@ -247765,6 +247765,197 @@ function formatDiff(r) {
 	if (r.spec.changes.length > 10) lines.push(`  - …${r.spec.changes.length - 10} more in ${r.report_md}`);
 	return lines.join("\n");
 }
+const DEFAULT_WIDTH = {
+	sheet: 240,
+	strip: 180,
+	crop: 540
+};
+const DEFAULT_COLS = {
+	sheet: 6,
+	strip: 8,
+	crop: 2
+};
+async function reviewRender(projectDir, opts = {}) {
+	const mode = opts.mode ?? "sheet";
+	const r = await resolveRender(projectDir, opts.quality);
+	const fps = r.fps;
+	const frame = 1 / fps;
+	const dur = r.duration_ms / 1e3;
+	const lastT = Math.max(0, dur - frame);
+	const notes = [];
+	let t = 0;
+	const spans = (r.state?.scenes ?? []).map((s) => {
+		const span = {
+			id: s.scene_id,
+			start: t,
+			end: t + s.duration_ms / 1e3
+		};
+		t = span.end;
+		return span;
+	});
+	const sceneAt = (x) => spans.find((s) => x >= s.start && x < s.end)?.id ?? spans[spans.length - 1]?.id;
+	let only;
+	if (opts.scene) {
+		only = spans.find((s) => s.id === opts.scene);
+		if (!only) throw new Error(`no scene "${opts.scene}" in this render (scenes: ${spans.map((s) => s.id).join(", ") || "unknown: no render state"})`);
+	}
+	const clamp = (x) => Math.min(lastT, Math.max(0, x));
+	const round3 = (x) => Math.round(x * 1e3) / 1e3;
+	let tiles;
+	if (opts.times?.length) tiles = opts.times.map((x) => ({ time: clamp(x) }));
+	else if (mode === "strip") {
+		const a = clamp(opts.from_sec ?? only?.start ?? 0);
+		const b = clamp(opts.to_sec ?? (only ? only.end - 1e-6 : a + 2));
+		if (b < a) throw new Error(`strip: to_sec ${b} is before from_sec ${a}`);
+		const fa = Math.ceil(a * fps - 1e-6);
+		const n = Math.max(fa, Math.floor(b * fps + 1e-6)) - fa + 1;
+		const take = Math.min(n, 48);
+		if (take < n) notes.push(`${n} frames in ${round3(a)}–${round3(b)}s; showing ${take} evenly spaced (narrow the span for every frame)`);
+		tiles = Array.from({ length: take }, (_, i) => ({ time: (fa + (take === 1 ? 0 : Math.round(i * (n - 1) / (take - 1)))) / fps }));
+	} else {
+		const list = only ? [only] : spans;
+		if (!list.length) {
+			tiles = [
+				.25,
+				.5,
+				.75
+			].map((f) => ({ time: clamp(dur * f) }));
+			notes.push("no render state with scene timings: sampled 25%, 50% and 75%");
+		} else tiles = list.flatMap((s) => {
+			const len = s.end - s.start;
+			return [
+				{
+					time: clamp(s.start + Math.min(.3, len * .2)),
+					tag: "in"
+				},
+				{
+					time: clamp(s.start + len / 2),
+					tag: "mid"
+				},
+				{
+					time: clamp(s.end - Math.max(frame, Math.min(.45, len * .15))),
+					tag: "out"
+				}
+			];
+		});
+	}
+	if (tiles.length > 48) {
+		notes.push(`${tiles.length} tiles requested; showing the first 48 (review one scene at a time with scene)`);
+		tiles = tiles.slice(0, 48);
+	}
+	let crop = "";
+	if (mode === "crop") {
+		const c = opts.crop;
+		if (!c) throw new Error("crop mode needs crop {x, y, w, h} as fractions of the frame (e.g. {x: 0.1, y: 0.6, w: 0.8, h: 0.3})");
+		if (c.x < 0 || c.y < 0 || c.w <= 0 || c.h <= 0 || c.x + c.w > 1.0001 || c.y + c.h > 1.0001) throw new Error("crop must lie inside the frame: 0 ≤ x, y and x + w, y + h ≤ 1");
+		const px = (f, full) => Math.max(0, Math.round(f * full));
+		crop = `crop=${Math.max(2, px(c.w, r.width))}:${Math.max(2, px(c.h, r.height))}:${px(c.x, r.width)}:${px(c.y, r.height)},`;
+		if (!opts.times?.length) {
+			if (!only) tiles = spans.length ? spans.map((s) => ({
+				time: clamp((s.start + s.end) / 2),
+				tag: "mid"
+			})) : [{ time: clamp(dur / 2) }];
+			else tiles = [{
+				time: clamp((only.start + only.end) / 2),
+				tag: "mid"
+			}];
+		}
+	}
+	const width = Math.max(64, Math.round(opts.width ?? DEFAULT_WIDTH[mode]));
+	const cols = Math.max(1, Math.min(opts.cols ?? DEFAULT_COLS[mode], tiles.length));
+	const rows = Math.ceil(tiles.length / cols);
+	const outDir = join(projectPaths(r.root).root, "qa", "review");
+	const work = join(outDir, ".work");
+	await rm(work, {
+		recursive: true,
+		force: true
+	});
+	await mkdir(work, { recursive: true });
+	const fontsDir = findFontsDir();
+	const font = fontsDir ? join(fontsDir, "Inter", "Inter-Bold.ttf") : void 0;
+	const labelSize = Math.max(11, Math.round(width / 14));
+	const out = tiles.map((x, i) => {
+		const scene_id = sceneAt(x.time);
+		const label = [
+			scene_id,
+			x.tag,
+			`${round3(x.time).toFixed(2)}s`
+		].filter(Boolean).join(" ");
+		return {
+			index: i,
+			time_sec: round3(x.time),
+			...scene_id ? { scene_id } : {},
+			label
+		};
+	});
+	try {
+		for (const [i, tile] of out.entries()) {
+			const draw = font && existsSync(font) ? `,drawtext=fontfile=${escapeFilterPath(font)}:text=${escapeFiltergraph(escapeFilterOption(tile.label))}:fontsize=${labelSize}:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=${Math.round(labelSize / 3)}:x=4:y=4` : "";
+			const png = join(work, `${String(i + 1).padStart(4, "0")}.png`);
+			for (let back = 0; back < 4 && !existsSync(png); back++) {
+				const at = Math.max(0, tile.time_sec - back * frame);
+				await runFfmpeg([
+					"-y",
+					"-ss",
+					at.toFixed(3),
+					"-i",
+					r.reel,
+					"-frames:v",
+					"1",
+					"-vf",
+					`${crop}scale=${width}:-2:flags=bicubic${draw}`,
+					png
+				], { timeoutMs: 6e4 });
+				if (back > 0 && existsSync(png)) {
+					tile.time_sec = round3(at);
+					tile.label = tile.label.replace(/[\d.]+s$/, `${tile.time_sec.toFixed(2)}s`);
+				}
+			}
+			if (!existsSync(png)) throw new Error(`no frame at ${tile.time_sec}s in ${r.reel}`);
+		}
+		if (!font || !existsSync(font)) notes.push("bundled fonts not found: tiles are unlabelled; use the tiles list for times");
+		const name = `${mode}-${r.quality ?? "render"}${opts.scene ? `-${opts.scene}` : ""}.jpg`;
+		const image = join(outDir, name);
+		await runFfmpeg([
+			"-y",
+			"-framerate",
+			"1",
+			"-i",
+			join(work, "%04d.png"),
+			"-vf",
+			`tile=${cols}x${rows}:padding=4:margin=4:color=0x808080`,
+			"-frames:v",
+			"1",
+			"-q:v",
+			"3",
+			image
+		], { timeoutMs: 6e4 });
+		return {
+			...r.quality ? { quality: r.quality } : {},
+			source: r.source,
+			mode,
+			image,
+			image_rel: relative(r.root, image),
+			cols,
+			rows,
+			tile_width: width,
+			tiles: out,
+			notes
+		};
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+function formatReview(r) {
+	return [
+		`review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${r.cols}×${r.rows} → ${r.image}`.replace(/ {2}/g, " "),
+		"Read the image and check: text fits and is readable, nothing sits under captions or app UI, graphics land when their words are spoken, crops keep faces and subjects, transitions are clean.",
+		...r.notes.map((n) => `note: ${n}`)
+	].join("\n");
+}
 //#endregion
 //#region src/lint.ts
 /**
@@ -251717,7 +251908,7 @@ async function lockFromState(root, state, projectId, outputs) {
 			cover: String(3),
 			target_package: String(1),
 			zones: String(2),
-			layout: String(8)
+			layout: String(9)
 		},
 		tools,
 		voice: {
@@ -252794,6 +252985,40 @@ function createServer(options = {}) {
 			...update ? { update } : {}
 		});
 		return jsonResult(formatGolden(r), r);
+	}));
+	server.registerTool("review", {
+		title: "Review frames of a render",
+		description: "Write an image of <project_dir>'s rendered reel for you to Read and check before handing it over: mode sheet (default; every scene's opening, middle and closing frame), strip (every frame of a span: from_sec/to_sec or one scene; for motion, transitions and word cues) or crop (a region, as fractions of the frame, at full resolution: captions, small text, faces). Tiles are labelled with scene and time. Writes qa/review/<mode>-<quality>[-<scene>].jpg. Returns {image, tiles[{index, time_sec, scene_id, label}], notes}.",
+		inputSchema: {
+			project_dir: string().min(1).describe("Rendered project folder"),
+			quality: QUALITY.optional().describe("Which render (default: the latest)"),
+			mode: _enum([
+				"sheet",
+				"strip",
+				"crop"
+			]).optional(),
+			scene: string().optional().describe("Limit to one scene (strip: its whole span)"),
+			times: array(number().nonnegative()).max(48).optional().describe("Exact times in seconds (sheet, crop)"),
+			from_sec: number().nonnegative().optional(),
+			to_sec: number().nonnegative().optional(),
+			crop: object$2({
+				x: number().min(0).max(1),
+				y: number().min(0).max(1),
+				w: number().gt(0).max(1),
+				h: number().gt(0).max(1)
+			}).optional().describe("Region as fractions of the frame (crop mode)"),
+			width: int().min(64).max(1080).optional().describe("Tile width in px"),
+			cols: int().min(1).max(12).optional()
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async ({ project_dir, ...o }) => {
+		const r = await reviewRender(resolveInputPath(project_dir, cwd()), o);
+		return jsonResult(formatReview(r), r);
 	}));
 	server.registerTool("diff", {
 		title: "Diff two renders",

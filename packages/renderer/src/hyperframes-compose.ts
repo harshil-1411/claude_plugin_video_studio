@@ -1638,7 +1638,7 @@ html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--
 .vs-quote-source { overflow-wrap: anywhere; }
 .vs-stat-label { line-height: 1.15; overflow-wrap: anywhere; }
 .vs-stat-context { overflow-wrap: anywhere; }
-.vs-count { position: relative; display: inline-block; }
+.vs-count { position: relative; display: inline-block; font-variant-numeric: tabular-nums; }
 .vs-count-frame { position: absolute; left: 0; top: 0; width: 100%; text-align: center; }
 .vs-tl-line { position: absolute; background: color-mix(in srgb, var(--vs-text) 30%, var(--vs-bg)); border-radius: 999px; }
 .vs-tl-pos, .vs-tl-event, .vs-split-pos, .vs-lt-pos, .vs-lt-headline, .vs-map-slot, .vs-map-title { position: absolute; display: flex; }

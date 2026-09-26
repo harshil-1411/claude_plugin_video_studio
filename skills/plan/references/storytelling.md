@@ -68,6 +68,35 @@ one or two moments per video; used everywhere it stops being a change.
 Transitions are `cut`, `crossfade`, `fade_black`, `slide`, `zoom` and
 `whip`; plain cuts are the default rhythm, and the others mark a shift.
 
+## Time the reads
+
+You know what each scene says because you wrote it; the viewer sees it once,
+at full speed, while listening. For each scene, list its **reads**: what the
+viewer has to notice and understand, in order (the headline, the number,
+the second half of the comparison, the speaker's face again). Then time
+them:
+
+- **One read at a time.** A new read starts only after the last one has
+  landed. Two things appearing together means only one gets seen: stagger
+  them, or land each on its own word with `cues`.
+- **Each read needs time:** for the eye to find it, to understand it, and a
+  beat to register. Big, central, expected things are quick; small,
+  off-centre or surprising ones (a label on a chart, a footnote number)
+  take longer. As a floor: about 0.7 s for a short word or number, plus
+  about 0.3 s per extra word of on-screen text, over and above narration.
+- **Lead the eye.** Before an important read, point at it: the narration
+  names it, it moves or lights up first (`punch`, a cue), or the previous
+  scene ends looking towards it.
+- **Fast motion, slow meaning.** Moves can be quick; what they mean needs a
+  held moment afterwards. Hurry through what doesn't matter, and hold on
+  the reads that do: that contrast is the rhythm.
+- **The reads set the length.** A scene with three reads can't be 2 s; a
+  scene whose single read has landed shouldn't be padded. The last scene's
+  final read also needs time before the video ends.
+
+Write the reads into the storyboard notes you show the user, so they can
+see why a scene is as long as it is.
+
 ## Retention checks (before validating)
 
 Read the storyboard as a viewer who is about to scroll away:
@@ -79,6 +108,8 @@ Read the storyboard as a viewer who is about to scroll away:
 - **Before the CTA:** Has the loop from the start been closed on screen?
   If not, add or sharpen the payoff scene.
 - **Every scene:** does something change within 4 s?
+- **Every read:** does it get its own moment, and is the eye already there
+  when it lands?
 
 ## Anti-patterns
 

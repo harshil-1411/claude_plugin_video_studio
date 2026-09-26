@@ -3,7 +3,7 @@ name: create
 description: End-to-end video-studio flow - turn free text, a URL, a document or a local repo into a finished video package - plan (brief, grounded scene spec, storyboard), approval, local render with captions, QA and dist/ export. Use when the user runs /video-studio:create, or asks to "make a video", "turn this into a reel/short" or similar from any source.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+).
-allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export Skill Read Write Edit
+allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__review Skill Read Write Edit
 ---
 
 # Create a video
@@ -89,7 +89,9 @@ TTS is unavailable, or ffmpeg because HyperFrames is not installed).
 
 ## 6. QA and revisions
 
-Walk through the QA findings (expected ones: silence/loudness with a silent
+Before showing the preview, look at it: the render skill's step 4 (the
+`review` contact sheet, plus strips or crops where something looks off).
+Fix clear problems first, then walk through the QA findings (expected ones: silence/loudness with a silent
 voice, frozen frames on static scenes). Offer fixes: scene edits (back to
 the plan rules and step 4), a different voice, or `timing_adjustments`
 folded into the spec. Re-render the preview after changes; cached scenes are
@@ -98,7 +100,7 @@ reused.
 ## 7. Final render and export
 
 On approval, `render_submit` with `quality: "final"` and poll to completion.
-Then refine the post copy in `publish.<target>` (the render skill's step 5) and finish
+Then refine the post copy in `publish.<target>` (the render skill's step 6) and finish
 with a short summary:
 
 - `dist/reel.mp4` (resolution, duration), one `dist/<target>/` package per

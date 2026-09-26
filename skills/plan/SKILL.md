@@ -190,9 +190,10 @@ points). Call `brief_validate {project_dir}` and fix every error before going on
      + `hashtags` (the post copy, one entry per target). Never copy one into
      another verbatim.
 3. Keep scene durations summing to within ±10% of `target_duration_sec`.
-4. Run the retention checks in `references/storytelling.md` (would a viewer
-   scroll at second 3? at the midpoint? is the loop closed before the CTA?)
-   and fix the weakest beat.
+4. List each scene's reads and time them (`references/storytelling.md`,
+   "Time the reads": one read at a time, each with time to land), then run
+   the retention checks there (would a viewer scroll at second 3? at the
+   midpoint? is the loop closed before the CTA?) and fix the weakest beat.
 5. Write `<project_dir>/project/video-spec.json`.
 
 ### 7. Validate and fix (loop)

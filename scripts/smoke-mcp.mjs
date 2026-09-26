@@ -29,6 +29,7 @@ const expected = [
   "project_init",
   "qa_run",
   "render_submit",
+  "review",
   "schema_get",
   "shorts",
   "spec_scaffold",

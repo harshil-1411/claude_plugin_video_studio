@@ -3,7 +3,7 @@ name: render
 description: Render a planned video-studio project (project/video-spec.json) into a finished package in dist/ - captioned 9:16/16:9 reel, clean master, SRT/VTT captions, transcript, thumbnail, social copy, render manifest and provenance - using only local tools (system TTS or silent voice, HyperFrames or ffmpeg motion graphics). Use when the user runs /video-studio:render, approves a plan, or asks to render, preview or export the video.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+) and ffmpeg with libass and libx264.
-allowed-tools: mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__doctor Read Write Edit
+allowed-tools: mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__doctor mcp__plugin_video-studio_engine__review Read Write Edit
 ---
 
 # Render a video
@@ -34,7 +34,23 @@ under a minute; a final render several minutes. Other submissions queue:
 only one render runs at a time. `interrupted` means the engine restarted:
 submit again (all finished work is cached).
 
-## 4. Present the result
+## 4. Look at it before presenting
+
+Call `mcp__plugin_video-studio_engine__review {project_dir}` and Read the contact sheet it returns (each
+scene's opening, middle and closing frame, labelled). Check that text fits
+and is readable, that nothing sits under the captions or the app UI, that
+graphics are complete by the middle of their scene, and that crops keep the
+subject. Look closer where needed:
+- `mode: "strip"` with `scene` (every frame of it): motion, transitions,
+  and word cues. A cued item should appear as its word is spoken; compare
+  with `captions.json` times.
+- `mode: "crop"` with `crop {x, y, w, h}` (fractions of the frame): caption
+  and small-text legibility, faces.
+
+Fix what you find in the spec (it is cheap: only changed scenes re-render),
+then re-render and look again. Mention anything you chose not to fix.
+
+## 5. Present the result
 
 From `result`:
 
@@ -61,7 +77,7 @@ From `result`:
 - **Placeholders**: scenes that need a video provider were drawn as titled
   cards (provider rendering arrives in a later phase).
 
-## 5. Final render and export
+## 6. Final render and export
 
 Ask whether to render the final version. On approval call
 `render_submit {project_dir, quality: "final"}` and poll again.
