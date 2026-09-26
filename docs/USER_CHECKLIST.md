@@ -36,7 +36,7 @@ Then do the Japanese Whisper explainer. Copy it out of the scratchpad first, or 
 Install the optional renderer (it also brings puppeteer-core, which `demo` needs):
 
 ```
-cd "$HOME/.video-studio" && PUPPETEER_SKIP_DOWNLOAD=1 npm i @hyperframes/producer@0.8.75 --prefix deps
+cd "$HOME/.video-studio" && PUPPETEER_SKIP_DOWNLOAD=1 npm i @hyperframes/producer@0.8.78 --prefix deps
 ```
 
 Then, in `claude --plugin-dir ~/Desktop/plugin_knowledge_to_video`, render a project that uses the new scene kinds (stat, timeline, split_screen, quote, kinetic_text, map, lower_third) with `renderer: hyperframes`. The text-over-music or faceless-listicle templates are good for this.

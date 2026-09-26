@@ -58,6 +58,6 @@ describe("resolveHyperframesProducer", () => {
 
   it("finds the repo root as plugin root and documents the install command", () => {
     expect(findPluginRoot({})).toMatch(/plugin_knowledge_to_video$|[^/]+$/);
-    expect(HYPERFRAMES_INSTALL_COMMAND).toBe('cd "${CLAUDE_PLUGIN_DATA}" && PUPPETEER_SKIP_DOWNLOAD=1 npm i @hyperframes/producer@0.8.75 --prefix deps');
+    expect(HYPERFRAMES_INSTALL_COMMAND).toBe('cd "${CLAUDE_PLUGIN_DATA}" && PUPPETEER_SKIP_DOWNLOAD=1 npm i @hyperframes/producer@0.8.78 --prefix deps');
   });
 });

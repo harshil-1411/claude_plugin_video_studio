@@ -125,7 +125,7 @@ describe("available()", () => {
     const r = createHyperframesRenderer({ chromePath: fakeChrome, launchProbe: async () => ({ ok: true }) });
     expect(await r.available({ ...process.env, FFMPEG_PATH: ff, FFPROBE_PATH: ff })).toEqual({ ok: true });
     expect(r.id).toBe("hyperframes");
-    expect(r.version).toBe("0.8.75");
+    expect(r.version).toBe("0.8.78");
     expect(r.kinds).toContain("diagram");
   });
 });
@@ -180,7 +180,7 @@ describe("render() with an injected producer", () => {
     const { r, seen, tmpRoot, project } = await setup({});
     const shot = { ...scene(1), deterministic: { kind: "screenshot" as const, props: { asset: "a1", callouts: ["Here"] } } };
     const res = await r.render(request(project, { scene: shot }));
-    expect(res).toEqual({ scene_id: "s01", out_path: join(project, "renders", "s01.mp4"), duration_ms: 1000, renderer: "hyperframes", renderer_version: "0.8.75", warnings: [], text_boxes: expect.any(Array) });
+    expect(res).toEqual({ scene_id: "s01", out_path: join(project, "renders", "s01.mp4"), duration_ms: 1000, renderer: "hyperframes", renderer_version: "0.8.78", warnings: [], text_boxes: expect.any(Array) });
     expect(res.text_boxes!.length).toBeGreaterThan(0);
     expect(seen.html).toContain('data-composition-id="vs-s01"');
     expect(seen.files).toEqual(["assets", "assets/screenshot-1.png", "index.html"]);

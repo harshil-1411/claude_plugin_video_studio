@@ -242951,8 +242951,8 @@ ${timelineScript(compositionId, dur)}
 }
 //#endregion
 //#region ../renderer/dist/hyperframes-renderer.js
-/** Exact pinned producer version (package.json pins "@hyperframes/producer": "0.8.75"). */
-const HYPERFRAMES_VERSION = "0.8.75";
+/** Exact pinned producer version (package.json pins "@hyperframes/producer": "0.8.78"). */
+const HYPERFRAMES_VERSION = "0.8.78";
 async function isExecutable(p) {
 	try {
 		await access(p, process.platform === "win32" ? constants.F_OK : constants.X_OK);
@@ -243430,7 +243430,7 @@ function inspect(nodeModules) {
 	if (!existsSync(pj)) return null;
 	try {
 		const pkg = JSON.parse(readFileSync(pj, "utf8"));
-		if (pkg.version !== "0.8.75") return {
+		if (pkg.version !== "0.8.78") return {
 			ok: false,
 			reason: `${PACKAGE} ${pkg.version ?? "?"} found in ${nodeModules}, but video-studio pins ${HYPERFRAMES_VERSION}`
 		};
@@ -243499,7 +243499,7 @@ function resolveHyperframesProducer(env = process.env, opts = {}) {
 	}
 	return {
 		ok: false,
-		reason: problems[0] ?? `${PACKAGE} 0.8.75 is not installed; run doctor for setup`,
+		reason: problems[0] ?? `${PACKAGE} 0.8.78 is not installed; run doctor for setup`,
 		searched
 	};
 }

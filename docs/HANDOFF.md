@@ -246,7 +246,7 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
   - writes to `~/.video-studio`: the dev CLI `scripts/render-project.mjs` then prints `ledger write failed … readonly database`. It is harmless and the render succeeds.
 - **Rendering in the sandbox:** use `--voice silent --renderer ffmpeg`. The plugin's MCP server runs outside the sandbox for the user, so `say` and Chrome work there.
 - **Chrome on macOS:** plain `chrome --headless --dump-dom` hangs for 45 s or more. The HyperFrames probe launches Chrome through the producer's `puppeteer-core` instead (about 0.6 s). The diagnostic is `node scripts/diagnose-chrome.mjs`.
-- **HyperFrames:** never bundled. It is installed at `~/.video-studio/deps` (dev) or `${CLAUDE_PLUGIN_DATA}/deps` (plugin) with `PUPPETEER_SKIP_DOWNLOAD=1 npm i @hyperframes/producer@0.8.75 --prefix deps`.
+- **HyperFrames:** never bundled. It is installed at `~/.video-studio/deps` (dev) or `${CLAUDE_PLUGIN_DATA}/deps` (plugin) with `PUPPETEER_SKIP_DOWNLOAD=1 npm i @hyperframes/producer@0.8.78 --prefix deps`.
 - **Duplicate "engine" MCP server:** the repo root is also the plugin root. `plugin:video-studio:engine` works. The project-scope `engine` fails with CONNECTION_CLOSED and is harmless; keep it in `disabledMcpjsonServers` in `.claude/settings.local.json`.
 - **pnpm:** the store is pinned in the repo (`storeDir: .pnpm-store`) so sandboxed and unsandboxed installs agree.
 

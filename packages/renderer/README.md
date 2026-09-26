@@ -8,7 +8,7 @@ HyperFrames first, FFmpeg as the fallback when `available()` reports `ok: false`
 
 ## HyperFrames renderer (primary): `hyperframes-*.ts`
 
-- Pinned to `@hyperframes/producer@0.8.75` exactly (pre-1.0; rerun the golden tests before any bump).
+- Pinned to `@hyperframes/producer@0.8.78` exactly (pre-1.0; rerun the golden tests before any bump).
 - `buildComposition(req)` (`hyperframes-compose.ts`) is a pure function. It returns a
   self-contained HTML document plus the asset files to copy. It covers typography, code (with a
   hand-rolled highlighter in `hyperframes-highlight.ts`), charts (stat, bar, line and pie as inline

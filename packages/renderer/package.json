@@ -14,7 +14,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@hyperframes/producer": "0.8.75",
+    "@hyperframes/producer": "0.8.78",
     "@video-studio/core": "workspace:*",
     "@video-studio/schema": "workspace:*",
     "@video-studio/media": "workspace:*",

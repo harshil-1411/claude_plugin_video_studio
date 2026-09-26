@@ -9,9 +9,9 @@ import type { MotionTokens, SceneRenderRequest, VisualTokens } from "./types.js"
 import { exitFadeMs } from "./tokens.js";
 
 /**
- * Pure HTML composition builder for the HyperFrames renderer (pinned @hyperframes/producer 0.8.75).
+ * Pure HTML composition builder for the HyperFrames renderer (pinned @hyperframes/producer 0.8.78).
  *
- * Authoring contract (verified against the 0.8.75 runtime, lint and docs shipped in node_modules):
+ * Authoring contract (verified against the 0.8.78 runtime, lint and docs shipped in node_modules):
  * - root `<div data-composition-id data-start="0" data-duration data-width data-height>`;
  * - one timed clip (`class="clip"`, `id`, `data-start`, `data-duration`, `data-track-index`);
  * - a paused timeline registered on `window.__timelines[<composition id>]`.

@@ -81,7 +81,7 @@ Richer motion graphics need `@hyperframes/producer` and Google Chrome. The
 engine never installs it by itself. If the user wants it, they run:
 
 ```
-cd "${CLAUDE_PLUGIN_DATA}" && PUPPETEER_SKIP_DOWNLOAD=1 npm i @hyperframes/producer@0.8.75 --prefix deps
+cd "${CLAUDE_PLUGIN_DATA}" && PUPPETEER_SKIP_DOWNLOAD=1 npm i @hyperframes/producer@0.8.78 --prefix deps
 ```
 
 then `/video-studio:doctor` (check `hyperframes`) and re-render with

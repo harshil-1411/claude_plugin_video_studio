@@ -10,10 +10,10 @@ import { ffprobe, resolveFfmpeg, type ProbeResult } from "@video-studio/media";
 import { buildComposition, HYPERFRAMES_KINDS } from "./hyperframes-compose.js";
 import type { Availability, SceneRenderer, SceneRenderRequest, SceneRenderResult } from "./types.js";
 
-/** Exact pinned producer version (package.json pins "@hyperframes/producer": "0.8.75"). */
-export const HYPERFRAMES_VERSION = "0.8.75";
+/** Exact pinned producer version (package.json pins "@hyperframes/producer": "0.8.78"). */
+export const HYPERFRAMES_VERSION = "0.8.78";
 
-/** The subset of @hyperframes/producer 0.8.75 this renderer calls. */
+/** The subset of @hyperframes/producer 0.8.78 this renderer calls. */
 export interface HyperframesProducer {
   createRenderJob(config: RenderConfigInput): RenderJob;
   executeRenderJob(

@@ -105,7 +105,7 @@ describe("buildComposition: HyperFrames contract", () => {
     expect(compositionIdFor('s1"];x')).toBe("vs-s1___x");
   });
 
-  it("passes the HyperFrames 0.8.75 linter with zero errors for every kind", async () => {
+  it("passes the HyperFrames 0.8.78 linter with zero errors for every kind", async () => {
     const lint = await loadLint();
     if (!lint) return; // lint package not resolvable in this install layout
     for (const kind of KINDS) {

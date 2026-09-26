@@ -29,6 +29,6 @@ Rules:
 - Chrome, `hyperframes` and whisper.cpp are optional: without HyperFrames the
   ffmpeg renderer draws every motion-graphic scene. If the user wants
   HyperFrames, give them the command from the `hyperframes` fix
-  (`cd "${CLAUDE_PLUGIN_DATA}" && PUPPETEER_SKIP_DOWNLOAD=1 npm i @hyperframes/producer@0.8.75 --prefix deps`)
+  (`cd "${CLAUDE_PLUGIN_DATA}" && PUPPETEER_SKIP_DOWNLOAD=1 npm i @hyperframes/producer@0.8.78 --prefix deps`)
   to run themselves, then re-run the doctor.
 - Do not try to install anything yourself unless the user asks.
