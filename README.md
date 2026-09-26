@@ -24,6 +24,7 @@ Turning knowledge into short videos usually means a timeline editor, a caption t
 
 - **Grounded:** every claim on screen cites a line in your sources. `verify` shows what is covered.
 - **Platform-ready:** one `dist/<platform>/` package each for TikTok, Instagram Reels, YouTube Shorts, LinkedIn and Facebook, with the video, cover, captions, post copy and a QA report. `lint` checks captions and text against each app's UI.
+- **Made to be watched:** plans follow a story arc with timed "reads", each list item, step or number appears as the voice says it, and Claude reviews contact sheets of its own render before handing it over.
 - **Reproducible:** `video.lock` pins every tool, font, renderer and asset hash. Re-renders are cached scene by scene, and `diff` and `test` catch regressions.
 - **Local-first:** ffmpeg, system text-to-speech and local whisper.cpp. Claude writes the plan, so the plugin needs **no LLM API key**, and none of the features below need a paid service.
 
@@ -149,7 +150,7 @@ flowchart LR
 | `/video-studio:test` · `diff` | Golden-frame regression tests; spec, lock and frame diffs between renders |
 | `/video-studio:variants` · `adapt` | Hook × cover A/B sets with an experiment manifest; new aspect, length or platform |
 | `/video-studio:localize` | Language versions from a translation sheet, re-timed for the language |
-| `/video-studio:ingest` · `shorts` · `analyze` | Media ingest and local transcription; standalone clips from a long talk; a reference video's format |
+| `/video-studio:ingest` · `shorts` · `analyze` | Media ingest and local transcription; standalone clips from a long talk, with cutaways to graphics while the speaker talks; a reference video's format |
 | `/video-studio:tighten` | Cleans up talking-head footage: shortens pauses, cuts filler words and drops retakes (dry run first, new asset on apply) |
 | `/video-studio:demo` | Records a scripted walk through **your** running app (inputs are blurred) |
 | `/video-studio:doctor` | Checks ffmpeg, fonts, Chrome, whisper, HyperFrames and keys |

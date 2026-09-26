@@ -11,3 +11,6 @@ examples/*/renders/
 examples/*/assets/voice/
 examples/*/dist/
 examples/*/qa/
+
+# The user's own video projects (kept local)
+msb-docs-ebmr-explainer/
