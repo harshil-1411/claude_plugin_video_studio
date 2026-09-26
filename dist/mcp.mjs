@@ -230567,7 +230567,7 @@ function toAss(lines, o) {
 /** Write `<base>.json|.srt|.vtt|.txt` (and `.ass` when `ass` options are given) into `dir`. */
 async function writeCaptionSet(dir, base, words, opts = {}) {
 	await mkdir(dir, { recursive: true });
-	const { ass, ...group } = opts;
+	const { ass, noBurnScenes, ...group } = opts;
 	const maxLines = Math.min(3, Math.max(1, opts.maxLines ?? ass?.maxLines ?? 2));
 	const layout = ass ? captionLayout({
 		...ass,
@@ -230592,8 +230592,9 @@ async function writeCaptionSet(dir, base, words, opts = {}) {
 		files,
 		lines
 	};
+	const burned = noBurnScenes?.size ? lines.filter((l) => !noBurnScenes.has(l.words[0]?.scene_id ?? "")) : lines;
 	files.ass = join(dir, `${base}.ass`);
-	await writeFile(files.ass, toAss(lines, {
+	await writeFile(files.ass, toAss(burned, {
 		...ass,
 		maxLines
 	}));
@@ -230601,7 +230602,7 @@ async function writeCaptionSet(dir, base, words, opts = {}) {
 		files,
 		lines,
 		placement: {
-			box: captionBlockBox(lines, layout, ass),
+			box: captionBlockBox(burned.length ? burned : lines, layout, ass),
 			max_lines: maxLines,
 			font_size: layout.fontSize
 		}
@@ -232650,6 +232651,7 @@ const Scene = strictObject({
 	audio: SceneAudio.optional(),
 	sfx: array(SoundEffect).max(8).optional(),
 	motion: SceneMotion.optional(),
+	burn_captions: boolean().optional().describe("false: no burned-in captions over this scene (e.g. kinetic_text already shows the spoken words). The .srt/.vtt captions keep every word. Default: captions.burn_in."),
 	cues: array(SceneCue).max(12).optional().describe("Word cues: each reveal item of the deterministic graphic appears as its word is spoken. Items without a cue keep the default stagger, never ahead of an earlier cue.")
 });
 const VoiceMode = _enum([
@@ -248827,6 +248829,59 @@ function checkOnScreenBrief(spec, state, out) {
 		});
 	}
 }
+/** Kinds that restate words on purpose: calls to action, end cards, quotes, name cards. */
+const ECHO_KINDS = /* @__PURE__ */ new Set([
+	"cta",
+	"end_card",
+	"quote",
+	"lower_third"
+]);
+/** Longest run of consecutive `shown` tokens that also appears consecutively in `said`. */
+function longestSharedRun(shown, said) {
+	let best = {
+		len: 0,
+		at: 0
+	};
+	const prev = new Array(said.length + 1).fill(0);
+	for (let i = 1; i <= shown.length; i++) {
+		let diag = 0;
+		for (let j = 1; j <= said.length; j++) {
+			const up = prev[j];
+			prev[j] = shown[i - 1] === said[j - 1] ? diag + 1 : 0;
+			if (prev[j] > best.len) best = {
+				len: prev[j],
+				at: i - prev[j]
+			};
+			diag = up;
+		}
+	}
+	return best;
+}
+/**
+* On-screen text that repeats the narration word for word while burned-in captions show the same
+* words: the viewer reads the line twice and the frame carries nothing new. Narrated, Latin-script
+* scenes only; calls to action, end cards, quotes and name cards are exempt, and so are scenes with
+* burn_captions: false. Kinetic text that types out the narration is the usual case: its fix is to
+* drop the burned-in captions for that scene.
+*/
+function checkTextRepeatsCaptions(spec, burnIn, out) {
+	if (!burnIn || voiceMode(spec) !== "narrated") return;
+	for (const s of spec.scenes) {
+		if (!s.voiceover.trim() || s.burn_captions === false || s.deterministic && ECHO_KINDS.has(s.deterministic.kind)) continue;
+		const text = [s.on_screen_text ?? "", s.deterministic ? propsText(s.deterministic.props) : ""].join(" ").trim();
+		if (!text || readingScript(text, spec.language) === "cjk") continue;
+		const shown = tokens(text);
+		if (shown.length < 4) continue;
+		if (longestSharedRun(shown, tokens(s.voiceover)).len < 4 || spokenShare(text, s.voiceover, false) < .8) continue;
+		out.push({
+			id: "text_repeats_captions",
+			severity: "warning",
+			scene_id: s.id,
+			message: `scene ${s.id}'s on-screen text repeats its voiceover word for word ("${snippet$1(text)}"), and the burned-in captions show the same words, so the line is read twice`,
+			fix: s.deterministic?.kind === "kinetic_text" ? `set burn_captions: false on scene ${s.id}: the kinetic text already shows the spoken words (the .srt/.vtt captions keep them for accessibility)` : `put something else on screen in ${s.id} (the key number or keyword, the payoff, a visual) or shorten it to the 1–3 words that matter; if the words must stay, set burn_captions: false on ${s.id}`
+		});
+	}
+}
 const TENSION = /* @__PURE__ */ new Set([
 	"question",
 	"problem",
@@ -248912,10 +248967,15 @@ async function checkTiming(root, spec, state, brand, out) {
 	const spans = sceneSpans(state);
 	const cap = state.captions?.json ? await readOptionalJson(join(root, state.captions.json)) : void 0;
 	if (cap?.lines?.length) {
-		const lines = captionLines(cap);
+		const noBurn = new Set(spec.scenes.filter((s) => s.burn_captions === false).map((s) => s.id));
+		const lines = captionLines(cap).filter((l) => !noBurn.has(l.scene_id));
 		checkCaptionBrief(spec, lines, brand, out);
 		const tracks = state.voice?.tracks_path ? await readOptionalJson(join(root, state.voice.tracks_path)) : void 0;
-		if (state.voice?.timing_source && state.voice.timing_source !== "none" && Array.isArray(tracks) && spans) checkCaptionSync(spec, cap, lines, spokenWords(tracks, spans), out);
+		if (state.voice?.timing_source && state.voice.timing_source !== "none" && Array.isArray(tracks) && spans) {
+			const spoken = spokenWords(tracks, spans);
+			for (const id of noBurn) spoken.delete(id);
+			checkCaptionSync(spec, cap, lines, spoken, out);
+		}
 		checkCaptionGap(lines, out);
 	}
 	checkBeatCuts(spec, state, spans, out);
@@ -249006,6 +249066,7 @@ async function lintProject(projectDir, opts = {}) {
 	checkOverflow(boxes, findings);
 	checkTextMasks(boxes, zones.masks, W, H, findings);
 	const burnIn = state?.burn_in ?? manifest?.captions?.burn_in ?? spec.captions.burn_in;
+	checkTextRepeatsCaptions(spec, burnIn, findings);
 	checkCaptions(spec, zones, state?.caption_layout?.box ?? state?.captions?.box ?? manifest?.captions?.box, burnIn, findings);
 	checkContrast(boxes, H, findings);
 	checkDensity(spec, findings);
@@ -251614,10 +251675,12 @@ async function renderProjectLocked(projectDir, o) {
 		total_ms: totalMs
 	}, warnings);
 	const captionWords = cues.length ? [...words, ...cues].sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms) : words;
+	const noBurnScenes = new Set(planScenes.filter((s) => s.burn_captions === false).map((s) => s.id));
 	const captionSet = captionWords.length ? await writeCaptionSet(captionsDir, "captions", captionWords, {
 		ass: assOpts,
 		maxLines: assOpts.maxLines,
-		endMs: totalMs
+		endMs: totalMs,
+		...noBurnScenes.size ? { noBurnScenes } : {}
 	}) : void 0;
 	const captionFiles = captionSet?.files;
 	if (captionFiles && cues.length) {

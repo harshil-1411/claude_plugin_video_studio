@@ -712,7 +712,11 @@ async function renderProjectLocked(projectDir: string, o: RenderProjectOptions):
           warnings,
         );
   const captionWords = cues.length ? [...words, ...cues].sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms) : words;
-  const captionSet = captionWords.length ? await writeCaptionSet(captionsDir, "captions", captionWords, { ass: assOpts, maxLines: assOpts.maxLines, endMs: totalMs }) : undefined;
+  // Scenes with burn_captions: false (kinetic text already showing the words) get no burned-in captions.
+  const noBurnScenes = new Set(planScenes.filter((s) => s.burn_captions === false).map((s) => s.id));
+  const captionSet = captionWords.length
+    ? await writeCaptionSet(captionsDir, "captions", captionWords, { ass: assOpts, maxLines: assOpts.maxLines, endMs: totalMs, ...(noBurnScenes.size ? { noBurnScenes } : {}) })
+    : undefined;
   const captionFiles = captionSet?.files;
   if (captionFiles && cues.length) {
     // The transcript is speech only (cues are for the captions).

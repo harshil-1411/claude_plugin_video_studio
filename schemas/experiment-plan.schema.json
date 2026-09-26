@@ -101,6 +101,10 @@
                 ],
                 "type": "object"
               },
+              "burn_captions": {
+                "description": "false: no burned-in captions over this scene (e.g. kinetic_text already shows the spoken words). The .srt/.vtt captions keep every word. Default: captions.burn_in.",
+                "type": "boolean"
+              },
               "claim_refs": {
                 "description": "Evidence source_refs or ContentIR claim ids backing this scene.",
                 "items": {

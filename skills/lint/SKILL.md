@@ -63,6 +63,12 @@ Run this loop when lint returns errors, or warnings the user wants cleared:
        word earlier.
      - `cue_too_close`: two cues in a scene land under 0.4 s apart. Drop
        one cue or cue a later word.
+   - `text_repeats_captions`: a narrated scene's on-screen text repeats its
+     voiceover word for word while burned-in captions show the same words.
+     For kinetic text that types out the narration, set `burn_captions:
+     false` on that scene (the .srt/.vtt keep the words). Otherwise put
+     something else on screen (the number, a keyword, the payoff), or cut
+     it to the 1-3 words that matter.
    - `cutaway_rhythm`: a cutaway (`footage.cutaway`) starts inside the
      hook's first second, lasts outside 3–10 s, or leaves under 2 s of the
      speaker since the previous one. Move, lengthen, split or merge it.

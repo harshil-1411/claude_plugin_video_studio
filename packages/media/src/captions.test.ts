@@ -1,4 +1,7 @@
 import type { SceneVoiceTrack } from "@video-studio/schema";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CJK_ROW_MAX_CHARS,
@@ -12,6 +15,7 @@ import {
   captionLayout,
   captionRows,
   captionReadMs,
+  writeCaptionSet,
   groupCaptionLines,
   joinWords,
   pickEmphasis,
@@ -407,5 +411,23 @@ describe("CJK, Devanagari and Arabic captions", () => {
     const ass = toAss(groupCaptionLines(words), { width: 360, height: 640, font: "Inter" });
     expect(ass).not.toContain("\\fn");
     expect(ass).toMatch(/,,Vector .*databases.* find meaning\.$/m);
+  });
+});
+
+describe("scenes without burned-in captions", () => {
+  it("leave the .ass only; .srt/.vtt/.json keep every word", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vs-noburn-"));
+    try {
+      const words = [...seq("I gave Claude a new superpower.", 250, "s01"), ...seq("Now it makes videos.", 250, "s02").map((x) => ({ ...x, start_ms: x.start_ms + 2000, end_ms: x.end_ms + 2000 }))];
+      const r = await writeCaptionSet(dir, "captions", words, { ass: { width: 1080, height: 1920 }, noBurnScenes: new Set(["s01"]) });
+      const ass = await readFile(r.files.ass!, "utf8");
+      const srt = await readFile(r.files.srt, "utf8");
+      expect(ass).not.toContain("superpower");
+      expect(ass).toContain("videos");
+      expect(srt).toContain("superpower");
+      expect(srt).toContain("videos");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

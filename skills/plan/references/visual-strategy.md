@@ -9,7 +9,7 @@ Use generative video only where a picture adds meaning that text cannot.
 | Scene content | `visual_strategy` | `deterministic.kind` | Typical `props` |
 |---|---|---|---|
 | Hook line, key phrase, single takeaway | `motion_graphic` | `typography` | `lines: [..]`, `emphasis` |
-| Punchy line revealed word by word (hooks, text-over-music cards) | `motion_graphic` | `kinetic_text` | `text`, `rhythm` (`word`/`phrase`), `emphasis` |
+| Punchy line revealed word by word (hooks, text-over-music cards) | `motion_graphic` | `kinetic_text` | `text`, `rhythm` (`word`/`phrase`), `emphasis`; when it types out the narration with captions burned in, set the scene's `burn_captions: false` so the words aren't shown twice |
 | Verbatim quote or testimonial from the source | `motion_graphic` | `quote` | `text`, `attribution`, `source` |
 | One headline number | `motion_graphic` | `stat` | `value` (number or string), `unit`, `label`, `context` (baseline) |
 | Code, CLI command, config, terminal output | `motion_graphic` | `code` | `language`, `code`, `highlight_lines` |

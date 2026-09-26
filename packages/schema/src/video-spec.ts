@@ -199,6 +199,12 @@ export const Scene = z.strictObject({
   audio: SceneAudio.optional(),
   sfx: z.array(SoundEffect).max(8).optional(),
   motion: SceneMotion.optional(),
+  burn_captions: z
+    .boolean()
+    .optional()
+    .describe(
+      "false: no burned-in captions over this scene (e.g. kinetic_text already shows the spoken words). The .srt/.vtt captions keep every word. Default: captions.burn_in.",
+    ),
   cues: z
     .array(SceneCue)
     .max(12)

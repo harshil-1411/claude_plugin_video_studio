@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TextBox } from "@video-studio/schema";
 import { describe, expect, it } from "vitest";
-import { type LintFinding, checkCues, checkCutaways, checkForbidden, checkLogo, contrastRatio, lintProject } from "./lint.js";
+import { type LintFinding, checkCues, checkCutaways, checkForbidden, checkLogo, checkTextRepeatsCaptions, contrastRatio, lintProject } from "./lint.js";
 
 const FIXTURE = join(import.meta.dirname, "__fixtures__", "lint", "tiktok-low-captions");
 
@@ -490,5 +490,40 @@ describe("brand logo and forbidden treatments", () => {
     checkForbidden({ scenes } as VideoSpec, { visual: { forbidden: ["drop shadow", "zoom transitions", "Kinetic text", "gradients"] } } as never, out);
     expect(out.map((f) => f.message.match(/uses "(.+?)"/)![1])).toEqual(["drop shadow", "zoom transitions", "Kinetic text"]);
     expect(out.every((f) => f.scene_id === "s01")).toBe(true);
+  });
+});
+
+describe("on-screen text repeating the captions", () => {
+  const scene = (id: string, voiceover: string, kind: string, props: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    ({ id, voiceover, deterministic: { kind, props }, ...extra }) as unknown as VideoSpec["scenes"][number];
+  const run = (scenes: VideoSpec["scenes"], burnIn = true, mode?: string) => {
+    const out: LintFinding[] = [];
+    checkTextRepeatsCaptions({ scenes, voice: mode ? { mode } : {} } as VideoSpec, burnIn, out);
+    return out;
+  };
+
+  it("flags word-for-word repeats (kinetic text included), not summaries", () => {
+    const out = run([
+      scene("s01", "I gave Claude a new superpower.", "kinetic_text", { text: "I gave Claude a new superpower." }),
+      scene("s02", "Every claim on screen cites a line in your sources.", "typography", { lines: ["Every claim", "cites a source."] }),
+      scene("s03", "Right now, that's an editor and checklists.", "typography", { lines: ["Creating videos", "is still painful."] }),
+      scene("s04", "It is fast because it caches every scene.", "typography", { lines: ["It caches every scene"] }),
+    ]);
+    expect(out.map((f) => f.scene_id)).toEqual(["s01", "s04"]);
+    expect(out[0]!.message).toMatch(/"I gave Claude a new superpower\."/);
+    expect(out[0]!.fix).toMatch(/set burn_captions: false on scene s01/);
+    expect(out[1]!.fix).toMatch(/put something else on screen/);
+  });
+
+  it("skips CTAs, quotes, hidden captions, no burn-in and unnarrated specs", () => {
+    const s = [
+      scene("s01", "Try it on your own README.", "cta", { headline: "Try it on your own README", action: "Install" }),
+      scene("s02", "It just works, a user said.", "quote", { text: "It just works, a user said." }),
+      scene("s03", "I gave Claude a new superpower.", "kinetic_text", { text: "I gave Claude a new superpower." }, { burn_captions: false }),
+    ];
+    expect(run(s)).toEqual([]);
+    const k = [scene("s01", "I gave Claude a new superpower.", "kinetic_text", { text: "I gave Claude a new superpower." })];
+    expect(run(k, false)).toEqual([]);
+    expect(run(k, true, "native")).toEqual([]);
   });
 });

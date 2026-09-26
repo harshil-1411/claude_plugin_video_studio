@@ -903,6 +903,8 @@ export function toAss(lines: readonly CaptionLine[], o: AssOptions): string {
 export interface CaptionSetOptions extends GroupOptions {
   /** Also write `.ass` burn-in captions; grouping then uses the layout's row width unless `maxChars` is set. */
   ass?: AssOptions;
+  /** Scenes left out of the burned-in `.ass` only (their words still go to .srt/.vtt/.json). */
+  noBurnScenes?: ReadonlySet<string>;
 }
 
 export interface CaptionSetFiles {
@@ -930,7 +932,7 @@ export interface CaptionSetResult {
 /** Write `<base>.json|.srt|.vtt|.txt` (and `.ass` when `ass` options are given) into `dir`. */
 export async function writeCaptionSet(dir: string, base: string, words: readonly CaptionWord[], opts: CaptionSetOptions = {}): Promise<CaptionSetResult> {
   await mkdir(dir, { recursive: true });
-  const { ass, ...group } = opts;
+  const { ass, noBurnScenes, ...group } = opts;
   const maxLines = Math.min(3, Math.max(1, opts.maxLines ?? ass?.maxLines ?? 2));
   const layout = ass ? captionLayout({ ...ass, maxLines }) : undefined;
   const lines = groupCaptionLines(words, { ...group, maxLines, ...(layout && opts.maxChars === undefined ? { maxChars: layout.maxChars } : {}) });
@@ -945,7 +947,9 @@ export async function writeCaptionSet(dir: string, base: string, words: readonly
   await writeFile(files.vtt, toVtt(lines));
   await writeFile(files.txt, toTranscript(words));
   if (!ass || !layout) return { files, lines };
+  // Captions never span scenes (a scene change is a hard break), so a caption belongs to its first word's scene.
+  const burned = noBurnScenes?.size ? lines.filter((l) => !noBurnScenes.has(l.words[0]?.scene_id ?? "")) : lines;
   files.ass = join(dir, `${base}.ass`);
-  await writeFile(files.ass, toAss(lines, { ...ass, maxLines }));
-  return { files, lines, placement: { box: captionBlockBox(lines, layout, ass), max_lines: maxLines, font_size: layout.fontSize } };
+  await writeFile(files.ass, toAss(burned, { ...ass, maxLines }));
+  return { files, lines, placement: { box: captionBlockBox(burned.length ? burned : lines, layout, ass), max_lines: maxLines, font_size: layout.fontSize } };
 }

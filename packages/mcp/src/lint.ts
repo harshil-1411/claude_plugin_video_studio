@@ -971,6 +971,58 @@ function checkOnScreenBrief(spec: VideoSpec, state: RenderStateView | undefined,
   }
 }
 
+/** Kinds that restate words on purpose: calls to action, end cards, quotes, name cards. */
+const ECHO_KINDS: ReadonlySet<string> = new Set(["cta", "end_card", "quote", "lower_third"]);
+/** On-screen text repeats the voiceover when a run this long is said verbatim and most of its words are spoken. */
+export const REPEAT_RUN_WORDS = 4;
+export const REPEAT_SPOKEN_SHARE = 0.8;
+
+/** Longest run of consecutive `shown` tokens that also appears consecutively in `said`. */
+function longestSharedRun(shown: readonly string[], said: readonly string[]): { len: number; at: number } {
+  let best = { len: 0, at: 0 };
+  const prev = new Array<number>(said.length + 1).fill(0);
+  for (let i = 1; i <= shown.length; i++) {
+    let diag = 0;
+    for (let j = 1; j <= said.length; j++) {
+      const up = prev[j]!;
+      prev[j] = shown[i - 1] === said[j - 1] ? diag + 1 : 0;
+      if (prev[j]! > best.len) best = { len: prev[j]!, at: i - prev[j]! };
+      diag = up;
+    }
+  }
+  return best;
+}
+
+/**
+ * On-screen text that repeats the narration word for word while burned-in captions show the same
+ * words: the viewer reads the line twice and the frame carries nothing new. Narrated, Latin-script
+ * scenes only; calls to action, end cards, quotes and name cards are exempt, and so are scenes with
+ * burn_captions: false. Kinetic text that types out the narration is the usual case: its fix is to
+ * drop the burned-in captions for that scene.
+ */
+export function checkTextRepeatsCaptions(spec: VideoSpec, burnIn: boolean, out: LintFinding[]): void {
+  if (!burnIn || voiceMode(spec) !== "narrated") return;
+  for (const s of spec.scenes) {
+    if (!s.voiceover.trim() || s.burn_captions === false || (s.deterministic && ECHO_KINDS.has(s.deterministic.kind))) continue;
+    const text = [s.on_screen_text ?? "", s.deterministic ? propsText(s.deterministic.props) : ""].join(" ").trim();
+    if (!text || readingScript(text, spec.language) === "cjk") continue;
+    const shown = tokens(text);
+    if (shown.length < REPEAT_RUN_WORDS) continue;
+    const run = longestSharedRun(shown, tokens(s.voiceover));
+    if (run.len < REPEAT_RUN_WORDS || spokenShare(text, s.voiceover, false) < REPEAT_SPOKEN_SHARE) continue;
+    out.push({
+      id: "text_repeats_captions",
+      severity: "warning",
+      scene_id: s.id,
+      message: `scene ${s.id}'s on-screen text repeats its voiceover word for word ("${snippet(text)}"), and the burned-in captions show the same words, so the line is read twice`,
+      fix:
+        s.deterministic?.kind === "kinetic_text"
+          ? `set burn_captions: false on scene ${s.id}: the kinetic text already shows the spoken words (the .srt/.vtt captions keep them for accessibility)`
+          : `put something else on screen in ${s.id} (the key number or keyword, the payoff, a visual) or shorten it to the 1–3 words that matter; if the words must stay, set burn_captions: false on ${s.id}`,
+    });
+  }
+}
+
 const TENSION: ReadonlySet<string> = new Set(["question", "problem", "contrarian_claim", "story"]);
 const PAYOFF: ReadonlySet<string> = new Set(["payoff", "result", "reveal", "loop_back"]);
 const CLOSERS: ReadonlySet<string> = new Set(["cta", "end_card"]);
@@ -1043,11 +1095,15 @@ async function checkTiming(root: string, spec: VideoSpec, state: RenderStateView
   const spans = sceneSpans(state);
   const cap = state.captions?.json ? await readOptionalJson<CaptionJsonView>(join(root, state.captions.json)) : undefined;
   if (cap?.lines?.length) {
-    const lines = captionLines(cap);
+    // Scenes without burned-in captions (burn_captions: false) have no on-screen captions to time.
+    const noBurn = new Set(spec.scenes.filter((s) => s.burn_captions === false).map((s) => s.id));
+    const lines = captionLines(cap).filter((l) => !noBurn.has(l.scene_id));
     checkCaptionBrief(spec, lines, brand, out);
     const tracks = state.voice?.tracks_path ? await readOptionalJson<VoiceTrackView[]>(join(root, state.voice.tracks_path)) : undefined;
     if (state.voice?.timing_source && state.voice.timing_source !== "none" && Array.isArray(tracks) && spans) {
-      checkCaptionSync(spec, cap, lines, spokenWords(tracks, spans), out);
+      const spoken = spokenWords(tracks, spans);
+      for (const id of noBurn) spoken.delete(id);
+      checkCaptionSync(spec, cap, lines, spoken, out);
     }
     checkCaptionGap(lines, out);
   }
@@ -1152,6 +1208,7 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   checkOverflow(boxes, findings);
   checkTextMasks(boxes, zones.masks, W, H, findings);
   const burnIn = state?.burn_in ?? manifest?.captions?.burn_in ?? spec.captions.burn_in;
+  checkTextRepeatsCaptions(spec, burnIn, findings);
   // The render state is current; the dist manifest may be from the previous export (lint runs during export).
   checkCaptions(spec, zones, state?.caption_layout?.box ?? state?.captions?.box ?? manifest?.captions?.box, burnIn, findings);
   checkContrast(boxes, H, findings);
