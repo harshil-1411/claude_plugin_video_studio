@@ -58,7 +58,7 @@ The strips below are frames from preview renders (built-in ffmpeg renderer) made
 **Requirements:** Node.js 22.13+ and a system FFmpeg with libass and libx264 (`brew install ffmpeg` on macOS). Check with `/video-studio:doctor`.
 
 ```sh
-git clone <this repo> video-studio
+git clone https://github.com/harshil-1411/claude_plugin_video_studio.git video-studio
 cd video-studio && pnpm install
 claude --plugin-dir .
 ```
@@ -84,7 +84,7 @@ dist/
 <summary>Install from a marketplace, and optional keys</summary>
 
 ```
-/plugin marketplace add <owner>/<repo>
+/plugin marketplace add harshil-1411/claude_plugin_video_studio
 /plugin install video-studio@video-studio-marketplace
 ```
 
