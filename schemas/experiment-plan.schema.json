@@ -109,6 +109,38 @@
                 },
                 "type": "array"
               },
+              "cues": {
+                "description": "Word cues: each reveal item of the deterministic graphic appears as its word is spoken. Items without a cue keep the default stagger, never ahead of an earlier cue.",
+                "items": {
+                  "description": "Lands one reveal item of the scene's graphic on a spoken word.",
+                  "additionalProperties": false,
+                  "properties": {
+                    "item": {
+                      "description": "Reveal item it drives (see cueItems for each kind); default: the item after the previous cue's, starting at 0.",
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "occurrence": {
+                      "description": "Which occurrence of the word in the scene's speech (default 1).",
+                      "maximum": 9007199254740991,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "word": {
+                      "description": "A word or short phrase of this scene's speech (voiceover, or the footage transcript in voice.mode native). Matched case-insensitively, ignoring punctuation.",
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "word"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 12,
+                "type": "array"
+              },
               "deterministic": {
                 "description": "Deterministic (template-rendered) content for this scene.",
                 "additionalProperties": false,

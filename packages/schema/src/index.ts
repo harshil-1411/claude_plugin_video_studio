@@ -2,6 +2,7 @@ export * from "./common.js";
 export * from "./content-ir.js";
 export * from "./creative-brief.js";
 export * from "./video-spec.js";
+export * from "./cues.js";
 export * from "./render-manifest.js";
 export * from "./video-lock.js";
 export * from "./experiment.js";

@@ -4,6 +4,7 @@ export * from "./text-layout.js";
 export * from "./script.js";
 export * from "./ffmpeg-renderer.js";
 export * from "./select.js";
+export * from "./cue-timing.js";
 export * from "./footage.js";
 export { buildComposition, compositionIdFor, EASING_CSS, HYPERFRAMES_KINDS, type BuildCompositionOptions, type Composition, type CompositionAsset } from "./hyperframes-compose.js";
 export {

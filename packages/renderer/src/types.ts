@@ -64,6 +64,21 @@ export interface SceneRenderRequest {
   zones?: LayoutZones;
   /** Resolved footage for scenes with `footage` (absolute path, hash and probe of the asset). */
   footage?: { path: string; sha256: string; media: MediaInfo };
+  /**
+   * Word cues resolved to scene-local times (`scene.cues` matched against the spoken words), sorted
+   * by `at_s`. Item indexes follow `cueItems(kind, props)` from @video-studio/schema. A cued item's
+   * entrance settles on `at_s`; uncued items keep the default stagger but never enter before an
+   * earlier item's cue. Absent or empty: the default timing, byte-identical to before.
+   */
+  cues?: ResolvedCue[];
+}
+
+/** One `scene.cues` entry placed on the scene timeline. */
+export interface ResolvedCue {
+  /** Reveal item index (`cueItems`). */
+  item: number;
+  /** Scene-local seconds at which the word starts. */
+  at_s: number;
 }
 
 export interface SceneRenderResult {

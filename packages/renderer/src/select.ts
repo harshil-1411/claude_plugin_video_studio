@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { canonicalJson, ensureDir, readJson, sha256Hex, writeJsonAtomic } from "@video-studio/core";
 import type { LayoutZones } from "@video-studio/platforms";
 import type { DeterministicKind, Scene, TextBox, VideoSpec } from "@video-studio/schema";
-import type { Availability, RenderTarget, SceneRenderRequest, SceneRenderer, VisualTokens } from "./types.js";
+import type { Availability, RenderTarget, ResolvedCue, SceneRenderRequest, SceneRenderer, VisualTokens } from "./types.js";
 import { createFootageRenderer } from "./footage.js";
 import { LAYOUT_VERSION } from "./text-layout.js";
 
@@ -126,6 +126,8 @@ export interface RenderScenesOptions {
   footage?: ReadonlyMap<string, ResolvedFootage | { error: string }>;
   /** Renderer for footage scenes. Default: a new {@link createFootageRenderer}. */
   footageRenderer?: SceneRenderer;
+  /** Word cues per scene id, resolved against the spoken words (see `SceneRenderRequest.cues`). */
+  cues?: ReadonlyMap<string, ResolvedCue[]>;
 }
 
 export type ResolvedFootage = NonNullable<SceneRenderRequest["footage"]>;
@@ -158,6 +160,7 @@ export function sceneCacheKey(
   placeholder = false,
   zones?: LayoutZones,
   footage?: { sha256: string; duration_sec?: number; content_box?: { x: number; y: number; w: number; h: number } },
+  cues?: readonly ResolvedCue[],
 ): string {
   return sha256Hex(
     canonicalJson({
@@ -171,6 +174,8 @@ export function sceneCacheKey(
       placeholder,
       // The footage params (in/out, fit, focus, speed, loop) are in `scene.footage`; the file is keyed by its hash.
       ...(footage ? { footage } : {}),
+      // Cue times move with the voice, so a re-voiced scene re-renders; absent keeps old keys.
+      ...(cues?.length ? { cues } : {}),
     }),
   );
 }
@@ -245,7 +250,8 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
       r = sel.renderer;
       selReason = sel.reason;
     }
-    const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? { sha256: footage.sha256, duration_sec: footage.media.duration_sec, ...(footage.media.content_box ? { content_box: footage.media.content_box } : {}) } : undefined);
+    const cues = placeholder ? undefined : o.cues?.get(orig.id);
+    const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? { sha256: footage.sha256, duration_sec: footage.media.duration_sec, ...(footage.media.content_box ? { content_box: footage.media.content_box } : {}) } : undefined, cues);
     const out = join(dir, `${orig.id}.mp4`);
     const sidecarPath = join(dir, `${orig.id}.json`);
     const base = { scene_id: orig.id, renderer: r.id, renderer_version: r.version, cache_key: key, ...(placeholder ? { placeholder: true, reason: pendingReason } : {}) };
@@ -266,7 +272,7 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
     const tmp = join(dir, `.${orig.id}.${process.pid}.tmp.mp4`);
     try {
       const res = await r.render(
-        { scene, target: o.target, tokens: o.tokens, out_path: tmp, project_dir: o.project_dir, ...(o.zones ? { zones: o.zones } : {}), ...(footage ? { footage } : {}) },
+        { scene, target: o.target, tokens: o.tokens, out_path: tmp, project_dir: o.project_dir, ...(o.zones ? { zones: o.zones } : {}), ...(footage ? { footage } : {}), ...(cues?.length ? { cues } : {}) },
         { signal: o.signal },
       );
       await rename(tmp, out);

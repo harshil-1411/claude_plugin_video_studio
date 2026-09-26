@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TextBox } from "@video-studio/schema";
 import { describe, expect, it } from "vitest";
-import { contrastRatio, lintProject } from "./lint.js";
+import { type LintFinding, checkCues, contrastRatio, lintProject } from "./lint.js";
 
 const FIXTURE = join(import.meta.dirname, "__fixtures__", "lint", "tiktok-low-captions");
 
@@ -417,5 +417,26 @@ describe("lint: caption, beat and on-screen timing", () => {
     expect(ids(strong, "story_structure")).toEqual([]);
     // Two-scene videos have no room for an arc: not checked.
     expect(ids(await lintProject(project((s) => delete s.captions.position)), "story_structure")).toEqual([]);
+  });
+});
+
+describe("word cue checks", () => {
+  it("reports unplaced cues and cues too close together", () => {
+    const out: LintFinding[] = [];
+    checkCues(
+      {
+        cues: [
+          { scene_id: "s01", word: "ingest", item: 0, at_ms: 200, status: "placed" },
+          { scene_id: "s01", word: "plan", item: 1, at_ms: 450, status: "placed" },
+          { scene_id: "s01", word: "render", item: 2, status: "unmatched" },
+          { scene_id: "s02", word: "later", item: 0, at_ms: 5000, status: "late" },
+          { scene_id: "s03", word: "a", item: 0, at_ms: 100, status: "placed" },
+          { scene_id: "s03", word: "b", item: 1, at_ms: 900, status: "placed" },
+        ],
+      },
+      out,
+    );
+    expect(out.map((f) => `${f.id}:${f.scene_id}`)).toEqual(["cue_unmatched:s01", "cue_unmatched:s02", "cue_too_close:s01"]);
+    expect(out[2]!.message).toMatch(/250 ms apart/);
   });
 });

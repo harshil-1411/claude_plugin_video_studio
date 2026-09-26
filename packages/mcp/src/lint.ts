@@ -15,6 +15,7 @@ import {
   resolveMaster,
   resolveTargets,
   voiceMode,
+  MIN_CUE_GAP_MS,
 } from "@video-studio/schema";
 import { type Script, dominantScript, languageScript, scriptsIn } from "@video-studio/renderer";
 import { projectSpecPaths } from "./spec-validate.js";
@@ -133,6 +134,7 @@ interface RenderStateView {
   voice?: { timing_source?: string; tracks_path?: string };
   voice_mode?: string;
   beat_sync?: { bpm?: number | null; beats?: number; moved_cuts?: number; beat_times_ms?: number[] };
+  cues?: Array<{ scene_id: string; word: string; item: number; at_ms?: number; status: string }>;
 }
 
 /** captions/captions.json (media `CaptionJson`): the words and the captions built from them. */
@@ -955,6 +957,44 @@ async function checkTiming(root: string, spec: VideoSpec, state: RenderStateView
     checkCaptionGap(lines, out);
   }
   checkBeatCuts(spec, state, spans, out);
+  checkCues(state, out);
+}
+
+/** Word cues the render could not place, and cues too close together to follow. */
+export function checkCues(state: Pick<RenderStateView, "cues">, out: LintFinding[]): void {
+  const cues = state.cues ?? [];
+  for (const c of cues) {
+    if (c.status === "placed") continue;
+    out.push({
+      id: "cue_unmatched",
+      severity: "warning",
+      scene_id: c.scene_id,
+      message:
+        c.status === "late"
+          ? `cue "${c.word}" (item ${c.item}) is spoken after scene ${c.scene_id} ends, so the item kept its default timing`
+          : `cue "${c.word}" (item ${c.item}) was not found in scene ${c.scene_id}'s spoken words, so the item kept its default timing`,
+      fix:
+        c.status === "late"
+          ? `move the word earlier in the voiceover, cue an earlier word, or lengthen scene ${c.scene_id}`
+          : `cue a word the scene actually says (a native transcript may spell it differently), or render with a voice (silent renders have no word timings)`,
+    });
+  }
+  const byScene = new Map<string, number[]>();
+  for (const c of cues) if (c.status === "placed" && c.at_ms !== undefined) byScene.set(c.scene_id, [...(byScene.get(c.scene_id) ?? []), c.at_ms]);
+  for (const [scene, times] of byScene) {
+    const t = [...times].sort((a, b) => a - b);
+    const gaps = t.slice(1).map((x, i) => x - t[i]!);
+    const min = Math.min(...gaps);
+    if (gaps.length && min < MIN_CUE_GAP_MS) {
+      out.push({
+        id: "cue_too_close",
+        severity: "warning",
+        scene_id: scene,
+        message: `two cues in scene ${scene} land ${Math.round(min)} ms apart; viewers follow about one change per ${MIN_CUE_GAP_MS} ms`,
+        fix: `cue words at least ${MIN_CUE_GAP_MS / 1000}s apart: drop a cue (that item keeps the default stagger) or cue a later word`,
+      });
+    }
+  }
 }
 
 // ------------------------------------------------------------------------------------ entry

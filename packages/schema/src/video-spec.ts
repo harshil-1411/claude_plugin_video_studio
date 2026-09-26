@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cueItemIndexes, cueItems, matchCue } from "./cues.js";
 import {
   AspectRatio,
   DataPolicy,
@@ -169,6 +170,14 @@ export const SceneMotion = z
   })
   .describe("Camera-like motion of the whole scene frame.");
 
+export const SceneCue = z
+  .strictObject({
+    word: NonEmptyString.describe("A word or short phrase of this scene's speech (voiceover, or the footage transcript in voice.mode native). Matched case-insensitively, ignoring punctuation."),
+    occurrence: z.int().min(1).optional().describe("Which occurrence of the word in the scene's speech (default 1)."),
+    item: z.int().min(0).optional().describe("Reveal item it drives (see cueItems for each kind); default: the item after the previous cue's, starting at 0."),
+  })
+  .describe("Lands one reveal item of the scene's graphic on a spoken word.");
+
 export const Scene = z.strictObject({
   id: SceneId,
   duration_sec: z.number().positive().max(120),
@@ -184,6 +193,11 @@ export const Scene = z.strictObject({
   audio: SceneAudio.optional(),
   sfx: z.array(SoundEffect).max(8).optional(),
   motion: SceneMotion.optional(),
+  cues: z
+    .array(SceneCue)
+    .max(12)
+    .optional()
+    .describe("Word cues: each reveal item of the deterministic graphic appears as its word is spoken. Items without a cue keep the default stagger, never ahead of an earlier cue."),
 });
 
 export const VoiceMode = z
@@ -310,6 +324,7 @@ export type RoutingPreference = z.infer<typeof RoutingPreference>;
 export type VisualRequirements = z.infer<typeof VisualRequirements>;
 export type Transition = z.infer<typeof Transition>;
 export type Scene = z.infer<typeof Scene>;
+export type SceneCue = z.infer<typeof SceneCue>;
 export type VoiceSettings = z.infer<typeof VoiceSettings>;
 export type VoiceMode = z.infer<typeof VoiceMode>;
 export type AudioLicense = z.infer<typeof AudioLicense>;
@@ -902,6 +917,50 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
       });
     }
   }
+  // Word cues: the graphic's items land on spoken words.
+  spec.scenes.forEach((scene, i) => {
+    const cues = scene.cues;
+    if (!cues?.length) return;
+    const path = `scenes.${i}.cues`;
+    if (!scene.deterministic) {
+      errors.push({ path, message: `scene ${scene.id} has cues but no deterministic graphic to reveal`, fix: "add deterministic {kind, props}, or remove cues" });
+      return;
+    }
+    const mode = voiceMode(spec);
+    if (mode === "none") {
+      errors.push({ path, message: `scene ${scene.id} has cues, but voice.mode is "none" (no words are spoken)`, fix: "remove cues (items keep their default stagger), or narrate the scene" });
+      return;
+    }
+    const items = cueItems(scene.deterministic.kind, scene.deterministic.props);
+    const idx = cueItemIndexes(cues);
+    const seen = new Set<number>();
+    idx.forEach((item, k) => {
+      if (item >= items.length) {
+        errors.push({
+          path: `${path}.${k}`,
+          message: `cue "${cues[k]!.word}" drives item ${item}, but ${scene.deterministic!.kind} has ${items.length} item(s): ${items.map((t, j) => `${j} ${t}`).join(", ")}`,
+          fix: "set item to one of those indexes, or drop the cue",
+        });
+      } else if (seen.has(item)) {
+        errors.push({ path: `${path}.${k}`, message: `two cues drive item ${item} (${items[item]})`, fix: "give each item at most one cue" });
+      }
+      seen.add(item);
+    });
+    // Narrated: the words must be in the voiceover. Native speech comes from the transcript (checked at render).
+    if (mode === "narrated") {
+      const words = scene.voiceover.split(/\s+/).filter(Boolean);
+      cues.forEach((c, k) => {
+        if (matchCue(words, c) < 0) {
+          errors.push({
+            path: `${path}.${k}.word`,
+            message: `cue word "${c.word}"${c.occurrence && c.occurrence > 1 ? ` (occurrence ${c.occurrence})` : ""} is not in scene ${scene.id}'s voiceover`,
+            fix: "use a word the voiceover says (case and punctuation are ignored), or fix occurrence",
+          });
+        }
+      });
+    }
+  });
+
   const music = spec.audio?.music;
   if (music && !music.file.startsWith("bundled:") && !music.license) {
     warnings.push({

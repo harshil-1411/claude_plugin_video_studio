@@ -24,6 +24,7 @@ import {
 import {
   type RendererPreference,
   type RenderTarget,
+  type ResolvedCue,
   type ResolvedFootage,
   createFootageRenderer,
   type SceneRenderEntry,
@@ -64,6 +65,8 @@ import {
   resolveMaster,
   resolveTargets,
   voiceMode,
+  cueItemIndexes,
+  matchCue,
   type AudioLicense,
   type C2paRecord,
   type Style,
@@ -281,6 +284,8 @@ interface RenderState {
   sfx?: Array<{ file: string; sha256: string; scenes: string[]; license?: AudioLicense }>;
   /** Beats detected in the music bed when beat_sync is on. */
   beat_sync?: { bpm: number | null; beats: number; moved_cuts: number; /** Beat times on the video timeline (ms, first 1000), for lint's cut_off_beat. */ beat_times_ms?: number[] };
+  /** Word cues as resolved for this render (scene-local ms), for lint's cue checks. */
+  cues?: Array<{ scene_id: string; word: string; item: number; at_ms?: number; status: "placed" | "unmatched" | "late" }>;
   /** The music bed mixed in, with its rights. */
   music?: { ref: string; sha256: string; title?: string; license?: AudioLicense };
   /** Brand file the render read, project-relative (`external/<name>` when outside the project). */
@@ -517,6 +522,56 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   timing_adjustments.sort((a, b) => spec.scenes.findIndex((s) => s.id === a.scene_id) - spec.scenes.findIndex((s) => s.id === b.scene_id));
   const planScenes: Scene[] = spec.scenes.map((s) => (adjusted.has(s.id) ? { ...s, duration_sec: adjusted.get(s.id)! } : s));
 
+  // Slots sit on frame boundaries of the cumulative timeline, so per-scene rounding never adds frames.
+  const bounds = [0];
+  let acc = 0;
+  for (const s of planScenes) {
+    acc += s.duration_sec;
+    bounds.push(Math.round(acc * target.fps));
+  }
+  const frameMs = (f: number) => (f * 1000) / target.fps;
+  const slotMs = planScenes.map((_, i) => frameMs(bounds[i + 1]! - bounds[i]!));
+  // voice.mode native: each footage scene's words come from its asset transcript, shifted onto the scene.
+  const nativeTracks = new Map<string, SceneVoiceTrack>();
+  if (mode === "native") {
+    for (const [i, s] of planScenes.entries()) {
+      const f = footage.byScene.get(s.id);
+      if (!s.footage || !f || "error" in f) continue;
+      const amode = s.audio?.mode ?? "native";
+      if (amode !== "native" && amode !== "mix") continue;
+      const words = await transcriptWords(root, footage.assets.get(s.footage.asset), s.footage, slotMs[i]!, warnings);
+      if (words.length) nativeTracks.set(s.id, { scene_id: s.id, duration_ms: Math.round(slotMs[i]!), words, timing_source: "aligned", provider: "native" });
+    }
+    if (nativeTracks.size) timingSource = "aligned";
+  }
+  // Word cues: each scene's cued items land on its spoken words (scene-local times).
+  const sceneCues = new Map<string, ResolvedCue[]>();
+  const cueLog: NonNullable<RenderState["cues"]> = [];
+  for (const [i, s] of planScenes.entries()) {
+    if (!s.cues?.length || !s.deterministic) continue;
+    const track = nativeTracks.get(s.id) ?? trackById.get(s.id);
+    const words = track?.words ?? [];
+    const items = cueItemIndexes(s.cues);
+    const placed: ResolvedCue[] = [];
+    s.cues.forEach((c, k) => {
+      const at = words.length ? matchCue(words.map((w) => w.word), c) : -1;
+      const entry = { scene_id: s.id, word: c.word, item: items[k]! };
+      if (at < 0) {
+        cueLog.push({ ...entry, status: "unmatched" });
+        warnings.push(`cues: ${s.id}: "${c.word}" ${words.length ? "is not in the spoken words" : "has no word timings (silent voice?)"}; item ${items[k]} keeps its default timing`);
+        return;
+      }
+      const atMs = words[at]!.start_ms;
+      if (atMs >= slotMs[i]!) {
+        cueLog.push({ ...entry, at_ms: atMs, status: "late" });
+        warnings.push(`cues: ${s.id}: "${c.word}" is spoken after the scene ends; item ${items[k]} keeps its default timing`);
+        return;
+      }
+      cueLog.push({ ...entry, at_ms: atMs, status: "placed" });
+      placed.push({ item: items[k]!, at_s: Math.round(atMs) / 1000 });
+    });
+    if (placed.length) sceneCues.set(s.id, placed.sort((a, b) => a.at_s - b.at_s || a.item - b.item));
+  }
   // d. scene clips
   const rdir = renderDir(root, quality);
   const scenesDir = join(rdir, "scenes");
@@ -545,6 +600,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     ...(signal ? { signal } : {}),
     footage: footage.byScene,
     footageRenderer: o.footageRenderer ?? createFootageRenderer({ encodePreset: o.encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") }),
+    ...(sceneCues.size ? { cues: sceneCues } : {}),
   };
   const first = await renderScenes({ scenes: planScenes }, { ...baseOpts, preference, onScene });
   const entries = new Map(first.scenes.map((e) => [e.scene_id, e]));
@@ -574,28 +630,6 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   // e. captions from the word timeline
   signal?.throwIfAborted();
   progress({ stage: "captions", message: "building captions" });
-  // Slots sit on frame boundaries of the cumulative timeline, so per-scene rounding never adds frames.
-  const bounds = [0];
-  let acc = 0;
-  for (const s of planScenes) {
-    acc += s.duration_sec;
-    bounds.push(Math.round(acc * target.fps));
-  }
-  const frameMs = (f: number) => (f * 1000) / target.fps;
-  const slotMs = planScenes.map((_, i) => frameMs(bounds[i + 1]! - bounds[i]!));
-  // voice.mode native: each footage scene's words come from its asset transcript, shifted onto the scene.
-  const nativeTracks = new Map<string, SceneVoiceTrack>();
-  if (mode === "native") {
-    for (const [i, s] of planScenes.entries()) {
-      const f = footage.byScene.get(s.id);
-      if (!s.footage || !f || "error" in f) continue;
-      const amode = s.audio?.mode ?? "native";
-      if (amode !== "native" && amode !== "mix") continue;
-      const words = await transcriptWords(root, footage.assets.get(s.footage.asset), s.footage, slotMs[i]!, warnings);
-      if (words.length) nativeTracks.set(s.id, { scene_id: s.id, duration_ms: Math.round(slotMs[i]!), words, timing_source: "aligned", provider: "native" });
-    }
-    if (nativeTracks.size) timingSource = "aligned";
-  }
   const placements = planScenes.map((s, i) => {
     const dur = slotMs[i]!;
     const track: SceneVoiceTrack = nativeTracks.get(s.id) ?? trackById.get(s.id) ?? { scene_id: s.id, duration_ms: Math.round(dur), words: [], timing_source: "none", provider: "silent" };
@@ -870,6 +904,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     ...(footage.used.length ? { footage: footage.used } : {}),
     ...(sceneAudio?.sfxState.length ? { sfx: sceneAudio.sfxState } : {}),
     ...(beatSync ? { beat_sync: beatSync } : {}),
+    ...(cueLog.length ? { cues: cueLog } : {}),
     background: tokens.color_background,
     ...(music ? { music: { ref: music.ref, sha256: music.sha256, ...(music.title ? { title: music.title } : {}), ...(music.license ? { license: music.license } : {}) } } : {}),
     ...(brandFile ? { brand_path: brandRel(root, brandFile.path) } : {}),
