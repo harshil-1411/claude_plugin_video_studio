@@ -53,7 +53,7 @@ describe("resolveHyperframesProducer", () => {
     await fakeProducer(join(tmp, "old", "node_modules"), "0.8.1");
     const r = resolveHyperframesProducer({ CLAUDE_PLUGIN_DATA: join(tmp, "empty-data") }, { pluginRoot: join(tmp, "old") });
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toMatch(/0\.8\.1 found .* pins 0\.8\.75/);
+    if (!r.ok) expect(r.reason).toMatch(/0\.8\.1 found .* pins 0\.8\.78/);
   });
 
   it("finds the repo root as plugin root and documents the install command", () => {

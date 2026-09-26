@@ -105,7 +105,7 @@ describe("available()", () => {
   });
   it("is false when the producer package is missing", async () => {
     const r = createHyperframesRenderer({ chromePath: fakeChrome, producerInstalled: () => false });
-    expect(await r.available(process.env)).toEqual({ ok: false, reason: expect.stringMatching(/@hyperframes\/producer 0\.8\.75/) });
+    expect(await r.available(process.env)).toEqual({ ok: false, reason: expect.stringMatching(/@hyperframes\/producer 0\.8\.78/) });
   });
   it("runs the launch probe once and caches its result", async () => {
     let calls = 0;
