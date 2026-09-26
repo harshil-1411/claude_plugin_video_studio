@@ -37,8 +37,15 @@ Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixe
     - Local HTML is capped at 20 MB.
     - Secrets are redacted in every source (`redact.ts`, cache included).
     - Review labels use `expansion=none`.
+  - Step 3: `renderProjectLocked` split into stage functions (602 → 67 lines; `pipeline-stages.ts`, `-core`, `-media`, `-sound-cues`), a pure refactor.
+  - Step 4 (reliability):
+    - `render_cancel` plus per-job abort, a `cancelled` status, and signal/stdin-close handlers in `main.ts`. A client disconnect now aborts the render.
+    - ffmpeg aborts kill the child process and remove partial output. Voice commands time out after 5 min.
+    - Tool annotations corrected. `variants` never double-queues, resubmits failed and cancelled renders, and skips folders under a live render lock.
+    - `FfmpegError.kind` gives actionable first lines, and tool errors carry a `[CODE]` (RENDER_LOCKED, SPEC_INVALID, MODEL_MISSING, FFMPEG_*, REFUSED, NOT_FOUND, CANCELLED).
+    - Follow-up: add `cancelled` to the `ExperimentVariant` status enum (it's shown as failed for now).
 - **Next:**
-  - Step 3: P1.5, split `renderProjectLocked` into stage functions (pure refactor).
+  - Step 5: P1.2 spend and consent controls (policy.yaml loaded, paid voice only when allowed, consent recorded, `disable-model-invocation`).
 
 ## Where things stand
 

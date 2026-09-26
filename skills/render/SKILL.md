@@ -3,7 +3,7 @@ name: render
 description: Render a planned video-studio project (project/video-spec.json) into a finished package in dist/ - captioned 9:16/16:9 reel, clean master, SRT/VTT captions, transcript, thumbnail, social copy, render manifest and provenance - using only local tools (system TTS or silent voice, HyperFrames or ffmpeg motion graphics). Use when the user runs /video-studio:render, approves a plan, or asks to render, preview or export the video.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+) and ffmpeg with libass and libx264.
-allowed-tools: mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__doctor mcp__plugin_video-studio_engine__review Read Write Edit
+allowed-tools: mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__render_cancel mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__doctor mcp__plugin_video-studio_engine__review Read Write Edit
 ---
 
 # Render a video
@@ -32,7 +32,17 @@ one short line when it changes (voice, scene 3/6, assemble, QA, export); do
 not repeat identical updates. A preview of a 30 s reel usually takes well
 under a minute; a final render several minutes. Other submissions queue:
 only one render runs at a time. `interrupted` means the engine restarted:
-submit again (all finished work is cached).
+submit again (all finished work is cached). If the user wants to stop a
+render (wrong settings, taking too long), call `render_cancel {job_id}`: the
+job ends as `cancelled`, the project's render lock is released and finished
+scene clips stay cached for the next `render_submit`.
+
+Errors start with a code in brackets (also `code` / `error_code` in the
+structured result): `RENDER_LOCKED` (another render of this project is
+running: wait and poll, or cancel it), `SPEC_INVALID` (fix the spec),
+`FFMPEG_MISSING_ENCODER` / `FFMPEG_MISSING_FILTER` / `FFMPEG_NOT_INSTALLED`
+(run `doctor` and relay its fix), `FFMPEG_DISK_FULL`, `FFMPEG_BAD_INPUT`
+(name the file), `NOT_FOUND`, `REFUSED`, else `ERROR`.
 
 ## 4. Look at it before presenting
 

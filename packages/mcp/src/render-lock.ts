@@ -89,3 +89,12 @@ export async function acquireRenderLock(lockPath: string, quality?: string, deps
   }
   throw new RenderLockedError((await readLock(lockPath)) ?? info, lockPath);
 }
+
+/** The holder of the lock at `lockPath` while a live render holds it; undefined when free or stale. */
+export async function renderLockHolder(lockPath: string, deps: RenderLockDeps = {}): Promise<RenderLockInfo | undefined> {
+  const held = await readLock(lockPath);
+  if (!held) return undefined;
+  const host = deps.host ?? hostname();
+  const now = deps.now ?? (() => new Date());
+  return isStale(held, host, now(), deps.alive ?? processAlive) ? undefined : held;
+}

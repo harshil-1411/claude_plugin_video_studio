@@ -29,6 +29,7 @@ const expected = [
   "localize",
   "project_init",
   "qa_run",
+  "render_cancel",
   "render_submit",
   "review",
   "schema_get",

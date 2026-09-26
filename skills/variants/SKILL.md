@@ -32,7 +32,11 @@ shared with the base project, so the experiment isolates what it tests.
 4. Call `variants {project_dir, render: true}` (add `quality: "final"` when
    the user wants final renders). Renders queue one at a time; poll
    `job_status` for each job id every 10–20 s, or
-   `variants {project_dir, status_only: true}`.
+   `variants {project_dir, status_only: true}`. Calling it again is safe:
+   variants already queued or running are not resubmitted, and a variant
+   being rendered is left untouched (listed under `skipped`). A variant
+   whose render failed or was cancelled shows `failed` with the job's error;
+   `render: true` resubmits it.
 5. Optionally run `lint` on one variant folder (`variants/<id>`) per hook.
 6. Report: the hypothesis and metric, then one line per variant (id, hook
    label, cover headline, status, `variants/<id>/dist/`). Remind the user to

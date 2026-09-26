@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { constants } from "node:fs";
-import { access } from "node:fs/promises";
-import { delimiter, join } from "node:path";
+import { constants, existsSync } from "node:fs";
+import { access, rm } from "node:fs/promises";
+import { delimiter, join, resolve } from "node:path";
 
 /**
  * FFmpeg process layer. Policy (see reports/Video studio implementation specs.md):
@@ -158,35 +158,119 @@ export interface RunResult {
   stderr: string;
 }
 
+/** Why an ffmpeg/ffprobe run failed, classified from its stderr (see {@link classifyFfmpegFailure}). */
+export type FfmpegErrorKind =
+  | "not_installed"
+  | "missing_encoder"
+  | "missing_filter"
+  | "input_missing"
+  | "bad_input"
+  | "disk_full"
+  | "permission_denied"
+  | "aborted"
+  | "timeout"
+  | "unknown";
+
 export class FfmpegError extends Error {
+  /** Classified cause; the message's first line says what to do about it. */
+  readonly kind: FfmpegErrorKind;
   constructor(
     message: string,
     readonly bin: string,
     readonly args: readonly string[],
     readonly exitCode: number | null,
     readonly stderrTail: string,
+    kind?: FfmpegErrorKind,
   ) {
     super(message);
     this.name = "FfmpegError";
+    this.kind = kind ?? "unknown";
   }
+}
+
+export interface FfmpegFailure {
+  kind: FfmpegErrorKind;
+  /** One actionable line, or undefined when the cause is not recognised. */
+  hint?: string;
+}
+
+/**
+ * The file an ffmpeg error names: `Error opening input file <path>.` (ffmpeg 6+), else a
+ * `<path>: <error>` line (older builds), else the first `-i` argument (inputs only).
+ */
+function namedFile(stderr: string, error: RegExp, args: readonly string[], inputsOnly: boolean): string | undefined {
+  const opening = new RegExp(`^Error opening ${inputsOnly ? "input" : "(?:input|output)"} file (.+?)\\.?$`, "m").exec(stderr);
+  if (opening) return opening[1];
+  for (const line of stderr.split("\n")) {
+    const m = /^(?:\[[^\]]*\]\s*)?(.+?):\s*(.*)$/.exec(line);
+    if (m && !/^Error /.test(m[1]!) && error.test(m[2]!)) return m[1];
+  }
+  if (!inputsOnly) return undefined;
+  const i = args.indexOf("-i");
+  return i >= 0 ? args[i + 1] : undefined;
+}
+
+/**
+ * Classify a failed ffmpeg/ffprobe run into a short actionable line. `spawnCode` is the spawn
+ * error's errno code (ENOENT: the binary is missing); `killedFor` is set when we killed it.
+ */
+export function classifyFfmpegFailure(
+  stderr: string,
+  ctx: { bin?: string; args?: readonly string[]; spawnCode?: string; killedFor?: "aborted" | "timeout" } = {},
+): FfmpegFailure {
+  const bin = (ctx.bin ?? "ffmpeg").split(/[\\/]/).pop() ?? "ffmpeg";
+  const args = ctx.args ?? [];
+  if (ctx.killedFor === "aborted") return { kind: "aborted", hint: `${bin} was stopped because the job was cancelled or the engine is shutting down` };
+  if (ctx.killedFor === "timeout") return { kind: "timeout", hint: `${bin} took too long and was killed; try preview quality or a shorter input` };
+  if (ctx.spawnCode === "ENOENT") {
+    return { kind: "not_installed", hint: `${bin} is not installed or not on PATH: install FFmpeg (macOS: brew install ffmpeg; Debian/Ubuntu: sudo apt install ffmpeg) or set FFMPEG_PATH/FFPROBE_PATH` };
+  }
+  if (ctx.spawnCode === "EACCES") return { kind: "permission_denied", hint: `${bin} is not executable (permission denied): fix its permissions or point FFMPEG_PATH/FFPROBE_PATH at a working binary` };
+  const enc = /Unknown encoder '([^']+)'|Encoder '?([\w-]+)'? not found|Requested encoder '([^']+)'/i.exec(stderr);
+  if (enc || /Encoder \(codec [^)]*\) not found/i.test(stderr)) {
+    const name = enc ? (enc[1] ?? enc[2] ?? enc[3]) : undefined;
+    const lib = name ?? "the requested encoder";
+    return { kind: "missing_encoder", hint: `your ffmpeg lacks ${lib}: install a full build, e.g. brew install ffmpeg (Debian/Ubuntu: sudo apt install ffmpeg), then check it with the doctor tool` };
+  }
+  const filt = /No such filter: '([^']+)'|Filter not found|Unknown filter '([^']+)'/i.exec(stderr);
+  if (filt) {
+    const name = filt[1] ?? filt[2];
+    const lib = name === "drawtext" ? "libfreetype (drawtext)" : name === "subtitles" || name === "ass" ? `libass (${name})` : name ? `the ${name} filter` : "a required filter";
+    return { kind: "missing_filter", hint: `your ffmpeg lacks ${lib}: install a full build with libfreetype and libass (e.g. brew install ffmpeg) and check it with the doctor tool` };
+  }
+  if (/No space left on device/i.test(stderr)) return { kind: "disk_full", hint: "the disk is full (No space left on device): free some space, then retry (cached work is reused)" };
+  if (/moov atom not found|Invalid data found when processing input|Could not find codec parameters/i.test(stderr)) {
+    const file = namedFile(stderr, /Invalid data found when processing input|moov atom not found|could not find codec parameters/i, args, true);
+    return { kind: "bad_input", hint: `${file ? `input ${file}` : "an input file"} is unreadable or corrupt (incomplete download or unsupported format): re-export or re-download it` };
+  }
+  if (/No such file or directory/i.test(stderr)) {
+    const file = namedFile(stderr, /No such file or directory/i, args, false);
+    return { kind: "input_missing", hint: `${file ? `${file} does not exist` : "a file ffmpeg needs does not exist"}: check the path` };
+  }
+  if (/Permission denied/i.test(stderr)) {
+    const file = namedFile(stderr, /Permission denied/i, args, false);
+    return { kind: "permission_denied", hint: `permission denied${file ? ` on ${file}` : ""}: check the file and folder permissions` };
+  }
+  return { kind: "unknown" };
 }
 
 const TAIL_BYTES = 16 * 1024;
 const MAX_KEEP = 64 * 1024 * 1024;
 const DEFAULT_TIMEOUT = 30 * 60 * 1000;
+const KILL_GRACE_MS = 2000;
 
 /** Spawn a binary with an argv array (never a shell) and collect output. */
 export function runProcess(bin: string, args: readonly string[], opts: RunOptions & { captureStdout?: boolean; onStdoutLine?: (l: string) => void } = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     if (opts.signal?.aborted) {
-      reject(new FfmpegError(`${bin} aborted before start`, bin, args, null, ""));
+      reject(new FfmpegError(`${bin.split(/[\\/]/).pop()} aborted before start`, bin, args, null, "", "aborted"));
       return;
     }
     const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, cwd: opts.cwd });
     let stderr = "";
     let stdout = "";
     let lineBuf = "";
-    let killedFor: string | null = null;
+    let killedFor: "aborted" | "timeout" | null = null;
     const keep = opts.keepStderr ? MAX_KEEP : TAIL_BYTES * 4;
 
     child.stderr.setEncoding("utf8");
@@ -207,13 +291,17 @@ export function runProcess(bin: string, args: readonly string[], opts: RunOption
       }
     });
 
-    const kill = (why: string) => {
+    const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT;
+    // SIGTERM first (ffmpeg stops cleanly), then SIGKILL if it is still alive after the grace period.
+    const kill = (why: "aborted" | "timeout") => {
       if (killedFor) return;
       killedFor = why;
       child.kill("SIGTERM");
-      setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 2000).unref();
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      }, KILL_GRACE_MS).unref();
     };
-    const timer = setTimeout(() => kill(`timed out after ${opts.timeoutMs ?? DEFAULT_TIMEOUT} ms`), opts.timeoutMs ?? DEFAULT_TIMEOUT);
+    const timer = setTimeout(() => kill("timeout"), timeoutMs);
     timer.unref();
     const onAbort = () => kill("aborted");
     opts.signal?.addEventListener("abort", onAbort, { once: true });
@@ -224,7 +312,8 @@ export function runProcess(bin: string, args: readonly string[], opts: RunOption
     };
     child.on("error", (err) => {
       done();
-      reject(new FfmpegError(`could not start ${bin}: ${err.message}`, bin, args, null, ""));
+      const c = classifyFfmpegFailure("", { bin, args, spawnCode: (err as NodeJS.ErrnoException).code });
+      reject(new FfmpegError(`${c.hint ? `${c.hint}\n` : ""}could not start ${bin}: ${err.message}`, bin, args, null, "", c.kind));
     });
     child.on("close", (code) => {
       done();
@@ -234,14 +323,38 @@ export function runProcess(bin: string, args: readonly string[], opts: RunOption
       }
       const tail = stderr.slice(-TAIL_BYTES).trim();
       const lastLines = tail.split("\n").slice(-6).join("\n");
-      const why = killedFor ?? `exited with code ${code}`;
-      reject(new FfmpegError(`${bin.split(/[\\/]/).pop()} ${why}${lastLines ? `:\n${lastLines}` : ""}`, bin, args, code, tail));
+      const why = killedFor === "aborted" ? "aborted" : killedFor === "timeout" ? `timed out after ${timeoutMs} ms` : `exited with code ${code}`;
+      const c = classifyFfmpegFailure(tail, { bin, args, ...(killedFor ? { killedFor } : {}) });
+      const detail = `${bin.split(/[\\/]/).pop()} ${why}${lastLines ? `:\n${lastLines}` : ""}`;
+      reject(new FfmpegError(c.hint ? `${c.hint}\n${detail}` : detail, bin, args, code, tail, c.kind));
     });
   });
 }
 
 /** Run ffmpeg with `args` (no shell). Always adds `-hide_banner -nostdin -nostats`. */
 export async function runFfmpeg(args: readonly string[], opts: RunOptions = {}): Promise<RunResult> {
+  const out = outputFile(args, opts.cwd);
+  // A file ffmpeg creates and then fails (or is aborted) on is partial: never leave it at its final path.
+  const existed = out ? existsSync(out) : true;
+  try {
+    return await runFfmpegRaw(args, opts);
+  } catch (err) {
+    if (out && !existed) await rm(out, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+/** ffmpeg's output file (its last argument) when it is a plain file path, not a pipe, device or pattern. */
+export function outputFile(args: readonly string[], cwd?: string): string | undefined {
+  const last = args[args.length - 1];
+  if (!last || args.length < 2 || last.startsWith("-") || last.includes("%") || /^[a-z][a-z0-9+.-]*:/i.test(last) || last.startsWith("/dev/")) return undefined;
+  // The last argument must not be an option's value (e.g. `-f null` has no output path).
+  const prev = args[args.length - 2]!;
+  if (prev === "-i" || prev === "-f") return undefined;
+  return resolve(cwd ?? ".", last);
+}
+
+async function runFfmpegRaw(args: readonly string[], opts: RunOptions): Promise<RunResult> {
   const { ffmpeg } = await getTools(opts.tools);
   const pre = ["-hide_banner", "-nostdin", "-nostats"];
   if (!opts.onProgress) return runProcess(ffmpeg, [...pre, ...args], opts);

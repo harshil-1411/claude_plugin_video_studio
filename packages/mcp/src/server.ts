@@ -23,10 +23,10 @@ import { type CompareSide, compareVideos, formatCompare } from "./compare.js";
 import { formatLint, lintProject } from "./lint.js";
 import { formatIssues, renderStoryboard, scaffoldSpec, validateBrief } from "./plan.js";
 import { type RenderProjectOptions, type RenderProjectResult, SpecInvalidError, exportProject, loadValidSpec, runQa } from "./pipeline.js";
-import { type RenderJobView, RenderJobManager } from "./render-jobs.js";
+import { type ErrorCode, type RenderJobView, RenderJobManager, errorCode, isActiveJob } from "./render-jobs.js";
 import { formatSpecValidation, projectSpecPaths, validateSpecFile } from "./spec-validate.js";
 import { findTemplatesDir, getTemplate, loadTemplates, requireTemplatesDir, summarizeTemplate } from "./templates.js";
-import { experimentStatus, formatVariants, prepareVariants } from "./variants.js";
+import { type JobLookup, experimentStatus, formatVariants, needsRender, prepareVariants } from "./variants.js";
 import { formatVerify, verifyProject } from "./verify.js";
 
 export const SERVER_NAME = "engine";
@@ -46,9 +46,13 @@ export interface ServerOptions {
   renderDefaults?: Partial<RenderProjectOptions>;
 }
 
-function errorResult(err: unknown): CallToolResult {
+/**
+ * A tool error: the first text line is `[CODE] error: <message>` and structuredContent carries
+ * {ok: false, code, error} so skills can branch on `code` (see {@link errorCode}).
+ */
+function errorResult(err: unknown, extra: Record<string, unknown> = {}, code: ErrorCode = errorCode(err)): CallToolResult {
   const message = err instanceof Error ? err.message : String(err);
-  return { isError: true, content: [{ type: "text", text: `error: ${message}` }] };
+  return { isError: true, content: [{ type: "text", text: `[${code}] error: ${message}` }], structuredContent: { ok: false, code, error: message, ...extra } };
 }
 
 /** Wrap a handler so it never throws: failures become `isError: true` results. */
@@ -98,7 +102,8 @@ function formatJob(v: RenderJobView): string {
       ...(r.warnings ?? []).slice(0, 10).map((w) => `warning: ${w}`),
     );
   }
-  if (v.error) lines.push(`error: ${v.error}`);
+  if (v.status === "cancelled" || v.status === "interrupted") lines.push(v.progress.message);
+  if (v.error) lines.push(`error${v.error_code ? ` [${v.error_code}]` : ""}: ${v.error}`);
   return lines.join("\n");
 }
 
@@ -369,7 +374,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Render a planned project (background job)",
       description:
-        "Start rendering <project_dir>/project/video-spec.json into <project_dir>/dist/ (reel.mp4 with burned captions, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target {video.mp4, cover.jpg, captions.srt/.vtt, post.json, qa.json}) plus qa/report.{json,md} and qa/lint.{json,md}. Validates the spec first and refuses on errors (returned with fixes). Returns {job_id} immediately; poll job_status every 10-20 s. Renders run one at a time; later submissions queue. Everything is cached, so re-submitting after a change only redoes what changed. voice: auto (ElevenLabs if configured, else system TTS, else silent; if a paid voice fails at synthesis it falls back to the system voice, then silent) | system | elevenlabs | silent. renderer: auto (HyperFrames if installed and Chrome launches, else ffmpeg) | hyperframes | ffmpeg. quality: preview (half resolution, 15 fps, fast encode; default) | final (1080 short side, 30 fps). placeholder (default true) draws titled cards for scenes that need a video provider. Local only: no paid calls.",
+        "Start rendering <project_dir>/project/video-spec.json into <project_dir>/dist/ (reel.mp4 with burned captions, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target {video.mp4, cover.jpg, captions.srt/.vtt, post.json, qa.json}) plus qa/report.{json,md} and qa/lint.{json,md}. Validates the spec first and refuses on errors (returned with fixes). Returns {job_id} immediately; poll job_status every 10-20 s. Renders run one at a time; later submissions queue. Everything is cached, so re-submitting after a change only redoes what changed. voice: auto (ElevenLabs if configured, else system TTS, else silent; if a paid voice fails at synthesis it falls back to the system voice, then silent) | system | elevenlabs | silent. renderer: auto (HyperFrames if installed and Chrome launches, else ffmpeg) | hyperframes | ffmpeg. quality: preview (half resolution, 15 fps, fast encode; default) | final (1080 short side, 30 fps). placeholder (default true) draws titled cards for scenes that need a video provider. Rendering is local; the only network call is ElevenLabs when voice is auto/elevenlabs and a key is configured. Stop a job with render_cancel.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Project folder containing project/video-spec.json"),
         voice: z.enum(["auto", "system", "elevenlabs", "silent"]).optional().describe("Voice backend (default auto)"),
@@ -379,7 +384,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
         placeholder: z.boolean().optional().describe("Placeholder cards for non-motion-graphic scenes (default true)"),
         brand_path: z.string().min(1).optional().describe("brand.yaml (default <project_dir>/brand.yaml when present)"),
       },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     safe(
       async (args: {
@@ -398,8 +403,8 @@ export function createServer(options: ServerOptions = {}): McpServer {
           if (e instanceof SpecInvalidError) {
             return {
               isError: true,
-              content: [{ type: "text", text: `render refused: ${e.message}` }],
-              structuredContent: { ok: false, errors: e.errors },
+              content: [{ type: "text", text: `[SPEC_INVALID] render refused: ${e.message}` }],
+              structuredContent: { ok: false, code: "SPEC_INVALID", error: e.message, errors: e.errors },
             };
           }
           throw e;
@@ -427,7 +432,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Render job status",
       description:
-        "Status of a render job from render_submit: {status: queued|running|succeeded|failed|interrupted, progress {stage, message, scene_index, scene_count}, result? (dist paths, width/height/fps/duration, qa {status, findings, report paths}, voice {backend, reason, timing_source}, renderer {used, reasons}, timing_adjustments, placeholders, warnings, cache), error?, spec_errors?}. `interrupted` means the engine restarted mid-job: submit again (cached work is reused).",
+        "Status of a render job from render_submit: {status: queued|running|succeeded|failed|cancelled|interrupted, progress {stage, message, scene_index, scene_count}, result? (dist paths, width/height/fps/duration, qa {status, findings, report paths}, voice {backend, reason, timing_source}, renderer {used, reasons}, timing_adjustments, placeholders, warnings, cache), error?, error_code? (RENDER_LOCKED|SPEC_INVALID|FFMPEG_<KIND>|NOT_FOUND|REFUSED|ERROR), spec_errors?}. `cancelled` means render_cancel stopped it; `interrupted` means the engine restarted or shut down mid-job: submit again (cached work is reused).",
       inputSchema: { job_id: z.string().min(1).describe("Job id from render_submit") },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
@@ -436,6 +441,31 @@ export function createServer(options: ServerOptions = {}): McpServer {
       if (!v) throw new Error(`unknown job ${job_id}`);
       const data = v as unknown as Record<string, unknown>;
       return v.status === "failed" ? { ...jsonResult(formatJob(v), data), isError: true } : jsonResult(formatJob(v), data);
+    }),
+  );
+
+  server.registerTool(
+    "render_cancel",
+    {
+      title: "Cancel a render job",
+      description:
+        "Cancel a queued or running render job from render_submit. A queued job is dropped; a running one is stopped (its ffmpeg/TTS processes are killed, the project's render lock is released and temp files are removed), waiting a few seconds for it to stop. Returns the job view like job_status, with status cancelled. Finished jobs are returned unchanged. Scene clips finished before the cancel stay cached, so a later render_submit resumes cheaply.",
+      inputSchema: { job_id: z.string().min(1).describe("Job id from render_submit") },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async ({ job_id }: { job_id: string }) => {
+      const before = getJobs().status(job_id)?.status;
+      const v = await getJobs().cancel(job_id);
+      if (!v) throw new Error(`unknown job ${job_id}`);
+      const note =
+        v.status === "cancelled"
+          ? before === "cancelled"
+            ? "already cancelled"
+            : "cancelled"
+          : isActiveJob(v.status)
+            ? "cancel requested; the job is still stopping, poll job_status"
+            : `not cancelled: the job already ${v.status === "interrupted" ? "stopped (interrupted)" : v.status}`;
+      return jsonResult(`${formatJob(v)}\n${note}`, { ...(v as unknown as Record<string, unknown>), cancel: note });
     }),
   );
 
@@ -471,7 +501,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
         project_dir: z.string().min(1).describe("Project folder with project/video-spec.json"),
         quality: QUALITY.optional().describe("Which render to check (default: final); spec-only checks run without a render"),
       },
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     safe(async ({ project_dir, quality }: { project_dir: string; quality?: "preview" | "final" }) => {
       const r = await lintProject(resolveInputPath(project_dir, cwd()), quality ? { quality } : {});
@@ -490,7 +520,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
         quality: QUALITY.optional().describe("Which render to export (default: the latest)"),
         sign: z.boolean().optional().describe("Add C2PA content credentials (provenance, AI disclosure) to the exported videos with the local c2patool"),
       },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     safe(async ({ project_dir, quality, sign }: { project_dir: string; quality?: "preview" | "final"; sign?: boolean }) => {
       const r = await exportProject(resolveInputPath(project_dir, cwd()), { ...(quality ? { quality } : {}), ...(sign ? { sign } : {}) });
@@ -507,7 +537,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
       inputSchema: {
         project_dir: z.string().min(1).describe("Project folder with project/video-spec.json and source/content-ir.json"),
       },
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     safe(async ({ project_dir }: { project_dir: string }) => {
       const r = await verifyProject(resolveInputPath(project_dir, cwd()));
@@ -526,7 +556,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
         quality: QUALITY.optional().describe("Which render to test (default: the latest)"),
         update: z.boolean().optional().describe("Record the current render as the new golden frames"),
       },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     safe(async ({ project_dir, quality, update }: { project_dir: string; quality?: "preview" | "final"; update?: boolean }) => {
       const r = await testProject(resolveInputPath(project_dir, cwd()), { ...(quality ? { quality } : {}), ...(update ? { update } : {}) });
@@ -622,7 +652,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Prepare (and render) A/B variants",
       description:
-        "Build an A/B experiment from <project_dir>/project/variants.json (ExperimentPlan: {schema_version, id, hypothesis, metric?, hooks: [{id, label?, scene}], covers?: [{id, label?, cover: {headline, focal_time_sec}}]}; schema_get experiment-plan). Every hook × cover pair becomes variants/<hook>-<cover>/, a full project whose spec is the base spec with the hook scene and cover swapped (validated like spec_validate). Writes variants/experiment.json (hypothesis, base spec hash, variants with status). With render: true, queues one render job per variant that is not rendered yet (renders run one at a time; poll job_status or call variants again with status_only: true). Base scene clips are reused, so a variant mostly re-renders its hook scene.",
+        "Build an A/B experiment from <project_dir>/project/variants.json (ExperimentPlan: {schema_version, id, hypothesis, metric?, hooks: [{id, label?, scene}], covers?: [{id, label?, cover: {headline, focal_time_sec}}]}; schema_get experiment-plan). Every hook × cover pair becomes variants/<hook>-<cover>/, a full project whose spec is the base spec with the hook scene and cover swapped (validated like spec_validate). Writes variants/experiment.json (hypothesis, base spec hash, variants with status). Each call rebuilds the variant folders from the base (their source/ and project/ are replaced; renders/ is kept), except a variant whose render is running right now, which is left as is and listed under skipped. With render: true, queues one render job per variant that is not rendered and not already queued or running (failed or cancelled renders are resubmitted; renders run one at a time; poll job_status or call variants again with status_only: true). A variant is `rendering` only while its job is queued or running. Base scene clips are reused, so a variant mostly re-renders its hook scene.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Planned (ideally rendered) base project"),
         render: z.boolean().optional().describe("Queue a render job per unrendered variant (default false: prepare only)"),
@@ -631,21 +661,28 @@ export function createServer(options: ServerOptions = {}): McpServer {
         voice: z.enum(["auto", "system", "elevenlabs", "silent"]).optional(),
         renderer: z.enum(["auto", "hyperframes", "ffmpeg"]).optional(),
       },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
     safe(
       async (args: { project_dir: string; render?: boolean; status_only?: boolean; quality?: "preview" | "final"; voice?: "auto" | "system" | "elevenlabs" | "silent"; renderer?: "auto" | "hyperframes" | "ffmpeg" }) => {
         const root = resolveInputPath(args.project_dir, cwd());
+        const lookup: JobLookup = (id) => {
+          const j = getJobs().status(id);
+          return j ? { status: j.status, ...(j.error ? { error: j.error } : {}) } : undefined;
+        };
         if (args.status_only) {
-          const m = await experimentStatus(root);
+          const m = await experimentStatus(root, {}, lookup);
           return jsonResult(formatVariants(m), m as unknown as Record<string, unknown>);
         }
-        const r = await prepareVariants(root);
+        const r = await prepareVariants(root, undefined, { jobs: lookup });
         let manifest = r.manifest;
         if (args.render) {
           const jobs: Record<string, string> = {};
+          const skipped = new Set(r.skipped.map((k) => k.id));
           for (const v of manifest.variants) {
-            if (v.status !== "prepared" && v.status !== "rendering") continue;
+            // Queued/running variants show as rendering and are not submitted twice; failed and
+            // cancelled renders are resubmitted; invalid specs and locked folders are left alone.
+            if (!needsRender(v) || skipped.has(v.id)) continue;
             const view = getJobs().submit(join(root, v.project_dir), {
               ...(args.quality ? { quality: args.quality } : {}),
               ...(args.voice ? { voice: args.voice } : {}),
@@ -653,9 +690,9 @@ export function createServer(options: ServerOptions = {}): McpServer {
             });
             jobs[v.id] = view.job_id;
           }
-          manifest = await experimentStatus(root, jobs);
+          manifest = await experimentStatus(root, jobs, lookup);
         }
-        return jsonResult(formatVariants(manifest, r.invalid), { ...manifest, manifest_path: r.manifest_path, invalid: r.invalid } as unknown as Record<string, unknown>);
+        return jsonResult(formatVariants(manifest, r.invalid, r.skipped), { ...manifest, manifest_path: r.manifest_path, invalid: r.invalid, skipped: r.skipped } as unknown as Record<string, unknown>);
       },
     ),
   );
@@ -719,12 +756,12 @@ export function createServer(options: ServerOptions = {}): McpServer {
         min_sec: z.number().positive().optional(),
         max_sec: z.number().positive().optional(),
         count: z.int().positive().max(10).optional().describe("How many candidates (default 3)"),
-        make_projects: z.boolean().optional().describe("Also create a ready talking-head project per candidate under shorts/<id>/ (footage scenes, native voice, transcript claim_refs)"),
+        make_projects: z.boolean().optional().describe("Also create a ready talking-head project per candidate under shorts/<id>/ (footage scenes, native voice, transcript claim_refs); overwrites an existing shorts/<id>/project/video-spec.json"),
         ids: z.array(z.string()).optional().describe("Only these candidate ids for make_projects"),
         aspect_ratio: AspectRatio.optional().describe("Aspect for the short projects (default 9:16)"),
         targets: z.array(PlatformTargetId).optional().describe("Targets for the short projects (default tiktok, instagram, youtube-shorts)"),
       },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     safe(
       async (args: { project_dir: string; asset: string; min_sec?: number; max_sec?: number; count?: number; make_projects?: boolean; ids?: string[]; aspect_ratio?: AspectRatio; targets?: string[] }) => {

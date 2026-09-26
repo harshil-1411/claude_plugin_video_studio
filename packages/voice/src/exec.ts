@@ -12,26 +12,72 @@ export interface CommandResult {
 export interface RunOptions {
   signal?: AbortSignal;
   env?: Env;
+  /** Kill the process after this long (SIGTERM, then SIGKILL). Default {@link DEFAULT_COMMAND_TIMEOUT_MS}. */
+  timeoutMs?: number;
 }
+
+/** Default per-call timeout for external commands (say, espeak-ng, ffmpeg helpers): 5 minutes. */
+export const DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
+/** Grace period between SIGTERM and SIGKILL. */
+const KILL_GRACE_MS = 2000;
 
 /** Runs a command (no shell). Injected everywhere so tests never depend on real binaries. */
 export type CommandRunner = (cmd: string, args: string[], opts?: RunOptions) => Promise<CommandResult>;
 
+function abortError(cmd: string, signal: AbortSignal): Error {
+  const reason = signal.reason instanceof Error ? `: ${signal.reason.message}` : "";
+  const e = new Error(`${cmd} aborted${reason}`);
+  e.name = "AbortError";
+  return e;
+}
+
+/**
+ * Spawn `cmd` with an argv array. Aborting `signal` or exceeding `timeoutMs` sends SIGTERM, then
+ * SIGKILL after a short grace period, and rejects (AbortError / timeout error) once the child is gone.
+ */
 export const defaultRunner: CommandRunner = (cmd, args, opts = {}) =>
   new Promise((resolve, reject) => {
+    const signal = opts.signal;
+    if (signal?.aborted) {
+      reject(abortError(cmd, signal));
+      return;
+    }
     const child = spawn(cmd, args, {
       stdio: ["ignore", "pipe", "pipe"],
-      signal: opts.signal,
       env: opts.env ? ({ ...process.env, ...opts.env } as NodeJS.ProcessEnv) : process.env,
     });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
+    let killedFor: "aborted" | "timeout" | null = null;
+    const timeoutMs = opts.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+    const kill = (why: "aborted" | "timeout") => {
+      if (killedFor) return;
+      killedFor = why;
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      }, KILL_GRACE_MS).unref();
+    };
+    const timer = setTimeout(() => kill("timeout"), timeoutMs);
+    timer.unref();
+    const onAbort = () => kill("aborted");
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
     child.stdout.on("data", (b: Buffer) => out.push(b));
     child.stderr.on("data", (b: Buffer) => err.push(b));
-    child.on("error", reject);
-    child.on("close", (code) =>
-      resolve({ code: code ?? -1, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") }),
-    );
+    child.on("error", (e) => {
+      done();
+      reject(e);
+    });
+    child.on("close", (code) => {
+      done();
+      if (killedFor === "aborted") return reject(abortError(cmd, signal!));
+      if (killedFor === "timeout") return reject(new Error(`${cmd} timed out after ${timeoutMs} ms and was killed`));
+      resolve({ code: code ?? -1, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") });
+    });
   });
 
 function isExecutable(path: string): boolean {

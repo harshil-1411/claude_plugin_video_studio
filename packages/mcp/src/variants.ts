@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { canonicalJson, hashFile, projectPaths, readJson, sha256Hex, writeJsonAtomic } from "@video-studio/core";
 import { ExperimentManifest, ExperimentPlan, type ExperimentVariant, VideoSpec, parseYamlOrJson } from "@video-studio/schema";
 import { LOCK_FILE, readLock } from "./lock.js";
+import { type RenderLockDeps, renderLockHolder } from "./render-lock.js";
 import { projectSpecPaths, validateSpecFile } from "./spec-validate.js";
 
 /**
@@ -26,6 +27,30 @@ export interface VariantsResult {
   manifest_path: string;
   /** Variants whose spec failed validation (not rendered). */
   invalid: Array<{ id: string; errors: string[] }>;
+  /** Variants left untouched because a render of them is running (their render lock is held). */
+  skipped: Array<{ id: string; reason: string }>;
+}
+
+/** A render job's state, looked up by id (the MCP server passes its job manager's view). */
+export type JobLookup = (jobId: string) => { status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted"; error?: string } | undefined;
+
+export interface VariantsOptions {
+  /** Look up each variant's render job; without it a variant with a job id counts as rendering. */
+  jobs?: JobLookup;
+  /** Render-lock liveness checks (tests). */
+  lockDeps?: RenderLockDeps;
+}
+
+const SPEC_INVALID = "spec invalid:";
+
+/** A variant whose spec failed validation (rendering it is pointless until the plan is fixed). */
+export function isSpecInvalid(v: ExperimentVariant): boolean {
+  return v.status === "failed" && (v.error?.startsWith(SPEC_INVALID) ?? false);
+}
+
+/** Whether `variants` with render: true should queue a job for this variant. */
+export function needsRender(v: ExperimentVariant): boolean {
+  return v.status === "prepared" || (v.status === "failed" && !isSpecInvalid(v));
 }
 
 function variantsDir(root: string): string {
@@ -64,20 +89,41 @@ export function variantSpec(base: VideoSpec, plan: ExperimentPlan, hookId: strin
   return spec;
 }
 
-/** Status of a prepared variant from its files: rendered when its dist lock matches its spec. */
-async function variantStatus(root: string, v: ExperimentVariant): Promise<ExperimentVariant> {
+/**
+ * Status of a prepared variant from its files and its render job: rendered when its dist lock
+ * matches its spec; rendering only while its job is queued or running; failed (resubmittable)
+ * when the job failed, was cancelled or was interrupted; else prepared.
+ */
+async function variantStatus(root: string, v: ExperimentVariant, jobs?: JobLookup): Promise<ExperimentVariant> {
+  if (isSpecInvalid(v)) return v;
+  const { error: _stale, dist: _dist, lock_sha256: _lock, ...rest } = v;
   const dir = join(root, v.project_dir);
   const lockPath = join(dir, "dist", LOCK_FILE);
-  if (v.status === "failed" && v.error) return v;
   try {
     const lock = await readLock(lockPath);
     if (lock && lock.spec_sha256 === v.spec_sha256) {
-      return { ...v, status: "rendered", dist: `${v.project_dir}/dist`, lock_sha256: await hashFile(lockPath) };
+      return { ...rest, status: "rendered", dist: `${v.project_dir}/dist`, lock_sha256: await hashFile(lockPath) };
     }
   } catch {
     // unreadable lock: not rendered
   }
-  return { ...v, status: v.job_id ? "rendering" : "prepared" };
+  if (!v.job_id) return { ...rest, status: "prepared" };
+  if (!jobs) return { ...rest, status: "rendering" };
+  const job = jobs(v.job_id);
+  switch (job?.status) {
+    case "queued":
+    case "running":
+      return { ...rest, status: "rendering" };
+    case "failed":
+      return { ...rest, status: "failed", error: `render job ${v.job_id} failed: ${(job.error ?? "unknown error").split("\n")[0]}; fix it and call variants with render: true again` };
+    case "cancelled":
+      return { ...rest, status: "failed", error: `render job ${v.job_id} was cancelled; call variants with render: true to render it again` };
+    case "interrupted":
+      return { ...rest, status: "failed", error: `render job ${v.job_id} was interrupted (engine restart); call variants with render: true to render it again` };
+    default:
+      // Succeeded without a matching dist lock (the spec changed since), or unknown: needs a render.
+      return { ...rest, status: "prepared" };
+  }
 }
 
 /**
@@ -85,7 +131,7 @@ async function variantStatus(root: string, v: ExperimentVariant): Promise<Experi
  * variants/experiment.json. Existing variant folders are rebuilt from the base, keeping their
  * renders/ so unchanged work stays cached.
  */
-export async function prepareVariants(projectDir: string, now: () => Date = () => new Date()): Promise<VariantsResult> {
+export async function prepareVariants(projectDir: string, now: () => Date = () => new Date(), o: VariantsOptions = {}): Promise<VariantsResult> {
   const root = projectPaths(projectDir).root;
   const plan = await loadPlan(root);
   const base = await loadBaseSpec(root);
@@ -95,11 +141,34 @@ export async function prepareVariants(projectDir: string, now: () => Date = () =
   const covers: Array<string | undefined> = plan.covers?.length ? plan.covers.map((c) => c.id) : [undefined];
   const variants: ExperimentVariant[] = [];
   const invalid: VariantsResult["invalid"] = [];
+  const skipped: VariantsResult["skipped"] = [];
 
   for (const hook of plan.hooks) {
     for (const coverId of covers) {
       const id = coverId ? `${hook.id}-${coverId}` : hook.id;
       const dir = join(vdir, id);
+      // Never delete and re-copy a variant that is being rendered right now.
+      const holder = await renderLockHolder(join(dir, "renders", ".render.lock"), o.lockDeps);
+      if (holder) {
+        const reason = `variant ${id} is being rendered (render lock held by pid ${holder.pid} on ${holder.host} since ${holder.started_at}); left as is. Call variants again after it finishes to apply plan changes.`;
+        skipped.push({ id, reason });
+        const prevEntry = prev?.variants.find((v) => v.id === id);
+        const onDisk = await readFile(projectSpecPaths(dir).spec, "utf8")
+          .then((t) => sha256Hex(canonicalJson(JSON.parse(t))))
+          .catch(() => undefined);
+        const entry: ExperimentVariant = prevEntry ?? {
+          id,
+          hook_id: hook.id,
+          ...(coverId ? { cover_id: coverId } : {}),
+          project_dir: `variants/${id}`,
+          spec_sha256: onDisk ?? sha256Hex(canonicalJson(variantSpec(base, plan, hook.id, coverId))),
+          status: "rendering",
+        };
+        const st = await variantStatus(root, entry, o.jobs);
+        // Its render is live even when this engine has no job for it (another session or the CLI).
+        variants.push(st.status === "rendered" ? st : { ...st, status: "rendering" });
+        continue;
+      }
       await mkdir(dir, { recursive: true });
       for (const part of COPY) {
         const src = join(root, part);
@@ -129,7 +198,7 @@ export async function prepareVariants(projectDir: string, now: () => Date = () =
         ...(check.ok ? {} : { error: `spec invalid: ${check.errors.map((e) => `${e.path}: ${e.message}`).join("; ")}` }),
       };
       if (!check.ok) invalid.push({ id, errors: check.errors.map((e) => `${e.path}: ${e.message} (fix: ${e.fix})`) });
-      variants.push(await variantStatus(root, entry));
+      variants.push(await variantStatus(root, entry, o.jobs));
     }
   }
 
@@ -146,26 +215,34 @@ export async function prepareVariants(projectDir: string, now: () => Date = () =
   });
   const manifest_path = join(vdir, EXPERIMENT_FILE);
   await writeJsonAtomic(manifest_path, manifest);
-  return { manifest, manifest_path, invalid };
+  return { manifest, manifest_path, invalid, skipped };
 }
 
 /** Re-read variants/experiment.json and refresh each variant's status from its files. */
-export async function experimentStatus(projectDir: string, jobs: Record<string, string> = {}): Promise<ExperimentManifest> {
+export async function experimentStatus(projectDir: string, jobs: Record<string, string> = {}, lookup?: JobLookup): Promise<ExperimentManifest> {
   const root = projectPaths(projectDir).root;
   const path = join(variantsDir(root), EXPERIMENT_FILE);
   if (!existsSync(path)) throw new Error("no variants/experiment.json; run variants first");
   const m = ExperimentManifest.parse(await readJson(path));
-  const variants = await Promise.all(m.variants.map((v) => variantStatus(root, jobs[v.id] ? { ...v, job_id: jobs[v.id] } : v)));
+  // A newly submitted job replaces the variant's old job and its failure.
+  const variants = await Promise.all(
+    m.variants.map((v) => {
+      if (!jobs[v.id]) return variantStatus(root, v, lookup);
+      const { error: _e, ...rest } = v;
+      return variantStatus(root, { ...rest, status: "rendering", job_id: jobs[v.id]! }, lookup);
+    }),
+  );
   const next = { ...m, variants };
   await writeJsonAtomic(path, next);
   return next;
 }
 
 /** One-screen summary. */
-export function formatVariants(m: ExperimentManifest, invalid: VariantsResult["invalid"] = []): string {
+export function formatVariants(m: ExperimentManifest, invalid: VariantsResult["invalid"] = [], skipped: VariantsResult["skipped"] = []): string {
   return [
     `experiment ${m.experiment_id}: ${m.variants.length} variant(s); hypothesis: ${m.hypothesis}`,
     ...m.variants.map((v) => `- ${v.id} (hook ${v.hook_id}${v.cover_id ? `, cover ${v.cover_id}` : ""}): ${v.status}${v.job_id ? ` [job ${v.job_id}]` : ""}${v.dist ? ` → ${v.dist}` : ""}${v.error ? ` — ${v.error}` : ""}`),
     ...invalid.flatMap((i) => i.errors.slice(0, 3).map((e) => `  ${i.id}: ${e}`)),
+    ...skipped.map((k) => `skipped: ${k.reason}`),
   ].join("\n");
 }
