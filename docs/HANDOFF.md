@@ -17,6 +17,15 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 3. **Phase 7**, paid providers, ElevenLabs first (needs the user's API key).
 4. **Phase 9**, publishing (needs platform developer accounts). Default targets are Instagram and YouTube Shorts: the user is in India, where TikTok is banned.
 
+## Audit fix loop (2026-09-26; resume from here)
+
+Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixes P0 → P1 → P2 from `audit/MASTER-PLUGIN-AUDIT.md`, including the user's top-8 features. The loop runs without questions, with `node scripts/check.mjs` and a push after each step.
+
+- **Done:**
+  - Step 0: `audit/` committed; per-run test temp root (`tests/setup/tmp-root.ts`, vitest `globalSetup`), so a full run leaks 0 folders; 3,885 leaked dirs (987 MB) removed.
+- **Next:**
+  - Step 1: P0 correctness (image-byte cache keys, `job_status` after restart, voice fallback, ingest merge, silent-wrong ingest, honest config).
+
 ## Where things stand
 
 | Phase | State |
