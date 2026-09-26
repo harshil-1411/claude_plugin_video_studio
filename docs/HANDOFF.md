@@ -252,6 +252,11 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
 
 ## Open issues
 
+0. **From the first real `shorts` run (2026-09-26):**
+   - **No footage redaction.** Screen or meeting recordings can show private data, and the spec has no way to blur regions. The session hand-made a blurred copy with ffmpeg. Planned: `footage.redact: [{x, y, w, h, from_sec?, to_sec?, mode: blur|box}]`, applied by the footage renderer.
+   - **Short projects copy the whole recording.** `makeShortProjects` copies all of `source/assets`, so an unredacted full copy sat in each `shorts/<id>/`. Planned: copy only a trimmed span (candidate ± margin) and rewrite the asset.
+   - **Loudness:** the true peak can land 0.1 dB over −1 dBTP on native meeting audio. Planned: keep a true-peak margin after the mix and encode.
+
 1. **TikTok contract not re-verified.** Re-check `platform-specs/tiktok.yaml` against developers.tiktok.com and bump `contract_version`/`verified`.
 2. ~~Deprecated caption helpers~~: already removed.
 3. **Brand v2 fields not used yet:** `motion` and `weights` (Phase 5 motion work), `logo_placement`, and `forbidden` (no lint check yet).

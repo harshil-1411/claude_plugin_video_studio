@@ -63,7 +63,7 @@ Approve the steps when asked.
 - a cursor is visible
 - the plan's `screen_capture` scenes cite `video:demo-<id>.mp4#step-N`
 
-## 5. A real talk or interview (15 min)
+## 5. A real talk or interview — ✅ done 2026-09-26 (real meeting recording → shorts → captioned 3-platform packages)
 
 With any MP4 of someone talking (2–10 min):
 
