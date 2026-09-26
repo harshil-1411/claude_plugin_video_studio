@@ -18,6 +18,8 @@ export interface SynthesisInput {
   duration_ms?: number;
   /** Spec language (BCP-47): backends pick a voice that speaks it, or fail rather than read it with another language's voice. */
   language?: string;
+  /** Speaking rate in words per minute (system TTS); backends use their default when absent. */
+  rate_wpm?: number;
 }
 
 export interface SynthesisContext {

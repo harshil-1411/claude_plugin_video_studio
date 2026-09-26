@@ -232488,6 +232488,7 @@ const VoiceMode = _enum([
 ]).describe("narrated: scenes carry voiceover (default). none: no speech; timing comes from scene durations and on-screen text, usually over a music bed. native: the speech is in the footage (talking head, interview); captions come from the asset transcripts.");
 const VoiceSettings = strictObject({
 	mode: VoiceMode.optional(),
+	rate_wpm: int().min(110).max(230).optional().describe("Speaking rate in words per minute for system TTS (default 160; 145–165 sounds natural for explainers)."),
 	provider_preference: array(Id).optional().describe("Preferred TTS providers in order; the router may override on policy."),
 	voice_id: string().optional(),
 	style: string().optional()
@@ -234812,6 +234813,1254 @@ function formatIngestSummary(s) {
 	return lines.join("\n");
 }
 //#endregion
+//#region ../voice/dist/exec.js
+const defaultRunner = (cmd, args, opts = {}) => new Promise((resolve, reject) => {
+	const child = spawn(cmd, args, {
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		signal: opts.signal,
+		env: opts.env ? {
+			...process.env,
+			...opts.env
+		} : process.env
+	});
+	const out = [];
+	const err = [];
+	child.stdout.on("data", (b) => out.push(b));
+	child.stderr.on("data", (b) => err.push(b));
+	child.on("error", reject);
+	child.on("close", (code) => resolve({
+		code: code ?? -1,
+		stdout: Buffer.concat(out).toString("utf8"),
+		stderr: Buffer.concat(err).toString("utf8")
+	}));
+});
+function isExecutable$1(path) {
+	try {
+		accessSync(path, constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+/** Find an executable on PATH. */
+function which(name, env = process.env) {
+	const dirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
+	for (const dir of dirs) {
+		const p = join(dir, name);
+		if (isExecutable$1(p)) return p;
+	}
+}
+/**
+* Resolve ffmpeg/ffprobe: FFMPEG_PATH / FFPROBE_PATH first, then PATH.
+* TODO: swap for @video-studio/media's resolver once it lands.
+*/
+function resolveFfTool$1(name, env = process.env) {
+	const override = env[name === "ffmpeg" ? "FFMPEG_PATH" : "FFPROBE_PATH"];
+	if (override && override.trim()) return isExecutable$1(override) ? override : void 0;
+	return which(name, env);
+}
+const defaultResolver = (name, env) => {
+	if (name === "ffmpeg" || name === "ffprobe") return resolveFfTool$1(name, env);
+	const found = which(name, env);
+	if (found) return found;
+	if (name === "say" && isExecutable$1("/usr/bin/say")) return "/usr/bin/say";
+};
+async function runChecked(runner, cmd, args, what, opts) {
+	const res = await runner(cmd, args, opts);
+	if (res.code !== 0) {
+		const tail = res.stderr.trim().split("\n").slice(-3).join(" | ");
+		throw new Error(`${what} failed (exit ${res.code})${tail ? `: ${tail}` : ""}`);
+	}
+	return res;
+}
+//#endregion
+//#region ../voice/dist/ffmpeg.js
+/**
+* Minimal local ffmpeg/ffprobe helpers for the voice package.
+* TODO: replace with @video-studio/media once its resolver/helpers land.
+*/
+/** Convert any input audio to 48 kHz mono 16-bit PCM WAV. */
+async function toWav48kMono(tools, input, output, opts) {
+	await runChecked(tools.runner, tools.ffmpeg, [
+		"-hide_banner",
+		"-loglevel",
+		"error",
+		"-y",
+		"-i",
+		input,
+		"-ar",
+		"48000",
+		"-ac",
+		"1",
+		"-c:a",
+		"pcm_s16le",
+		output
+	], "ffmpeg (convert to wav)", opts);
+}
+/** Concatenate audio files into one 48 kHz mono WAV. */
+async function concatToWav(tools, inputs, output, opts) {
+	if (inputs.length === 1) return toWav48kMono(tools, inputs[0], output, opts);
+	const args = [
+		"-hide_banner",
+		"-loglevel",
+		"error",
+		"-y"
+	];
+	for (const i of inputs) args.push("-i", i);
+	const labels = inputs.map((_, i) => `[${i}:a]`).join("");
+	args.push("-filter_complex", `${labels}concat=n=${inputs.length}:v=0:a=1[a]`, "-map", "[a]", "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", output);
+	await runChecked(tools.runner, tools.ffmpeg, args, "ffmpeg (concat)", opts);
+}
+/** Container duration in integer milliseconds. */
+async function probeDurationMs(tools, file, opts) {
+	const res = await runChecked(tools.runner, tools.ffprobe, [
+		"-v",
+		"error",
+		"-show_entries",
+		"format=duration",
+		"-of",
+		"default=noprint_wrappers=1:nokey=1",
+		file
+	], "ffprobe (duration)", opts);
+	const sec = Number.parseFloat(res.stdout.trim());
+	if (!Number.isFinite(sec) || sec < 0) throw new Error(`ffprobe returned no duration for ${file}`);
+	return Math.round(sec * 1e3);
+}
+/**
+* Parse ffmpeg `silencedetect` stderr into leading/trailing silence.
+* Leading: a silence starting at ~0. Trailing: a silence ending at ~EOF (ffmpeg closes open
+* silences at EOF). Returns zeros when the result would swallow most of the audio.
+*/
+function parseEdgeSilence(stderr, durationMs) {
+	const spans = [];
+	for (const line of stderr.split("\n")) {
+		const s = /silence_start:\s*(-?[\d.]+)/.exec(line);
+		if (s) spans.push({ start: Math.max(0, Number.parseFloat(s[1]) * 1e3) });
+		const e = /silence_end:\s*([\d.]+)/.exec(line);
+		if (e && spans.length) spans[spans.length - 1].end = Number.parseFloat(e[1]) * 1e3;
+	}
+	let leadMs = 0;
+	let trailMs = 0;
+	const first = spans[0];
+	const leading = first && first.start <= 10 && first.end !== void 0 ? first : void 0;
+	if (leading) leadMs = leading.end;
+	const last = spans[spans.length - 1];
+	if (last && last !== leading && (last.end === void 0 || last.end >= durationMs - 50)) trailMs = durationMs - last.start;
+	leadMs = Math.max(0, Math.round(leadMs));
+	trailMs = Math.max(0, Math.round(trailMs));
+	if (leadMs + trailMs > durationMs * .8) return {
+		leadMs: 0,
+		trailMs: 0
+	};
+	return {
+		leadMs,
+		trailMs
+	};
+}
+/** Detect leading/trailing silence with ffmpeg `silencedetect`; zeros on any failure. */
+async function detectEdgeSilence(tools, file, durationMs, opts) {
+	try {
+		const res = await tools.runner(tools.ffmpeg, [
+			"-hide_banner",
+			"-nostats",
+			"-i",
+			file,
+			"-af",
+			"silencedetect=noise=-45dB:d=0.08",
+			"-f",
+			"null",
+			"-"
+		], opts);
+		if (res.code !== 0) return {
+			leadMs: 0,
+			trailMs: 0
+		};
+		return parseEdgeSilence(res.stderr, durationMs);
+	} catch {
+		return {
+			leadMs: 0,
+			trailMs: 0
+		};
+	}
+}
+//#endregion
+//#region ../voice/dist/estimate.js
+const WORDLIKE$1 = /[\p{L}\p{N}]/u;
+/** CJK characters that are each a caption/speech unit: ideographs, kana, full-width letters and digits. */
+const CJK_UNIT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Bopomofo}０-９Ａ-Ｚａ-ｚｦ-ﾟ]/u;
+/** Any CJK character, punctuation included. */
+const CJK_ANY = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Bopomofo}　-〿！-｠・ー]/u;
+/** Kinsoku: never at the start of a unit (glued to the unit before): closing punctuation, small kana, ー. */
+const NO_START = new Set(Array.from("、。，．,.!?！？)）]］}｝〕〉》」』】〙〗〟’”»ー―‐〜～…‥・:;：；々〻ゝゞヽヾぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ%％"));
+/** Kinsoku: never at the end of a unit (glued to the unit after): opening brackets. */
+const NO_END = new Set(Array.from("(（[［{｛〔〈《「『【〘〖〝‘“«"));
+/** True for a character that is a speech/caption unit of its own (ideograph, kana, full-width letter). */
+function isCjkUnitChar(ch) {
+	return CJK_UNIT.test(ch);
+}
+/** True for a character that joins the unit before it (closing punctuation, small kana, ー). */
+function isNoStartChar(ch) {
+	return NO_START.has(ch);
+}
+/** The script with the most letters in `text` (Latin when there are none). */
+function speechScript(text) {
+	const n = {
+		latin: 0,
+		cjk: 0,
+		devanagari: 0,
+		arabic: 0,
+		hebrew: 0,
+		other: 0
+	};
+	for (const ch of text) {
+		if (!/\p{L}/u.test(ch)) continue;
+		if (/[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}]/u.test(ch)) n.latin++;
+		else if (CJK_ANY.test(ch)) n.cjk++;
+		else if (/\p{Script=Devanagari}/u.test(ch)) n.devanagari++;
+		else if (/\p{Script=Arabic}/u.test(ch)) n.arabic++;
+		else if (/\p{Script=Hebrew}/u.test(ch)) n.hebrew++;
+		else n.other++;
+	}
+	let best = "latin";
+	for (const k of Object.keys(n)) if (n[k] > n[best] || n[k] === n[best] && n[k] > 0 && best === "latin") best = k;
+	return best;
+}
+/**
+* Split a whitespace-free token that contains CJK into units: each CJK character is a unit,
+* runs of other characters (Latin words, ASCII digits) stay whole, closing punctuation and
+* small kana join the unit before, opening brackets the unit after.
+*/
+function splitCjk(token) {
+	const units = [];
+	let buf = "";
+	let prefix = "";
+	const flush = () => {
+		if (!buf) return;
+		units.push(prefix + buf);
+		prefix = "";
+		buf = "";
+	};
+	for (const ch of token) {
+		if (NO_START.has(ch)) {
+			if (buf) buf += ch;
+			else if (units.length && !prefix) units[units.length - 1] += ch;
+			else prefix += ch;
+			continue;
+		}
+		if (NO_END.has(ch)) {
+			flush();
+			prefix += ch;
+			continue;
+		}
+		if (CJK_UNIT.test(ch)) {
+			flush();
+			units.push(prefix + ch);
+			prefix = "";
+			continue;
+		}
+		buf += ch;
+	}
+	flush();
+	if (prefix) {
+		if (units.length) units[units.length - 1] += prefix;
+		else units.push(prefix);
+	}
+	return units;
+}
+/**
+* Split text into caption/speech words on whitespace. Punctuation-only tokens ("—", "-", "…")
+* are attached to the preceding word (or the following one when there is none). CJK text has
+* no spaces: each ideograph or kana is its own word (with kinsoku-glued punctuation), so
+* captions can break between characters and karaoke sweeps per character.
+*/
+function tokenize$1(text) {
+	const out = [];
+	let pending = "";
+	for (const t of text.split(/\s+/).flatMap((tok) => CJK_ANY.test(tok) ? splitCjk(tok) : [tok])) {
+		if (!t) continue;
+		if (!WORDLIKE$1.test(t)) {
+			if (out.length) out[out.length - 1] += t;
+			else pending += t;
+			continue;
+		}
+		out.push(pending + t);
+		pending = "";
+	}
+	return out;
+}
+const VOWEL_GROUP = /[aeiouyàáâãäåæèéêëìíîïòóôõöøùúûüýÿœ]+/g;
+/**
+* Rough syllable count (vowel-group heuristic), minimum 1:
+* - vowel groups, minus a silent trailing "e" (but not "-le");
+* - short all-caps tokens (acronyms like "API", "CI/CD") count one per letter (spelled out);
+* - words with no Latin vowels (e.g. CJK, "HTTP") count one per letter;
+* - each digit adds one.
+*/
+function estimateSyllables(word) {
+	const script = speechScript(word);
+	if (script === "cjk") return cjkMorae(word);
+	if (script === "devanagari") return devanagariSyllables(word);
+	if (script === "arabic" || script === "hebrew") {
+		const letters = (word.match(/\p{L}/gu) ?? []).length;
+		return Math.max(1, Math.round(letters / 2) + (word.match(/\p{N}/gu) ?? []).length);
+	}
+	const digits = (word.match(/\p{N}/gu) ?? []).length;
+	const lettersRaw = word.replace(/[^\p{L}]/gu, "");
+	let n = 0;
+	if (lettersRaw) {
+		const isAcronym = lettersRaw.length >= 2 && lettersRaw.length <= 5 && lettersRaw === lettersRaw.toUpperCase() && lettersRaw !== lettersRaw.toLowerCase();
+		const letters = lettersRaw.toLowerCase();
+		if (isAcronym) n = letters.length;
+		else {
+			n = (letters.match(VOWEL_GROUP) ?? []).length;
+			if (n > 1 && /[^aeiouy]e$/.test(letters) && !/[^aeiouy]le$/.test(letters)) n--;
+			if (n === 0) n = letters.length;
+		}
+	}
+	return Math.max(1, n + digits);
+}
+/** Morae weight of a CJK unit: kana 1 each (small kana 0), ー 1, an ideograph KANJI_MORAE, other characters as Latin. */
+const KANJI_MORAE = 1.6;
+function cjkMorae(word) {
+	let n = 0;
+	let rest = "";
+	for (const ch of word) if (/[ぁぃぅぇぉっゃゅょゎァィゥェォャュョヮ]/u.test(ch)) n += ch === "っ" || ch === "ッ" ? 1 : 0;
+	else if (/[\p{Script=Hiragana}\p{Script=Katakana}ー]/u.test(ch)) n += 1;
+	else if (/\p{Script=Han}/u.test(ch)) n += KANJI_MORAE;
+	else if (/[\p{L}\p{N}]/u.test(ch)) rest += ch;
+	return Math.max(1, n + (rest ? estimateSyllables(rest) : 0));
+}
+/** Devanagari: one syllable per consonant or independent vowel, minus the consonants a virama joins into a conjunct. */
+function devanagariSyllables(word) {
+	const letters = (word.match(/[ऄ-हक़-ॡॲ-ॿ]/gu) ?? []).length;
+	const viramas = (word.match(/्/gu) ?? []).length;
+	const digits = (word.match(/\p{N}/gu) ?? []).length;
+	return Math.max(1, letters - viramas + digits);
+}
+/**
+* Speaking rates for duration estimates (design rules, not measurements of any one voice):
+* - Latin-script languages: words per second at the system voice's 180 wpm (3 words/s).
+* - Japanese / Chinese: characters per second (CJK_CHARS_PER_SEC, about 7.5; natural Japanese
+*   narration runs 7–8 characters/s of mixed kanji and kana).
+* - Hindi (Devanagari): 2.5 words/s; Arabic 2.2 words/s (clitics make words longer); Hebrew 2.5.
+*/
+const SPEECH_RATES = Object.freeze({
+	latin_words_per_sec: 3,
+	cjk_chars_per_sec: 7.5,
+	devanagari_words_per_sec: 2.5,
+	arabic_words_per_sec: 2.2,
+	hebrew_words_per_sec: 2.5,
+	other_words_per_sec: 2.5
+});
+/** Count what the rate counts: CJK characters (letters and digits, not punctuation) or whitespace words. */
+function speechUnits(text) {
+	const script = speechScript(text);
+	if (script === "cjk") {
+		let count = 0;
+		for (const ch of text) if (CJK_UNIT.test(ch) || /[\p{L}\p{N}]/u.test(ch)) count++;
+		return {
+			script,
+			unit: "chars",
+			count
+		};
+	}
+	return {
+		script,
+		unit: "words",
+		count: text.split(/\s+/).filter((w) => WORDLIKE$1.test(w)).length
+	};
+}
+/** Estimated narration time of `text` in seconds (see SPEECH_RATES), without pauses. */
+function estimateSpeechSec$1(text) {
+	const { script, count } = speechUnits(text);
+	const rate = script === "cjk" ? SPEECH_RATES.cjk_chars_per_sec : script === "devanagari" ? SPEECH_RATES.devanagari_words_per_sec : script === "arabic" ? SPEECH_RATES.arabic_words_per_sec : script === "hebrew" ? SPEECH_RATES.hebrew_words_per_sec : script === "other" ? SPEECH_RATES.other_words_per_sec : SPEECH_RATES.latin_words_per_sec;
+	return Math.round(count / rate * 100) / 100;
+}
+const TRAIL_CLOSERS = `["')\\]}»”’」』）]*$`;
+const SENTENCE_END = new RegExp(`[.!?…。！？]${TRAIL_CLOSERS}`, "u");
+const CLAUSE_END = new RegExp(`[,;:—–\\-、，；：]${TRAIL_CLOSERS}`, "u");
+/** Extra pause weight after a word: sentence end 1.2, clause punctuation 0.6, else 0. */
+function pauseWeight(word) {
+	if (SENTENCE_END.test(word)) return 1.2;
+	if (CLAUSE_END.test(word)) return .6;
+	return 0;
+}
+/**
+* Distribute `durationMs` (minus edge silence) across `words`, weighted by estimated syllables,
+* with pauses after punctuation (not after the last word). Timings are integer ms, monotonic
+* and non-overlapping; the first word starts at `leadMs`, the last ends at `durationMs - trailMs`.
+*/
+function estimateWordTimings(words, durationMs, opts = {}) {
+	if (words.length === 0) return [];
+	const total = Math.max(0, Math.round(durationMs));
+	let lead = Math.max(0, Math.round(opts.leadMs ?? 0));
+	let trail = Math.max(0, Math.round(opts.trailMs ?? 0));
+	if (lead + trail >= total) {
+		lead = 0;
+		trail = 0;
+	}
+	const spanStart = lead;
+	const spanEnd = total - trail;
+	const weights = words.map((w) => opts.even ? 1 : estimateSyllables(w));
+	const pauses = words.map((w, i) => opts.even || i === words.length - 1 ? 0 : pauseWeight(w));
+	const units = weights.reduce((a, b) => a + b, 0) + pauses.reduce((a, b) => a + b, 0);
+	const perUnit = (spanEnd - spanStart) / units;
+	const out = [];
+	let cursor = 0;
+	let prevEnd = spanStart;
+	words.forEach((word, i) => {
+		const startF = spanStart + cursor * perUnit;
+		cursor += weights[i];
+		const endF = i === words.length - 1 ? spanEnd : spanStart + cursor * perUnit;
+		cursor += pauses[i];
+		const start = Math.max(prevEnd, Math.round(startF));
+		const end = Math.max(start, Math.round(endF));
+		out.push({
+			word,
+			start_ms: start,
+			end_ms: end
+		});
+		prevEnd = end;
+	});
+	return out;
+}
+//#endregion
+//#region ../voice/dist/text.js
+const LEADING_PUNCT = /^["'(\[{«“‘¿¡]+/u;
+const TRAILING_PUNCT = /["')\]}»”’.,;:!?…]+$/u;
+function core(token) {
+	return token.replace(LEADING_PUNCT, "").replace(TRAILING_PUNCT, "");
+}
+function rulesFrom(terms) {
+	return Object.entries(terms).map(([from, to]) => ({
+		from: tokenize$1(from).map(core),
+		to: tokenize$1(to)
+	})).filter((r) => r.from.length > 0 && r.from.every(Boolean)).sort((a, b) => b.from.length - a.from.length || b.from.join(" ").length - a.from.join(" ").length);
+}
+/**
+* Apply brand pronunciation/terminology overrides (`brand.language.terminology`, e.g.
+* {"CI/CD": "C I C D"}) to produce the speech text, while keeping the original words for captions.
+*
+* Matching is token-based and case-sensitive on the token with surrounding punctuation stripped, so
+* "CI/CD," matches "CI/CD" and the trailing comma is carried onto the last speech token (preserving
+* the pause). Longer terms win. Terms embedded inside a larger token (e.g. "CI/CD-based") are not
+* replaced.
+*/
+function prepareSpeechText(voiceover, brand, extra) {
+	const captionWords = tokenize$1(voiceover);
+	const rules = rulesFrom({
+		...brand?.language?.terminology ?? {},
+		...extra ?? {}
+	});
+	const speechWords = [];
+	const spans = [];
+	let i = 0;
+	while (i < captionWords.length) {
+		const rule = rules.find((r) => r.from.every((f, k) => i + k < captionWords.length && core(captionWords[i + k]) === f));
+		if (rule) {
+			const n = rule.from.length;
+			const first = captionWords[i];
+			const last = captionWords[i + n - 1];
+			const lead = LEADING_PUNCT.exec(first)?.[0] ?? "";
+			const trail = TRAILING_PUNCT.exec(last)?.[0] ?? "";
+			const to = [...rule.to];
+			if (to.length) {
+				to[0] = lead + to[0];
+				to[to.length - 1] = to[to.length - 1] + trail;
+			}
+			spans.push({
+				captionStart: i,
+				captionEnd: i + n,
+				speechStart: speechWords.length,
+				speechEnd: speechWords.length + to.length
+			});
+			speechWords.push(...to);
+			i += n;
+		} else {
+			spans.push({
+				captionStart: i,
+				captionEnd: i + 1,
+				speechStart: speechWords.length,
+				speechEnd: speechWords.length + 1
+			});
+			speechWords.push(captionWords[i]);
+			i += 1;
+		}
+	}
+	return {
+		speech: speechWords.join(" "),
+		speechWords,
+		captionWords,
+		spans
+	};
+}
+/** Split [start, end] across words weighted by syllables; monotonic integer ms. */
+function spread(words, start, end) {
+	const weights = words.map(estimateSyllables);
+	const total = weights.reduce((a, b) => a + b, 0);
+	const out = [];
+	let acc = 0;
+	let prev = start;
+	words.forEach((word, k) => {
+		const s = prev;
+		acc += weights[k];
+		const e = k === words.length - 1 ? end : Math.max(s, Math.round(start + (end - start) * acc / total));
+		out.push({
+			word,
+			start_ms: s,
+			end_ms: e
+		});
+		prev = e;
+	});
+	return out;
+}
+/**
+* Map timings of speech tokens back onto the original caption words.
+*
+* - 1:1 spans copy the timing (with the caption spelling).
+* - A replaced span (e.g. "CI/CD" → "C I C D") takes the time range from its first to its last
+*   speech token and spreads it across its caption words by syllable weight.
+* - A span whose replacement is empty gets zero-width timings at the previous word's end.
+* - Fallback when `timings` does not have one entry per speech token (e.g. a provider normalized
+*   the text differently): the whole range [first start, last end] is spread across all caption
+*   words by syllable weight.
+*/
+function mapTimingsToCaptions(prepared, timings) {
+	const { captionWords, spans, speechWords } = prepared;
+	if (captionWords.length === 0) return [];
+	if (timings.length === 0) return spread(captionWords, 0, 0);
+	if (timings.length !== speechWords.length) return spread(captionWords, timings[0].start_ms, timings[timings.length - 1].end_ms);
+	const out = [];
+	let prevEnd = timings[0].start_ms;
+	for (const span of spans) {
+		const words = captionWords.slice(span.captionStart, span.captionEnd);
+		if (span.speechEnd === span.speechStart) {
+			for (const word of words) out.push({
+				word,
+				start_ms: prevEnd,
+				end_ms: prevEnd
+			});
+			continue;
+		}
+		const first = timings[span.speechStart];
+		const last = timings[span.speechEnd - 1];
+		if (words.length === span.speechEnd - span.speechStart) words.forEach((word, k) => {
+			const t = timings[span.speechStart + k];
+			out.push({
+				word,
+				start_ms: t.start_ms,
+				end_ms: t.end_ms
+			});
+		});
+		else out.push(...spread(words, first.start_ms, last.end_ms));
+		prevEnd = last.end_ms;
+	}
+	return out;
+}
+//#endregion
+//#region ../voice/dist/silent.js
+/** Silent track: no audio, words timed evenly across the scene duration. */
+function silentTrack(input) {
+	const duration_ms = Math.max(0, Math.round(input.duration_ms ?? 0));
+	return {
+		scene_id: input.scene_id,
+		duration_ms,
+		words: estimateWordTimings(tokenize$1(input.text), duration_ms, { even: true }),
+		timing_source: "none",
+		provider: "silent"
+	};
+}
+function createSilentBackend() {
+	return {
+		id: "silent",
+		available: () => ({
+			ok: true,
+			reason: "always available (no audio)"
+		}),
+		synthesize: async (input) => silentTrack(input)
+	};
+}
+const DEFAULT_SAY_VOICE = "Samantha";
+/** Audio shorter than this from a non-empty script is treated as a failed synthesis. */
+const MIN_AUDIO_MS = 50;
+/**
+* Parse `say -v '?'` output. Lines look like
+* `Samantha            en_US    # Hello! My name is Samantha.` and names may contain spaces and
+* parentheses, e.g. `Eddy (English (US)) en_US    # Hello!`.
+*/
+function parseSayVoices(output) {
+	const voices = [];
+	for (const line of output.split("\n")) {
+		const m = /^(.+?)\s+([a-z]{2,3}(?:[_-][A-Za-z0-9]+)+)\s+#\s?(.*)$/.exec(line.trimEnd());
+		if (m) voices.push({
+			name: m[1].trim(),
+			locale: m[2],
+			sample: m[3]
+		});
+	}
+	return voices;
+}
+/**
+* Preferred macOS `say` voices per language (primary subtag), best first. Any other installed
+* voice whose locale matches the language is used after these.
+*/
+const SAY_VOICES_BY_LANGUAGE = Object.freeze({
+	ja: ["Kyoko", "Otoya"],
+	zh: [
+		"Tingting",
+		"Meijia",
+		"Sinji"
+	],
+	ko: ["Yuna"],
+	hi: ["Lekha"],
+	ar: ["Majed", "Maged"],
+	he: ["Carmit"],
+	fr: [
+		"Thomas",
+		"Amélie",
+		"Amelie"
+	],
+	de: ["Anna"],
+	es: [
+		"Mónica",
+		"Monica",
+		"Paulina"
+	],
+	it: ["Alice"],
+	pt: ["Luciana", "Joana"],
+	ru: ["Milena"]
+});
+/** Primary language subtag, lower case (`ja-JP` → `ja`); undefined for none. */
+function baseLang(language) {
+	return language?.trim().split(/[-_]/)[0]?.toLowerCase() || void 0;
+}
+/** True when a language needs a voice of its own (anything but English, which every engine defaults to). */
+function needsOwnVoice(language) {
+	const base = baseLang(language);
+	return base !== void 0 && base !== "en";
+}
+/**
+* The `say` voice for a language: the requested voice when it speaks that language, else the
+* preferred voice, else any installed voice with a matching locale; undefined when none exists.
+*/
+/** Quality tier of a macOS voice from its name: Premium (neural) > Enhanced > compact. */
+function voiceQuality(name) {
+	return /\(Premium\)/i.test(name) ? 2 : /\(Enhanced\)/i.test(name) ? 1 : 0;
+}
+/**
+* The best installed Premium/Enhanced voice for a language (region match first, e.g. en-IN →
+* en_IN), or undefined when only compact voices are installed.
+*/
+function bestNaturalVoice(voices, language) {
+	const base = (baseLang(language) ?? "en").toLowerCase();
+	const region = language.split(/[-_]/)[1]?.toUpperCase();
+	return voices.filter((v) => voiceQuality(v.name) > 0 && v.locale.toLowerCase().split(/[-_]/)[0] === base).sort((a, b) => {
+		const ra = region && a.locale.toUpperCase().endsWith(`_${region}`) ? 1 : 0;
+		const rb = region && b.locale.toUpperCase().endsWith(`_${region}`) ? 1 : 0;
+		return voiceQuality(b.name) - voiceQuality(a.name) || rb - ra || a.name.localeCompare(b.name);
+	})[0]?.name;
+}
+function pickSayVoice(voices, language, requested) {
+	const base = baseLang(language);
+	const speaks = (v) => v.locale.toLowerCase().split(/[-_]/)[0] === base;
+	const byName = (n) => voices.find((v) => v.name === n && speaks(v));
+	if (requested && byName(requested)) return requested;
+	const natural = bestNaturalVoice(voices, language);
+	if (natural) return natural;
+	for (const n of SAY_VOICES_BY_LANGUAGE[base] ?? []) if (byName(n)) return n;
+	const region = language.split(/[-_]/)[1]?.toUpperCase();
+	return (region ? voices.find((v) => speaks(v) && v.locale.toUpperCase().endsWith(`_${region}`)) : void 0)?.name ?? voices.find(speaks)?.name;
+}
+/** Thrown when the system engine has no voice for the spec language (the caller falls back to silent). */
+var NoVoiceForLanguageError = class extends Error {
+	language;
+	engine;
+	constructor(language, engine, detail) {
+		super(`${engine} has no voice for language "${language}"; not reading it with an English voice (${detail})`);
+		this.language = language;
+		this.engine = engine;
+		this.name = "NoVoiceForLanguageError";
+	}
+};
+/**
+* Local OS text-to-speech: macOS `say`, or `espeak-ng` on Linux. Audio is converted to 48 kHz mono
+* WAV with ffmpeg; word timings are ESTIMATED (syllable-weighted over the measured duration).
+*/
+function createSystemBackend(options = {}) {
+	const runner = options.runner ?? defaultRunner;
+	const resolver = options.resolver ?? defaultResolver;
+	const platform = options.platform ?? process.platform;
+	const rate = Math.round(options.rate ?? 160);
+	const trimSilence = options.trimSilence ?? true;
+	let voiceCache;
+	const engine = (env) => {
+		if (platform === "darwin") return resolver("say", env) ? "say" : void 0;
+		if (platform === "linux") return resolver("espeak-ng", env) ? "espeak-ng" : void 0;
+	};
+	const listVoices = (env) => {
+		if (engine(env) !== "say") return Promise.resolve([]);
+		voiceCache ??= runner(resolver("say", env), ["-v", "?"]).then((r) => r.code === 0 ? parseSayVoices(r.stdout) : []).catch(() => []);
+		return voiceCache;
+	};
+	/**
+	* The voice to use. English (or no language): the requested voice, the configured one, or
+	* Samantha, else the system default. Other languages: a voice that speaks the language (see
+	* `pickSayVoice`; espeak-ng: the language code), or undefined when none is installed.
+	*/
+	const resolveVoice = async (requested, env, language) => {
+		const eng = engine(env);
+		if (eng === "espeak-ng") return requested ?? options.voice ?? (needsOwnVoice(language) ? baseLang(language) : void 0);
+		if (eng !== "say") return void 0;
+		const voices = await listVoices(env);
+		if (needsOwnVoice(language)) return pickSayVoice(voices, language, requested ?? options.voice);
+		const has = (n) => voices.some((v) => v.name === n);
+		for (const candidate of [requested, options.voice]) if (candidate && has(candidate)) return candidate;
+		const best = bestNaturalVoice(voices, language ?? "en-US");
+		if (best) return best;
+		return has("Samantha") ? DEFAULT_SAY_VOICE : void 0;
+	};
+	const available = (env) => {
+		const eng = engine(env);
+		if (!eng) return {
+			ok: false,
+			reason: platform === "darwin" ? "macOS `say` not found" : platform === "linux" ? "`espeak-ng` not found on PATH" : `no system TTS supported on ${platform}`
+		};
+		if (!resolver("ffmpeg", env) || !resolver("ffprobe", env)) return {
+			ok: false,
+			reason: `${eng} found but ffmpeg/ffprobe missing (set FFMPEG_PATH/FFPROBE_PATH or install ffmpeg)`
+		};
+		return {
+			ok: true,
+			reason: `${eng} with ffmpeg`
+		};
+	};
+	const synthesize = async (input, ctx) => {
+		const eng = engine(ctx.env);
+		const ffmpeg = resolver("ffmpeg", ctx.env);
+		const ffprobe = resolver("ffprobe", ctx.env);
+		if (!eng || !ffmpeg || !ffprobe) throw new Error(`system voice backend unavailable: ${available(ctx.env).reason}`);
+		const tools = {
+			ffmpeg,
+			ffprobe,
+			runner
+		};
+		const run = { signal: ctx.signal };
+		const voice = await resolveVoice(input.voice, ctx.env, input.language);
+		if (eng === "say" && needsOwnVoice(input.language) && !voice) {
+			const langs = [...new Set((await listVoices(ctx.env)).map((v) => v.locale.split(/[-_]/)[0]))].sort().join(", ");
+			throw new NoVoiceForLanguageError(input.language, eng, `installed voice languages: ${langs || "none listed"}; add one in System Settings > Accessibility > Spoken Content > System voice > Manage Voices, or use voice "silent"`);
+		}
+		const words = tokenize$1(input.text);
+		await ensureDir(ctx.outDir);
+		const outFile = join(ctx.outDir, `${input.scene_id}.wav`);
+		const work = await mkdtemp(join(tmpdir(), "vs-voice-"));
+		try {
+			const textFile = join(work, "text.txt");
+			await writeFile(textFile, input.text, "utf8");
+			if (eng === "say") {
+				const raw = join(work, "say.aiff");
+				const args = [
+					...voice ? ["-v", voice] : [],
+					"-r",
+					String(Math.round(input.rate_wpm ?? rate)),
+					"-o",
+					raw,
+					"-f",
+					textFile
+				];
+				await runChecked(runner, resolver("say", ctx.env), args, "say", run);
+				await toWav48kMono(tools, raw, outFile, run);
+			} else {
+				const raw = join(work, "espeak.wav");
+				const args = [
+					...voice ? ["-v", voice] : [],
+					"-s",
+					String(Math.round(input.rate_wpm ?? rate)),
+					"-w",
+					raw,
+					"-f",
+					textFile
+				];
+				await runChecked(runner, resolver("espeak-ng", ctx.env), args, "espeak-ng", run);
+				await toWav48kMono(tools, raw, outFile, run);
+			}
+			const duration_ms = await probeDurationMs(tools, outFile, run);
+			if (words.length > 0 && duration_ms < MIN_AUDIO_MS) throw new Error(`${eng} produced no audio for scene ${input.scene_id} (${duration_ms} ms); it may be blocked by a sandbox`);
+			const edges = trimSilence ? await detectEdgeSilence(tools, outFile, duration_ms, run) : {
+				leadMs: 0,
+				trailMs: 0
+			};
+			return {
+				scene_id: input.scene_id,
+				audio_path: outFile,
+				duration_ms,
+				words: estimateWordTimings(words, duration_ms, edges),
+				timing_source: "estimated",
+				...voice ? { voice } : {},
+				provider: eng === "say" ? "system-say" : "system-espeak-ng"
+			};
+		} finally {
+			await rm(work, {
+				recursive: true,
+				force: true
+			});
+		}
+	};
+	return {
+		id: "system",
+		available,
+		synthesize,
+		resolveVoice,
+		cacheOptions: () => ({
+			rate,
+			platform,
+			trimSilence
+		}),
+		engine,
+		listVoices
+	};
+}
+/** Per-request character budget; well under every current model's limit (5k for eleven_v3). */
+const DEFAULT_CHUNK_CHARS = 2500;
+const WORDLIKE = /[\p{L}\p{N}]/u;
+/**
+* Group ElevenLabs character-level alignment into words.
+* - Whitespace separates words (runs of spaces are fine).
+* - A punctuation-only group ("—", "!") is attached to the preceding word, keeping that word's end
+*   time; with no preceding word it is prefixed to the next one.
+* - A word's start is its first character's start; its end is the end of its last letter/digit
+*   (trailing punctuation carries no speech time).
+* - Times are integer ms offset by `offsetMs`, forced monotonic and non-overlapping.
+*/
+function alignmentToWords(alignment, offsetMs = 0) {
+	const { characters: chars, character_start_times_seconds: starts, character_end_times_seconds: ends } = alignment;
+	const out = [];
+	let pendingPrefix = "";
+	let text = "";
+	let start = -1;
+	let end = -1;
+	let lastSpokenEnd = -1;
+	const flush = () => {
+		if (!text) return;
+		if (!WORDLIKE.test(text)) {
+			if (out.length) out[out.length - 1].word += text;
+			else pendingPrefix += text;
+		} else {
+			const s = Math.round(start * 1e3) + offsetMs;
+			const e = Math.round((lastSpokenEnd >= 0 ? lastSpokenEnd : end) * 1e3) + offsetMs;
+			out.push({
+				word: pendingPrefix + text,
+				start_ms: s,
+				end_ms: e
+			});
+			pendingPrefix = "";
+		}
+		text = "";
+		start = -1;
+		end = -1;
+		lastSpokenEnd = -1;
+	};
+	let cjkOpen = false;
+	for (let i = 0; i < chars.length; i++) {
+		const c = chars[i] ?? "";
+		if (/^\s*$/u.test(c)) {
+			flush();
+			cjkOpen = false;
+			continue;
+		}
+		if (isCjkUnitChar(c) && !(cjkOpen && isNoStartChar(c))) {
+			flush();
+			cjkOpen = true;
+		} else if (cjkOpen && !isNoStartChar(c)) {
+			flush();
+			cjkOpen = false;
+		}
+		if (start < 0) start = starts[i] ?? 0;
+		end = ends[i] ?? end;
+		if (WORDLIKE.test(c)) lastSpokenEnd = ends[i] ?? lastSpokenEnd;
+		text += c;
+	}
+	flush();
+	let prev = 0;
+	for (const w of out) {
+		w.start_ms = Math.max(prev, w.start_ms);
+		w.end_ms = Math.max(w.start_ms, w.end_ms);
+		prev = w.end_ms;
+	}
+	return out;
+}
+/** Split text into chunks of at most `max` chars, preferring sentence, then word boundaries. */
+function chunkText(text, max = DEFAULT_CHUNK_CHARS) {
+	const clean = text.trim();
+	if (clean.length <= max) return clean ? [clean] : [];
+	const sentences = clean.match(/[^.!?…]+(?:[.!?…]+["')\]]*|$)\s*/gu) ?? [clean];
+	const chunks = [];
+	let cur = "";
+	const push = () => {
+		if (cur.trim()) chunks.push(cur.trim());
+		cur = "";
+	};
+	for (const s of sentences) {
+		if ((cur + s).length <= max) {
+			cur += s;
+			continue;
+		}
+		push();
+		if (s.length <= max) {
+			cur = s;
+			continue;
+		}
+		for (const w of s.split(/(\s+)/)) {
+			if ((cur + w).length > max) push();
+			cur += w;
+		}
+	}
+	push();
+	return chunks;
+}
+var ElevenLabsError = class extends Error {
+	status;
+	constructor(message, status) {
+		super(message);
+		this.status = status;
+		this.name = "ElevenLabsError";
+	}
+};
+function apiKey(env) {
+	const k = env.ELEVENLABS_API_KEY;
+	return k && k.trim() ? k.trim() : void 0;
+}
+/**
+* ElevenLabs `with-timestamps` TTS over plain fetch. Enabled only when ELEVENLABS_API_KEY is set.
+* Long scripts are chunked; each chunk passes up to 3 `previous_request_ids` for prosody continuity
+* (also across scenes within one backend instance) and its word times are offset by the cumulative
+* measured audio duration. The key is only ever sent in the `xi-api-key` header, never logged.
+*/
+function createElevenLabsBackend(options = {}) {
+	const doFetch = options.fetch ?? globalThis.fetch;
+	const runner = options.runner ?? defaultRunner;
+	const resolver = options.resolver ?? defaultResolver;
+	const modelId = options.modelId ?? "eleven_multilingual_v2";
+	const outputFormat = options.outputFormat ?? "mp3_44100_128";
+	const baseUrl = (options.baseUrl ?? "https://api.elevenlabs.io").replace(/\/+$/, "");
+	const recentRequestIds = [];
+	const available = (env) => {
+		if (!apiKey(env)) return {
+			ok: false,
+			reason: "ELEVENLABS_API_KEY not set"
+		};
+		if (!resolver("ffmpeg", env) || !resolver("ffprobe", env)) return {
+			ok: false,
+			reason: "ELEVENLABS_API_KEY set but ffmpeg/ffprobe missing"
+		};
+		return {
+			ok: true,
+			reason: "ELEVENLABS_API_KEY set"
+		};
+	};
+	const resolveVoice = async (requested, env) => requested ?? (env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM");
+	const request = async (voiceId, text, key, signal) => {
+		const body = {
+			text,
+			model_id: modelId
+		};
+		if (recentRequestIds.length) body.previous_request_ids = recentRequestIds.slice(-3);
+		if (options.seed !== void 0) body.seed = options.seed;
+		if (options.pronunciationDictionaryLocators?.length) body.pronunciation_dictionary_locators = options.pronunciationDictionaryLocators;
+		const url = `${baseUrl}/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=${encodeURIComponent(outputFormat)}`;
+		const res = await doFetch(url, {
+			method: "POST",
+			headers: {
+				"xi-api-key": key,
+				"content-type": "application/json",
+				accept: "application/json"
+			},
+			body: JSON.stringify(body),
+			...signal ? { signal } : {}
+		});
+		if (!res.ok) {
+			const detail = (await res.text().catch(() => "")).slice(0, 300).replaceAll(key, "***");
+			throw new ElevenLabsError(`ElevenLabs TTS failed: HTTP ${res.status}${detail ? ` ${detail}` : ""}`, res.status);
+		}
+		const json = await res.json();
+		if (!json || typeof json.audio_base64 !== "string" || !json.audio_base64) throw new ElevenLabsError("ElevenLabs response missing audio_base64");
+		const requestId = res.headers.get("request-id");
+		if (requestId) {
+			recentRequestIds.push(requestId);
+			if (recentRequestIds.length > 3) recentRequestIds.shift();
+		}
+		return json;
+	};
+	const synthesize = async (input, ctx) => {
+		const key = apiKey(ctx.env);
+		if (!key) throw new ElevenLabsError("ELEVENLABS_API_KEY not set");
+		const ffmpeg = resolver("ffmpeg", ctx.env);
+		const ffprobe = resolver("ffprobe", ctx.env);
+		if (!ffmpeg || !ffprobe) throw new ElevenLabsError("ffmpeg/ffprobe missing");
+		const tools = {
+			ffmpeg,
+			ffprobe,
+			runner
+		};
+		const run = { signal: ctx.signal };
+		const voice = await resolveVoice(input.voice, ctx.env);
+		const chunks = chunkText(input.text, options.chunkChars ?? 2500);
+		await ensureDir(ctx.outDir);
+		const outFile = join(ctx.outDir, `${input.scene_id}.wav`);
+		const work = await mkdtemp(join(tmpdir(), "vs-11l-"));
+		try {
+			const parts = [];
+			const words = [];
+			let offset = 0;
+			for (const [i, chunk] of chunks.entries()) {
+				const json = await request(voice, chunk, key, ctx.signal);
+				const part = join(work, `part-${i}.${outputFormat.split("_")[0] ?? "mp3"}`);
+				await writeFile(part, Buffer.from(json.audio_base64, "base64"));
+				parts.push(part);
+				const alignment = json.alignment ?? json.normalized_alignment;
+				if (alignment) words.push(...alignmentToWords(alignment, offset));
+				offset += await probeDurationMs(tools, part, run);
+			}
+			if (parts.length === 0) throw new ElevenLabsError(`scene ${input.scene_id} has no text`);
+			await concatToWav(tools, parts, outFile, run);
+			const duration_ms = await probeDurationMs(tools, outFile, run);
+			let prev = 0;
+			for (const w of words) {
+				w.start_ms = Math.min(Math.max(prev, w.start_ms), duration_ms);
+				w.end_ms = Math.min(Math.max(w.start_ms, w.end_ms), duration_ms);
+				prev = w.end_ms;
+			}
+			return {
+				scene_id: input.scene_id,
+				audio_path: outFile,
+				duration_ms,
+				words,
+				timing_source: "provider",
+				voice,
+				provider: "elevenlabs"
+			};
+		} finally {
+			await rm(work, {
+				recursive: true,
+				force: true
+			});
+		}
+	};
+	return {
+		id: "elevenlabs",
+		available,
+		synthesize,
+		resolveVoice,
+		cacheOptions: () => ({
+			modelId,
+			outputFormat,
+			seed: options.seed ?? null,
+			dictionaries: options.pronunciationDictionaryLocators ?? null
+		})
+	};
+}
+var VoiceBackendUnavailableError = class extends Error {
+	backendId;
+	constructor(backendId, reason) {
+		super(`voice backend "${backendId}" is unavailable: ${reason}`);
+		this.backendId = backendId;
+		this.name = "VoiceBackendUnavailableError";
+	}
+};
+function defaultBackends() {
+	return {
+		system: createSystemBackend(),
+		elevenlabs: createElevenLabsBackend(),
+		silent: createSilentBackend()
+	};
+}
+/**
+* auto: elevenlabs if its key is set, else system TTS if available, else silent.
+* An explicit choice that is unavailable throws VoiceBackendUnavailableError.
+*/
+async function selectBackend(choice, env, backends = defaultBackends()) {
+	if (choice !== "auto") {
+		const backend = backends[choice];
+		const a = await backend.available(env);
+		if (!a.ok) throw new VoiceBackendUnavailableError(choice, a.reason ?? "unavailable");
+		return {
+			backend,
+			reason: `requested "${choice}"${a.reason ? ` (${a.reason})` : ""}`
+		};
+	}
+	const skipped = [];
+	for (const id of ["elevenlabs", "system"]) {
+		const a = await backends[id].available(env);
+		if (a.ok) {
+			const prefix = skipped.length ? `${skipped.join("; ")}; ` : "";
+			return {
+				backend: backends[id],
+				reason: `auto: ${prefix}using ${id} (${a.reason ?? "available"})`
+			};
+		}
+		skipped.push(`${id} unavailable: ${a.reason ?? "unknown"}`);
+	}
+	return {
+		backend: backends.silent,
+		reason: `auto: ${skipped.join("; ")}; falling back to silent (no audio)`
+	};
+}
+const toPosix$2 = (p) => p.split(sep).join("/");
+function detectOverrun(scene, track) {
+	if (!track.audio_path || track.duration_ms <= Math.round(scene.duration_sec * 1e3)) return void 0;
+	const audio = track.duration_ms / 1e3;
+	return {
+		scene_id: scene.id,
+		scene_duration_sec: scene.duration_sec,
+		audio_duration_sec: audio,
+		suggested_duration_sec: Math.ceil(Math.round((audio + .3) * 1e3) / 100) / 10
+	};
+}
+/**
+* Synthesize voice for every scene of a spec into `<project>/assets/voice/<scene_id>.wav` and write
+* `assets/voice/voice-tracks.json`. Results are cached by content (backend, voice, text, options)
+* in a ContentStore, so re-runs are free. The spec is never modified: scenes whose audio is longer
+* than `duration_sec` are reported in `overruns` for the caller to act on.
+*/
+async function synthesizeSpec(spec, options) {
+	const env = options.env ?? process.env;
+	const backends = {
+		...defaultBackends(),
+		...options.backends
+	};
+	const { backend, reason } = await selectBackend(options.backend ?? "auto", env, backends);
+	const paths = projectPaths(options.projectDir);
+	const voiceDir = paths.assetsVoice;
+	const cacheRoot = options.cacheDir ?? join(resolveDataDir(env).cache, "voice");
+	const store = new ContentStore(join(cacheRoot, "cas"));
+	const indexDir = join(cacheRoot, "index");
+	const tracks = [];
+	const overruns = [];
+	const cacheHits = [];
+	const work = await mkdtemp(join(tmpdir(), "vs-voice-spec-"));
+	try {
+		for (const scene of spec.scenes) {
+			options.signal?.throwIfAborted();
+			const durationMs = Math.round(scene.duration_sec * 1e3);
+			const prepared = prepareSpeechText(scene.voiceover, options.brand);
+			if (prepared.captionWords.length === 0) {
+				tracks.push(silentTrack({
+					scene_id: scene.id,
+					text: "",
+					duration_ms: durationMs
+				}));
+				continue;
+			}
+			if (backend.id === "silent") {
+				const t = await backend.synthesize({
+					scene_id: scene.id,
+					text: prepared.speech,
+					duration_ms: durationMs
+				}, {
+					outDir: work,
+					env,
+					...options.signal ? { signal: options.signal } : {}
+				});
+				tracks.push({
+					...t,
+					words: mapTimingsToCaptions(prepared, t.words)
+				});
+				continue;
+			}
+			const voice = await backend.resolveVoice?.(spec.voice.voice_id, env, spec.language);
+			const key = cacheKey({
+				kind: "voice",
+				inputDigest: sha256Hex(`${prepared.speech}\u0000${scene.voiceover}`),
+				extractorVersion: "1",
+				options: {
+					backend: backend.id,
+					voice: voice ?? null,
+					text: prepared.speech,
+					...spec.voice.rate_wpm ? { rate_wpm: spec.voice.rate_wpm } : {},
+					...backend.cacheOptions?.() ?? {}
+				},
+				irSchemaVersion: 1
+			});
+			const indexFile = join(indexDir, `${key}.json`);
+			const dest = join(voiceDir, `${scene.id}.wav`);
+			const relAudio = toPosix$2(relative(paths.root, dest));
+			const cached = await readJson(indexFile).catch(() => void 0);
+			if (cached?.version === "1" && cached.audio_sha256 && await store.has(cached.audio_sha256)) {
+				await store.materialize(cached.audio_sha256, dest);
+				const track = SceneVoiceTrack.parse({
+					...cached.track,
+					scene_id: scene.id,
+					audio_path: relAudio
+				});
+				tracks.push(track);
+				cacheHits.push(scene.id);
+				const o = detectOverrun(scene, track);
+				if (o) overruns.push(o);
+				continue;
+			}
+			const raw = await backend.synthesize({
+				scene_id: scene.id,
+				text: prepared.speech,
+				...voice ? { voice } : {},
+				duration_ms: durationMs,
+				language: spec.language,
+				...spec.voice.rate_wpm ? { rate_wpm: spec.voice.rate_wpm } : {}
+			}, {
+				outDir: work,
+				env,
+				...options.signal ? { signal: options.signal } : {}
+			});
+			const words = mapTimingsToCaptions(prepared, raw.words);
+			let track;
+			let audioSha;
+			if (raw.audio_path) {
+				const entry = await store.put(raw.audio_path);
+				audioSha = entry.sha256;
+				await store.materialize(entry.sha256, dest);
+				await rm(raw.audio_path, { force: true });
+				track = SceneVoiceTrack.parse({
+					...raw,
+					words,
+					audio_path: relAudio
+				});
+			} else {
+				const { audio_path: _drop, ...rest } = raw;
+				track = SceneVoiceTrack.parse({
+					...rest,
+					words
+				});
+			}
+			if (audioSha) await writeJsonAtomic(indexFile, {
+				version: "1",
+				audio_sha256: audioSha,
+				track
+			});
+			tracks.push(track);
+			const o = detectOverrun(scene, track);
+			if (o) overruns.push(o);
+		}
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+	const tracksFile = join(voiceDir, "voice-tracks.json");
+	await writeJsonAtomic(tracksFile, tracks);
+	return {
+		backend: backend.id,
+		reason,
+		tracks,
+		tracks_path: toPosix$2(relative(paths.root, tracksFile)),
+		overruns,
+		cache_hits: cacheHits
+	};
+}
+//#endregion
 //#region ../renderer/dist/script.js
 /**
 * Writing-system detection for layout, fonts, direction and timing.
@@ -236472,7 +237721,7 @@ function tokenRegex(family) {
 	return re;
 }
 /** Tokenize source code. Pure and deterministic; concatenating `text` reproduces the input exactly. */
-function tokenize$1(code, language) {
+function tokenize(code, language) {
 	const family = languageFamily(language);
 	const def = LANGS[family];
 	const re = tokenRegex(family);
@@ -236527,7 +237776,7 @@ function tokenize$1(code, language) {
 /** Highlight into escaped HTML, split per source line (so each line can be its own element). */
 function highlightLines(code, language) {
 	const lines = [""];
-	for (const tok of tokenize$1(code, language)) tok.text.split("\n").forEach((part, idx) => {
+	for (const tok of tokenize(code, language)) tok.text.split("\n").forEach((part, idx) => {
 		if (idx > 0) lines.push("");
 		if (part) lines[lines.length - 1] += tok.cls ? `<span class="tk-${tok.cls}">${escapeHtml(part)}</span>` : escapeHtml(part);
 	});
@@ -241683,7 +242932,7 @@ ${timelineScript(compositionId, dur)}
 //#region ../renderer/dist/hyperframes-renderer.js
 /** Exact pinned producer version (package.json pins "@hyperframes/producer": "0.8.75"). */
 const HYPERFRAMES_VERSION = "0.8.75";
-async function isExecutable$1(p) {
+async function isExecutable(p) {
 	try {
 		await access(p, process.platform === "win32" ? constants.F_OK : constants.X_OK);
 		return true;
@@ -241714,7 +242963,7 @@ async function findChrome(explicit, env, platform = process.platform) {
 	if (env.CHROME_PATH?.trim()) configured.push(["CHROME_PATH", env.CHROME_PATH.trim()]);
 	if (env.HYPERFRAMES_BROWSER_PATH?.trim()) configured.push(["HYPERFRAMES_BROWSER_PATH", env.HYPERFRAMES_BROWSER_PATH.trim()]);
 	const first = configured[0];
-	if (first) return await isExecutable$1(first[1]) ? {
+	if (first) return await isExecutable(first[1]) ? {
 		ok: true,
 		path: first[1]
 	} : {
@@ -241728,7 +242977,7 @@ async function findChrome(explicit, env, platform = process.platform) {
 		const dirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
 		candidates = LINUX_CHROME_NAMES.flatMap((n) => dirs.map((d) => join(d, n)));
 	}
-	for (const c of candidates) if (await isExecutable$1(c)) return {
+	for (const c of candidates) if (await isExecutable(c)) return {
 		ok: true,
 		path: c
 	};
@@ -242374,7 +243623,7 @@ const FFMPEG_FIX = {
 	ffprobe: "Install FFmpeg, which includes ffprobe (macOS: `brew install ffmpeg`; Debian/Ubuntu: `sudo apt install ffmpeg`), or set FFPROBE_PATH."
 };
 /** Resolve ffmpeg/ffprobe: env override first, then PATH. Never ffmpeg-static. */
-async function resolveFfTool$1(tool, deps) {
+async function resolveFfTool(tool, deps) {
 	const loc = await locateFfTool(tool, deps);
 	if (!loc.ok && loc.reason === "bad_override") return {
 		path: null,
@@ -242598,6 +243847,31 @@ function checkProviderKeys(env) {
 		keys
 	};
 }
+/**
+* macOS narration quality: the compact `say` voices sound robotic; the free Premium/Enhanced
+* voices (a one-time download in System Settings) sound natural and are picked automatically.
+*/
+async function checkSystemVoice(deps) {
+	if (deps.platform !== "darwin") return null;
+	const r = await deps.exec("/usr/bin/say", ["-v", "?"]);
+	if (!r || r.code !== 0) return {
+		id: "system_voice",
+		status: "warn",
+		detail: "macOS `say` did not list its voices"
+	};
+	const best = bestNaturalVoice(parseSayVoices(r.stdout), "en-US");
+	if (best) return {
+		id: "system_voice",
+		status: "ok",
+		detail: `natural voice installed: ${best} (used automatically for English narration)`
+	};
+	return {
+		id: "system_voice",
+		status: "warn",
+		detail: "only compact macOS voices are installed, so narration sounds robotic",
+		fix: "System Settings → Accessibility → Spoken Content → System voice → Manage Voices… → English: download a Premium voice (e.g. Zoe or Ava (Premium); for Indian English, an en-IN Premium/Enhanced voice). The plugin picks it automatically. Or set voice.rate_wpm (default 160) to slow the pace."
+	};
+}
 async function checkDataDir(deps) {
 	let root;
 	try {
@@ -242625,12 +243899,14 @@ async function checkDataDir(deps) {
 }
 async function runDoctor(deps = defaultDoctorDeps()) {
 	const checks = [checkNode(deps.nodeVersion), await checkSqlite(deps)];
-	const ffmpeg = await resolveFfTool$1("ffmpeg", deps);
-	const ffprobe = await resolveFfTool$1("ffprobe", deps);
+	const ffmpeg = await resolveFfTool("ffmpeg", deps);
+	const ffprobe = await resolveFfTool("ffprobe", deps);
 	checks.push(ffmpeg.check, ffprobe.check, ...await checkBuildconf(ffmpeg.path, deps));
 	checks.push(await checkChrome(deps));
 	if (deps.hyperframes) checks.push(await deps.hyperframes());
 	checks.push(await checkWhisper(deps));
+	const voice = await checkSystemVoice(deps);
+	if (voice) checks.push(voice);
 	const keys = checkProviderKeys(deps.env);
 	checks.push(keys.check, await checkDataDir(deps));
 	const overall = checks.some((c) => c.status === "fail") ? "fail" : checks.some((c) => c.status === "warn") ? "warn" : "ok";
@@ -244121,1234 +245397,6 @@ function formatDemo(r) {
 		...r.warnings.map((w) => `warning: ${w}`),
 		"use it in screen_capture scenes: footage {asset, in_sec, out_sec} with claim_refs of the steps shown"
 	].join("\n");
-}
-//#endregion
-//#region ../voice/dist/exec.js
-const defaultRunner = (cmd, args, opts = {}) => new Promise((resolve, reject) => {
-	const child = spawn(cmd, args, {
-		stdio: [
-			"ignore",
-			"pipe",
-			"pipe"
-		],
-		signal: opts.signal,
-		env: opts.env ? {
-			...process.env,
-			...opts.env
-		} : process.env
-	});
-	const out = [];
-	const err = [];
-	child.stdout.on("data", (b) => out.push(b));
-	child.stderr.on("data", (b) => err.push(b));
-	child.on("error", reject);
-	child.on("close", (code) => resolve({
-		code: code ?? -1,
-		stdout: Buffer.concat(out).toString("utf8"),
-		stderr: Buffer.concat(err).toString("utf8")
-	}));
-});
-function isExecutable(path) {
-	try {
-		accessSync(path, constants.X_OK);
-		return true;
-	} catch {
-		return false;
-	}
-}
-/** Find an executable on PATH. */
-function which(name, env = process.env) {
-	const dirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
-	for (const dir of dirs) {
-		const p = join(dir, name);
-		if (isExecutable(p)) return p;
-	}
-}
-/**
-* Resolve ffmpeg/ffprobe: FFMPEG_PATH / FFPROBE_PATH first, then PATH.
-* TODO: swap for @video-studio/media's resolver once it lands.
-*/
-function resolveFfTool(name, env = process.env) {
-	const override = env[name === "ffmpeg" ? "FFMPEG_PATH" : "FFPROBE_PATH"];
-	if (override && override.trim()) return isExecutable(override) ? override : void 0;
-	return which(name, env);
-}
-const defaultResolver = (name, env) => {
-	if (name === "ffmpeg" || name === "ffprobe") return resolveFfTool(name, env);
-	const found = which(name, env);
-	if (found) return found;
-	if (name === "say" && isExecutable("/usr/bin/say")) return "/usr/bin/say";
-};
-async function runChecked(runner, cmd, args, what, opts) {
-	const res = await runner(cmd, args, opts);
-	if (res.code !== 0) {
-		const tail = res.stderr.trim().split("\n").slice(-3).join(" | ");
-		throw new Error(`${what} failed (exit ${res.code})${tail ? `: ${tail}` : ""}`);
-	}
-	return res;
-}
-//#endregion
-//#region ../voice/dist/ffmpeg.js
-/**
-* Minimal local ffmpeg/ffprobe helpers for the voice package.
-* TODO: replace with @video-studio/media once its resolver/helpers land.
-*/
-/** Convert any input audio to 48 kHz mono 16-bit PCM WAV. */
-async function toWav48kMono(tools, input, output, opts) {
-	await runChecked(tools.runner, tools.ffmpeg, [
-		"-hide_banner",
-		"-loglevel",
-		"error",
-		"-y",
-		"-i",
-		input,
-		"-ar",
-		"48000",
-		"-ac",
-		"1",
-		"-c:a",
-		"pcm_s16le",
-		output
-	], "ffmpeg (convert to wav)", opts);
-}
-/** Concatenate audio files into one 48 kHz mono WAV. */
-async function concatToWav(tools, inputs, output, opts) {
-	if (inputs.length === 1) return toWav48kMono(tools, inputs[0], output, opts);
-	const args = [
-		"-hide_banner",
-		"-loglevel",
-		"error",
-		"-y"
-	];
-	for (const i of inputs) args.push("-i", i);
-	const labels = inputs.map((_, i) => `[${i}:a]`).join("");
-	args.push("-filter_complex", `${labels}concat=n=${inputs.length}:v=0:a=1[a]`, "-map", "[a]", "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", output);
-	await runChecked(tools.runner, tools.ffmpeg, args, "ffmpeg (concat)", opts);
-}
-/** Container duration in integer milliseconds. */
-async function probeDurationMs(tools, file, opts) {
-	const res = await runChecked(tools.runner, tools.ffprobe, [
-		"-v",
-		"error",
-		"-show_entries",
-		"format=duration",
-		"-of",
-		"default=noprint_wrappers=1:nokey=1",
-		file
-	], "ffprobe (duration)", opts);
-	const sec = Number.parseFloat(res.stdout.trim());
-	if (!Number.isFinite(sec) || sec < 0) throw new Error(`ffprobe returned no duration for ${file}`);
-	return Math.round(sec * 1e3);
-}
-/**
-* Parse ffmpeg `silencedetect` stderr into leading/trailing silence.
-* Leading: a silence starting at ~0. Trailing: a silence ending at ~EOF (ffmpeg closes open
-* silences at EOF). Returns zeros when the result would swallow most of the audio.
-*/
-function parseEdgeSilence(stderr, durationMs) {
-	const spans = [];
-	for (const line of stderr.split("\n")) {
-		const s = /silence_start:\s*(-?[\d.]+)/.exec(line);
-		if (s) spans.push({ start: Math.max(0, Number.parseFloat(s[1]) * 1e3) });
-		const e = /silence_end:\s*([\d.]+)/.exec(line);
-		if (e && spans.length) spans[spans.length - 1].end = Number.parseFloat(e[1]) * 1e3;
-	}
-	let leadMs = 0;
-	let trailMs = 0;
-	const first = spans[0];
-	const leading = first && first.start <= 10 && first.end !== void 0 ? first : void 0;
-	if (leading) leadMs = leading.end;
-	const last = spans[spans.length - 1];
-	if (last && last !== leading && (last.end === void 0 || last.end >= durationMs - 50)) trailMs = durationMs - last.start;
-	leadMs = Math.max(0, Math.round(leadMs));
-	trailMs = Math.max(0, Math.round(trailMs));
-	if (leadMs + trailMs > durationMs * .8) return {
-		leadMs: 0,
-		trailMs: 0
-	};
-	return {
-		leadMs,
-		trailMs
-	};
-}
-/** Detect leading/trailing silence with ffmpeg `silencedetect`; zeros on any failure. */
-async function detectEdgeSilence(tools, file, durationMs, opts) {
-	try {
-		const res = await tools.runner(tools.ffmpeg, [
-			"-hide_banner",
-			"-nostats",
-			"-i",
-			file,
-			"-af",
-			"silencedetect=noise=-45dB:d=0.08",
-			"-f",
-			"null",
-			"-"
-		], opts);
-		if (res.code !== 0) return {
-			leadMs: 0,
-			trailMs: 0
-		};
-		return parseEdgeSilence(res.stderr, durationMs);
-	} catch {
-		return {
-			leadMs: 0,
-			trailMs: 0
-		};
-	}
-}
-//#endregion
-//#region ../voice/dist/estimate.js
-const WORDLIKE$1 = /[\p{L}\p{N}]/u;
-/** CJK characters that are each a caption/speech unit: ideographs, kana, full-width letters and digits. */
-const CJK_UNIT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Bopomofo}０-９Ａ-Ｚａ-ｚｦ-ﾟ]/u;
-/** Any CJK character, punctuation included. */
-const CJK_ANY = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Bopomofo}　-〿！-｠・ー]/u;
-/** Kinsoku: never at the start of a unit (glued to the unit before): closing punctuation, small kana, ー. */
-const NO_START = new Set(Array.from("、。，．,.!?！？)）]］}｝〕〉》」』】〙〗〟’”»ー―‐〜～…‥・:;：；々〻ゝゞヽヾぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ%％"));
-/** Kinsoku: never at the end of a unit (glued to the unit after): opening brackets. */
-const NO_END = new Set(Array.from("(（[［{｛〔〈《「『【〘〖〝‘“«"));
-/** True for a character that is a speech/caption unit of its own (ideograph, kana, full-width letter). */
-function isCjkUnitChar(ch) {
-	return CJK_UNIT.test(ch);
-}
-/** True for a character that joins the unit before it (closing punctuation, small kana, ー). */
-function isNoStartChar(ch) {
-	return NO_START.has(ch);
-}
-/** The script with the most letters in `text` (Latin when there are none). */
-function speechScript(text) {
-	const n = {
-		latin: 0,
-		cjk: 0,
-		devanagari: 0,
-		arabic: 0,
-		hebrew: 0,
-		other: 0
-	};
-	for (const ch of text) {
-		if (!/\p{L}/u.test(ch)) continue;
-		if (/[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}]/u.test(ch)) n.latin++;
-		else if (CJK_ANY.test(ch)) n.cjk++;
-		else if (/\p{Script=Devanagari}/u.test(ch)) n.devanagari++;
-		else if (/\p{Script=Arabic}/u.test(ch)) n.arabic++;
-		else if (/\p{Script=Hebrew}/u.test(ch)) n.hebrew++;
-		else n.other++;
-	}
-	let best = "latin";
-	for (const k of Object.keys(n)) if (n[k] > n[best] || n[k] === n[best] && n[k] > 0 && best === "latin") best = k;
-	return best;
-}
-/**
-* Split a whitespace-free token that contains CJK into units: each CJK character is a unit,
-* runs of other characters (Latin words, ASCII digits) stay whole, closing punctuation and
-* small kana join the unit before, opening brackets the unit after.
-*/
-function splitCjk(token) {
-	const units = [];
-	let buf = "";
-	let prefix = "";
-	const flush = () => {
-		if (!buf) return;
-		units.push(prefix + buf);
-		prefix = "";
-		buf = "";
-	};
-	for (const ch of token) {
-		if (NO_START.has(ch)) {
-			if (buf) buf += ch;
-			else if (units.length && !prefix) units[units.length - 1] += ch;
-			else prefix += ch;
-			continue;
-		}
-		if (NO_END.has(ch)) {
-			flush();
-			prefix += ch;
-			continue;
-		}
-		if (CJK_UNIT.test(ch)) {
-			flush();
-			units.push(prefix + ch);
-			prefix = "";
-			continue;
-		}
-		buf += ch;
-	}
-	flush();
-	if (prefix) {
-		if (units.length) units[units.length - 1] += prefix;
-		else units.push(prefix);
-	}
-	return units;
-}
-/**
-* Split text into caption/speech words on whitespace. Punctuation-only tokens ("—", "-", "…")
-* are attached to the preceding word (or the following one when there is none). CJK text has
-* no spaces: each ideograph or kana is its own word (with kinsoku-glued punctuation), so
-* captions can break between characters and karaoke sweeps per character.
-*/
-function tokenize(text) {
-	const out = [];
-	let pending = "";
-	for (const t of text.split(/\s+/).flatMap((tok) => CJK_ANY.test(tok) ? splitCjk(tok) : [tok])) {
-		if (!t) continue;
-		if (!WORDLIKE$1.test(t)) {
-			if (out.length) out[out.length - 1] += t;
-			else pending += t;
-			continue;
-		}
-		out.push(pending + t);
-		pending = "";
-	}
-	return out;
-}
-const VOWEL_GROUP = /[aeiouyàáâãäåæèéêëìíîïòóôõöøùúûüýÿœ]+/g;
-/**
-* Rough syllable count (vowel-group heuristic), minimum 1:
-* - vowel groups, minus a silent trailing "e" (but not "-le");
-* - short all-caps tokens (acronyms like "API", "CI/CD") count one per letter (spelled out);
-* - words with no Latin vowels (e.g. CJK, "HTTP") count one per letter;
-* - each digit adds one.
-*/
-function estimateSyllables(word) {
-	const script = speechScript(word);
-	if (script === "cjk") return cjkMorae(word);
-	if (script === "devanagari") return devanagariSyllables(word);
-	if (script === "arabic" || script === "hebrew") {
-		const letters = (word.match(/\p{L}/gu) ?? []).length;
-		return Math.max(1, Math.round(letters / 2) + (word.match(/\p{N}/gu) ?? []).length);
-	}
-	const digits = (word.match(/\p{N}/gu) ?? []).length;
-	const lettersRaw = word.replace(/[^\p{L}]/gu, "");
-	let n = 0;
-	if (lettersRaw) {
-		const isAcronym = lettersRaw.length >= 2 && lettersRaw.length <= 5 && lettersRaw === lettersRaw.toUpperCase() && lettersRaw !== lettersRaw.toLowerCase();
-		const letters = lettersRaw.toLowerCase();
-		if (isAcronym) n = letters.length;
-		else {
-			n = (letters.match(VOWEL_GROUP) ?? []).length;
-			if (n > 1 && /[^aeiouy]e$/.test(letters) && !/[^aeiouy]le$/.test(letters)) n--;
-			if (n === 0) n = letters.length;
-		}
-	}
-	return Math.max(1, n + digits);
-}
-/** Morae weight of a CJK unit: kana 1 each (small kana 0), ー 1, an ideograph KANJI_MORAE, other characters as Latin. */
-const KANJI_MORAE = 1.6;
-function cjkMorae(word) {
-	let n = 0;
-	let rest = "";
-	for (const ch of word) if (/[ぁぃぅぇぉっゃゅょゎァィゥェォャュョヮ]/u.test(ch)) n += ch === "っ" || ch === "ッ" ? 1 : 0;
-	else if (/[\p{Script=Hiragana}\p{Script=Katakana}ー]/u.test(ch)) n += 1;
-	else if (/\p{Script=Han}/u.test(ch)) n += KANJI_MORAE;
-	else if (/[\p{L}\p{N}]/u.test(ch)) rest += ch;
-	return Math.max(1, n + (rest ? estimateSyllables(rest) : 0));
-}
-/** Devanagari: one syllable per consonant or independent vowel, minus the consonants a virama joins into a conjunct. */
-function devanagariSyllables(word) {
-	const letters = (word.match(/[ऄ-हक़-ॡॲ-ॿ]/gu) ?? []).length;
-	const viramas = (word.match(/्/gu) ?? []).length;
-	const digits = (word.match(/\p{N}/gu) ?? []).length;
-	return Math.max(1, letters - viramas + digits);
-}
-/**
-* Speaking rates for duration estimates (design rules, not measurements of any one voice):
-* - Latin-script languages: words per second at the system voice's 180 wpm (3 words/s).
-* - Japanese / Chinese: characters per second (CJK_CHARS_PER_SEC, about 7.5; natural Japanese
-*   narration runs 7–8 characters/s of mixed kanji and kana).
-* - Hindi (Devanagari): 2.5 words/s; Arabic 2.2 words/s (clitics make words longer); Hebrew 2.5.
-*/
-const SPEECH_RATES = Object.freeze({
-	latin_words_per_sec: 3,
-	cjk_chars_per_sec: 7.5,
-	devanagari_words_per_sec: 2.5,
-	arabic_words_per_sec: 2.2,
-	hebrew_words_per_sec: 2.5,
-	other_words_per_sec: 2.5
-});
-/** Count what the rate counts: CJK characters (letters and digits, not punctuation) or whitespace words. */
-function speechUnits(text) {
-	const script = speechScript(text);
-	if (script === "cjk") {
-		let count = 0;
-		for (const ch of text) if (CJK_UNIT.test(ch) || /[\p{L}\p{N}]/u.test(ch)) count++;
-		return {
-			script,
-			unit: "chars",
-			count
-		};
-	}
-	return {
-		script,
-		unit: "words",
-		count: text.split(/\s+/).filter((w) => WORDLIKE$1.test(w)).length
-	};
-}
-/** Estimated narration time of `text` in seconds (see SPEECH_RATES), without pauses. */
-function estimateSpeechSec$1(text) {
-	const { script, count } = speechUnits(text);
-	const rate = script === "cjk" ? SPEECH_RATES.cjk_chars_per_sec : script === "devanagari" ? SPEECH_RATES.devanagari_words_per_sec : script === "arabic" ? SPEECH_RATES.arabic_words_per_sec : script === "hebrew" ? SPEECH_RATES.hebrew_words_per_sec : script === "other" ? SPEECH_RATES.other_words_per_sec : SPEECH_RATES.latin_words_per_sec;
-	return Math.round(count / rate * 100) / 100;
-}
-const TRAIL_CLOSERS = `["')\\]}»”’」』）]*$`;
-const SENTENCE_END = new RegExp(`[.!?…。！？]${TRAIL_CLOSERS}`, "u");
-const CLAUSE_END = new RegExp(`[,;:—–\\-、，；：]${TRAIL_CLOSERS}`, "u");
-/** Extra pause weight after a word: sentence end 1.2, clause punctuation 0.6, else 0. */
-function pauseWeight(word) {
-	if (SENTENCE_END.test(word)) return 1.2;
-	if (CLAUSE_END.test(word)) return .6;
-	return 0;
-}
-/**
-* Distribute `durationMs` (minus edge silence) across `words`, weighted by estimated syllables,
-* with pauses after punctuation (not after the last word). Timings are integer ms, monotonic
-* and non-overlapping; the first word starts at `leadMs`, the last ends at `durationMs - trailMs`.
-*/
-function estimateWordTimings(words, durationMs, opts = {}) {
-	if (words.length === 0) return [];
-	const total = Math.max(0, Math.round(durationMs));
-	let lead = Math.max(0, Math.round(opts.leadMs ?? 0));
-	let trail = Math.max(0, Math.round(opts.trailMs ?? 0));
-	if (lead + trail >= total) {
-		lead = 0;
-		trail = 0;
-	}
-	const spanStart = lead;
-	const spanEnd = total - trail;
-	const weights = words.map((w) => opts.even ? 1 : estimateSyllables(w));
-	const pauses = words.map((w, i) => opts.even || i === words.length - 1 ? 0 : pauseWeight(w));
-	const units = weights.reduce((a, b) => a + b, 0) + pauses.reduce((a, b) => a + b, 0);
-	const perUnit = (spanEnd - spanStart) / units;
-	const out = [];
-	let cursor = 0;
-	let prevEnd = spanStart;
-	words.forEach((word, i) => {
-		const startF = spanStart + cursor * perUnit;
-		cursor += weights[i];
-		const endF = i === words.length - 1 ? spanEnd : spanStart + cursor * perUnit;
-		cursor += pauses[i];
-		const start = Math.max(prevEnd, Math.round(startF));
-		const end = Math.max(start, Math.round(endF));
-		out.push({
-			word,
-			start_ms: start,
-			end_ms: end
-		});
-		prevEnd = end;
-	});
-	return out;
-}
-//#endregion
-//#region ../voice/dist/text.js
-const LEADING_PUNCT = /^["'(\[{«“‘¿¡]+/u;
-const TRAILING_PUNCT = /["')\]}»”’.,;:!?…]+$/u;
-function core(token) {
-	return token.replace(LEADING_PUNCT, "").replace(TRAILING_PUNCT, "");
-}
-function rulesFrom(terms) {
-	return Object.entries(terms).map(([from, to]) => ({
-		from: tokenize(from).map(core),
-		to: tokenize(to)
-	})).filter((r) => r.from.length > 0 && r.from.every(Boolean)).sort((a, b) => b.from.length - a.from.length || b.from.join(" ").length - a.from.join(" ").length);
-}
-/**
-* Apply brand pronunciation/terminology overrides (`brand.language.terminology`, e.g.
-* {"CI/CD": "C I C D"}) to produce the speech text, while keeping the original words for captions.
-*
-* Matching is token-based and case-sensitive on the token with surrounding punctuation stripped, so
-* "CI/CD," matches "CI/CD" and the trailing comma is carried onto the last speech token (preserving
-* the pause). Longer terms win. Terms embedded inside a larger token (e.g. "CI/CD-based") are not
-* replaced.
-*/
-function prepareSpeechText(voiceover, brand, extra) {
-	const captionWords = tokenize(voiceover);
-	const rules = rulesFrom({
-		...brand?.language?.terminology ?? {},
-		...extra ?? {}
-	});
-	const speechWords = [];
-	const spans = [];
-	let i = 0;
-	while (i < captionWords.length) {
-		const rule = rules.find((r) => r.from.every((f, k) => i + k < captionWords.length && core(captionWords[i + k]) === f));
-		if (rule) {
-			const n = rule.from.length;
-			const first = captionWords[i];
-			const last = captionWords[i + n - 1];
-			const lead = LEADING_PUNCT.exec(first)?.[0] ?? "";
-			const trail = TRAILING_PUNCT.exec(last)?.[0] ?? "";
-			const to = [...rule.to];
-			if (to.length) {
-				to[0] = lead + to[0];
-				to[to.length - 1] = to[to.length - 1] + trail;
-			}
-			spans.push({
-				captionStart: i,
-				captionEnd: i + n,
-				speechStart: speechWords.length,
-				speechEnd: speechWords.length + to.length
-			});
-			speechWords.push(...to);
-			i += n;
-		} else {
-			spans.push({
-				captionStart: i,
-				captionEnd: i + 1,
-				speechStart: speechWords.length,
-				speechEnd: speechWords.length + 1
-			});
-			speechWords.push(captionWords[i]);
-			i += 1;
-		}
-	}
-	return {
-		speech: speechWords.join(" "),
-		speechWords,
-		captionWords,
-		spans
-	};
-}
-/** Split [start, end] across words weighted by syllables; monotonic integer ms. */
-function spread(words, start, end) {
-	const weights = words.map(estimateSyllables);
-	const total = weights.reduce((a, b) => a + b, 0);
-	const out = [];
-	let acc = 0;
-	let prev = start;
-	words.forEach((word, k) => {
-		const s = prev;
-		acc += weights[k];
-		const e = k === words.length - 1 ? end : Math.max(s, Math.round(start + (end - start) * acc / total));
-		out.push({
-			word,
-			start_ms: s,
-			end_ms: e
-		});
-		prev = e;
-	});
-	return out;
-}
-/**
-* Map timings of speech tokens back onto the original caption words.
-*
-* - 1:1 spans copy the timing (with the caption spelling).
-* - A replaced span (e.g. "CI/CD" → "C I C D") takes the time range from its first to its last
-*   speech token and spreads it across its caption words by syllable weight.
-* - A span whose replacement is empty gets zero-width timings at the previous word's end.
-* - Fallback when `timings` does not have one entry per speech token (e.g. a provider normalized
-*   the text differently): the whole range [first start, last end] is spread across all caption
-*   words by syllable weight.
-*/
-function mapTimingsToCaptions(prepared, timings) {
-	const { captionWords, spans, speechWords } = prepared;
-	if (captionWords.length === 0) return [];
-	if (timings.length === 0) return spread(captionWords, 0, 0);
-	if (timings.length !== speechWords.length) return spread(captionWords, timings[0].start_ms, timings[timings.length - 1].end_ms);
-	const out = [];
-	let prevEnd = timings[0].start_ms;
-	for (const span of spans) {
-		const words = captionWords.slice(span.captionStart, span.captionEnd);
-		if (span.speechEnd === span.speechStart) {
-			for (const word of words) out.push({
-				word,
-				start_ms: prevEnd,
-				end_ms: prevEnd
-			});
-			continue;
-		}
-		const first = timings[span.speechStart];
-		const last = timings[span.speechEnd - 1];
-		if (words.length === span.speechEnd - span.speechStart) words.forEach((word, k) => {
-			const t = timings[span.speechStart + k];
-			out.push({
-				word,
-				start_ms: t.start_ms,
-				end_ms: t.end_ms
-			});
-		});
-		else out.push(...spread(words, first.start_ms, last.end_ms));
-		prevEnd = last.end_ms;
-	}
-	return out;
-}
-//#endregion
-//#region ../voice/dist/silent.js
-/** Silent track: no audio, words timed evenly across the scene duration. */
-function silentTrack(input) {
-	const duration_ms = Math.max(0, Math.round(input.duration_ms ?? 0));
-	return {
-		scene_id: input.scene_id,
-		duration_ms,
-		words: estimateWordTimings(tokenize(input.text), duration_ms, { even: true }),
-		timing_source: "none",
-		provider: "silent"
-	};
-}
-function createSilentBackend() {
-	return {
-		id: "silent",
-		available: () => ({
-			ok: true,
-			reason: "always available (no audio)"
-		}),
-		synthesize: async (input) => silentTrack(input)
-	};
-}
-const DEFAULT_SAY_VOICE = "Samantha";
-/** Audio shorter than this from a non-empty script is treated as a failed synthesis. */
-const MIN_AUDIO_MS = 50;
-/**
-* Parse `say -v '?'` output. Lines look like
-* `Samantha            en_US    # Hello! My name is Samantha.` and names may contain spaces and
-* parentheses, e.g. `Eddy (English (US)) en_US    # Hello!`.
-*/
-function parseSayVoices(output) {
-	const voices = [];
-	for (const line of output.split("\n")) {
-		const m = /^(.+?)\s+([a-z]{2,3}(?:[_-][A-Za-z0-9]+)+)\s+#\s?(.*)$/.exec(line.trimEnd());
-		if (m) voices.push({
-			name: m[1].trim(),
-			locale: m[2],
-			sample: m[3]
-		});
-	}
-	return voices;
-}
-/**
-* Preferred macOS `say` voices per language (primary subtag), best first. Any other installed
-* voice whose locale matches the language is used after these.
-*/
-const SAY_VOICES_BY_LANGUAGE = Object.freeze({
-	ja: ["Kyoko", "Otoya"],
-	zh: [
-		"Tingting",
-		"Meijia",
-		"Sinji"
-	],
-	ko: ["Yuna"],
-	hi: ["Lekha"],
-	ar: ["Majed", "Maged"],
-	he: ["Carmit"],
-	fr: [
-		"Thomas",
-		"Amélie",
-		"Amelie"
-	],
-	de: ["Anna"],
-	es: [
-		"Mónica",
-		"Monica",
-		"Paulina"
-	],
-	it: ["Alice"],
-	pt: ["Luciana", "Joana"],
-	ru: ["Milena"]
-});
-/** Primary language subtag, lower case (`ja-JP` → `ja`); undefined for none. */
-function baseLang(language) {
-	return language?.trim().split(/[-_]/)[0]?.toLowerCase() || void 0;
-}
-/** True when a language needs a voice of its own (anything but English, which every engine defaults to). */
-function needsOwnVoice(language) {
-	const base = baseLang(language);
-	return base !== void 0 && base !== "en";
-}
-/**
-* The `say` voice for a language: the requested voice when it speaks that language, else the
-* preferred voice, else any installed voice with a matching locale; undefined when none exists.
-*/
-function pickSayVoice(voices, language, requested) {
-	const base = baseLang(language);
-	const speaks = (v) => v.locale.toLowerCase().split(/[-_]/)[0] === base;
-	const byName = (n) => voices.find((v) => v.name === n && speaks(v));
-	if (requested && byName(requested)) return requested;
-	for (const n of SAY_VOICES_BY_LANGUAGE[base] ?? []) if (byName(n)) return n;
-	const region = language.split(/[-_]/)[1]?.toUpperCase();
-	return (region ? voices.find((v) => speaks(v) && v.locale.toUpperCase().endsWith(`_${region}`)) : void 0)?.name ?? voices.find(speaks)?.name;
-}
-/** Thrown when the system engine has no voice for the spec language (the caller falls back to silent). */
-var NoVoiceForLanguageError = class extends Error {
-	language;
-	engine;
-	constructor(language, engine, detail) {
-		super(`${engine} has no voice for language "${language}"; not reading it with an English voice (${detail})`);
-		this.language = language;
-		this.engine = engine;
-		this.name = "NoVoiceForLanguageError";
-	}
-};
-/**
-* Local OS text-to-speech: macOS `say`, or `espeak-ng` on Linux. Audio is converted to 48 kHz mono
-* WAV with ffmpeg; word timings are ESTIMATED (syllable-weighted over the measured duration).
-*/
-function createSystemBackend(options = {}) {
-	const runner = options.runner ?? defaultRunner;
-	const resolver = options.resolver ?? defaultResolver;
-	const platform = options.platform ?? process.platform;
-	const rate = Math.round(options.rate ?? 180);
-	const trimSilence = options.trimSilence ?? true;
-	let voiceCache;
-	const engine = (env) => {
-		if (platform === "darwin") return resolver("say", env) ? "say" : void 0;
-		if (platform === "linux") return resolver("espeak-ng", env) ? "espeak-ng" : void 0;
-	};
-	const listVoices = (env) => {
-		if (engine(env) !== "say") return Promise.resolve([]);
-		voiceCache ??= runner(resolver("say", env), ["-v", "?"]).then((r) => r.code === 0 ? parseSayVoices(r.stdout) : []).catch(() => []);
-		return voiceCache;
-	};
-	/**
-	* The voice to use. English (or no language): the requested voice, the configured one, or
-	* Samantha, else the system default. Other languages: a voice that speaks the language (see
-	* `pickSayVoice`; espeak-ng: the language code), or undefined when none is installed.
-	*/
-	const resolveVoice = async (requested, env, language) => {
-		const eng = engine(env);
-		if (eng === "espeak-ng") return requested ?? options.voice ?? (needsOwnVoice(language) ? baseLang(language) : void 0);
-		if (eng !== "say") return void 0;
-		const voices = await listVoices(env);
-		if (needsOwnVoice(language)) return pickSayVoice(voices, language, requested ?? options.voice);
-		const has = (n) => voices.some((v) => v.name === n);
-		for (const candidate of [
-			requested,
-			options.voice,
-			DEFAULT_SAY_VOICE
-		]) if (candidate && has(candidate)) return candidate;
-	};
-	const available = (env) => {
-		const eng = engine(env);
-		if (!eng) return {
-			ok: false,
-			reason: platform === "darwin" ? "macOS `say` not found" : platform === "linux" ? "`espeak-ng` not found on PATH" : `no system TTS supported on ${platform}`
-		};
-		if (!resolver("ffmpeg", env) || !resolver("ffprobe", env)) return {
-			ok: false,
-			reason: `${eng} found but ffmpeg/ffprobe missing (set FFMPEG_PATH/FFPROBE_PATH or install ffmpeg)`
-		};
-		return {
-			ok: true,
-			reason: `${eng} with ffmpeg`
-		};
-	};
-	const synthesize = async (input, ctx) => {
-		const eng = engine(ctx.env);
-		const ffmpeg = resolver("ffmpeg", ctx.env);
-		const ffprobe = resolver("ffprobe", ctx.env);
-		if (!eng || !ffmpeg || !ffprobe) throw new Error(`system voice backend unavailable: ${available(ctx.env).reason}`);
-		const tools = {
-			ffmpeg,
-			ffprobe,
-			runner
-		};
-		const run = { signal: ctx.signal };
-		const voice = await resolveVoice(input.voice, ctx.env, input.language);
-		if (eng === "say" && needsOwnVoice(input.language) && !voice) {
-			const langs = [...new Set((await listVoices(ctx.env)).map((v) => v.locale.split(/[-_]/)[0]))].sort().join(", ");
-			throw new NoVoiceForLanguageError(input.language, eng, `installed voice languages: ${langs || "none listed"}; add one in System Settings > Accessibility > Spoken Content > System voice > Manage Voices, or use voice "silent"`);
-		}
-		const words = tokenize(input.text);
-		await ensureDir(ctx.outDir);
-		const outFile = join(ctx.outDir, `${input.scene_id}.wav`);
-		const work = await mkdtemp(join(tmpdir(), "vs-voice-"));
-		try {
-			const textFile = join(work, "text.txt");
-			await writeFile(textFile, input.text, "utf8");
-			if (eng === "say") {
-				const raw = join(work, "say.aiff");
-				const args = [
-					...voice ? ["-v", voice] : [],
-					"-r",
-					String(rate),
-					"-o",
-					raw,
-					"-f",
-					textFile
-				];
-				await runChecked(runner, resolver("say", ctx.env), args, "say", run);
-				await toWav48kMono(tools, raw, outFile, run);
-			} else {
-				const raw = join(work, "espeak.wav");
-				const args = [
-					...voice ? ["-v", voice] : [],
-					"-s",
-					String(rate),
-					"-w",
-					raw,
-					"-f",
-					textFile
-				];
-				await runChecked(runner, resolver("espeak-ng", ctx.env), args, "espeak-ng", run);
-				await toWav48kMono(tools, raw, outFile, run);
-			}
-			const duration_ms = await probeDurationMs(tools, outFile, run);
-			if (words.length > 0 && duration_ms < MIN_AUDIO_MS) throw new Error(`${eng} produced no audio for scene ${input.scene_id} (${duration_ms} ms); it may be blocked by a sandbox`);
-			const edges = trimSilence ? await detectEdgeSilence(tools, outFile, duration_ms, run) : {
-				leadMs: 0,
-				trailMs: 0
-			};
-			return {
-				scene_id: input.scene_id,
-				audio_path: outFile,
-				duration_ms,
-				words: estimateWordTimings(words, duration_ms, edges),
-				timing_source: "estimated",
-				...voice ? { voice } : {},
-				provider: eng === "say" ? "system-say" : "system-espeak-ng"
-			};
-		} finally {
-			await rm(work, {
-				recursive: true,
-				force: true
-			});
-		}
-	};
-	return {
-		id: "system",
-		available,
-		synthesize,
-		resolveVoice,
-		cacheOptions: () => ({
-			rate,
-			platform,
-			trimSilence
-		}),
-		engine,
-		listVoices
-	};
-}
-/** Per-request character budget; well under every current model's limit (5k for eleven_v3). */
-const DEFAULT_CHUNK_CHARS = 2500;
-const WORDLIKE = /[\p{L}\p{N}]/u;
-/**
-* Group ElevenLabs character-level alignment into words.
-* - Whitespace separates words (runs of spaces are fine).
-* - A punctuation-only group ("—", "!") is attached to the preceding word, keeping that word's end
-*   time; with no preceding word it is prefixed to the next one.
-* - A word's start is its first character's start; its end is the end of its last letter/digit
-*   (trailing punctuation carries no speech time).
-* - Times are integer ms offset by `offsetMs`, forced monotonic and non-overlapping.
-*/
-function alignmentToWords(alignment, offsetMs = 0) {
-	const { characters: chars, character_start_times_seconds: starts, character_end_times_seconds: ends } = alignment;
-	const out = [];
-	let pendingPrefix = "";
-	let text = "";
-	let start = -1;
-	let end = -1;
-	let lastSpokenEnd = -1;
-	const flush = () => {
-		if (!text) return;
-		if (!WORDLIKE.test(text)) {
-			if (out.length) out[out.length - 1].word += text;
-			else pendingPrefix += text;
-		} else {
-			const s = Math.round(start * 1e3) + offsetMs;
-			const e = Math.round((lastSpokenEnd >= 0 ? lastSpokenEnd : end) * 1e3) + offsetMs;
-			out.push({
-				word: pendingPrefix + text,
-				start_ms: s,
-				end_ms: e
-			});
-			pendingPrefix = "";
-		}
-		text = "";
-		start = -1;
-		end = -1;
-		lastSpokenEnd = -1;
-	};
-	let cjkOpen = false;
-	for (let i = 0; i < chars.length; i++) {
-		const c = chars[i] ?? "";
-		if (/^\s*$/u.test(c)) {
-			flush();
-			cjkOpen = false;
-			continue;
-		}
-		if (isCjkUnitChar(c) && !(cjkOpen && isNoStartChar(c))) {
-			flush();
-			cjkOpen = true;
-		} else if (cjkOpen && !isNoStartChar(c)) {
-			flush();
-			cjkOpen = false;
-		}
-		if (start < 0) start = starts[i] ?? 0;
-		end = ends[i] ?? end;
-		if (WORDLIKE.test(c)) lastSpokenEnd = ends[i] ?? lastSpokenEnd;
-		text += c;
-	}
-	flush();
-	let prev = 0;
-	for (const w of out) {
-		w.start_ms = Math.max(prev, w.start_ms);
-		w.end_ms = Math.max(w.start_ms, w.end_ms);
-		prev = w.end_ms;
-	}
-	return out;
-}
-/** Split text into chunks of at most `max` chars, preferring sentence, then word boundaries. */
-function chunkText(text, max = DEFAULT_CHUNK_CHARS) {
-	const clean = text.trim();
-	if (clean.length <= max) return clean ? [clean] : [];
-	const sentences = clean.match(/[^.!?…]+(?:[.!?…]+["')\]]*|$)\s*/gu) ?? [clean];
-	const chunks = [];
-	let cur = "";
-	const push = () => {
-		if (cur.trim()) chunks.push(cur.trim());
-		cur = "";
-	};
-	for (const s of sentences) {
-		if ((cur + s).length <= max) {
-			cur += s;
-			continue;
-		}
-		push();
-		if (s.length <= max) {
-			cur = s;
-			continue;
-		}
-		for (const w of s.split(/(\s+)/)) {
-			if ((cur + w).length > max) push();
-			cur += w;
-		}
-	}
-	push();
-	return chunks;
-}
-var ElevenLabsError = class extends Error {
-	status;
-	constructor(message, status) {
-		super(message);
-		this.status = status;
-		this.name = "ElevenLabsError";
-	}
-};
-function apiKey(env) {
-	const k = env.ELEVENLABS_API_KEY;
-	return k && k.trim() ? k.trim() : void 0;
-}
-/**
-* ElevenLabs `with-timestamps` TTS over plain fetch. Enabled only when ELEVENLABS_API_KEY is set.
-* Long scripts are chunked; each chunk passes up to 3 `previous_request_ids` for prosody continuity
-* (also across scenes within one backend instance) and its word times are offset by the cumulative
-* measured audio duration. The key is only ever sent in the `xi-api-key` header, never logged.
-*/
-function createElevenLabsBackend(options = {}) {
-	const doFetch = options.fetch ?? globalThis.fetch;
-	const runner = options.runner ?? defaultRunner;
-	const resolver = options.resolver ?? defaultResolver;
-	const modelId = options.modelId ?? "eleven_multilingual_v2";
-	const outputFormat = options.outputFormat ?? "mp3_44100_128";
-	const baseUrl = (options.baseUrl ?? "https://api.elevenlabs.io").replace(/\/+$/, "");
-	const recentRequestIds = [];
-	const available = (env) => {
-		if (!apiKey(env)) return {
-			ok: false,
-			reason: "ELEVENLABS_API_KEY not set"
-		};
-		if (!resolver("ffmpeg", env) || !resolver("ffprobe", env)) return {
-			ok: false,
-			reason: "ELEVENLABS_API_KEY set but ffmpeg/ffprobe missing"
-		};
-		return {
-			ok: true,
-			reason: "ELEVENLABS_API_KEY set"
-		};
-	};
-	const resolveVoice = async (requested, env) => requested ?? (env.ELEVENLABS_VOICE_ID?.trim() || "21m00Tcm4TlvDq8ikWAM");
-	const request = async (voiceId, text, key, signal) => {
-		const body = {
-			text,
-			model_id: modelId
-		};
-		if (recentRequestIds.length) body.previous_request_ids = recentRequestIds.slice(-3);
-		if (options.seed !== void 0) body.seed = options.seed;
-		if (options.pronunciationDictionaryLocators?.length) body.pronunciation_dictionary_locators = options.pronunciationDictionaryLocators;
-		const url = `${baseUrl}/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=${encodeURIComponent(outputFormat)}`;
-		const res = await doFetch(url, {
-			method: "POST",
-			headers: {
-				"xi-api-key": key,
-				"content-type": "application/json",
-				accept: "application/json"
-			},
-			body: JSON.stringify(body),
-			...signal ? { signal } : {}
-		});
-		if (!res.ok) {
-			const detail = (await res.text().catch(() => "")).slice(0, 300).replaceAll(key, "***");
-			throw new ElevenLabsError(`ElevenLabs TTS failed: HTTP ${res.status}${detail ? ` ${detail}` : ""}`, res.status);
-		}
-		const json = await res.json();
-		if (!json || typeof json.audio_base64 !== "string" || !json.audio_base64) throw new ElevenLabsError("ElevenLabs response missing audio_base64");
-		const requestId = res.headers.get("request-id");
-		if (requestId) {
-			recentRequestIds.push(requestId);
-			if (recentRequestIds.length > 3) recentRequestIds.shift();
-		}
-		return json;
-	};
-	const synthesize = async (input, ctx) => {
-		const key = apiKey(ctx.env);
-		if (!key) throw new ElevenLabsError("ELEVENLABS_API_KEY not set");
-		const ffmpeg = resolver("ffmpeg", ctx.env);
-		const ffprobe = resolver("ffprobe", ctx.env);
-		if (!ffmpeg || !ffprobe) throw new ElevenLabsError("ffmpeg/ffprobe missing");
-		const tools = {
-			ffmpeg,
-			ffprobe,
-			runner
-		};
-		const run = { signal: ctx.signal };
-		const voice = await resolveVoice(input.voice, ctx.env);
-		const chunks = chunkText(input.text, options.chunkChars ?? 2500);
-		await ensureDir(ctx.outDir);
-		const outFile = join(ctx.outDir, `${input.scene_id}.wav`);
-		const work = await mkdtemp(join(tmpdir(), "vs-11l-"));
-		try {
-			const parts = [];
-			const words = [];
-			let offset = 0;
-			for (const [i, chunk] of chunks.entries()) {
-				const json = await request(voice, chunk, key, ctx.signal);
-				const part = join(work, `part-${i}.${outputFormat.split("_")[0] ?? "mp3"}`);
-				await writeFile(part, Buffer.from(json.audio_base64, "base64"));
-				parts.push(part);
-				const alignment = json.alignment ?? json.normalized_alignment;
-				if (alignment) words.push(...alignmentToWords(alignment, offset));
-				offset += await probeDurationMs(tools, part, run);
-			}
-			if (parts.length === 0) throw new ElevenLabsError(`scene ${input.scene_id} has no text`);
-			await concatToWav(tools, parts, outFile, run);
-			const duration_ms = await probeDurationMs(tools, outFile, run);
-			let prev = 0;
-			for (const w of words) {
-				w.start_ms = Math.min(Math.max(prev, w.start_ms), duration_ms);
-				w.end_ms = Math.min(Math.max(w.start_ms, w.end_ms), duration_ms);
-				prev = w.end_ms;
-			}
-			return {
-				scene_id: input.scene_id,
-				audio_path: outFile,
-				duration_ms,
-				words,
-				timing_source: "provider",
-				voice,
-				provider: "elevenlabs"
-			};
-		} finally {
-			await rm(work, {
-				recursive: true,
-				force: true
-			});
-		}
-	};
-	return {
-		id: "elevenlabs",
-		available,
-		synthesize,
-		resolveVoice,
-		cacheOptions: () => ({
-			modelId,
-			outputFormat,
-			seed: options.seed ?? null,
-			dictionaries: options.pronunciationDictionaryLocators ?? null
-		})
-	};
-}
-var VoiceBackendUnavailableError = class extends Error {
-	backendId;
-	constructor(backendId, reason) {
-		super(`voice backend "${backendId}" is unavailable: ${reason}`);
-		this.backendId = backendId;
-		this.name = "VoiceBackendUnavailableError";
-	}
-};
-function defaultBackends() {
-	return {
-		system: createSystemBackend(),
-		elevenlabs: createElevenLabsBackend(),
-		silent: createSilentBackend()
-	};
-}
-/**
-* auto: elevenlabs if its key is set, else system TTS if available, else silent.
-* An explicit choice that is unavailable throws VoiceBackendUnavailableError.
-*/
-async function selectBackend(choice, env, backends = defaultBackends()) {
-	if (choice !== "auto") {
-		const backend = backends[choice];
-		const a = await backend.available(env);
-		if (!a.ok) throw new VoiceBackendUnavailableError(choice, a.reason ?? "unavailable");
-		return {
-			backend,
-			reason: `requested "${choice}"${a.reason ? ` (${a.reason})` : ""}`
-		};
-	}
-	const skipped = [];
-	for (const id of ["elevenlabs", "system"]) {
-		const a = await backends[id].available(env);
-		if (a.ok) {
-			const prefix = skipped.length ? `${skipped.join("; ")}; ` : "";
-			return {
-				backend: backends[id],
-				reason: `auto: ${prefix}using ${id} (${a.reason ?? "available"})`
-			};
-		}
-		skipped.push(`${id} unavailable: ${a.reason ?? "unknown"}`);
-	}
-	return {
-		backend: backends.silent,
-		reason: `auto: ${skipped.join("; ")}; falling back to silent (no audio)`
-	};
-}
-const toPosix$2 = (p) => p.split(sep).join("/");
-function detectOverrun(scene, track) {
-	if (!track.audio_path || track.duration_ms <= Math.round(scene.duration_sec * 1e3)) return void 0;
-	const audio = track.duration_ms / 1e3;
-	return {
-		scene_id: scene.id,
-		scene_duration_sec: scene.duration_sec,
-		audio_duration_sec: audio,
-		suggested_duration_sec: Math.ceil(Math.round((audio + .3) * 1e3) / 100) / 10
-	};
-}
-/**
-* Synthesize voice for every scene of a spec into `<project>/assets/voice/<scene_id>.wav` and write
-* `assets/voice/voice-tracks.json`. Results are cached by content (backend, voice, text, options)
-* in a ContentStore, so re-runs are free. The spec is never modified: scenes whose audio is longer
-* than `duration_sec` are reported in `overruns` for the caller to act on.
-*/
-async function synthesizeSpec(spec, options) {
-	const env = options.env ?? process.env;
-	const backends = {
-		...defaultBackends(),
-		...options.backends
-	};
-	const { backend, reason } = await selectBackend(options.backend ?? "auto", env, backends);
-	const paths = projectPaths(options.projectDir);
-	const voiceDir = paths.assetsVoice;
-	const cacheRoot = options.cacheDir ?? join(resolveDataDir(env).cache, "voice");
-	const store = new ContentStore(join(cacheRoot, "cas"));
-	const indexDir = join(cacheRoot, "index");
-	const tracks = [];
-	const overruns = [];
-	const cacheHits = [];
-	const work = await mkdtemp(join(tmpdir(), "vs-voice-spec-"));
-	try {
-		for (const scene of spec.scenes) {
-			options.signal?.throwIfAborted();
-			const durationMs = Math.round(scene.duration_sec * 1e3);
-			const prepared = prepareSpeechText(scene.voiceover, options.brand);
-			if (prepared.captionWords.length === 0) {
-				tracks.push(silentTrack({
-					scene_id: scene.id,
-					text: "",
-					duration_ms: durationMs
-				}));
-				continue;
-			}
-			if (backend.id === "silent") {
-				const t = await backend.synthesize({
-					scene_id: scene.id,
-					text: prepared.speech,
-					duration_ms: durationMs
-				}, {
-					outDir: work,
-					env,
-					...options.signal ? { signal: options.signal } : {}
-				});
-				tracks.push({
-					...t,
-					words: mapTimingsToCaptions(prepared, t.words)
-				});
-				continue;
-			}
-			const voice = await backend.resolveVoice?.(spec.voice.voice_id, env, spec.language);
-			const key = cacheKey({
-				kind: "voice",
-				inputDigest: sha256Hex(`${prepared.speech}\u0000${scene.voiceover}`),
-				extractorVersion: "1",
-				options: {
-					backend: backend.id,
-					voice: voice ?? null,
-					text: prepared.speech,
-					...backend.cacheOptions?.() ?? {}
-				},
-				irSchemaVersion: 1
-			});
-			const indexFile = join(indexDir, `${key}.json`);
-			const dest = join(voiceDir, `${scene.id}.wav`);
-			const relAudio = toPosix$2(relative(paths.root, dest));
-			const cached = await readJson(indexFile).catch(() => void 0);
-			if (cached?.version === "1" && cached.audio_sha256 && await store.has(cached.audio_sha256)) {
-				await store.materialize(cached.audio_sha256, dest);
-				const track = SceneVoiceTrack.parse({
-					...cached.track,
-					scene_id: scene.id,
-					audio_path: relAudio
-				});
-				tracks.push(track);
-				cacheHits.push(scene.id);
-				const o = detectOverrun(scene, track);
-				if (o) overruns.push(o);
-				continue;
-			}
-			const raw = await backend.synthesize({
-				scene_id: scene.id,
-				text: prepared.speech,
-				...voice ? { voice } : {},
-				duration_ms: durationMs,
-				language: spec.language
-			}, {
-				outDir: work,
-				env,
-				...options.signal ? { signal: options.signal } : {}
-			});
-			const words = mapTimingsToCaptions(prepared, raw.words);
-			let track;
-			let audioSha;
-			if (raw.audio_path) {
-				const entry = await store.put(raw.audio_path);
-				audioSha = entry.sha256;
-				await store.materialize(entry.sha256, dest);
-				await rm(raw.audio_path, { force: true });
-				track = SceneVoiceTrack.parse({
-					...raw,
-					words,
-					audio_path: relAudio
-				});
-			} else {
-				const { audio_path: _drop, ...rest } = raw;
-				track = SceneVoiceTrack.parse({
-					...rest,
-					words
-				});
-			}
-			if (audioSha) await writeJsonAtomic(indexFile, {
-				version: "1",
-				audio_sha256: audioSha,
-				track
-			});
-			tracks.push(track);
-			const o = detectOverrun(scene, track);
-			if (o) overruns.push(o);
-		}
-	} finally {
-		await rm(work, {
-			recursive: true,
-			force: true
-		});
-	}
-	const tracksFile = join(voiceDir, "voice-tracks.json");
-	await writeJsonAtomic(tracksFile, tracks);
-	return {
-		backend: backend.id,
-		reason,
-		tracks,
-		tracks_path: toPosix$2(relative(paths.root, tracksFile)),
-		overruns,
-		cache_hits: cacheHits
-	};
 }
 //#endregion
 //#region src/localize.ts

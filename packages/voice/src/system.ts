@@ -8,7 +8,8 @@ import { defaultResolver, defaultRunner, runChecked, type CommandRunner, type To
 import { detectEdgeSilence, probeDurationMs, toWav48kMono, type FfTools } from "./ffmpeg.js";
 import type { Availability, Env, SynthesisContext, SynthesisInput, VoiceBackend } from "./types.js";
 
-export const DEFAULT_RATE_WPM = 180;
+/** Default speaking rate: natural explainer narration sits around 150–165 words per minute. */
+export const DEFAULT_RATE_WPM = 160;
 export const DEFAULT_SAY_VOICE = "Samantha";
 /** Audio shorter than this from a non-empty script is treated as a failed synthesis. */
 const MIN_AUDIO_MS = 50;
@@ -69,11 +70,35 @@ function needsOwnVoice(language: string | undefined): boolean {
  * The `say` voice for a language: the requested voice when it speaks that language, else the
  * preferred voice, else any installed voice with a matching locale; undefined when none exists.
  */
+/** Quality tier of a macOS voice from its name: Premium (neural) > Enhanced > compact. */
+export function voiceQuality(name: string): number {
+  return /\(Premium\)/i.test(name) ? 2 : /\(Enhanced\)/i.test(name) ? 1 : 0;
+}
+
+/**
+ * The best installed Premium/Enhanced voice for a language (region match first, e.g. en-IN →
+ * en_IN), or undefined when only compact voices are installed.
+ */
+export function bestNaturalVoice(voices: readonly SayVoice[], language: string): string | undefined {
+  const base = (baseLang(language) ?? "en").toLowerCase();
+  const region = language.split(/[-_]/)[1]?.toUpperCase();
+  const candidates = voices
+    .filter((v) => voiceQuality(v.name) > 0 && v.locale.toLowerCase().split(/[-_]/)[0] === base)
+    .sort((a, b) => {
+      const ra = region && a.locale.toUpperCase().endsWith(`_${region}`) ? 1 : 0;
+      const rb = region && b.locale.toUpperCase().endsWith(`_${region}`) ? 1 : 0;
+      return voiceQuality(b.name) - voiceQuality(a.name) || rb - ra || a.name.localeCompare(b.name);
+    });
+  return candidates[0]?.name;
+}
+
 export function pickSayVoice(voices: readonly SayVoice[], language: string, requested?: string): string | undefined {
   const base = baseLang(language)!;
   const speaks = (v: SayVoice) => v.locale.toLowerCase().split(/[-_]/)[0] === base;
   const byName = (n: string) => voices.find((v) => v.name === n && speaks(v));
   if (requested && byName(requested)) return requested;
+  const natural = bestNaturalVoice(voices, language);
+  if (natural) return natural;
   for (const n of SAY_VOICES_BY_LANGUAGE[base] ?? []) if (byName(n)) return n;
   // Prefer a region matching the tag (zh-TW → zh_TW), then any voice of the language.
   const region = language.split(/[-_]/)[1]?.toUpperCase();
@@ -96,7 +121,7 @@ export interface SystemBackendOptions {
   runner?: CommandRunner;
   resolver?: ToolResolver;
   platform?: NodeJS.Platform;
-  /** Words per minute (default 180). */
+  /** Words per minute (default 160); a request's rate_wpm wins. */
   rate?: number;
   /** Default voice when the scene requests none. */
   voice?: string;
@@ -149,10 +174,14 @@ export function createSystemBackend(options: SystemBackendOptions = {}): Omit<Vo
     const voices = await listVoices(env);
     if (needsOwnVoice(language)) return pickSayVoice(voices, language!, requested ?? options.voice);
     const has = (n: string) => voices.some((v) => v.name === n);
-    for (const candidate of [requested, options.voice, DEFAULT_SAY_VOICE]) {
+    for (const candidate of [requested, options.voice]) {
       if (candidate && has(candidate)) return candidate;
     }
-    return undefined; // system default voice
+    // Natural-sounding voices first: an installed Premium/Enhanced English voice (matching the
+    // spec's region when possible), then Samantha, then the system default.
+    const best = bestNaturalVoice(voices, language ?? "en-US");
+    if (best) return best;
+    return has(DEFAULT_SAY_VOICE) ? DEFAULT_SAY_VOICE : undefined;
   };
 
   const available = (env: Env): Availability => {
@@ -200,12 +229,12 @@ export function createSystemBackend(options: SystemBackendOptions = {}): Omit<Vo
       await writeFile(textFile, input.text, "utf8");
       if (eng === "say") {
         const raw = join(work, "say.aiff");
-        const args = [...(voice ? ["-v", voice] : []), "-r", String(rate), "-o", raw, "-f", textFile];
+        const args = [...(voice ? ["-v", voice] : []), "-r", String(Math.round(input.rate_wpm ?? rate)), "-o", raw, "-f", textFile];
         await runChecked(runner, resolver("say", ctx.env)!, args, "say", run);
         await toWav48kMono(tools, raw, outFile, run);
       } else {
         const raw = join(work, "espeak.wav");
-        const args = [...(voice ? ["-v", voice] : []), "-s", String(rate), "-w", raw, "-f", textFile];
+        const args = [...(voice ? ["-v", voice] : []), "-s", String(Math.round(input.rate_wpm ?? rate)), "-w", raw, "-f", textFile];
         await runChecked(runner, resolver("espeak-ng", ctx.env)!, args, "espeak-ng", run);
         await toWav48kMono(tools, raw, outFile, run);
       }

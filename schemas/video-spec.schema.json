@@ -770,6 +770,12 @@
           },
           "type": "array"
         },
+        "rate_wpm": {
+          "description": "Speaking rate in words per minute for system TTS (default 160; 145–165 sounds natural for explainers).",
+          "maximum": 230,
+          "minimum": 110,
+          "type": "integer"
+        },
         "style": {
           "type": "string"
         },

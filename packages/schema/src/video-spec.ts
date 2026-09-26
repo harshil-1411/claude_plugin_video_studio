@@ -174,6 +174,12 @@ export const VoiceMode = z
 
 export const VoiceSettings = z.strictObject({
   mode: VoiceMode.optional(),
+  rate_wpm: z
+    .int()
+    .min(110)
+    .max(230)
+    .optional()
+    .describe("Speaking rate in words per minute for system TTS (default 160; 145–165 sounds natural for explainers)."),
   provider_preference: z.array(Id).optional().describe("Preferred TTS providers in order; the router may override on policy."),
   voice_id: z.string().optional(),
   style: z.string().optional(),

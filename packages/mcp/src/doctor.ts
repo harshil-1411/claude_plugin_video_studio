@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveDataDir } from "@video-studio/core";
 import { hasEnvValue as hasValue, locateFfTool, parseBuildconf, which } from "@video-studio/media";
+import { bestNaturalVoice, parseSayVoices } from "@video-studio/voice";
 import { checkHyperframes } from "./hyperframes.js";
 
 // ffmpeg/ffprobe location and buildconf parsing live in @video-studio/media (shared with the render path).
@@ -322,6 +323,25 @@ export function checkProviderKeys(env: Env): { check: Check; keys: Record<string
   return { check, keys };
 }
 
+/**
+ * macOS narration quality: the compact `say` voices sound robotic; the free Premium/Enhanced
+ * voices (a one-time download in System Settings) sound natural and are picked automatically.
+ */
+export async function checkSystemVoice(deps: DoctorDeps): Promise<Check | null> {
+  if (deps.platform !== "darwin") return null;
+  const r = await deps.exec("/usr/bin/say", ["-v", "?"]);
+  if (!r || r.code !== 0) return { id: "system_voice", status: "warn", detail: "macOS `say` did not list its voices" };
+  const voices = parseSayVoices(r.stdout);
+  const best = bestNaturalVoice(voices, "en-US");
+  if (best) return { id: "system_voice", status: "ok", detail: `natural voice installed: ${best} (used automatically for English narration)` };
+  return {
+    id: "system_voice",
+    status: "warn",
+    detail: "only compact macOS voices are installed, so narration sounds robotic",
+    fix: "System Settings → Accessibility → Spoken Content → System voice → Manage Voices… → English: download a Premium voice (e.g. Zoe or Ava (Premium); for Indian English, an en-IN Premium/Enhanced voice). The plugin picks it automatically. Or set voice.rate_wpm (default 160) to slow the pace.",
+  };
+}
+
 export async function checkDataDir(deps: DoctorDeps): Promise<Check> {
   let root: string;
   try {
@@ -358,6 +378,8 @@ export async function runDoctor(deps: DoctorDeps = defaultDoctorDeps()): Promise
   checks.push(await checkChrome(deps));
   if (deps.hyperframes) checks.push(await deps.hyperframes());
   checks.push(await checkWhisper(deps));
+  const voice = await checkSystemVoice(deps);
+  if (voice) checks.push(voice);
   const keys = checkProviderKeys(deps.env);
   checks.push(keys.check, await checkDataDir(deps));
   const overall: CheckStatus = checks.some((c) => c.status === "fail")

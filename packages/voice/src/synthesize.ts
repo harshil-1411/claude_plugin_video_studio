@@ -172,6 +172,7 @@ export async function synthesizeSpec(spec: VideoSpec, options: SynthesizeSpecOpt
           backend: backend.id,
           voice: voice ?? null,
           text: prepared.speech,
+          ...(spec.voice.rate_wpm ? { rate_wpm: spec.voice.rate_wpm } : {}),
           ...(backend.cacheOptions?.() ?? {}),
         },
         irSchemaVersion: 1,
@@ -192,7 +193,7 @@ export async function synthesizeSpec(spec: VideoSpec, options: SynthesizeSpecOpt
       }
 
       const raw = await backend.synthesize(
-        { scene_id: scene.id, text: prepared.speech, ...(voice ? { voice } : {}), duration_ms: durationMs, language: spec.language },
+        { scene_id: scene.id, text: prepared.speech, ...(voice ? { voice } : {}), duration_ms: durationMs, language: spec.language, ...(spec.voice.rate_wpm ? { rate_wpm: spec.voice.rate_wpm } : {}) },
         { outDir: work, env, ...(options.signal ? { signal: options.signal } : {}) },
       );
       const words = mapTimingsToCaptions(prepared, raw.words);

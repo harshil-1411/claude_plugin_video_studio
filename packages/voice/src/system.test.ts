@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { defaultResolver, defaultRunner, type CommandRunner, type ToolResolver } from "./exec.js";
-import { NoVoiceForLanguageError, createSystemBackend, parseSayVoices, pickSayVoice } from "./system.js";
+import { DEFAULT_RATE_WPM, NoVoiceForLanguageError, bestNaturalVoice, createSystemBackend, parseSayVoices, pickSayVoice, voiceQuality } from "./system.js";
 
 const SAY_VOICES = [
   "Albert              en_US    # Hello! My name is Albert.",
@@ -59,6 +59,44 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+});
+
+describe("natural voices", () => {
+  // How `say -v '?'` lists downloaded Premium/Enhanced voices.
+  const withPremium = parseSayVoices(
+    [
+      "Samantha            en_US    # Hello! My name is Samantha.",
+      "Ava (Enhanced)      en_US    # Hello! My name is Ava.",
+      "Zoe (Premium)       en_US    # Hello! My name is Zoe.",
+      "Isha (Premium)      en_IN    # Hello! My name is Isha.",
+      "Kyoko (Enhanced)    ja_JP    # こんにちは。",
+      "Kyoko               ja_JP    # こんにちは。",
+    ].join("\n"),
+  );
+
+  it("ranks Premium over Enhanced over compact, and matches the region", () => {
+    expect(voiceQuality("Zoe (Premium)")).toBe(2);
+    expect(voiceQuality("Ava (Enhanced)")).toBe(1);
+    expect(voiceQuality("Samantha")).toBe(0);
+    expect(bestNaturalVoice(withPremium, "en-US")).toBe("Zoe (Premium)");
+    expect(bestNaturalVoice(withPremium, "en-IN")).toBe("Isha (Premium)");
+    expect(bestNaturalVoice(withPremium, "ja-JP")).toBe("Kyoko (Enhanced)");
+    expect(bestNaturalVoice(parseSayVoices(SAY_VOICES), "en-US")).toBeUndefined(); // compact only
+    expect(pickSayVoice(withPremium, "ja-JP")).toBe("Kyoko (Enhanced)");
+  });
+
+  it("uses the best installed voice by default, and the spec's rate", async () => {
+    const calls: Call[] = [];
+    const base = fakeRunner(calls);
+    const runner: CommandRunner = async (cmd, args) =>
+      args[0] === "-v" && args[1] === "?" ? { code: 0, stdout: withPremium.map((v) => `${v.name}  ${v.locale}    # ${v.sample}`).join("\n"), stderr: "" } : base(cmd, args);
+    const b = createSystemBackend({ platform: "darwin", resolver: allTools, runner, trimSilence: false });
+    const track = await b.synthesize({ scene_id: "s01", text: "Hello there.", language: "en-IN", rate_wpm: 150 }, { outDir: dir, env: {} });
+    expect(track.voice).toBe("Isha (Premium)");
+    const sayCall = calls.find((c) => c.cmd.endsWith("say") && c.args.includes("-o"))!;
+    expect(sayCall.args).toEqual(expect.arrayContaining(["-v", "Isha (Premium)", "-r", "150"]));
+    expect(DEFAULT_RATE_WPM).toBe(160);
+  });
 });
 
 describe("system backend (mocked commands)", () => {
@@ -146,7 +184,7 @@ describe("system backend (mocked commands)", () => {
     const b = createSystemBackend({ platform: "linux", resolver: allTools, runner: fakeRunner(calls, "0.8"), trimSilence: false });
     const track = await b.synthesize({ scene_id: "s02", text: "Hi all" }, { outDir: dir, env: {} });
     expect(track.provider).toBe("system-espeak-ng");
-    expect(calls.some((c) => c.cmd.endsWith("espeak-ng") && c.args.includes("-s") && c.args.includes("180"))).toBe(true);
+    expect(calls.some((c) => c.cmd.endsWith("espeak-ng") && c.args.includes("-s") && c.args.includes(String(DEFAULT_RATE_WPM)))).toBe(true);
     expect(track.words.at(-1)!.end_ms).toBe(800);
   });
 
