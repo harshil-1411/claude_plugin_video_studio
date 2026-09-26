@@ -29,11 +29,13 @@ Turning knowledge into short videos usually means a timeline editor, a caption t
 
 ## See what it makes
 
-All images below are frames from real renders made by the plugin during development, using the built-in ffmpeg renderer at preview size.
+Everything below was made by the plugin itself: no hand editing.
 
-**This README as a reel.** [`docs/media/hero.mp4`](docs/media/hero.mp4) was made by the plugin from this README (animated-explainer template, `technical` style):
+**This README as a reel.** [`docs/media/hero.mp4`](docs/media/hero.mp4) is a narrated 1080×1920 final render made from this README. It uses the animated-explainer structure, the `technical` style and a macOS Premium voice, and every line cites a README line. The project that makes it is [`examples/readme-hero`](examples/readme-hero):
 
-<p align="center"><img src="docs/media/hero-cover.jpg" width="200" alt="Cover frame of the hero reel: the stat 680,000 hours"></p>
+<p align="center"><img src="docs/media/hero-cover.jpg" width="200" alt="Cover of the hero reel: the headline 'Docs in, video out'"></p>
+
+The strips below are frames from preview renders (built-in ffmpeg renderer) made during development.
 
 **15 scene kinds.** The strip shows kinetic text, a stat, a timeline, before/after, a quote, a map and a lower third, from a text-over-music reel with no voiceover:
 
@@ -118,12 +120,22 @@ flowchart LR
 | **Inputs** | Markdown, text, PDF, DOCX, PPTX, web pages, local repos, video and audio files, folders of clips |
 | **Templates (18)** | explain · educational · listicle · faceless-listicle · product-launch · devtool-launch · product-demo · product-ui · case-study · before-after · carousel-story · animated-explainer · text-over-music · talking-head · aesthetic-broll · silent-vlog · oddly-satisfying · ambient-slice-of-life |
 | **Scene kinds (15)** | typography · code · chart · stat · diagram · timeline · comparison · split_screen · quote · kinetic_text · lower_third · map · screenshot · cta · end_card, plus real footage with text overlays |
-| **Voice** | macOS `say` / espeak-ng, ElevenLabs (optional key), no voice (text over music), or the speech already in your footage |
-| **Audio** | 4 bundled CC0 music beds (ducked under speech), beat-synced cuts, native clip sound, crossfades, sound effects, −14 LUFS |
+| **Voice** | macOS `say` (automatically picks an installed Premium/Enhanced voice) or espeak-ng, ElevenLabs (optional key), no voice (text over music), or the speech already in your footage; pace set with `voice.rate_wpm` (default 160) |
+| **Audio** | 4 bundled CC0 music beds (ducked under speech), beat-synced cuts, native clip sound, crossfades, sound effects, −14 LUFS with true-peak headroom |
+| **Footage** | Crop, contain or blurred-pad fits, trim and speed, text overlays, automatic removal of baked-in letterbox bars, and `redact` regions to blur inboxes, names or dashboards in screen recordings |
 | **Captions** | 3–7 word phrases on plates, placed clear of each platform's UI, with keyword emphasis and sound-event cues like `[music]` |
-| **Looks** | Style packs (minimal, editorial, technical, energetic) and brand kits (colours, fonts, weights, motion, banned phrases) |
+| **Looks** | Style packs (minimal, editorial, technical, energetic) and brand kits (colours, fonts, weights, motion, banned phrases); scene transitions (crossfade, fade to black, slide, zoom, whip) that keep narration in sync |
 | **Languages** | `localize` translation sheets; bundled Noto fonts for Japanese, Devanagari and Arabic; CJK line breaking; right-to-left text |
 | **Trust** | `verify` claim coverage, `video.lock`, golden-frame `test`, `diff`, provenance, optional C2PA content credentials (`export sign`) |
+
+## Examples
+
+| Example | What it shows |
+|---|---|
+| [`examples/readme-hero`](examples/readme-hero) | The narrated hero reel above, grounded in a README snapshot |
+| [`examples/text-to-motion-graphic`](examples/text-to-motion-graphic) | A 30 s explainer from Markdown notes (also the golden-frame test) |
+| [`examples/reel-grammar`](examples/reel-grammar) | Every Phase 5 scene kind, the `energetic` style and a music bed, with no voiceover |
+| [`examples/demo-app`](examples/demo-app) | A tiny web app to try `/video-studio:demo` screen recording on |
 
 ## Commands
 
