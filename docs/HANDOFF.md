@@ -147,7 +147,15 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 
 Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md` (Phases 4 → 5 → 6 → local 8, no human intervention; Phase 7, Phase 9 and CI are out of scope).
 
-- **Current:** the loop is **complete**. Next is the user's `docs/USER_CHECKLIST.md`, then Phase 7 (providers, keys) or Phase 9 (distribution) when the user decides.
+- **Current:** the loop and the user checklist are **complete**. After the checklist (2026-09-26):
+  - **Fixed from real runs:** caption plates without dark bars; demo capture at phone width; `footage.redact`; shorts copy only their span; true-peak headroom; strict letterbox cropping.
+  - **Polish:** scene video transitions; natural voices (Premium/Enhanced picked automatically, `voice.rate_wpm`, default 160, doctor `system_voice`); the narrated hero video (`examples/readme-hero`); local `.html` ingest.
+  - **New:** HyperFrames 0.8.78, and `tighten` (pauses, fillers and retakes → a new `<asset>-tight`).
+  - **Next** (the user chooses):
+    - the first real reel: the MSB Docs eBMR page for Instagram (`/video-studio:create ~/Downloads/"MSB Docs eBMR.html" …`)
+    - Phase 7 (ElevenLabs first)
+    - Phase 9 (publishing)
+    - more ideas from the HyperFrames student kit (motion vocabulary, caption and beat validators, storytelling beats)
 - **Done:**
   - Step 0 (Phase 4 closed).
   - Phase 5 step 1 (`489dbbd`): schema for the new purposes and kinds, `audio.music`, `voice.mode` and `Style`.
