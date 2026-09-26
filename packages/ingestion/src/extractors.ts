@@ -8,6 +8,7 @@ import { type FetchRepo, createRepoExtractor, repoExtractor } from "./repo.js";
 import { textExtractor } from "./text.js";
 import { type FetchImpl, type UrlExtractorOptions, createUrlExtractor, urlExtractor } from "./url.js";
 import type { Extractor } from "./types.js";
+import { type VideoUrlOptions, createVideoUrlExtractor, videoUrlExtractor } from "./video-url.js";
 
 export type ExtractorRegistry = Partial<Record<SourceKind, Extractor>>;
 
@@ -22,6 +23,7 @@ export const extractors = {
   repo: repoExtractor,
   video: mediaExtractor,
   audio: mediaExtractor,
+  video_url: videoUrlExtractor,
 } as const satisfies ExtractorRegistry;
 
 export interface ExtractorRegistryOptions {
@@ -30,6 +32,8 @@ export interface ExtractorRegistryOptions {
   url?: Omit<UrlExtractorOptions, "fetch">;
   /** Materializes remote repos; without it only local directories are accepted. */
   fetchRepo?: FetchRepo;
+  /** Options of the video URL extractor (env for yt-dlp, SSRF lookup/override, subtitle language). */
+  videoUrl?: VideoUrlOptions;
 }
 
 /** Registry with injectable transports; returns the defaults when nothing is overridden. */
@@ -38,5 +42,6 @@ export function createExtractors(options: ExtractorRegistryOptions = {}): Extrac
     ...extractors,
     ...(options.fetch || options.url ? { url: createUrlExtractor({ ...options.url, ...(options.fetch ? { fetch: options.fetch } : {}) }) } : {}),
     ...(options.fetchRepo ? { repo: createRepoExtractor({ fetchRepo: options.fetchRepo }) } : {}),
+    ...(options.videoUrl || options.fetch ? { video_url: createVideoUrlExtractor({ ...options.videoUrl, ...(options.fetch ? { fetch: options.fetch } : {}) }) } : {}),
   };
 }

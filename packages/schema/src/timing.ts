@@ -10,6 +10,7 @@ export const WordTiming = z.strictObject({
   word: NonEmptyString,
   start_ms: z.int().nonnegative(),
   end_ms: z.int().nonnegative(),
+  speaker: z.string().min(1).max(64).optional().describe("Speaker label (S1, S2, …) from speaker-turn detection; captions break when it changes."),
 });
 
 /**

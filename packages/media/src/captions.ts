@@ -51,7 +51,7 @@ export function buildWordTimeline(scenes: readonly SceneTrackPlacement[]): Capti
       if (!word) continue;
       const start = Math.min(Math.round(scene_start_ms + w.start_ms), sceneEnd);
       const end = Math.min(Math.max(Math.round(scene_start_ms + w.end_ms), start), sceneEnd);
-      out.push({ word, start_ms: start, end_ms: end, scene_id: track.scene_id });
+      out.push({ word, start_ms: start, end_ms: end, scene_id: track.scene_id, ...(w.speaker !== undefined ? { speaker: w.speaker } : {}) });
     }
   }
   out.sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms);
@@ -240,8 +240,14 @@ export function pickEmphasis(words: readonly CaptionWord[], prevWord?: string): 
   return out.sort((a, b) => a - b);
 }
 
+/** A change of speaker label between two words (only when both carry one). */
+function speakerChange(a: CaptionWord, b: CaptionWord): boolean {
+  return a.speaker !== undefined && b.speaker !== undefined && a.speaker !== b.speaker;
+}
+
 /**
- * Group words into captions. Hard breaks: scene changes, pauses over `maxGapMs`, sentence ends.
+ * Group words into captions. Hard breaks: scene changes, speaker changes (words with `speaker`),
+ * pauses over `maxGapMs`, sentence ends.
  * Inside a phrase, captions of `minWords`–`maxWords` words that fit `maxLines` rows are chosen
  * to minimise a cost that prefers ~5 words, breaks after punctuation or before a conjunction,
  * and never ends on an article or preposition. Then timing is smoothed: short gaps are held
@@ -261,7 +267,7 @@ export function groupCaptionLines(words: readonly CaptionWord[], opts: GroupOpti
   let run: CaptionWord[] = [];
   for (const w of words) {
     const prev = run[run.length - 1];
-    if (prev && (w.start_ms - prev.end_ms > maxGap || (sentence && SENTENCE_END.test(prev.word)) || prev.scene_id !== w.scene_id)) {
+    if (prev && (w.start_ms - prev.end_ms > maxGap || (sentence && SENTENCE_END.test(prev.word)) || prev.scene_id !== w.scene_id || speakerChange(prev, w))) {
       runs.push(run);
       run = [];
     }

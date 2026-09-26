@@ -21,8 +21,12 @@ that were not said.
    `transcript`), call
    `transcribe {project_dir, asset}`.
    - If the user has a .srt or .vtt for it, use `captions_file` instead.
+   - Non-English speech: pass `language` (`es`, `hi`, … or `auto`); it uses
+     the multilingual model. For an English interview or podcast, pass
+     `speakers: true` to label speaker turns (`S1`/`S2`, two people assumed).
    - If the whisper model is missing, **ask the user before downloading it**
-     (about 148 MB, stored in the plugin data folder). Only after they agree,
+     (the file and size are in the error: about 148 MB, or 488 MB for the
+     speaker model; stored in the plugin data folder). Only after they agree,
      call it again with `download_model: true`.
 
 ## 2. Find candidates
@@ -31,6 +35,10 @@ Call `shorts {project_dir, asset}`. Optional arguments:
 - `min_sec` / `max_sec`: default 20–60. Use the target platform's range if
   the user named one.
 - `count`: default 3.
+- `speaker`: only spans spoken entirely by one speaker label (`S1`, `S2`);
+  needs a transcript made with `speakers: true`. With speaker labels,
+  single-speaker spans score slightly higher and each candidate lists its
+  `speakers`.
 
 It writes `qa/shorts.json`. Each candidate has `start_sec`, `end_sec`,
 `score`, `hook` (its first sentence), `transcript`, `reasons`, and

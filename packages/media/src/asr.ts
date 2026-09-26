@@ -12,6 +12,11 @@ export interface TimedWord {
   word: string;
   start_ms: number;
   end_ms: number;
+  /**
+   * Speaker label from speaker-turn detection (`S1`, `S2`, …). Present only when the transcript
+   * was made with turn detection (tinydiarize); absent otherwise.
+   */
+  speaker?: string;
 }
 
 export interface AsrOptions {
@@ -19,7 +24,10 @@ export interface AsrOptions {
   model: string;
   /** whisper-cli binary (default: on PATH). */
   bin?: string;
+  /** ISO 639-1 code (`es`) or `auto`. Default: `en` for `*.en` models, else `auto` (detect). */
   language?: string;
+  /** Detect speaker turns (`-tdrz`); needs a tinydiarize model (`ggml-small.en-tdrz.bin`). */
+  speakers?: boolean;
   signal?: AbortSignal;
   /** false forces CPU (`-ng`). Default: try the GPU and retry on CPU if whisper-cli crashes. */
   gpu?: boolean;
@@ -30,7 +38,20 @@ export interface AsrOptions {
 /** Language passed to whisper-cli: explicit, else `en` for English-only (`*.en`) models, else auto-detect. */
 export function whisperLanguage(model: string, language?: string): string {
   if (language) return language;
-  return /\.en(?:[.-]|$)/i.test(basename(model).replace(/\.bin$/i, "")) ? "en" : "auto";
+  return isEnglishOnlyModel(model) ? "en" : "auto";
+}
+
+/** True for an English-only whisper model file (`ggml-base.en.bin`, `ggml-small.en-tdrz.bin`). */
+export function isEnglishOnlyModel(model: string): boolean {
+  return /\.en(?:[.-]|$)/i.test(basename(model).replace(/\.bin$/i, ""));
+}
+
+export interface WhisperResult {
+  words: TimedWord[];
+  /** Language whisper reports (`result.language`); always `en` for English-only models. */
+  language?: string;
+  /** Speaker turns found (only with `speakers: true`). */
+  speaker_turns?: number;
 }
 
 /**
@@ -38,6 +59,15 @@ export function whisperLanguage(model: string, language?: string): string {
  * `whisper-cli -ml 1 -sow -oj` emits one segment per word with millisecond offsets.
  */
 export async function whisperTranscribe(mediaPath: string, opts: AsrOptions): Promise<TimedWord[]> {
+  return (await whisperTranscribeDetailed(mediaPath, opts)).words;
+}
+
+/**
+ * {@link whisperTranscribe} plus the detected language and, with `speakers: true` (tinydiarize,
+ * `-tdrz`), word-level speaker labels. `-tdrz` works with word segmentation (`-ml 1`): whisper
+ * marks `speaker_turn_next` on the last word before a turn.
+ */
+export async function whisperTranscribeDetailed(mediaPath: string, opts: AsrOptions): Promise<WhisperResult> {
   const work = await mkdtemp(join(tmpdir(), "vs-asr-"));
   try {
     const wav = join(work, "audio.wav");
@@ -53,6 +83,7 @@ export async function whisperTranscribe(mediaPath: string, opts: AsrOptions): Pr
       "-l", whisperLanguage(opts.model, opts.language),
       "-ml", "1",
       "-sow",
+      ...(opts.speakers ? ["-tdrz"] : []),
       "-oj",
       "-of", outBase,
       "-np",
@@ -72,7 +103,7 @@ export async function whisperTranscribe(mediaPath: string, opts: AsrOptions): Pr
         throw whisperError(err2, bin);
       }
     }
-    return parseWhisperJson(await readFile(`${outBase}.json`, "utf8"));
+    return parseWhisperOutput(await readFile(`${outBase}.json`, "utf8"), { speakers: opts.speakers === true });
   } finally {
     await rm(work, { recursive: true, force: true });
   }
@@ -89,6 +120,8 @@ function whisperError(err: unknown, bin: string): Error {
 interface WhisperSegment {
   offsets?: { from?: number; to?: number };
   text?: string;
+  /** tinydiarize (`-tdrz`): the speaker changes after this segment. */
+  speaker_turn_next?: boolean;
 }
 
 /** Non-speech annotations whisper emits as text: `[BLANK_AUDIO]`, `[Music]`, `(laughs)`, `*sigh*`. */
@@ -99,17 +132,32 @@ const NON_SPEECH = /^(?:\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|♪+)$/;
  * without leading whitespace continue the previous word (`don` + `'t`, a lone `,`).
  */
 export function parseWhisperJson(json: string): TimedWord[] {
-  const data = JSON.parse(json) as { transcription?: WhisperSegment[] };
+  return parseWhisperOutput(json).words;
+}
+
+/**
+ * Parse whisper-cli JSON into words, the detected language and (with `speakers`) speaker labels.
+ * A `speaker_turn_next` flag ends the current speaker's run; runs are labelled S1, S2, S1, …
+ * alternating, which assumes a two-person conversation (tinydiarize detects turn changes, not
+ * who speaks; relabel the words when more people talk).
+ */
+export function parseWhisperOutput(json: string, opts: { speakers?: boolean } = {}): WhisperResult {
+  const data = JSON.parse(json) as { transcription?: WhisperSegment[]; result?: { language?: unknown } };
   const words: TimedWord[] = [];
   let prevNonSpeech = false;
+  let speaker = 1;
+  let pendingTurn = false;
+  let turns = 0;
   for (const seg of data.transcription ?? []) {
     const raw = seg.text ?? "";
     const text = raw.trim();
     const from = Number(seg.offsets?.from);
     const to = Number(seg.offsets?.to);
-    if (!text || !Number.isFinite(from) || !Number.isFinite(to)) continue;
-    if (NON_SPEECH.test(text)) {
-      prevNonSpeech = true;
+    const turn = seg.speaker_turn_next === true;
+    if (!text || !Number.isFinite(from) || !Number.isFinite(to) || NON_SPEECH.test(text)) {
+      if (text && NON_SPEECH.test(text)) prevNonSpeech = true;
+      // A turn marked on a blank/non-speech segment still ends the speaker's run.
+      if (turn && words.length) pendingTurn = true;
       continue;
     }
     const last = words[words.length - 1];
@@ -117,11 +165,22 @@ export function parseWhisperJson(json: string): TimedWord[] {
       last.word += text;
       last.end_ms = Math.max(last.end_ms, to);
     } else {
-      words.push({ word: text, start_ms: Math.max(0, from), end_ms: Math.max(from, to) });
+      if (pendingTurn) {
+        speaker = speaker === 1 ? 2 : 1;
+        turns++;
+        pendingTurn = false;
+      }
+      words.push({ word: text, start_ms: Math.max(0, from), end_ms: Math.max(from, to), ...(opts.speakers ? { speaker: `S${speaker}` } : {}) });
     }
+    if (turn) pendingTurn = true;
     prevNonSpeech = false;
   }
-  return monotonic(words);
+  const lang = typeof data.result?.language === "string" && data.result.language.trim() ? data.result.language.trim() : undefined;
+  return {
+    words: monotonic(words),
+    ...(lang ? { language: lang } : {}),
+    ...(opts.speakers ? { speaker_turns: turns } : {}),
+  };
 }
 
 /** Force non-decreasing, non-overlapping times. */
@@ -194,6 +253,8 @@ export interface TimedSentence {
   /** Index range [first, last] into the word list. */
   first: number;
   last: number;
+  /** Speaker label of the sentence's words (only when the words carry one). */
+  speaker?: string;
 }
 
 export interface SentenceOptions {
@@ -203,7 +264,10 @@ export interface SentenceOptions {
   maxWords?: number;
 }
 
-/** Group timed words into sentences: terminal punctuation (. ? ! …), a long pause, or the word cap. */
+/**
+ * Group timed words into sentences: terminal punctuation (. ? ! …), a long pause, the word cap,
+ * or a change of speaker label (words with `speaker`).
+ */
 export function groupSentences(words: readonly TimedWord[], opts: SentenceOptions = {}): TimedSentence[] {
   const pause = opts.pauseMs ?? 700;
   const maxWords = opts.maxWords ?? 60;
@@ -214,9 +278,11 @@ export function groupSentences(words: readonly TimedWord[], opts: SentenceOption
     const next = words[i + 1];
     const terminal = /[.?!…]["'”’)\]]*$/.test(w.word) && !/^(?:[A-Z]\.|Mr\.|Mrs\.|Ms\.|Dr\.|St\.|vs\.|e\.g\.|i\.e\.)$/.test(w.word);
     const gap = next ? next.start_ms - w.end_ms : Infinity;
-    if (!next || terminal || gap >= pause || i - first + 1 >= maxWords) {
+    const turn = next !== undefined && w.speaker !== undefined && next.speaker !== undefined && w.speaker !== next.speaker;
+    if (!next || terminal || turn || gap >= pause || i - first + 1 >= maxWords) {
       const slice = words.slice(first, i + 1);
-      out.push({ text: slice.map((x) => x.word).join(" "), start_ms: slice[0]!.start_ms, end_ms: w.end_ms, first, last: i });
+      const speaker = slice[0]!.speaker;
+      out.push({ text: slice.map((x) => x.word).join(" "), start_ms: slice[0]!.start_ms, end_ms: w.end_ms, first, last: i, ...(speaker !== undefined ? { speaker } : {}) });
       first = i + 1;
     }
   }

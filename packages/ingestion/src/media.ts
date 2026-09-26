@@ -75,7 +75,7 @@ export function spreadIndices(n: number, max: number): number[] {
   return Array.from({ length: max }, (_, i) => Math.floor(((i + 0.5) * n) / max));
 }
 
-async function copyIntoProject(projectDir: string, src: string, sha256: string): Promise<string> {
+async function copyIntoProject(projectDir: string, src: string, sha256: string, move = false): Promise<string> {
   const root = resolve(projectDir);
   const ext = extname(src).toLowerCase().replace(/[^a-z0-9.]/g, "") || ".bin";
   const abs = join(root, "source", "assets", `${sha256}${ext}`);
@@ -84,6 +84,11 @@ async function copyIntoProject(projectDir: string, src: string, sha256: string):
   const exists = await stat(abs).then((s) => s.isFile(), () => false);
   if (!exists && resolve(src) !== abs) {
     await ensureDir(join(root, "source", "assets"));
+    if (move) {
+      // A download staged inside the project: a rename, not a second copy of a large file.
+      await rename(src, abs);
+      return rel.split(sep).join("/");
+    }
     const tmp = `${abs}.part-${process.pid}-${Date.now()}`;
     try {
       await copyFile(src, tmp);
@@ -104,115 +109,138 @@ function describe(kind: "video" | "audio", p: ProbeResult, shots: number, loudne
   return `${parts.join(", ")}. No transcript yet: run transcribe to add what is said as evidence.`;
 }
 
+export interface MediaFileOptions {
+  /** Project folder: the file is copied (or moved) to `source/assets/<sha256><ext>`. */
+  projectDir?: string;
+  /** Source uri (default: the file path). A video URL keeps the URL here. */
+  uri?: string;
+  /** Source title and section heading (default: the file name). */
+  title?: string;
+  /** Location used in source refs, `video:<refPath>#t=…` (default: the project-relative path). */
+  refPath?: string;
+  /** Move the file instead of copying it (a download staged inside the project). */
+  move?: boolean;
+  signal?: AbortSignal;
+}
+
 export const mediaExtractor: Extractor = {
   version: "media-2",
   kinds: ["video", "audio"],
-  async extract(input: ExtractInput): Promise<ExtractedSource> {
-    const st = await stat(input.uri);
-    if (!st.isFile()) throw new Error(`not a regular file: ${input.uri}`);
-    if (st.size > MEDIA_MAX_BYTES) throw new Error(`${basename(input.uri)} is ${st.size} bytes (limit ${MEDIA_MAX_BYTES})`);
-    const sha256 = await hashFile(input.uri);
-    let probe: ProbeResult;
-    try {
-      probe = await ffprobe(input.uri);
-    } catch (err) {
-      throw new Error(`${basename(input.uri)} is not a readable video or audio file (ffprobe: ${err instanceof Error ? err.message.split("\n")[0] : String(err)})`);
-    }
-    if (!probe.has_video && !probe.has_audio) throw new Error(`${basename(input.uri)} has no video or audio stream ffprobe can read`);
-    // A still image renamed .mp4 probes as one "video" stream (png_pipe, image2…) with no
-    // duration: refuse it instead of ingesting a 0-second video.
-    if (/(?:_pipe|^image2)$/.test(probe.format_name ?? "")) {
-      throw new Error(`${basename(input.uri)} is a still image (${probe.format_name}), not a video or audio file; images are not a supported source type yet`);
-    }
-    if (!(probe.duration_s > 0)) throw new Error(`${basename(input.uri)} has zero duration: ffprobe found no playable video or audio in it`);
-    // A file named .mp4 that only holds audio is ingested as audio (and vice versa).
-    const kind: "video" | "audio" = probe.has_video ? "video" : "audio";
-    const refBase = fileRef(kind, displayPath(input.uri, input.projectDir));
-    const warnings: ExtractedSource["warnings"] = [];
-
-    const shots: Shot[] = [];
-    const keyframeAssets: ExtractedAsset[] = [];
-    if (probe.has_video && probe.duration_s > 0) {
-      const detected = await detectShots(input.uri, probe.duration_s);
-      shots.push(...detected);
-      if (input.projectDir) {
-        const work = await mkdtemp(join(tmpdir(), "vs-keyframes-"));
-        try {
-          for (const i of spreadIndices(detected.length, MAX_KEYFRAMES)) {
-            const s = detected[i]!;
-            const at = (s.start_sec + s.end_sec) / 2;
-            const out = join(work, `k${i}.jpg`);
-            try {
-              await runFfmpeg(["-y", "-ss", at.toFixed(3), "-i", input.uri, "-map", "0:v:0", "-frames:v", "1", "-vf", `scale=${KEYFRAME_WIDTH}:-2`, "-q:v", "6", out], { timeoutMs: 120_000 });
-              const asset = await writeProjectAsset(input.projectDir, new Uint8Array(await readFile(out)), "jpg", "image", `${refBase}#t=${at.toFixed(1)}`);
-              asset.local_id = `keyframe-${i + 1}`;
-              keyframeAssets.push(asset);
-              shots[i] = { ...s, keyframe: asset.local_id };
-            } catch {
-              /* a keyframe is optional */
-            }
-          }
-        } finally {
-          await rm(work, { recursive: true, force: true });
-        }
-        if (detected.length > MAX_KEYFRAMES) {
-          warnings.push({ code: "keyframes_capped", message: `${detected.length} shots; keyframes kept for ${MAX_KEYFRAMES} evenly spread shots` });
-        }
-      }
-    }
-
-    // Baked-in black bars (strict: dark scenes are left alone); the footage renderer crops them off.
-    let contentBox: ContentBox | null = null;
-    if (probe.has_video && probe.width && probe.height) {
-      try {
-        contentBox = await detectLetterbox(input.uri, { duration_sec: probe.duration_s, width: probe.width, height: probe.height });
-      } catch {
-        contentBox = null;
-      }
-    }
-
-    let loudness: number | undefined;
-    if (probe.has_audio) {
-      try {
-        const l = await measureLoudness(input.uri);
-        if (l.integrated_lufs !== null && Number.isFinite(l.integrated_lufs)) loudness = l.integrated_lufs;
-      } catch {
-        /* loudness is informative only */
-      }
-      warnings.push({ code: "needs_transcript", message: `${basename(input.uri)} has audio but no transcript; run transcribe (local whisper.cpp, or a .srt/.vtt the user supplies)` });
-    }
-
-    const media: MediaInfo = {
-      duration_sec: Math.round(probe.duration_s * 1000) / 1000,
-      ...(probe.width ? { width: probe.width } : {}),
-      ...(probe.height ? { height: probe.height } : {}),
-      ...(probe.fps ? { fps: probe.fps } : {}),
-      has_video: probe.has_video,
-      has_audio: probe.has_audio,
-      ...(shots.length ? { shots } : {}),
-      ...(loudness !== undefined ? { loudness_lufs: Math.round(loudness * 10) / 10 } : {}),
-      ...(contentBox ? { content_box: contentBox } : {}),
-    };
-
-    const assets: ExtractedAsset[] = [];
-    if (input.projectDir) {
-      const path = await copyIntoProject(input.projectDir, input.uri, sha256);
-      assets.push({ kind, path, sha256, source_ref: refBase, media }, ...keyframeAssets);
-    } else {
-      warnings.push({ code: "media_not_copied", message: "no project folder: the media file was probed but not copied" });
-    }
-
-    const title = basename(input.uri, extname(input.uri));
-    return {
-      source: { kind, uri: input.uri, sha256, title },
-      sections: [{ heading: basename(input.uri), text: describe(kind, probe, shots.length, loudness) }],
-      evidence: [],
-      assets,
-      warnings,
-      classificationHints:
-        kind === "video"
-          ? { contains_likeness: true, notes: ["likeness: video frames are not checked for faces; assume the footage shows real people until the user confirms otherwise"] }
-          : { notes: ["likeness: audio may carry identifiable voices; get consent before reusing a person's voice"] },
-    };
+  extract(input: ExtractInput): Promise<ExtractedSource> {
+    return extractMediaFile(input.uri, { ...(input.projectDir ? { projectDir: input.projectDir } : {}), ...(input.signal ? { signal: input.signal } : {}) });
   },
 };
+
+/**
+ * Probe a local video/audio file and build its source part (see the module comment). Shared by
+ * {@link mediaExtractor} and the video URL extractor, which passes the URL as `uri`/`refPath`.
+ */
+export async function extractMediaFile(path: string, opts: MediaFileOptions = {}): Promise<ExtractedSource> {
+  const input = { uri: path, projectDir: opts.projectDir };
+  const st = await stat(input.uri);
+  if (!st.isFile()) throw new Error(`not a regular file: ${input.uri}`);
+  if (st.size > MEDIA_MAX_BYTES) throw new Error(`${basename(input.uri)} is ${st.size} bytes (limit ${MEDIA_MAX_BYTES})`);
+  const sha256 = await hashFile(input.uri);
+  let probe: ProbeResult;
+  try {
+    probe = await ffprobe(input.uri);
+  } catch (err) {
+    throw new Error(`${basename(input.uri)} is not a readable video or audio file (ffprobe: ${err instanceof Error ? err.message.split("\n")[0] : String(err)})`);
+  }
+  if (!probe.has_video && !probe.has_audio) throw new Error(`${basename(input.uri)} has no video or audio stream ffprobe can read`);
+  // A still image renamed .mp4 probes as one "video" stream (png_pipe, image2…) with no
+  // duration: refuse it instead of ingesting a 0-second video.
+  if (/(?:_pipe|^image2)$/.test(probe.format_name ?? "")) {
+    throw new Error(`${basename(input.uri)} is a still image (${probe.format_name}), not a video or audio file; images are not a supported source type yet`);
+  }
+  if (!(probe.duration_s > 0)) throw new Error(`${basename(input.uri)} has zero duration: ffprobe found no playable video or audio in it`);
+  // A file named .mp4 that only holds audio is ingested as audio (and vice versa).
+  const kind: "video" | "audio" = probe.has_video ? "video" : "audio";
+  const refBase = fileRef(kind, opts.refPath ?? displayPath(input.uri, input.projectDir));
+  const warnings: ExtractedSource["warnings"] = [];
+
+  const shots: Shot[] = [];
+  const keyframeAssets: ExtractedAsset[] = [];
+  if (probe.has_video && probe.duration_s > 0) {
+    const detected = await detectShots(input.uri, probe.duration_s, opts.signal ? { signal: opts.signal } : {});
+    shots.push(...detected);
+    if (input.projectDir) {
+      const work = await mkdtemp(join(tmpdir(), "vs-keyframes-"));
+      try {
+        for (const i of spreadIndices(detected.length, MAX_KEYFRAMES)) {
+          const s = detected[i]!;
+          const at = (s.start_sec + s.end_sec) / 2;
+          const out = join(work, `k${i}.jpg`);
+          try {
+            await runFfmpeg(["-y", "-ss", at.toFixed(3), "-i", input.uri, "-map", "0:v:0", "-frames:v", "1", "-vf", `scale=${KEYFRAME_WIDTH}:-2`, "-q:v", "6", out], { timeoutMs: 120_000 });
+            const asset = await writeProjectAsset(input.projectDir, new Uint8Array(await readFile(out)), "jpg", "image", `${refBase}#t=${at.toFixed(1)}`);
+            asset.local_id = `keyframe-${i + 1}`;
+            keyframeAssets.push(asset);
+            shots[i] = { ...s, keyframe: asset.local_id };
+          } catch {
+            /* a keyframe is optional */
+          }
+        }
+      } finally {
+        await rm(work, { recursive: true, force: true });
+      }
+      if (detected.length > MAX_KEYFRAMES) {
+        warnings.push({ code: "keyframes_capped", message: `${detected.length} shots; keyframes kept for ${MAX_KEYFRAMES} evenly spread shots` });
+      }
+    }
+  }
+
+  // Baked-in black bars (strict: dark scenes are left alone); the footage renderer crops them off.
+  let contentBox: ContentBox | null = null;
+  if (probe.has_video && probe.width && probe.height) {
+    try {
+      contentBox = await detectLetterbox(input.uri, { duration_sec: probe.duration_s, width: probe.width, height: probe.height });
+    } catch {
+      contentBox = null;
+    }
+  }
+
+  let loudness: number | undefined;
+  if (probe.has_audio) {
+    try {
+      const l = await measureLoudness(input.uri);
+      if (l.integrated_lufs !== null && Number.isFinite(l.integrated_lufs)) loudness = l.integrated_lufs;
+    } catch {
+      /* loudness is informative only */
+    }
+    warnings.push({ code: "needs_transcript", message: `${basename(input.uri)} has audio but no transcript; run transcribe (local whisper.cpp, or a .srt/.vtt the user supplies)` });
+  }
+
+  const media: MediaInfo = {
+    duration_sec: Math.round(probe.duration_s * 1000) / 1000,
+    ...(probe.width ? { width: probe.width } : {}),
+    ...(probe.height ? { height: probe.height } : {}),
+    ...(probe.fps ? { fps: probe.fps } : {}),
+    has_video: probe.has_video,
+    has_audio: probe.has_audio,
+    ...(shots.length ? { shots } : {}),
+    ...(loudness !== undefined ? { loudness_lufs: Math.round(loudness * 10) / 10 } : {}),
+    ...(contentBox ? { content_box: contentBox } : {}),
+  };
+
+  const assets: ExtractedAsset[] = [];
+  if (input.projectDir) {
+    const assetPath = await copyIntoProject(input.projectDir, input.uri, sha256, opts.move === true);
+    assets.push({ kind, path: assetPath, sha256, source_ref: refBase, media }, ...keyframeAssets);
+  } else {
+    warnings.push({ code: "media_not_copied", message: "no project folder: the media file was probed but not copied" });
+  }
+
+  const title = opts.title ?? basename(input.uri, extname(input.uri));
+  return {
+    source: { kind, uri: opts.uri ?? input.uri, sha256, title },
+    sections: [{ heading: opts.title ?? basename(input.uri), text: describe(kind, probe, shots.length, loudness) }],
+    evidence: [],
+    assets,
+    warnings,
+    classificationHints:
+      kind === "video"
+        ? { contains_likeness: true, notes: ["likeness: video frames are not checked for faces; assume the footage shows real people until the user confirms otherwise"] }
+        : { notes: ["likeness: audio may carry identifiable voices; get consent before reusing a person's voice"] },
+  };
+}

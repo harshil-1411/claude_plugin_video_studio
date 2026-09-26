@@ -35,7 +35,8 @@ const EXTENSION_KINDS: Record<string, SourceKind> = {
 export const SUPPORTED_INPUTS =
   "Supported: Markdown (.md .markdown .mdx), plain text (.txt, or another text file such as .json .yaml .csv or source code), " +
   "PDF (.pdf), Word (.docx), PowerPoint (.pptx), a saved web page (.html .htm), video (.mp4 .mov .webm .mkv .m4v), " +
-  "audio (.mp3 .wav .m4a .aac .flac .ogg), a repository folder, a folder of clips, an http(s) URL, or inline text.";
+  "audio (.mp3 .wav .m4a .aac .flac .ogg), a repository folder, a folder of clips, an http(s) URL (a web page, or a video: " +
+  "YouTube, Vimeo, Loom via yt-dlp, or a direct .mp4/.mp3… link), or inline text.";
 
 /**
  * Extensions of files that are plain text and ingested as kind `text` (after a binary sniff).
@@ -160,6 +161,71 @@ function unknownFileKind(path: string): SourceKind {
   return "text";
 }
 
+/** Media file extensions a URL path can end in to count as a direct media URL. */
+export const MEDIA_URL_EXTENSIONS: ReadonlySet<string> = new Set(Object.entries(EXTENSION_KINDS).filter(([, k]) => k === "video" || k === "audio").map(([e]) => e));
+
+export type VideoPlatform = "youtube" | "vimeo" | "loom";
+
+function parseUrl(raw: string): URL | undefined {
+  try {
+    const u = new URL(raw.trim());
+    return u.protocol === "http:" || u.protocol === "https:" ? u : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const hostIs = (host: string, domain: string) => host === domain || host.endsWith(`.${domain}`);
+
+/**
+ * The video platform of a URL that yt-dlp downloads, or undefined:
+ * - YouTube: `youtube.com/watch?v=…`, `/shorts/<id>`, `/live/<id>`, `/embed/<id>`, `/v/<id>`,
+ *   `/playlist?list=…` (refused later: one video at a time), `youtu.be/<id>`, `youtube-nocookie.com/embed/<id>`
+ *   (any subdomain: www, m, music);
+ * - Vimeo: `vimeo.com/<digits>` (also under `/channels/…/`, `/groups/…/videos/`, `/showcase/…/video/`),
+ *   `player.vimeo.com/video/<digits>`;
+ * - Loom: `loom.com/share/<id>`, `loom.com/embed/<id>`.
+ * Other pages on those sites (a channel page, vimeo.com/pricing) stay web pages.
+ */
+export function videoPlatform(raw: string): VideoPlatform | undefined {
+  const u = parseUrl(raw);
+  if (!u) return undefined;
+  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  const path = u.pathname;
+  if (hostIs(host, "youtu.be")) return /^\/[\w-]{6,}/.test(path) ? "youtube" : undefined;
+  if (hostIs(host, "youtube.com") || hostIs(host, "youtube-nocookie.com")) {
+    if (path === "/watch" && u.searchParams.get("v")) return "youtube";
+    if (path === "/playlist" && u.searchParams.get("list")) return "youtube";
+    if (/^\/(?:shorts|live|embed|v)\/[\w-]{6,}/.test(path)) return "youtube";
+    return undefined;
+  }
+  if (hostIs(host, "vimeo.com")) {
+    if (/^\/(?:video\/)?\d+(?:\/|$)/.test(path)) return "vimeo";
+    if (/^\/(?:channels\/[^/]+|groups\/[^/]+\/videos|showcase\/\d+\/video|album\/\d+\/video)\/\d+(?:\/|$)/.test(path)) return "vimeo";
+    return undefined;
+  }
+  if (hostIs(host, "loom.com")) return /^\/(?:share|embed)\/[\w-]{8,}/.test(path) ? "loom" : undefined;
+  return undefined;
+}
+
+/** True when the URL path ends in a video/audio file extension (`https://cdn.example.com/talk.mp4?sig=…`). */
+export function isDirectMediaUrl(raw: string): boolean {
+  const u = parseUrl(raw);
+  if (!u) return false;
+  let path = u.pathname;
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    /* keep encoded */
+  }
+  return MEDIA_URL_EXTENSIONS.has(extname(path).toLowerCase());
+}
+
+/** True for a video URL: a platform page yt-dlp handles, or a direct media file by extension. */
+export function isVideoUrl(raw: string): boolean {
+  return videoPlatform(raw) !== undefined || isDirectMediaUrl(raw);
+}
+
 /** `https://github.com/<owner>/<repo>` optionally followed by `.git`, `/`, `/tree/<ref>…`. */
 const GITHUB_REPO = /^https?:\/\/(?:www\.)?github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?(?:\.git)?(?:\/(?:tree\/[^?#]*)?)?(?:[?#].*)?$/i;
 
@@ -196,7 +262,9 @@ export function mediaFolderFiles(dir: string): string[] | null {
 
 /**
  * Guess the SourceKind of an ingest input:
- * - `http(s)://` → `repo` for github.com/<owner>/<repo>, else `url`;
+ * - `http(s)://` → `repo` for github.com/<owner>/<repo>; `video_url` for YouTube, Vimeo and Loom
+ *   video pages and for URLs ending in a media extension ({@link isVideoUrl}); else `url` (a URL
+ *   that turns out to serve video/audio is retried as `video_url` by ingest);
  * - an existing directory with .git / package.json / README → `repo`;
  * - an existing file → by extension; other text extensions (.json, .yaml, source code…) and
  *   extension-less files that pass a NUL-byte / UTF-8 sniff → `text`; images, archives,
@@ -212,7 +280,8 @@ export function mediaFolderFiles(dir: string): string[] | null {
 export function detectKind(input: string): SourceKind {
   const trimmed = input.trim();
   if (/^https?:\/\//i.test(trimmed) && !/\s/.test(trimmed)) {
-    return GITHUB_REPO.test(trimmed) ? "repo" : "url";
+    if (GITHUB_REPO.test(trimmed)) return "repo";
+    return isVideoUrl(trimmed) ? "video_url" : "url";
   }
   const isSingleToken = trimmed.length > 0 && trimmed.length < 4096 && !/[\n\r]/.test(trimmed);
   if (isSingleToken) {

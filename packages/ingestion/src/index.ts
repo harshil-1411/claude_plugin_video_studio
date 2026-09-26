@@ -9,6 +9,7 @@ export * from "./markdown.js";
 export * from "./url.js";
 export * from "./repo.js";
 export * from "./media.js";
+export * from "./video-url.js";
 export * from "./classify.js";
 export * from "./redact.js";
 export * from "./net-guard.js";

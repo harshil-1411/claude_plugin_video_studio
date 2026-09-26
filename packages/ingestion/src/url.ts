@@ -70,6 +70,8 @@ export class UrlFetchError extends Error {
   constructor(
     readonly code: UrlFetchErrorCode,
     message: string,
+    /** The response's media type, for `unsupported_content_type` (lets ingest retry a video/audio URL as `video_url`). */
+    readonly mediaType?: string,
   ) {
     super(message);
     this.name = "UrlFetchError";
@@ -79,7 +81,8 @@ export class UrlFetchError extends Error {
 const HTML_TYPES = new Set(["text/html", "application/xhtml+xml"]);
 const TEXT_TYPES = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
 
-function parseHttpUrl(raw: string, base?: string): URL {
+/** Parse an http(s) URL; refuses other schemes and embedded credentials. */
+export function parseHttpUrl(raw: string, base?: string): URL {
   let u: URL;
   try {
     u = new URL(raw, base);
@@ -190,6 +193,61 @@ export function pinnedFetch(url: string, init: RequestInit | undefined, pinned: 
   });
 }
 
+export interface GuardedGetOptions extends FetchOptions {
+  /** Accept header of every request. */
+  accept: string;
+  /** Aborts the whole request (timeout and/or caller). */
+  signal: AbortSignal;
+}
+
+/**
+ * GET `url` through the SSRF guard with manual redirects (each hop must stay http/https and pass
+ * {@link checkUrlHost}; with the default transport the connection is pinned to the validated
+ * addresses). Returns the first non-redirect 2xx response with its body unread, and the final URL.
+ * Non-2xx statuses and too many redirects throw {@link UrlFetchError}. Timeouts surface as the
+ * signal's abort reason; callers map them.
+ */
+export async function guardedGet(url: string, opts: GuardedGetOptions): Promise<{ response: Response; finalUrl: string }> {
+  const injected = opts.fetch;
+  const lookup = opts.lookup ?? (injected ? undefined : defaultLookup);
+  const maxRedirects = opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+  const { signal } = opts;
+  let current = parseHttpUrl(url);
+  for (let hop = 0; ; hop++) {
+    let pinned: ResolvedAddress[] | undefined;
+    try {
+      pinned = await raceAbort(checkUrlHost(current, { ...(lookup ? { lookup } : {}), allowPrivate: opts.allowPrivateAddresses === true }), signal);
+    } catch (err) {
+      if (err instanceof BlockedAddressError) throw new UrlFetchError("blocked_address", err.message);
+      if (signal.aborted) throw err;
+      throw new UrlFetchError("network_error", `could not resolve ${current.hostname}: ${(err as Error).message}`);
+    }
+    const doFetch: FetchImpl = injected ?? (pinned ? (u, init) => pinnedFetch(u, init, pinned!) : (globalThis.fetch as FetchImpl));
+    let res: Response;
+    try {
+      res = await doFetch(current.href, {
+        redirect: "manual",
+        signal,
+        headers: { "user-agent": opts.userAgent ?? USER_AGENT, accept: opts.accept },
+      });
+    } catch (err) {
+      if (signal.aborted) throw err;
+      throw new UrlFetchError("network_error", `fetch failed for ${current.href}: ${(err as Error).message}`);
+    }
+    if (res.status >= 300 && res.status < 400 && res.headers.has("location")) {
+      await res.body?.cancel().catch(() => {});
+      if (hop >= maxRedirects) throw new UrlFetchError("too_many_redirects", `more than ${maxRedirects} redirects`);
+      current = parseHttpUrl(res.headers.get("location")!, current.href);
+      continue;
+    }
+    if (!res.ok) {
+      await res.body?.cancel().catch(() => {});
+      throw new UrlFetchError("http_error", `HTTP ${res.status} for ${current.href}`);
+    }
+    return { response: res, finalUrl: current.href };
+  }
+}
+
 /**
  * Fetch a page with a timeout, size cap, content-type check and manual
  * redirect handling (each hop must stay http/https). Never executes content.
@@ -202,59 +260,24 @@ export function pinnedFetch(url: string, init: RequestInit | undefined, pinned: 
  * DNS server could still steer it; production code never injects one.
  */
 export async function fetchPage(url: string, opts: FetchOptions = {}): Promise<FetchedPage> {
-  const injected = opts.fetch;
-  const lookup = opts.lookup ?? (injected ? undefined : defaultLookup);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
-  const maxRedirects = opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
   const signal = AbortSignal.timeout(timeoutMs);
-
-  let current = parseHttpUrl(url);
   try {
-    for (let hop = 0; ; hop++) {
-      let pinned: ResolvedAddress[] | undefined;
-      try {
-        pinned = await raceAbort(checkUrlHost(current, { ...(lookup ? { lookup } : {}), allowPrivate: opts.allowPrivateAddresses === true }), signal);
-      } catch (err) {
-        if (err instanceof BlockedAddressError) throw new UrlFetchError("blocked_address", err.message);
-        if (signal.aborted) throw err;
-        throw new UrlFetchError("network_error", `could not resolve ${current.hostname}: ${(err as Error).message}`);
-      }
-      const doFetch: FetchImpl = injected ?? (pinned ? (u, init) => pinnedFetch(u, init, pinned!) : (globalThis.fetch as FetchImpl));
-      let res: Response;
-      try {
-        res = await doFetch(current.href, {
-          redirect: "manual",
-          signal,
-          headers: {
-            "user-agent": opts.userAgent ?? USER_AGENT,
-            accept: "text/html,application/xhtml+xml;q=0.9,text/plain;q=0.5,text/markdown;q=0.5",
-          },
-        });
-      } catch (err) {
-        if (signal.aborted) throw err;
-        throw new UrlFetchError("network_error", `fetch failed for ${current.href}: ${(err as Error).message}`);
-      }
-      if (res.status >= 300 && res.status < 400 && res.headers.has("location")) {
-        await res.body?.cancel().catch(() => {});
-        if (hop >= maxRedirects) throw new UrlFetchError("too_many_redirects", `more than ${maxRedirects} redirects`);
-        current = parseHttpUrl(res.headers.get("location")!, current.href);
-        continue;
-      }
-      if (!res.ok) {
-        await res.body?.cancel().catch(() => {});
-        throw new UrlFetchError("http_error", `HTTP ${res.status} for ${current.href}`);
-      }
-      const ct = res.headers.get("content-type") ?? "";
-      const mediaType = ct.split(";")[0]!.trim().toLowerCase();
-      if (mediaType && !HTML_TYPES.has(mediaType) && !TEXT_TYPES.has(mediaType)) {
-        await res.body?.cancel().catch(() => {});
-        throw new UrlFetchError("unsupported_content_type", `unsupported content-type "${mediaType}" for ${current.href}`);
-      }
-      const charset = /charset=["']?([\w-]+)/i.exec(ct)?.[1];
-      const body = await readCapped(res, maxBytes);
-      return { url, finalUrl: current.href, status: res.status, mediaType: mediaType || "text/html", ...(charset ? { charset } : {}), body };
+    const { response: res, finalUrl } = await guardedGet(url, {
+      ...opts,
+      signal,
+      accept: "text/html,application/xhtml+xml;q=0.9,text/plain;q=0.5,text/markdown;q=0.5",
+    });
+    const ct = res.headers.get("content-type") ?? "";
+    const mediaType = ct.split(";")[0]!.trim().toLowerCase();
+    if (mediaType && !HTML_TYPES.has(mediaType) && !TEXT_TYPES.has(mediaType)) {
+      await res.body?.cancel().catch(() => {});
+      throw new UrlFetchError("unsupported_content_type", `unsupported content-type "${mediaType}" for ${finalUrl}`, mediaType);
     }
+    const charset = /charset=["']?([\w-]+)/i.exec(ct)?.[1];
+    const body = await readCapped(res, maxBytes);
+    return { url, finalUrl, status: res.status, mediaType: mediaType || "text/html", ...(charset ? { charset } : {}), body };
   } catch (err) {
     if (signal.aborted && !(err instanceof UrlFetchError)) {
       throw new UrlFetchError("timeout", `timed out after ${timeoutMs} ms fetching ${url}`);

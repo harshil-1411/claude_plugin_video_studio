@@ -107,11 +107,45 @@
                 },
                 "type": "array"
               },
+              "subtitles": {
+                "description": "Subtitle files downloaded with a video URL, best first (manual before auto). Import one with transcribe captions_file.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "description": "manual: uploaded by the creator; auto: the platform's automatic captions.",
+                      "enum": [
+                        "manual",
+                        "auto"
+                      ],
+                      "type": "string"
+                    },
+                    "lang": {
+                      "description": "Language code as the platform reports it, e.g. en, en-US, en-orig.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Project-relative .vtt next to the asset.",
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "lang",
+                    "kind"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "transcript": {
                 "description": "Timed transcript of the asset's speech.",
                 "additionalProperties": false,
                 "properties": {
                   "language": {
+                    "description": "Spoken language: detected by whisper (ISO 639-1, e.g. es), or the one requested.",
                     "type": "string"
                   },
                   "model": {
@@ -119,7 +153,7 @@
                     "type": "string"
                   },
                   "path": {
-                    "description": "Project-relative JSON file with timed words: [{word, start_ms, end_ms}].",
+                    "description": "Project-relative JSON file with timed words: [{word, start_ms, end_ms, speaker?}].",
                     "minLength": 1,
                     "type": "string"
                   },
@@ -131,6 +165,10 @@
                       "vtt"
                     ],
                     "type": "string"
+                  },
+                  "speakers": {
+                    "description": "true when speaker turns were detected (tinydiarize); words then carry speaker labels S1, S2, …",
+                    "type": "boolean"
                   },
                   "words": {
                     "maximum": 9007199254740991,
@@ -444,9 +482,74 @@
               "pptx",
               "repo",
               "video",
-              "audio"
+              "audio",
+              "video_url"
             ],
             "type": "string"
+          },
+          "remote": {
+            "description": "Set when the source was downloaded from a video URL: where it came from and what the platform reported.",
+            "additionalProperties": false,
+            "properties": {
+              "bytes": {
+                "description": "Size of the downloaded media file.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "content_type": {
+                "type": "string"
+              },
+              "downloader_version": {
+                "description": "yt-dlp version.",
+                "type": "string"
+              },
+              "duration_sec": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "extractor": {
+                "description": "yt-dlp extractor, e.g. Youtube.",
+                "type": "string"
+              },
+              "final_url": {
+                "description": "URL after redirects (direct downloads).",
+                "type": "string"
+              },
+              "license": {
+                "description": "License the platform reports, if any.",
+                "type": "string"
+              },
+              "uploader": {
+                "type": "string"
+              },
+              "url": {
+                "description": "The URL the user gave.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "via": {
+                "description": "direct: an http(s) media file fetched by the engine; yt-dlp: a video page (YouTube, Vimeo, Loom…) downloaded by the user's yt-dlp.",
+                "enum": [
+                  "direct",
+                  "yt-dlp"
+                ],
+                "type": "string"
+              },
+              "video_id": {
+                "type": "string"
+              },
+              "webpage_url": {
+                "description": "Canonical page URL reported by yt-dlp.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "url",
+              "via",
+              "bytes"
+            ],
+            "type": "object"
           },
           "sha256": {
             "description": "Hash of the raw source bytes as ingested.",

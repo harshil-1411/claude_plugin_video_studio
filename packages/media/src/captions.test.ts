@@ -431,3 +431,19 @@ describe("scenes without burned-in captions", () => {
     }
   });
 });
+
+describe("speaker changes", () => {
+  const sw = (word: string, start_ms: number, end_ms: number, speaker?: string): CaptionWord => ({ word, start_ms, end_ms, scene_id: "s", ...(speaker ? { speaker } : {}) });
+  it("break a caption when the speaker label changes", () => {
+    const ws = [sw("okay", 0, 200, "S1"), sw("we", 200, 300, "S1"), sw("have", 300, 400, "S1"), sw("roger", 400, 600, "S2"), sw("that", 600, 800, "S2"), sw("then", 800, 900, "S2")];
+    expect(groupCaptionLines(ws).map((l) => l.text)).toEqual(["okay we have", "roger that then"]);
+  });
+  it("keep grouping unchanged without speaker labels", () => {
+    const ws = [sw("okay", 0, 200), sw("we", 200, 300), sw("have", 300, 400), sw("roger", 400, 600), sw("that", 600, 800), sw("then", 800, 900)];
+    expect(groupCaptionLines(ws)).toHaveLength(1);
+  });
+  it("carry speaker labels through the word timeline", () => {
+    const t = buildWordTimeline([{ scene_start_ms: 0, track: { ...s1, words: [{ word: "Hi", start_ms: 0, end_ms: 100, speaker: "S2" }] } }]);
+    expect(t[0]).toMatchObject({ word: "Hi", speaker: "S2" });
+  });
+});

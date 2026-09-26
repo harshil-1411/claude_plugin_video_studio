@@ -80,6 +80,7 @@ export const ShortCandidate = z.strictObject({
   reasons: z.array(z.string()),
   transcript: z.string().describe("The words spoken in the span."),
   hook: z.string().describe("The first sentence of the span."),
+  speakers: z.array(z.string()).optional().describe("Speaker labels heard in the span (only for transcripts with speaker turns)."),
 });
 
 export const ShortCandidates = z

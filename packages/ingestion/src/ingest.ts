@@ -18,6 +18,7 @@ import {
   type Classification,
   type ContentIR,
   type IrWarning,
+  type Source,
   type SourceKind,
 } from "@video-studio/schema";
 import { buildContentIR, mergeContentIR } from "./builder.js";
@@ -26,7 +27,7 @@ import { type ExtractorRegistry, createExtractors } from "./extractors.js";
 import { displayPath } from "./refs.js";
 import type { FetchRepo } from "./repo.js";
 import type { ExtractInput, ExtractedSource, Extractor } from "./types.js";
-import type { FetchImpl } from "./url.js";
+import { type FetchImpl, UrlFetchError } from "./url.js";
 import { type LookupFn, allowPrivateUrls } from "./net-guard.js";
 import { redactPart } from "./redact.js";
 
@@ -66,6 +67,10 @@ export interface IngestOptions {
    * (false) ingest MERGES into an existing ContentIR; see {@link ingest}.
    */
   replace?: boolean;
+  /** Preferred subtitle language for video URLs (default en; English is always requested too). */
+  subtitleLanguage?: string;
+  /** Cancels downloads and media probing. */
+  signal?: AbortSignal;
 }
 
 export interface SourceProvenance {
@@ -78,6 +83,8 @@ export interface SourceProvenance {
   fetched_at: string;
   cache_hit: boolean;
   cache_key: string;
+  /** Video URL sources: URL, final URL, bytes, platform metadata (the downloaded file's sha256 is `sha256`). */
+  remote?: Source["remote"];
 }
 
 export interface Provenance {
@@ -175,7 +182,7 @@ export function resolveIngestInput(raw: string | IngestInput, cwd: string): Extr
   const isUrl = /^https?:\/\//i.test(trimmed) && !/\s/.test(trimmed);
   if (isUrl) {
     const kind = item.kind ?? detectKind(trimmed);
-    if (kind === "url" || kind === "repo") return { uri: trimmed, kind };
+    if (kind === "url" || kind === "repo" || kind === "video_url") return { uri: trimmed, kind };
     throw new Error(`a ${kind} input must be a local file, got a URL: ${trimmed}`);
   }
   const singleLine = !/[\n\r]/.test(uri) && uri.length < 4096;
@@ -194,6 +201,7 @@ export function resolveIngestInput(raw: string | IngestInput, cwd: string): Extr
     if (err instanceof Error && err.message.startsWith("refusing")) throw err;
   }
   const kind = item.kind ?? detectKind(candidatePath);
+  if (kind === "video_url") throw new Error(`a video_url input must be an http(s) URL, got a local path: ${trimmed} (ingest the file directly)`);
   if (INLINE_KINDS.has(kind) && isExistingFile(candidatePath)) assertTextFile(candidatePath);
   return { uri: candidatePath, kind };
 }
@@ -227,7 +235,7 @@ class ExtractionCache {
       if (!blob) return undefined;
       const part = JSON.parse(await readFile(blob.path, "utf8")) as ExtractedSource;
       if (!part?.source || !Array.isArray(part.sections) || !Array.isArray(part.evidence)) return undefined;
-      for (const a of part.assets ?? []) {
+      for (const a of [...(part.assets ?? []), ...(part.files ?? [])]) {
         const dest = join(projectDir, a.path);
         if (existsSync(dest)) continue;
         if (!(await this.store.has(a.sha256))) return undefined;
@@ -241,7 +249,7 @@ class ExtractionCache {
 
   async put(key: string, part: ExtractedSource, projectDir: string, extractorVersion: string, fetchedAt: string): Promise<void> {
     try {
-      for (const a of part.assets) await this.store.put(join(projectDir, a.path));
+      for (const a of [...part.assets, ...(part.files ?? [])]) await this.store.put(join(projectDir, a.path));
       const blob = await this.store.put(new TextEncoder().encode(JSON.stringify(part)));
       const entry: CacheIndexEntry = {
         sha256: blob.sha256,
@@ -332,12 +340,49 @@ export async function ingest(inputs: ReadonlyArray<string | IngestInput>, option
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.fetchRepo ? { fetchRepo: options.fetchRepo } : {}),
       ...(Object.keys(urlOptions).length ? { url: urlOptions } : {}),
+      videoUrl: {
+        env: options.env ?? process.env,
+        ...(options.lookup ? { lookup: options.lookup } : {}),
+        ...(allowPrivate ? { allowPrivateAddresses: true } : {}),
+        ...(options.subtitleLanguage ? { subtitleLanguage: options.subtitleLanguage } : {}),
+      },
     }),
     ...options.extractors,
   };
   const cache = options.noCache
     ? undefined
     : new ExtractionCache(options.cacheDir ?? resolveDataDir(options.env ?? process.env).cache);
+
+  /** Cache lookup or extraction of one resolved input (secrets redacted before anything is persisted). */
+  const extractOne = async (input: ExtractInput) => {
+    const extractor = registry[input.kind];
+    if (!extractor) throw new Error(`no extractor for kind "${input.kind}" yet`);
+    const digest = await inputDigest(extractor, input);
+    const inline = input.content !== undefined;
+    const key = cacheKey({
+      kind: `ingest.${input.kind}`,
+      inputDigest: digest,
+      extractorVersion: extractor.version,
+      // Things besides the bytes that change the output: where the input
+      // lives (Source.uri) and the project-relative path used in refs.
+      options: inline ? null : { uri: input.uri, ref_base: displayPath(input.uri, projectDir) },
+      irSchemaVersion: SCHEMA_VERSION,
+    });
+    const cached = cache ? await cache.get(key, projectDir) : undefined;
+    let part: ExtractedSource;
+    let fetchedAt = now;
+    if (cached) {
+      // Entries written before redaction existed may hold secrets: redact them too (a no-op
+      // for entries that are already redacted).
+      part = await redactPart(cached.part);
+      fetchedAt = cached.entry.fetched_at;
+      if (part !== cached.part) await cache?.put(key, part, projectDir, extractor.version, fetchedAt);
+    } else {
+      part = await redactPart(await extractor.extract(input));
+      await cache?.put(key, part, projectDir, extractor.version, now);
+    }
+    return { part, extractor, key, hit: cached !== undefined, fetchedAt };
+  };
 
   const parts: ExtractedSource[] = [];
   const provenance: Array<Omit<SourceProvenance, "source_id">> = [];
@@ -347,36 +392,20 @@ export async function ingest(inputs: ReadonlyArray<string | IngestInput>, option
     const label = typeof raw === "string" ? raw : raw.uri || "(inline)";
     let kind: SourceKind | undefined = typeof raw === "string" ? undefined : raw.kind;
     try {
-      const input: ExtractInput = { ...resolveIngestInput(raw, cwd), projectDir };
-      kind = input.kind;
-      const extractor = registry[input.kind];
-      if (!extractor) throw new Error(`no extractor for kind "${input.kind}" yet`);
-      const digest = await inputDigest(extractor, input);
-      const inline = input.content !== undefined;
-      const key = cacheKey({
-        kind: `ingest.${input.kind}`,
-        inputDigest: digest,
-        extractorVersion: extractor.version,
-        // Things besides the bytes that change the output: where the input
-        // lives (Source.uri) and the project-relative path used in refs.
-        options: inline ? null : { uri: input.uri, ref_base: displayPath(input.uri, projectDir) },
-        irSchemaVersion: SCHEMA_VERSION,
-      });
-
-      const hit = cache ? await cache.get(key, projectDir) : undefined;
-      let part: ExtractedSource;
-      let fetchedAt = now;
-      if (hit) {
-        // Entries written before redaction existed may hold secrets: redact them too (a no-op
-        // for entries that are already redacted).
-        part = await redactPart(hit.part);
-        fetchedAt = hit.entry.fetched_at;
-        if (part !== hit.part) await cache?.put(key, part, projectDir, extractor.version, fetchedAt);
-      } else {
-        // Secrets are redacted before anything is persisted: the cache stores the redacted part.
-        part = await redactPart(await extractor.extract(input));
-        await cache?.put(key, part, projectDir, extractor.version, now);
+      const resolved: ExtractInput = { ...resolveIngestInput(raw, cwd), projectDir, ...(options.signal ? { signal: options.signal } : {}) };
+      kind = resolved.kind;
+      let one: Awaited<ReturnType<typeof extractOne>>;
+      try {
+        one = await extractOne(resolved);
+      } catch (err) {
+        // A URL that serves video/audio (no telltale extension) is a video URL: download it.
+        const explicit = typeof raw !== "string" && raw.kind !== undefined;
+        if (!explicit && resolved.kind === "url" && err instanceof UrlFetchError && err.code === "unsupported_content_type" && /^(?:video|audio)\//.test(err.mediaType ?? "")) {
+          kind = "video_url";
+          one = await extractOne({ ...resolved, kind: "video_url" });
+        } else throw err;
       }
+      const { part, extractor, key, hit, fetchedAt } = one;
       parts.push(part);
       provenance.push({
         uri: part.source.uri,
@@ -385,8 +414,9 @@ export async function ingest(inputs: ReadonlyArray<string | IngestInput>, option
         ...(part.source.title ? { title: part.source.title } : {}),
         extractor_version: extractor.version,
         fetched_at: fetchedAt,
-        cache_hit: hit !== undefined,
+        cache_hit: hit,
         cache_key: key,
+        ...(part.source.remote ? { remote: part.source.remote } : {}),
       });
     } catch (err) {
       failures.push({ uri: inline(label), ...(kind ? { kind } : {}), error: err instanceof Error ? err.message : String(err) });

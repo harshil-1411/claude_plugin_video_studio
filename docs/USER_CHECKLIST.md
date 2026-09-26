@@ -104,3 +104,9 @@ The skill asks before downloading the whisper model (about 148 MB); say yes.
 - **Brand logo:** add `visual.logo` and `visual.logo_placement: {position: top_right}` to a brand.yaml and render. The logo should appear in the corner on every scene but the end card.
 - **Approval dialog (MCP elicitation):** in Claude Code, ask for a demo capture or a whisper model download. You should get the engine's own approval dialog (not just Claude asking in chat), and `project/consent.json` should record `via: elicitation`.
 - **ElevenLabs prices:** check `ELEVENLABS_PRICING` in `packages/voice/src/elevenlabs.ts` against elevenlabs.io/pricing/api (set in 2025, not verifiable from the sandbox). Spend limits in `policy.yaml` rely on it.
+- **Video URL ingest:**
+  1. Run `brew install yt-dlp`, then `/video-studio:doctor`; the `yt_dlp` row should show its version.
+  2. Ingest a short public YouTube video you have the right to use (e.g. a CC-BY talk under 5 minutes) into a new project.
+  3. Check that `source/assets/` holds `<sha>.mp4` plus `<sha>.en.vtt`, and that the ingest output reports a transcript from the subtitles, with no whisper download.
+  4. Also try a `watch?v=…&list=…` link (only one video should come in) and a direct `.mp4` link.
+- **Speakers:** transcribe a two-person interview with `speakers: true`. It needs the ~488 MB English-only tinydiarize model, downloaded after your approval. Check that the S1/S2 labels follow the real turns.

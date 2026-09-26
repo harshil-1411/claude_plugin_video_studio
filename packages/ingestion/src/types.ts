@@ -16,6 +16,8 @@ export interface ExtractInput {
   content?: string;
   /** Project directory; extracted binary assets are written under source/assets/. */
   projectDir?: string;
+  /** Cancels long work (downloads, media probing). */
+  signal?: AbortSignal;
 }
 
 export interface ExtractedAsset {
@@ -42,6 +44,11 @@ export interface ExtractedSource {
    * e.g. a repo file that was excluded because it contains a secret. OR-ed
    * into the source's classification. Notes must never contain secret values.
    */
+  /**
+   * Other project files the part references that are not assets (subtitle .vtt files next to a
+   * downloaded video). The extraction cache stores and restores them like assets.
+   */
+  files?: Array<{ path: string; sha256: string }>;
   classificationHints?: { contains_secrets?: boolean; contains_pii?: boolean; contains_likeness?: boolean; notes?: string[] };
 }
 

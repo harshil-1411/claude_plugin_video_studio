@@ -17,6 +17,23 @@ export const Source = z.strictObject({
   uri: NonEmptyString.describe("Original location: file path, URL or repo path."),
   sha256: Sha256.describe("Hash of the raw source bytes as ingested."),
   title: z.string().optional(),
+  remote: z
+    .strictObject({
+      url: NonEmptyString.describe("The URL the user gave."),
+      via: z.enum(["direct", "yt-dlp"]).describe("direct: an http(s) media file fetched by the engine; yt-dlp: a video page (YouTube, Vimeo, Loom…) downloaded by the user's yt-dlp."),
+      final_url: z.string().optional().describe("URL after redirects (direct downloads)."),
+      webpage_url: z.string().optional().describe("Canonical page URL reported by yt-dlp."),
+      bytes: z.int().nonnegative().describe("Size of the downloaded media file."),
+      content_type: z.string().optional(),
+      extractor: z.string().optional().describe("yt-dlp extractor, e.g. Youtube."),
+      video_id: z.string().optional(),
+      uploader: z.string().optional(),
+      duration_sec: z.number().nonnegative().optional(),
+      license: z.string().optional().describe("License the platform reports, if any."),
+      downloader_version: z.string().optional().describe("yt-dlp version."),
+    })
+    .optional()
+    .describe("Set when the source was downloaded from a video URL: where it came from and what the platform reported."),
 });
 
 export const Section = z.strictObject({
@@ -81,10 +98,11 @@ export const Shot = z.strictObject({
 
 export const Transcript = z
   .strictObject({
-    path: FilePath.describe("Project-relative JSON file with timed words: [{word, start_ms, end_ms}]."),
+    path: FilePath.describe("Project-relative JSON file with timed words: [{word, start_ms, end_ms, speaker?}]."),
     source: z.enum(["whisper", "srt", "vtt"]).describe("whisper.cpp (local ASR) or a caption file the user supplied."),
     model: z.string().optional().describe("ASR model, e.g. ggml-base.en."),
-    language: z.string().optional(),
+    language: z.string().optional().describe("Spoken language: detected by whisper (ISO 639-1, e.g. es), or the one requested."),
+    speakers: z.boolean().optional().describe("true when speaker turns were detected (tinydiarize); words then carry speaker labels S1, S2, …"),
     words: z.int().nonnegative(),
   })
   .describe("Timed transcript of the asset's speech.");
@@ -99,6 +117,16 @@ export const MediaInfo = z
     has_audio: z.boolean(),
     shots: z.array(Shot).optional().describe("Shot boundaries from scene detection."),
     transcript: Transcript.optional(),
+    subtitles: z
+      .array(
+        z.strictObject({
+          path: FilePath.describe("Project-relative .vtt next to the asset."),
+          lang: NonEmptyString.describe("Language code as the platform reports it, e.g. en, en-US, en-orig."),
+          kind: z.enum(["manual", "auto"]).describe("manual: uploaded by the creator; auto: the platform's automatic captions."),
+        }),
+      )
+      .optional()
+      .describe("Subtitle files downloaded with a video URL, best first (manual before auto). Import one with transcribe captions_file."),
     loudness_lufs: z.number().optional(),
     content_box: z
       .strictObject({ x: z.int().nonnegative(), y: z.int().nonnegative(), w: z.int().positive(), h: z.int().positive() })

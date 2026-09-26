@@ -40,6 +40,13 @@
             "minimum": 0,
             "type": "number"
           },
+          "speakers": {
+            "description": "Speaker labels heard in the span (only for transcripts with speaker turns).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "start_sec": {
             "minimum": 0,
             "type": "number"

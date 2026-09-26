@@ -118,7 +118,7 @@ flowchart LR
 
 | | |
 |---|---|
-| **Inputs** | Markdown, text, PDF, DOCX, PPTX, web pages, local repos, video and audio files, folders of clips |
+| **Inputs** | Markdown, text, PDF, DOCX, PPTX, web pages, local repos, video and audio files (local transcription in English or ~99 languages with detection, optional speaker turns for English conversations), folders of clips, video URLs (YouTube, Vimeo, Loom through your own optional `yt-dlp`, using their subtitles when present; direct .mp4/.mp3 links need nothing extra) |
 | **Templates (18)** | explain · educational · listicle · faceless-listicle · product-launch · devtool-launch · product-demo · product-ui · case-study · before-after · carousel-story · animated-explainer · text-over-music · talking-head · aesthetic-broll · silent-vlog · oddly-satisfying · ambient-slice-of-life |
 | **Scene kinds (15)** | typography · code · chart · stat · diagram · timeline · comparison · split_screen · quote · kinetic_text · lower_third · map · screenshot · cta · end_card, plus real footage with text overlays |
 | **Voice** | macOS `say` (automatically picks an installed Premium/Enhanced voice; with local whisper installed its word timings are aligned to the audio, so captions and cues land exactly) or espeak-ng, ElevenLabs (optional key), no voice (text over music), or the speech already in your footage; pace set with `voice.rate_wpm` (default 160) |
@@ -160,7 +160,7 @@ flowchart LR
 - **No generative video or avatars yet.** Runway, HeyGen and fal.ai adapters are planned (Phase 7, needs keys). Until then those scenes render as titled placeholder cards. Sora is intentionally not supported.
 - **No posting or analytics.** It produces packages and post copy; you upload them. Platform "trending sounds" are added in each app, and `post.json` reminds you of that.
 - **HyperFrames is optional.** The built-in ffmpeg renderer covers every scene kind. The richer HyperFrames renderer needs its own install and Google Chrome.
-- **The whisper model is downloaded only with your consent** (about 148 MB). You can supply SRT/VTT captions instead.
+- **Whisper models are downloaded only with your consent** (about 148 MB; 488 MB for the speaker-turn model). You can supply SRT/VTT captions instead.
 - **Demo capture never starts your app.** You start it and give the URL, and every step is approved first.
 
 The roadmap is in [`docs/PLAN.md`](docs/PLAN.md) and the current state in [`docs/HANDOFF.md`](docs/HANDOFF.md).

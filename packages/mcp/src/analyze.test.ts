@@ -9,7 +9,7 @@ import { type ContentIR, SCHEMA_VERSION, ShortCandidates } from "@video-studio/s
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { analyzeVideo, aspectRatioOf, findCaptionBand, findShorts, formatGrammar, formatShorts, pacingFor } from "./analyze.js";
 import { makeShortProjects } from "./shorts.js";
-import { hookScore } from "./shorts.js";
+import { hookScore, scoreShorts } from "./shorts.js";
 import { applyTranscript } from "./transcribe.js";
 
 const FONT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../fonts/Inter/Inter-Bold.ttf");
@@ -256,5 +256,61 @@ describe("shorts", () => {
     delete ir.assets[0]!.media!.transcript;
     await writeFile(irPath, JSON.stringify(ir));
     await expect(findShorts(project, "asset-1")).rejects.toThrow(/run transcribe/);
+  });
+});
+
+describe("shorts with speaker labels", () => {
+  /** Alternating speakers: each sentence by S1 or S2 as given. */
+  function dialogue(parts: Array<[string, string]>): TimedWord[] {
+    const words: TimedWord[] = [];
+    let t = 0;
+    for (const [speaker, text] of parts) {
+      const r = say(text, t);
+      words.push(...r.words.map((w) => ({ ...w, speaker })));
+      t = r.end + 600;
+    }
+    return words;
+  }
+  const parts: Array<[string, string]> = [
+    ["S1", "Why do most startups fail in their first year?"],
+    ["S1", "The answer is that they run out of cash too early."],
+    ["S2", "So what should a founder do about that?"],
+    ["S1", "Here is how to avoid that problem for good."],
+    ["S2", "and then we kept going with the plan for a while."],
+    ["S2", "so the team met every week to talk it through."],
+  ];
+
+  it("reports the speakers of each span and keeps one speaker's spans with speaker", () => {
+    const words = dialogue(parts);
+    const all = scoreShorts(words, [], { min_sec: 3, max_sec: 12, count: 5 });
+    expect(all.every((c) => c.speakers && c.speakers.length >= 1)).toBe(true);
+    expect(all.some((c) => c.reasons.some((r) => /single speaker|2 speakers/.test(r)))).toBe(true);
+    const s2 = scoreShorts(words, [], { min_sec: 3, max_sec: 12, count: 5, speaker: "S2" });
+    expect(s2.length).toBeGreaterThan(0);
+    for (const c of s2) {
+      expect(c.speakers).toEqual(["S2"]);
+      expect(words.slice(c.sentences[0]!.first, c.sentences.at(-1)!.last + 1).every((w) => w.speaker === "S2")).toBe(true);
+    }
+  });
+
+  it("prefers a single speaker over the same span with a speaker change", () => {
+    const three = parts.slice(0, 3);
+    const one = dialogue(three.map(([, t]) => ["S1", t] as [string, string]));
+    const mixed = dialogue(three);
+    const total = one.at(-1)!.end_ms / 1000;
+    const opts = { min_sec: total - 0.5, max_sec: total + 1, count: 1 };
+    const a = scoreShorts(one, [], opts)[0]!;
+    const b = scoreShorts(mixed, [], opts)[0]!;
+    expect([a.start_sec, a.end_sec]).toEqual([b.start_sec, b.end_sec]);
+    expect(a.speakers).toEqual(["S1"]);
+    expect(b.speakers).toEqual(["S1", "S2"]);
+    expect(b.score).toBeCloseTo(a.score - 0.05, 6);
+  });
+
+  it("leaves candidates unchanged without speaker data and refuses a speaker filter", async () => {
+    const plain = scoreShorts(dialogue(parts).map(({ speaker: _s, ...w }) => w), [], { min_sec: 3, max_sec: 12, count: 3 });
+    expect(plain.every((c) => c.speakers === undefined && !c.reasons.some((r) => /speaker/.test(r)))).toBe(true);
+    const { project } = await syntheticProject();
+    await expect(findShorts(project, "asset-1", { min_sec: 8, max_sec: 16, speaker: "S1" })).rejects.toThrow(/no speaker labels[\s\S]*speakers: true/);
   });
 });

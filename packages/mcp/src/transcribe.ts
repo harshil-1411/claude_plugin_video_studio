@@ -6,7 +6,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { projectPaths, resolveDataDir, resolveInsideProject, writeJsonAtomic } from "@video-studio/core";
 import { classifyText, deriveClaims, maxDataClass } from "@video-studio/ingestion";
-import { type TimedWord, groupSentences, isVtt, parseCaptionFile, whisperLanguage, whisperTranscribe } from "@video-studio/media";
+import { type TimedSentence, type TimedWord, groupSentences, isEnglishOnlyModel, isVtt, parseCaptionFile, whisperLanguage, whisperTranscribeDetailed } from "@video-studio/media";
 import { ContentIR, type EvidenceSpan, type IrAsset, formatIssues } from "@video-studio/schema";
 
 /**
@@ -17,26 +17,77 @@ import { ContentIR, type EvidenceSpan, type IrAsset, formatIssues } from "@video
  * (`download_model: true`).
  */
 
-export const WHISPER_MODEL = {
-  name: "ggml-base.en",
-  file: "ggml-base.en.bin",
-  url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
-  /** sha256 of the published file (147,964,211 bytes). */
-  sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
-  approx_mb: 148,
-} as const;
+export interface WhisperModelInfo {
+  name: string;
+  file: string;
+  url: string;
+  /** sha256 of the published file. */
+  sha256: string;
+  bytes: number;
+  approx_mb: number;
+  /** "en": English only; "multi": ~99 languages with detection. */
+  languages: "en" | "multi";
+  /** Detects speaker turns (tinydiarize, `-tdrz`). */
+  speakers: boolean;
+}
+
+/** Models `transcribe` can download (with consent), keyed by the `model` option. */
+export const WHISPER_MODELS = {
+  "base.en": {
+    name: "ggml-base.en",
+    file: "ggml-base.en.bin",
+    url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+    sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+    bytes: 147_964_211,
+    approx_mb: 148,
+    languages: "en",
+    speakers: false,
+  },
+  base: {
+    name: "ggml-base",
+    file: "ggml-base.bin",
+    url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+    sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+    bytes: 147_951_465,
+    approx_mb: 148,
+    languages: "multi",
+    speakers: false,
+  },
+  "small.en-tdrz": {
+    name: "ggml-small.en-tdrz",
+    file: "ggml-small.en-tdrz.bin",
+    url: "https://huggingface.co/akashmjn/tinydiarize-whisper.cpp/resolve/main/ggml-small.en-tdrz.bin",
+    sha256: "ceac3ec06d1d98ef71aec665283564631055fd6129b79d8e1be4f9cc33cc54b4",
+    bytes: 487_614_184,
+    approx_mb: 488,
+    languages: "en",
+    speakers: true,
+  },
+} as const satisfies Record<string, WhisperModelInfo>;
+
+export type WhisperModelName = keyof typeof WHISPER_MODELS;
+export const WHISPER_MODEL_NAMES = Object.keys(WHISPER_MODELS) as [WhisperModelName, ...WhisperModelName[]];
+
+/** The default (English) model; kept for compatibility. */
+export const WHISPER_MODEL = WHISPER_MODELS["base.en"];
 
 export type FetchLike = (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
 
 export interface TranscribeOptions {
   /** Import this caption file instead of running ASR (project-relative .srt or .vtt). */
   captions_file?: string;
-  /** Explicit consent to download the whisper model (~150 MB) into the plugin data dir. */
+  /** Explicit consent to download the chosen whisper model into the plugin data dir. */
   download_model?: boolean;
+  /** Spoken language: ISO 639-1 code (`es`, `hi`; `en-US` is reduced to `en`) or `auto` to detect. */
+  language?: string;
+  /** Whisper model (default: chosen from language/speakers, see {@link selectWhisperModel}). */
+  model?: WhisperModelName;
+  /** Detect speaker turns (English only, tinydiarize model `small.en-tdrz`). */
+  speakers?: boolean;
   env?: Record<string, string | undefined>;
   /** Tests: injected fetch for the model download. */
   fetch?: FetchLike;
-  /** Tests: expected sha256 of the downloaded model (default: the published base.en hash). */
+  /** Tests: expected sha256 of the downloaded model (default: the chosen model's published hash). */
   modelSha256?: string;
   /** whisper-cli binary (default: on PATH). */
   whisperBin?: string;
@@ -51,6 +102,13 @@ export interface TranscribeResult {
   sentences: number;
   evidence_refs: string[];
   model?: string;
+  /** Spoken language: detected by whisper, or the one requested. */
+  language?: string;
+  /** Speaker labels present (speakers: true). */
+  speakers?: boolean;
+  /** Speaker turns detected (speakers: true). */
+  speaker_turns?: number;
+  warnings?: string[];
   model_downloaded?: { path: string; sha256: string; bytes: number };
 }
 
@@ -70,21 +128,125 @@ export interface ResolvedModel {
   path: string;
   exists: boolean;
   from: "VS_WHISPER_MODEL" | "data_dir";
+  /** Registry entry (absent for a VS_WHISPER_MODEL override). */
+  info?: WhisperModelInfo;
 }
 
-/** `VS_WHISPER_MODEL`, else `<plugin data>/models/ggml-base.en.bin`. */
-export function resolveWhisperModel(env: Record<string, string | undefined> = process.env): ResolvedModel {
+const unexpanded = (v: string) => /^\$\{[^}]*\}$/.test(v);
+
+/**
+ * Where a model lives: `<plugin data>/models/<file>`. Without a name (the default model),
+ * `VS_WHISPER_MODEL` overrides it; a named model is always the registry file.
+ */
+export function resolveWhisperModel(env: Record<string, string | undefined> = process.env, name?: WhisperModelName): ResolvedModel {
   const override = env.VS_WHISPER_MODEL?.trim();
-  if (override && !/^\$\{[^}]*\}$/.test(override)) return { path: resolve(override), exists: existsSync(override), from: "VS_WHISPER_MODEL" };
-  const path = join(resolveDataDir(env).root, "models", WHISPER_MODEL.file);
-  return { path, exists: existsSync(path), from: "data_dir" };
+  if (!name && override && !unexpanded(override)) return { path: resolve(override), exists: existsSync(override), from: "VS_WHISPER_MODEL" };
+  const info: WhisperModelInfo = WHISPER_MODELS[name ?? "base.en"];
+  const path = join(resolveDataDir(env).root, "models", info.file);
+  return { path, exists: existsSync(path), from: "data_dir", info };
+}
+
+/** `en-US` → `en`, `AUTO` → `auto`; empty → undefined. */
+export function normalizeLanguage(lang: string | undefined): string | undefined {
+  const l = lang?.trim().toLowerCase();
+  if (!l) return undefined;
+  if (l === "auto") return "auto";
+  const primary = l.split(/[-_]/)[0]!;
+  if (!/^[a-z]{2,3}$/.test(primary)) throw new TranscribeError(`language must be an ISO 639-1 code like "es" or "hi", or "auto"; got "${lang}"`);
+  return primary;
+}
+
+export interface ModelSelection {
+  name: WhisperModelName;
+  /** Language passed to whisper-cli (undefined: the model's default, `en` or `auto`). */
+  language?: string;
+  reason: string;
+}
+
+/**
+ * Pick the model for a transcription:
+ * - `model` given: that one (checked against `language` and `speakers`).
+ * - `speakers`: small.en-tdrz (English only).
+ * - `language` set and not `en` (or `auto`), or the spec's language is not English: base (multilingual).
+ * - otherwise base.en when present, else base when present, else base.en (to download).
+ */
+export function selectWhisperModel(o: { model?: WhisperModelName; language?: string; speakers?: boolean; specLanguage?: string; has: (name: WhisperModelName) => boolean }): ModelSelection {
+  const lang = normalizeLanguage(o.language);
+  const spec = (() => {
+    try {
+      return normalizeLanguage(o.specLanguage);
+    } catch {
+      return undefined;
+    }
+  })();
+  const nonEnglish = lang !== undefined && lang !== "en";
+  if (o.model) {
+    if (!(o.model in WHISPER_MODELS)) throw new TranscribeError(`unknown whisper model "${o.model}"`, `use one of: ${WHISPER_MODEL_NAMES.join(", ")}`);
+    const info: WhisperModelInfo = WHISPER_MODELS[o.model];
+    if (o.speakers && !info.speakers) throw new TranscribeError(`model ${o.model} cannot detect speaker turns`, `use model "small.en-tdrz" (or leave model out) with speakers: true`);
+    if (nonEnglish && info.languages === "en") throw new TranscribeError(`model ${o.model} is English-only and cannot transcribe language "${lang}"`, `use model "base" (multilingual), or leave model out`);
+    return { name: o.model, ...(lang ? { language: lang } : {}), reason: "requested" };
+  }
+  if (o.speakers) {
+    if (nonEnglish) throw new TranscribeError("speaker turns work only for English (tinydiarize)", `leave speakers out for "${lang}" speech, or pass language: "en"`);
+    return { name: "small.en-tdrz", language: "en", reason: "speaker turns (tinydiarize, English)" };
+  }
+  if (nonEnglish) return { name: "base", language: lang, reason: lang === "auto" ? "language detection needs the multilingual model" : `language "${lang}" needs the multilingual model` };
+  if (!lang && spec && spec !== "en") return { name: "base", language: "auto", reason: `the video spec's language is "${spec}"` };
+  if (o.has("base.en")) return { name: "base.en", ...(lang ? { language: lang } : {}), reason: "English (default)" };
+  if (o.has("base")) return { name: "base", language: lang ?? "auto", reason: "multilingual model already downloaded" };
+  return { name: "base.en", ...(lang ? { language: lang } : {}), reason: "English (default)" };
+}
+
+export interface WhisperPlan {
+  selection: ModelSelection;
+  model: ResolvedModel;
+  /** The spec's language (project/video-spec.json), if any. */
+  specLanguage?: string;
+}
+
+/** The spec's `language` (e.g. `es-ES`), or undefined when there is no readable spec. */
+export async function readSpecLanguage(projectDir: string): Promise<string | undefined> {
+  try {
+    const spec = JSON.parse(await readFile(join(projectDir, "project", "video-spec.json"), "utf8")) as { language?: unknown };
+    return typeof spec.language === "string" && spec.language.trim() ? spec.language.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Choose and locate the model for a transcription. `VS_WHISPER_MODEL` replaces the default
+ * choice when neither `model` nor `speakers` is given (unless it is English-only and a
+ * non-English language is needed).
+ */
+export async function planWhisperModel(
+  projectDir: string,
+  o: { model?: WhisperModelName; language?: string; speakers?: boolean },
+  env: Record<string, string | undefined> = process.env,
+): Promise<WhisperPlan> {
+  const specLanguage = await readSpecLanguage(projectDir);
+  const selection = selectWhisperModel({ ...o, ...(specLanguage ? { specLanguage } : {}), has: (n) => resolveWhisperModel(env, n).exists });
+  const override = env.VS_WHISPER_MODEL?.trim();
+  if (!o.model && !o.speakers && override && !unexpanded(override)) {
+    const m = resolveWhisperModel(env);
+    const englishOnly = isEnglishOnlyModel(m.path);
+    const lang = normalizeLanguage(o.language);
+    const wantsOther = (lang !== undefined && lang !== "en") || selection.reason.startsWith("the video spec");
+    // An English-only override cannot serve a non-English request: fall through to the registry.
+    if (!(englishOnly && wantsOther)) {
+      const language = englishOnly ? lang : (lang ?? "auto");
+      return { selection: { name: selection.name, ...(language ? { language } : {}), reason: "VS_WHISPER_MODEL" }, model: m, ...(specLanguage ? { specLanguage } : {}) };
+    }
+  }
+  return { selection, model: resolveWhisperModel(env, selection.name), ...(specLanguage ? { specLanguage } : {}) };
 }
 
 /** The error shown when no model is present and the user has not agreed to a download. */
-export function missingModelError(path: string): TranscribeError {
+export function missingModelError(path: string, info: WhisperModelInfo = WHISPER_MODEL): TranscribeError {
   return new TranscribeError(
-    `no whisper model at ${path}. Local transcription needs ${WHISPER_MODEL.file} (~${WHISPER_MODEL.approx_mb} MB) from ${WHISPER_MODEL.url}.`,
-    `ask the user whether to download it (about ${WHISPER_MODEL.approx_mb} MB, stored in the plugin data folder), then call transcribe again with download_model: true; or set VS_WHISPER_MODEL to a ggml model they already have; or pass captions_file with a .srt/.vtt they supply.`,
+    `no whisper model at ${path}. Local transcription needs ${info.file} (~${info.approx_mb} MB) from ${info.url}.`,
+    `ask the user whether to download it (about ${info.approx_mb} MB, stored in the plugin data folder), then call transcribe again with download_model: true; or set VS_WHISPER_MODEL to a ggml model they already have; or pass captions_file with a .srt/.vtt they supply.`,
   );
 }
 
@@ -164,6 +326,21 @@ export interface TranscriptMeta {
   source: "whisper" | "srt" | "vtt";
   model?: string;
   language?: string;
+  /** Words carry speaker labels (speaker-turn detection ran). */
+  speakers?: boolean;
+}
+
+/**
+ * Sentence text for evidence: with speaker labels, a sentence that starts a new speaker's turn
+ * (and the first one) is prefixed `S2: `. Refs stay time-based, so they do not change.
+ */
+function speakerText(sentences: readonly TimedSentence[]): string[] {
+  let prev: string | undefined;
+  return sentences.map((s) => {
+    const label = s.speaker !== undefined && s.speaker !== prev ? `${s.speaker}: ` : "";
+    prev = s.speaker;
+    return `${label}${s.text}`;
+  });
 }
 
 /**
@@ -191,15 +368,16 @@ export function applyTranscript(input: ContentIR, assetId: string, words: readon
 
   const used = new Set(ir.evidence.map((e) => e.ref));
   const sentences = groupSentences(words);
-  const spans: EvidenceSpan[] = sentences.map((s) => {
+  const texts = speakerText(sentences);
+  const spans: EvidenceSpan[] = sentences.map((s, i) => {
     let ref = `${base}#t=${secs(s.start_ms)}-${secs(s.end_ms)}`;
     for (let n = 2; used.has(ref); n++) ref = `${base}#t=${secs(s.start_ms)}-${secs(s.end_ms)}-${n}`;
     used.add(ref);
-    return { ref, source_id: source.id, text: s.text, locator: { time_start_sec: s.start_ms / 1000, time_end_sec: s.end_ms / 1000 } };
+    return { ref, source_id: source.id, text: texts[i]!, locator: { time_start_sec: s.start_ms / 1000, time_end_sec: s.end_ms / 1000 } };
   });
   ir.evidence.push(...spans);
 
-  const text = sentences.map((s) => s.text).join(" ");
+  const text = texts.join(" ");
   const usedSec = new Set(ir.sections.map((s) => s.id));
   let n = ir.sections.length + 1;
   while (usedSec.has(`sec-${n}`)) n++;
@@ -228,7 +406,7 @@ export function applyTranscript(input: ContentIR, assetId: string, words: readon
   const target = ir.assets.find((a) => a.id === asset.id)!;
   target.media = {
     ...(target.media ?? { duration_sec: words.length ? words[words.length - 1]!.end_ms / 1000 : 0, has_video: target.kind === "video", has_audio: true }),
-    transcript: { path: meta.path, source: meta.source, ...(meta.model ? { model: meta.model } : {}), ...(meta.language ? { language: meta.language } : {}), words: words.length },
+    transcript: { path: meta.path, source: meta.source, ...(meta.model ? { model: meta.model } : {}), ...(meta.language ? { language: meta.language } : {}), ...(meta.speakers !== undefined ? { speakers: meta.speakers } : {}), words: words.length },
   };
 
   const r = ContentIR.safeParse(ir);
@@ -259,6 +437,8 @@ export async function transcribeAsset(projectDir: string, assetId: string, opts:
   let words: TimedWord[];
   let meta: Omit<TranscriptMeta, "path">;
   let downloaded: TranscribeResult["model_downloaded"];
+  let speakerTurns: number | undefined;
+  const warnings: string[] = [];
   if (opts.captions_file) {
     // Inside the project only (symlinks resolved): a caption path never reads files from elsewhere.
     let file: string;
@@ -278,19 +458,42 @@ export async function transcribeAsset(projectDir: string, assetId: string, opts:
     meta = { source: isVtt(text) || ext === ".vtt" ? "vtt" : "srt" };
   } else {
     if (asset.media && !asset.media.has_audio) throw new TranscribeError(`asset ${asset.id} has no audio track to transcribe`, "pass captions_file with a .srt/.vtt instead");
-    let model = resolveWhisperModel(env);
+    const plan = await planWhisperModel(root, { ...(opts.model ? { model: opts.model } : {}), ...(opts.language ? { language: opts.language } : {}), ...(opts.speakers ? { speakers: true } : {}) }, env);
+    let model = plan.model;
+    const info = model.info ?? WHISPER_MODELS[plan.selection.name];
     if (!model.exists) {
       if (model.from === "VS_WHISPER_MODEL") throw new TranscribeError(`VS_WHISPER_MODEL points at ${model.path}, which does not exist`, "fix the path or unset VS_WHISPER_MODEL");
-      if (opts.download_model !== true) throw missingModelError(model.path);
+      if (opts.download_model !== true) throw missingModelError(model.path, info);
       downloaded = await downloadWhisperModel(model.path, {
+        url: info.url,
+        expectedSha256: opts.modelSha256 !== undefined ? opts.modelSha256 : info.sha256,
         ...(opts.fetch ? { fetch: opts.fetch } : {}),
-        ...(opts.modelSha256 !== undefined ? { expectedSha256: opts.modelSha256 } : {}),
       });
       model = { ...model, exists: true };
     }
     const mediaPath = join(root, asset.path);
-    words = await whisperTranscribe(mediaPath, { model: model.path, ...(opts.whisperBin ? { bin: opts.whisperBin } : {}) });
-    meta = { source: "whisper", model: basename(model.path).replace(/\.bin$/i, ""), language: whisperLanguage(model.path) };
+    const speakers = opts.speakers === true;
+    const language = plan.selection.language;
+    const r = await whisperTranscribeDetailed(mediaPath, {
+      model: model.path,
+      ...(language ? { language } : {}),
+      ...(speakers ? { speakers: true } : {}),
+      ...(opts.whisperBin ? { bin: opts.whisperBin } : {}),
+    });
+    words = r.words;
+    speakerTurns = r.speaker_turns;
+    const englishOnly = isEnglishOnlyModel(model.path);
+    const detected = englishOnly ? "en" : (r.language ?? (language && language !== "auto" ? language : undefined));
+    meta = {
+      source: "whisper",
+      model: basename(model.path).replace(/\.bin$/i, ""),
+      ...(detected ? { language: detected } : { language: whisperLanguage(model.path, language) }),
+      speakers,
+    };
+    warnings.push(...languageWarnings({ specLanguage: plan.specLanguage, detected, englishOnly }));
+    if (speakers && !speakerTurns) {
+      warnings.push("no speaker turns were detected: tinydiarize is trained on conversation and finds turn changes in dialogue, not between separate monologues; all words are labelled S1");
+    }
   }
 
   const rel = `source/transcripts/${asset.id}.json`;
@@ -310,6 +513,30 @@ export async function transcribeAsset(projectDir: string, assetId: string, opts:
     sentences: applied.sentences,
     evidence_refs: applied.refs,
     ...(meta.model ? { model: meta.model } : {}),
+    ...(meta.language ? { language: meta.language } : {}),
+    ...(meta.speakers ? { speakers: true, speaker_turns: speakerTurns ?? 0 } : {}),
+    ...(warnings.length ? { warnings } : {}),
     ...(downloaded ? { model_downloaded: downloaded } : {}),
   };
+}
+
+/**
+ * Warnings when the transcript's language and the video spec's disagree. English-only models
+ * always report `en`, so a non-English spec with such a model is flagged as a likely mistranscription.
+ */
+export function languageWarnings(o: { specLanguage?: string | undefined; detected?: string | undefined; englishOnly: boolean }): string[] {
+  let spec: string | undefined;
+  try {
+    spec = normalizeLanguage(o.specLanguage);
+  } catch {
+    return [];
+  }
+  if (!spec || spec === "auto") return [];
+  if (o.englishOnly && spec !== "en") {
+    return [`the video spec's language is "${o.specLanguage}" but an English-only model was used, so non-English speech is transcribed as (wrong) English; run transcribe again with model: "base" (multilingual) or language: "${spec}"`];
+  }
+  if (o.detected && o.detected !== "auto" && o.detected !== spec) {
+    return [`whisper detected "${o.detected}" speech but the video spec's language is "${o.specLanguage}": check the spec's language, or pass language: "${spec}" to force it`];
+  }
+  return [];
 }

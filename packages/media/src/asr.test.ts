@@ -1,7 +1,7 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { groupSentences, parseCaptionFile, parseWhisperJson, whisperLanguage, whisperTranscribe } from "./asr.js";
+import { groupSentences, isEnglishOnlyModel, parseCaptionFile, parseWhisperJson, parseWhisperOutput, whisperLanguage, whisperTranscribe, whisperTranscribeDetailed } from "./asr.js";
 
 const SRT = `1
 00:00:01,000 --> 00:00:03,000
@@ -93,4 +93,88 @@ describe.skipIf(!MODEL || !existsSync(MODEL))("whisperTranscribe (VS_TEST_WHISPE
     }
     expect(words[words.length - 1]!.end_ms).toBeGreaterThan(8000);
   }, 120_000);
+});
+
+describe("parseWhisperOutput", () => {
+  // Captured from `whisper-cli -m ggml-small.en-tdrz.bin -f a13.wav -l en -tdrz -ml 1 -sow -oj` (Apollo 13 air-to-ground, public domain).
+  const fixture = readFileSync(join(import.meta.dirname, "__fixtures__", "whisper-tdrz-apollo13.json"), "utf8");
+
+  it("reads the detected language and labels speaker runs S1/S2 at each speaker_turn_next", () => {
+    const r = parseWhisperOutput(fixture, { speakers: true });
+    expect(r.language).toBe("en");
+    // Five turns are flagged; the last one ends the recording, so four change the speaker.
+    expect(r.speaker_turns).toBe(4);
+    const runs: Array<{ speaker: string; text: string }> = [];
+    for (const w of r.words) {
+      const last = runs[runs.length - 1];
+      if (last && last.speaker === w.speaker) last.text += ` ${w.word}`;
+      else runs.push({ speaker: w.speaker!, text: w.word });
+    }
+    expect(runs.map((x) => x.speaker)).toEqual(["S1", "S2", "S1", "S2", "S1"]);
+    expect(runs[0]!.text).toBe("Okay Houston, we've had a problem here.");
+    expect(runs[1]!.text).toBe("This is Houston. Say again, please.");
+    expect(runs[3]!.text).toMatch(/^Roger, main beam/);
+    // Same words and times as the plain parser.
+    expect(r.words.map(({ speaker: _s, ...w }) => w)).toEqual(parseWhisperJson(fixture));
+  });
+
+  it("adds no speaker labels unless asked", () => {
+    const r = parseWhisperOutput(fixture);
+    expect(r.words.some((w) => "speaker" in w)).toBe(false);
+    expect(r.speaker_turns).toBeUndefined();
+  });
+
+  it("applies a turn flagged on a continuation or blank segment to the next word", () => {
+    const json = JSON.stringify({
+      result: { language: "es" },
+      transcription: [
+        { offsets: { from: 0, to: 300 }, text: " Hola" },
+        { offsets: { from: 300, to: 350 }, text: ",", speaker_turn_next: true },
+        { offsets: { from: 400, to: 600 }, text: " Buenas" },
+        { offsets: { from: 600, to: 700 }, text: " [BLANK_AUDIO]", speaker_turn_next: true },
+        { offsets: { from: 700, to: 900 }, text: " Sí" },
+      ],
+    });
+    const r = parseWhisperOutput(json, { speakers: true });
+    expect(r.language).toBe("es");
+    expect(r.words.map((w) => `${w.speaker}:${w.word}`)).toEqual(["S1:Hola,", "S2:Buenas", "S1:Sí"]);
+    expect(r.speaker_turns).toBe(2);
+  });
+
+  it("ends sentences at a speaker change", () => {
+    const w = (word: string, s: number, e: number, speaker: string) => ({ word, start_ms: s, end_ms: e, speaker });
+    const s = groupSentences([w("go", 0, 100, "S1"), w("ahead", 100, 200, "S1"), w("roger", 250, 400, "S2"), w("that", 400, 500, "S2")]);
+    expect(s.map((x) => [x.speaker, x.text])).toEqual([["S1", "go ahead"], ["S2", "roger that"]]);
+  });
+
+  it("recognises English-only model files", () => {
+    expect(isEnglishOnlyModel("/m/ggml-base.en.bin")).toBe(true);
+    expect(isEnglishOnlyModel("/m/ggml-small.en-tdrz.bin")).toBe(true);
+    expect(isEnglishOnlyModel("/m/ggml-base.bin")).toBe(false);
+  });
+});
+
+// Real runs: VS_TEST_WHISPER_DIR holds ggml-base.bin, ggml-small.en-tdrz.bin, jfk.wav, es20.wav, a13.wav.
+const WDIR = process.env.VS_TEST_WHISPER_DIR;
+const have = (...f: string[]) => !!WDIR && f.every((x) => existsSync(join(WDIR, x)));
+describe("whisper.cpp real runs (VS_TEST_WHISPER_DIR)", () => {
+  it.skipIf(!have("ggml-base.bin", "es20.wav"))("multilingual base detects Spanish", async () => {
+    const r = await whisperTranscribeDetailed(join(WDIR!, "es20.wav"), { model: join(WDIR!, "ggml-base.bin") });
+    expect(r.language).toBe("es");
+    const text = r.words.map((w) => w.word.toLowerCase()).join(" ");
+    expect(text).toMatch(/febrero/);
+    expect(text).toMatch(/\bes\b|\bpara\b|\buna\b/);
+  }, 180_000);
+
+  it.skipIf(!have("ggml-base.bin", "jfk.wav"))("multilingual base detects English on jfk.wav", async () => {
+    const r = await whisperTranscribeDetailed(join(WDIR!, "jfk.wav"), { model: join(WDIR!, "ggml-base.bin") });
+    expect(r.language).toBe("en");
+    expect(r.words.map((w) => w.word.toLowerCase()).join(" ")).toMatch(/country/);
+  }, 180_000);
+
+  it.skipIf(!have("ggml-small.en-tdrz.bin", "a13.wav"))("tinydiarize finds speaker turns in the Apollo 13 dialogue", async () => {
+    const r = await whisperTranscribeDetailed(join(WDIR!, "a13.wav"), { model: join(WDIR!, "ggml-small.en-tdrz.bin"), speakers: true });
+    expect(r.speaker_turns).toBeGreaterThanOrEqual(3);
+    expect(new Set(r.words.map((w) => w.speaker))).toEqual(new Set(["S1", "S2"]));
+  }, 300_000);
 });

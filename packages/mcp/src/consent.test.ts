@@ -237,6 +237,23 @@ describe("whisper model download consent (transcribe)", () => {
     }
   });
 
+  it("asks for the model the language or speakers option needs, per model file", async () => {
+    const c = await connect(decline);
+    try {
+      await c.call("transcribe", { project_dir: dir, asset: assetId, language: "es" });
+      expect(c.asked[0]).toMatch(/model ggml-base\.bin \(about 148 MB\) from huggingface\.co into .*ggml-base\.bin/);
+      await c.call("transcribe", { project_dir: dir, asset: assetId, speakers: true });
+      expect(c.asked[1]).toMatch(/model ggml-small\.en-tdrz\.bin \(about 488 MB\) from huggingface\.co/);
+      // An impossible combination fails before anyone is asked.
+      const bad = await c.call("transcribe", { project_dir: dir, asset: assetId, speakers: true, language: "hi" });
+      expect(bad.isError).toBe(true);
+      expect(text(bad)).toMatch(/speaker turns work only for English/);
+      expect(c.asked).toHaveLength(2);
+    } finally {
+      await c.close();
+    }
+  });
+
   it("without elicitation and without the flag it reports the missing model (MODEL_MISSING)", async () => {
     const c = await connect();
     try {

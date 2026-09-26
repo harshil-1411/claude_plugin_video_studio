@@ -18,6 +18,8 @@ export interface ShortsOptions {
   min_sec?: number;
   max_sec?: number;
   count?: number;
+  /** Only spans spoken entirely by this speaker label (S1, S2; needs a transcript made with speakers: true). */
+  speaker?: string;
 }
 
 /** Extra, non-schema detail returned with the candidates (not written to qa/shorts.json). */
@@ -65,6 +67,8 @@ interface Span {
   end_sec: number;
   score: number;
   reasons: string[];
+  /** Speaker labels in the span, in order of first appearance (only with speaker data). */
+  speakers?: string[];
 }
 
 function snap(t: number, cuts: readonly number[], lo: number, hi: number): number | undefined {
@@ -76,15 +80,21 @@ function snap(t: number, cuts: readonly number[], lo: number, hi: number): numbe
   return best;
 }
 
+/** Penalty for a span in which more than one speaker talks (only with speaker data). */
+const MULTI_SPEAKER_PENALTY = 0.05;
+
 /**
  * Score every sentence-aligned span of min–max seconds, then greedily keep the best
  * non-overlapping ones. `cuts` are shot-boundary times in seconds (0 and the end excluded).
+ * With speaker labels on the words, single-speaker spans are preferred and `speaker` keeps only
+ * spans spoken entirely by that label.
  */
 export function scoreShorts(
   words: readonly TimedWord[],
   cuts: readonly number[],
-  opts: { min_sec: number; max_sec: number; count: number; duration_sec?: number },
+  opts: { min_sec: number; max_sec: number; count: number; duration_sec?: number; speaker?: string },
 ): Array<Span & { sentences: TimedSentence[] }> {
+  const hasSpeakers = words.some((w) => w.speaker !== undefined);
   const sentences = groupSentences(words);
   const total = opts.duration_sec ?? (words.length ? words[words.length - 1]!.end_ms / 1000 : 0);
   const spans: Span[] = [];
@@ -108,6 +118,8 @@ export function scoreShorts(
       if (dur < opts.min_sec || dur > opts.max_sec) continue;
 
       const spanWords = words.slice(a.first, b.last + 1);
+      const speakers = hasSpeakers ? [...new Set(spanWords.map((w) => w.speaker).filter((x): x is string => x !== undefined))] : undefined;
+      if (opts.speaker !== undefined && (speakers?.length !== 1 || speakers[0] !== opts.speaker)) continue;
       const density = Math.min(1, spanWords.length / dur / DENSE_WPS);
       let dead = 0;
       for (let k = 1; k < spanWords.length; k++) dead += Math.max(0, spanWords[k]!.start_ms - spanWords[k - 1]!.end_ms - DEAD_GAP_MS);
@@ -116,7 +128,8 @@ export function scoreShorts(
       const pauseBefore = i === 0 || a.start_ms - sentences[i - 1]!.end_ms >= 400;
       const completeness = (endsClean ? 0.7 : 0.35) + (pauseBefore ? 0.3 : 0.1);
       const snapped = (sCut !== undefined ? 0.5 : 0) + (eCut !== undefined ? 0.5 : 0);
-      const score = Math.min(1, 0.35 * hook.score + 0.25 * density + 0.2 * completeness + 0.2 * deadScore + 0.05 * snapped);
+      const multi = speakers !== undefined && speakers.length > 1;
+      const score = Math.max(0, Math.min(1, 0.35 * hook.score + 0.25 * density + 0.2 * completeness + 0.2 * deadScore + 0.05 * snapped) - (multi ? MULTI_SPEAKER_PENALTY : 0));
 
       const reasons = [
         `hook: ${hook.reason}`,
@@ -125,7 +138,8 @@ export function scoreShorts(
         dead > 0 ? `${(dead / 1000).toFixed(1)} s of dead air` : "no dead air",
       ];
       if (sCut !== undefined || eCut !== undefined) reasons.push(`snapped to shot cut${sCut !== undefined && eCut !== undefined ? "s" : ""}`);
-      spans.push({ first: i, last: j, start_sec: start, end_sec: end, score, reasons });
+      if (speakers?.length) reasons.push(multi ? `${speakers.length} speakers (${speakers.join(", ")})` : `single speaker (${speakers[0]})`);
+      spans.push({ first: i, last: j, start_sec: start, end_sec: end, score, reasons, ...(speakers?.length ? { speakers } : {}) });
     }
   }
   spans.sort((x, y) => y.score - x.score || x.start_sec - y.start_sec);
@@ -149,8 +163,13 @@ export async function findShorts(projectDir: string, assetId: string, opts: Shor
   const words = await loadTranscriptWords(root, asset);
   const duration = asset.media?.duration_sec;
   const cuts = (asset.media?.shots ?? []).map((s) => s.start_sec).filter((t) => t > 0);
+  if (opts.speaker !== undefined) {
+    const labels = [...new Set(words.map((w) => w.speaker).filter((x): x is string => typeof x === "string"))];
+    if (!labels.length) throw new Error(`the transcript of ${asset.id} has no speaker labels; run transcribe with speakers: true first (English conversations)`);
+    if (!labels.includes(opts.speaker)) throw new Error(`no speaker "${opts.speaker}" in the transcript of ${asset.id}; speakers: ${labels.join(", ")}`);
+  }
 
-  const picked = scoreShorts(words, cuts, { min_sec: min, max_sec: max, count, ...(duration ? { duration_sec: duration } : {}) });
+  const picked = scoreShorts(words, cuts, { min_sec: min, max_sec: max, count, ...(duration ? { duration_sec: duration } : {}), ...(opts.speaker !== undefined ? { speaker: opts.speaker } : {}) });
   const base = mediaRefBase(asset);
   const spans = ir.evidence.filter((e) => e.ref.startsWith(`${base}#t=`) && e.locator.time_start_sec !== undefined);
   const r3 = (x: number) => Math.round(x * 1000) / 1000;
@@ -171,6 +190,7 @@ export async function findShorts(projectDir: string, assetId: string, opts: Shor
         reasons: p.reasons,
         transcript: p.sentences.map((s) => s.text).join(" "),
         hook: p.sentences[0]!.text,
+        ...(p.speakers ? { speakers: p.speakers } : {}),
       };
     });
   const doc = ShortCandidates.parse({ schema_version: SCHEMA_VERSION, asset: asset.id, target_sec: { min, max }, candidates });
@@ -185,7 +205,7 @@ export function formatShorts(s: ShortCandidates & { evidence_refs?: Record<strin
   }
   const lines = [`${s.candidates.length} short candidate(s) from ${s.asset}${s.path ? ` → ${s.path}` : ""}:`];
   for (const c of s.candidates) {
-    lines.push(`- ${c.id} ${c.start_sec.toFixed(1)}–${c.end_sec.toFixed(1)} s (${(c.end_sec - c.start_sec).toFixed(1)} s), score ${c.score.toFixed(2)}`);
+    lines.push(`- ${c.id} ${c.start_sec.toFixed(1)}–${c.end_sec.toFixed(1)} s (${(c.end_sec - c.start_sec).toFixed(1)} s), score ${c.score.toFixed(2)}${c.speakers?.length ? `, speakers ${c.speakers.join("+")}` : ""}`);
     lines.push(`  hook: "${c.hook}"`);
     lines.push(`  why: ${c.reasons.join("; ")}`);
     const refs = s.evidence_refs?.[c.id];

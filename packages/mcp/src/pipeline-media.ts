@@ -130,13 +130,13 @@ export async function transcriptWords(root: string, asset: FootageAsset | undefi
   const endMs = inMs + footageSpanSec(clip, asset.media, sceneMs) * 1000;
   const out: WordTiming[] = [];
   for (const w of list) {
-    const { word, start_ms, end_ms } = (w ?? {}) as Partial<WordTiming>;
+    const { word, start_ms, end_ms, speaker } = (w ?? {}) as Partial<WordTiming>;
     if (typeof word !== "string" || !word.trim() || typeof start_ms !== "number" || typeof end_ms !== "number") continue;
     if (start_ms < inMs || start_ms >= endMs) continue;
     const a = Math.round((start_ms - inMs) / speed);
     if (a >= sceneMs) continue;
     const b = Math.round(Math.min((Math.min(end_ms, endMs) - inMs) / speed, sceneMs));
-    out.push({ word: word.trim(), start_ms: a, end_ms: Math.max(a, b) });
+    out.push({ word: word.trim(), start_ms: a, end_ms: Math.max(a, b), ...(typeof speaker === "string" && speaker ? { speaker } : {}) });
   }
   return out;
 }

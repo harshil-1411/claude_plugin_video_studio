@@ -55,6 +55,20 @@ describe("doctor", () => {
     expect(byId(r, "data_dir").detail).toContain("/data/video-studio");
   });
 
+  it("reports yt-dlp as optional: missing is ok, found shows the version, a bad YT_DLP_PATH warns", async () => {
+    const missing = await runDoctor(fakeDeps());
+    expect(byId(missing, "yt_dlp").status).toBe("ok");
+    expect(byId(missing, "yt_dlp").detail).toContain("not installed (optional: video URLs");
+    const found = await runDoctor(fakeDeps({ executables: ["/usr/bin/ffmpeg", "/usr/bin/ffprobe", "/usr/local/bin/yt-dlp"] }));
+    expect(byId(found, "yt_dlp")).toMatchObject({ status: "ok", detail: expect.stringContaining("/usr/local/bin/yt-dlp (yt-dlp version 7.1.1") });
+    expect(found.checks.map((c) => c.id).indexOf("yt_dlp")).toBe(found.checks.map((c) => c.id).indexOf("whisper_cpp") + 1);
+    const override = await runDoctor(fakeDeps({ env: { YT_DLP_PATH: "/opt/yt/yt-dlp" }, executables: ["/usr/bin/ffmpeg", "/usr/bin/ffprobe", "/opt/yt/yt-dlp"] }));
+    expect(byId(override, "yt_dlp").detail).toContain("from YT_DLP_PATH");
+    const bad = await runDoctor(fakeDeps({ env: { YT_DLP_PATH: "/nope/yt-dlp" } }));
+    expect(byId(bad, "yt_dlp").status).toBe("warn");
+    expect(byId(bad, "yt_dlp").fix).toMatch(/brew install yt-dlp/);
+  });
+
   it("includes the injected hyperframes check after chrome", async () => {
     const deps = { ...fakeDeps({ executables: ["/usr/bin/ffmpeg", "/usr/bin/ffprobe", "/usr/bin/chromium"] }), hyperframes: async () => ({ id: "hyperframes", status: "warn" as const, detail: "not installed", fix: "npm i" }) };
     const r = await runDoctor(deps);

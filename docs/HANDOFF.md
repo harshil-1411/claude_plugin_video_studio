@@ -55,8 +55,17 @@ Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixe
     - `job_status` takes `since` (cursor deltas while running).
     - New `source_summary`/`source_section` tools: −88% to −97.6% vs reading `content-ir.json`. The plan, verify and shorts skills and source-researcher use them.
     - `review` splits sheets into pages of ≤1568 px.
+  - Step 7 (multilingual ASR and speakers):
+    - `WHISPER_MODELS` has base.en, base (multilingual) and small.en-tdrz, each with its own consent and download.
+    - `transcribe {language, model, speakers}`: language is detected and a mismatch with the spec language warns.
+    - tinydiarize turns become S1/S2 word labels (assumes two speakers; it finds turns in dialogue, not between concatenated monologues). Captions break at a speaker change; `shorts` can filter by speaker.
+    - Real runs: Spanish detected `es`; Apollo 13 gave 4 turns. Real tests are gated by `VS_TEST_WHISPER_DIR`.
+  - Step 8 (video URLs):
+    - `ingestion/src/video-url.ts`: YouTube, Vimeo and Loom go through the user's `yt-dlp` (runtime-resolved; safety flags; `--` before the URL; env allowlist). Direct media links use the SSRF-guarded, pinned download (2 GB cap).
+    - Subtitles are downloaded and, in the `ingest` tool, applied as the transcript (no whisper).
+    - Doctor has a `yt_dlp` check. Tested with a fake yt-dlp and a local HTTP server; a real YouTube test is on the checklist.
 - **Next:**
-  - Step 7: multilingual ASR (`ggml-base`, `language`, detection) and speakers (tinydiarize). Both models are downloaded to the scratchpad and sha256-verified against Hugging Face: base `60ed5bc3…2efe` (147,951,465 B), small.en-tdrz `ceac3ec0…54b4` (487,614,184 B).
+  - Step 9: `footage_look`/`footage_notes`, then reframing (`footage.focus_track`, macOS Vision helper — JXA works in the sandbox with `usesCPUOnly = true`, prototype face + saliency detection verified on a PD portrait).
 
 ## Where things stand
 

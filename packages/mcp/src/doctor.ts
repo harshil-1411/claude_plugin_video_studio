@@ -290,6 +290,31 @@ export async function checkChrome(deps: DoctorDeps): Promise<Check> {
   };
 }
 
+/**
+ * yt-dlp (optional, the user's own install): needed only to ingest YouTube/Vimeo/Loom URLs.
+ * `YT_DLP_PATH` first, then PATH. Missing is fine (ok, informational); a bad override warns.
+ */
+export async function checkYtDlp(deps: DoctorDeps): Promise<Check> {
+  const fix = "Install it yourself if you want video URLs: `brew install yt-dlp` (or `pipx install yt-dlp`), or set YT_DLP_PATH.";
+  const override = deps.env.YT_DLP_PATH;
+  let path: string | null = null;
+  let from = "PATH";
+  if (hasValue(override)) {
+    if (!(await deps.isExecutable(override!))) {
+      return { id: "yt_dlp", status: "warn", detail: `YT_DLP_PATH points at ${override}, which is not executable`, fix };
+    }
+    path = override!;
+    from = "YT_DLP_PATH";
+  } else {
+    path = await which("yt-dlp", deps);
+  }
+  if (!path) return { id: "yt_dlp", status: "ok", detail: "not installed (optional: video URLs such as YouTube, Vimeo, Loom; direct .mp4 links work without it)", fix };
+  const r = await deps.exec(path, ["--version"]);
+  if (!r || r.code !== 0) return { id: "yt_dlp", status: "warn", detail: `${path} (from ${from}) failed to run`, fix };
+  const version = r.stdout.trim().split("\n")[0] || "unknown version";
+  return { id: "yt_dlp", status: "ok", detail: `${path} (${version}, from ${from})` };
+}
+
 export async function checkWhisper(deps: DoctorDeps): Promise<Check> {
   const override = deps.env.WHISPER_CPP_PATH;
   if (hasValue(override) && (await deps.isExecutable(override!))) {
@@ -405,6 +430,7 @@ export async function runDoctor(deps: DoctorDeps = defaultDoctorDeps(), opts: { 
   checks.push(await checkChrome(deps));
   if (deps.hyperframes) checks.push(await deps.hyperframes());
   checks.push(await checkWhisper(deps));
+  checks.push(await checkYtDlp(deps));
   const voice = await checkSystemVoice(deps);
   if (voice) checks.push(voice);
   const keys = checkProviderKeys(deps.env);

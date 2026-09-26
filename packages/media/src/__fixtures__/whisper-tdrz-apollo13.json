@@ -1,0 +1,571 @@
+{
+ "model": {
+  "type": "small",
+  "multilingual": false,
+  "vocab": 51864,
+  "audio": {
+   "ctx": 1500,
+   "state": 768,
+   "head": 12,
+   "layer": 12
+  },
+  "text": {
+   "ctx": 448,
+   "state": 768,
+   "head": 12,
+   "layer": 12
+  },
+  "mels": 80,
+  "ftype": 1
+ },
+ "params": {
+  "model": "ggml-small.en-tdrz.bin",
+  "language": "en",
+  "translate": false
+ },
+ "result": {
+  "language": "en"
+ },
+ "transcription": [
+  {
+   "timestamps": {
+    "from": "00:00:00,000",
+    "to": "00:00:00,060"
+   },
+   "offsets": {
+    "from": 0,
+    "to": 60
+   },
+   "text": "",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:00,060",
+    "to": "00:00:00,500"
+   },
+   "offsets": {
+    "from": 60,
+    "to": 500
+   },
+   "text": " Okay",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:00,500",
+    "to": "00:00:01,340"
+   },
+   "offsets": {
+    "from": 500,
+    "to": 1340
+   },
+   "text": " Houston,",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:01,340",
+    "to": "00:00:01,850"
+   },
+   "offsets": {
+    "from": 1340,
+    "to": 1850
+   },
+   "text": " we've",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:01,850",
+    "to": "00:00:02,160"
+   },
+   "offsets": {
+    "from": 1850,
+    "to": 2160
+   },
+   "text": " had",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:02,160",
+    "to": "00:00:02,260"
+   },
+   "offsets": {
+    "from": 2160,
+    "to": 2260
+   },
+   "text": " a",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:02,260",
+    "to": "00:00:02,990"
+   },
+   "offsets": {
+    "from": 2260,
+    "to": 2990
+   },
+   "text": " problem",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:02,990",
+    "to": "00:00:03,780"
+   },
+   "offsets": {
+    "from": 2990,
+    "to": 3780
+   },
+   "text": " here.",
+   "speaker_turn_next": true
+  },
+  {
+   "timestamps": {
+    "from": "00:00:04,800",
+    "to": "00:00:04,800"
+   },
+   "offsets": {
+    "from": 4800,
+    "to": 4800
+   },
+   "text": " This",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:04,800",
+    "to": "00:00:04,800"
+   },
+   "offsets": {
+    "from": 4800,
+    "to": 4800
+   },
+   "text": " is",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:04,800",
+    "to": "00:00:04,820"
+   },
+   "offsets": {
+    "from": 4800,
+    "to": 4820
+   },
+   "text": " Houston.",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:04,820",
+    "to": "00:00:04,860"
+   },
+   "offsets": {
+    "from": 4820,
+    "to": 4860
+   },
+   "text": " Say",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:04,860",
+    "to": "00:00:05,220"
+   },
+   "offsets": {
+    "from": 4860,
+    "to": 5220
+   },
+   "text": " again,",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:05,220",
+    "to": "00:00:06,180"
+   },
+   "offsets": {
+    "from": 5220,
+    "to": 6180
+   },
+   "text": " please.",
+   "speaker_turn_next": true
+  },
+  {
+   "timestamps": {
+    "from": "00:00:06,960",
+    "to": "00:00:06,960"
+   },
+   "offsets": {
+    "from": 6960,
+    "to": 6960
+   },
+   "text": " Uh",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:06,960",
+    "to": "00:00:07,020"
+   },
+   "offsets": {
+    "from": 6960,
+    "to": 7020
+   },
+   "text": " Houston,",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:07,020",
+    "to": "00:00:07,280"
+   },
+   "offsets": {
+    "from": 7020,
+    "to": 7280
+   },
+   "text": " we've",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:07,280",
+    "to": "00:00:07,450"
+   },
+   "offsets": {
+    "from": 7280,
+    "to": 7450
+   },
+   "text": " had",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:07,450",
+    "to": "00:00:07,510"
+   },
+   "offsets": {
+    "from": 7450,
+    "to": 7510
+   },
+   "text": " a",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:07,510",
+    "to": "00:00:08,260"
+   },
+   "offsets": {
+    "from": 7510,
+    "to": 8260
+   },
+   "text": " problem.",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:09,760",
+    "to": "00:00:09,760"
+   },
+   "offsets": {
+    "from": 9760,
+    "to": 9760
+   },
+   "text": " We've",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:09,760",
+    "to": "00:00:09,760"
+   },
+   "offsets": {
+    "from": 9760,
+    "to": 9760
+   },
+   "text": " had",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:09,760",
+    "to": "00:00:09,760"
+   },
+   "offsets": {
+    "from": 9760,
+    "to": 9760
+   },
+   "text": " a",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:09,760",
+    "to": "00:00:09,820"
+   },
+   "offsets": {
+    "from": 9760,
+    "to": 9820
+   },
+   "text": " main",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:09,820",
+    "to": "00:00:10,040"
+   },
+   "offsets": {
+    "from": 9820,
+    "to": 10040
+   },
+   "text": " beam",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:10,040",
+    "to": "00:00:10,240"
+   },
+   "offsets": {
+    "from": 10040,
+    "to": 10240
+   },
+   "text": " up",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:10,240",
+    "to": "00:00:10,450"
+   },
+   "offsets": {
+    "from": 10240,
+    "to": 10450
+   },
+   "text": " on",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:10,450",
+    "to": "00:00:10,550"
+   },
+   "offsets": {
+    "from": 10450,
+    "to": 10550
+   },
+   "text": " a",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:10,550",
+    "to": "00:00:11,320"
+   },
+   "offsets": {
+    "from": 10550,
+    "to": 11320
+   },
+   "text": " volt.",
+   "speaker_turn_next": true
+  },
+  {
+   "timestamps": {
+    "from": "00:00:12,700",
+    "to": "00:00:12,700"
+   },
+   "offsets": {
+    "from": 12700,
+    "to": 12700
+   },
+   "text": " Roger,",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:12,700",
+    "to": "00:00:12,700"
+   },
+   "offsets": {
+    "from": 12700,
+    "to": 12700
+   },
+   "text": " main",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:12,700",
+    "to": "00:00:12,720"
+   },
+   "offsets": {
+    "from": 12700,
+    "to": 12720
+   },
+   "text": " beam",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:12,720",
+    "to": "00:00:12,760"
+   },
+   "offsets": {
+    "from": 12720,
+    "to": 12760
+   },
+   "text": " under",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:12,760",
+    "to": "00:00:13,800"
+   },
+   "offsets": {
+    "from": 12760,
+    "to": 13800
+   },
+   "text": " volt.",
+   "speaker_turn_next": true
+  },
+  {
+   "timestamps": {
+    "from": "00:00:13,800",
+    "to": "00:00:13,860"
+   },
+   "offsets": {
+    "from": 13800,
+    "to": 13860
+   },
+   "text": "",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:13,860",
+    "to": "00:00:15,340"
+   },
+   "offsets": {
+    "from": 13860,
+    "to": 15340
+   },
+   "text": " Uh,",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:15,340",
+    "to": "00:00:16,200"
+   },
+   "offsets": {
+    "from": 15340,
+    "to": 16200
+   },
+   "text": " okay",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:16,200",
+    "to": "00:00:18,300"
+   },
+   "offsets": {
+    "from": 16200,
+    "to": 18300
+   },
+   "text": " stand,",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:18,300",
+    "to": "00:00:18,910"
+   },
+   "offsets": {
+    "from": 18300,
+    "to": 18910
+   },
+   "text": " by",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:18,910",
+    "to": "00:00:19,500"
+   },
+   "offsets": {
+    "from": 18910,
+    "to": 19500
+   },
+   "text": " at",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:19,500",
+    "to": "00:00:21,900"
+   },
+   "offsets": {
+    "from": 19500,
+    "to": 21900
+   },
+   "text": " thirteen",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:21,900",
+    "to": "00:00:23,470"
+   },
+   "offsets": {
+    "from": 21900,
+    "to": 23470
+   },
+   "text": " we're",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:23,470",
+    "to": "00:00:25,490"
+   },
+   "offsets": {
+    "from": 23470,
+    "to": 25490
+   },
+   "text": " looking",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:25,490",
+    "to": "00:00:26,100"
+   },
+   "offsets": {
+    "from": 25490,
+    "to": 26100
+   },
+   "text": " at",
+   "speaker_turn_next": false
+  },
+  {
+   "timestamps": {
+    "from": "00:00:26,100",
+    "to": "00:00:30,060"
+   },
+   "offsets": {
+    "from": 26100,
+    "to": 30060
+   },
+   "text": " it.",
+   "speaker_turn_next": true
+  }
+ ]
+}
