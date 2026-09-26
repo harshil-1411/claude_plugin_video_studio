@@ -94,9 +94,10 @@ TTS is unavailable, or ffmpeg because HyperFrames is not installed).
 
 ## 6. QA and revisions
 
-Before showing the preview, look at it: the render skill's step 4 (the
-`review` contact sheet, plus strips or crops where something looks off).
-Fix clear problems first, then walk through the QA findings (frozen frames on static scenes are
+Before showing the preview, run the render skill's step 4: `review` the
+preview and do its review → fix → re-render loop (at most 2 passes,
+spec-level fixes only). Show the user the result with what you fixed. Then
+walk through the QA findings (frozen frames on static scenes are
 expected; with a silent voice, loudness is not measured). Offer fixes: scene edits (back to
 the plan rules and step 4), a different voice, or `timing_adjustments`
 folded into the spec. Re-render the preview after changes; cached scenes are

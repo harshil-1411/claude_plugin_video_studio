@@ -1,11 +1,12 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ffprobe } from "@video-studio/media";
 import type { DeterministicKind, Scene } from "@video-studio/schema";
 import { createFfmpegRenderer } from "./ffmpeg-renderer.js";
-import { PENDING_REASON, placeholderScene, renderScenes, sceneCacheKey, selectRenderer } from "./select.js";
+import { PENDING_REASON, autoSceneConcurrency, parseVmStat, placeholderScene, renderScenes, sceneCacheKey, selectRenderer } from "./select.js";
 import { resolveTokens, targetForAspect } from "./tokens.js";
 import type { SceneRenderer } from "./types.js";
 
@@ -132,9 +133,76 @@ describe("renderScenes", () => {
     });
   }, T);
 
+  it("renders scenes in parallel with identical clips, results in spec order", async () => {
+    const scenes = [mg("p1", "typography", { lines: ["One"] }), mg("p2", "cta", { headline: "Two", action: "Go" }), mg("p3", "typography", { lines: ["Three"] })];
+    const hashes = async (concurrency: number) => {
+      const seen: string[] = [];
+      const res = await renderScenes({ scenes }, { project_dir: dir, dir: join(dir, `par-${concurrency}`), renderers: [ffmpeg], tokens, target, concurrency, onScene: (e) => seen.push(e.scene_id) });
+      expect(res.scenes.map((e) => [e.scene_id, e.status])).toEqual(scenes.map((s) => [s.id, "rendered"]));
+      expect([...seen].sort()).toEqual(["p1", "p2", "p3"]);
+      return Promise.all(res.scenes.map(async (e) => createHash("sha256").update(await readFile(e.out_path!)).digest("hex")));
+    };
+    expect(await hashes(3)).toEqual(await hashes(1));
+  }, T);
+
+  it("never runs two HyperFrames renders at once, even when ffmpeg scenes run in parallel", async () => {
+    const counter = (id: string) => {
+      const c = { active: 0, max: 0 };
+      const r: SceneRenderer = {
+        id,
+        version: "1",
+        kinds: ["typography"],
+        available: async () => ({ ok: true }),
+        render: async (req) => {
+          c.max = Math.max(c.max, ++c.active);
+          await new Promise((ok) => setTimeout(ok, 30));
+          await writeFile(req.out_path, "x");
+          c.active--;
+          return { out_path: req.out_path, renderer: id, renderer_version: "1", duration_ms: 1000, warnings: [] };
+        },
+      };
+      return { r, c };
+    };
+    const hf = counter("hyperframes-fake");
+    const ff = counter("ffmpeg-fake");
+    const scenes = ["h1", "h2", "h3", "h4"].map((id) => mg(id, "typography", { lines: [id] }));
+    await renderScenes({ scenes }, { project_dir: dir, dir: join(dir, "gate-hf"), renderers: [hf.r], tokens, target, concurrency: 3, force: true });
+    await renderScenes({ scenes }, { project_dir: dir, dir: join(dir, "gate-ff"), renderers: [ff.r], tokens, target, concurrency: 3, force: true });
+    expect(hf.c.max).toBe(1);
+    expect(ff.c.max).toBe(3);
+  }, T);
+
   it("reports failures per scene without throwing", async () => {
     const res = await renderScenes({ scenes: [mg("s09", "cta", { headline: "x", action: "y" })] }, { project_dir: dir, renderers: [fake("ffmpeg-broken", ["cta"])], tokens, target });
     expect(res.scenes[0]).toMatchObject({ status: "failed" });
     expect(res.scenes[0]!.reason).toMatch(/render failed: not used/);
+  });
+});
+
+describe("autoSceneConcurrency", () => {
+  const GiB = 1024 ** 3;
+  it.each([
+    ["plenty of memory and cpus", { freeMemBytes: 16 * GiB, cpus: 8 }, 2],
+    ["low memory", { freeMemBytes: 2 * GiB, cpus: 8 }, 1],
+    ["3.2 GiB free", { freeMemBytes: 3.2 * GiB, cpus: 8 }, 2],
+    ["almost no memory", { freeMemBytes: 0.2 * GiB, cpus: 8 }, 1],
+    ["two cpus", { freeMemBytes: 16 * GiB, cpus: 2 }, 1],
+    ["hyperframes", { freeMemBytes: 16 * GiB, cpus: 8, family: "hyperframes" as const }, 1],
+    ["footage counts like ffmpeg", { freeMemBytes: 16 * GiB, cpus: 8, family: "footage" as const }, 2],
+    ["env override", { freeMemBytes: 1 * GiB, cpus: 2, env: { VS_RENDER_CONCURRENCY: "4" } }, 4],
+    ["option override beats env", { freeMemBytes: 1 * GiB, cpus: 8, override: 2, env: { VS_RENDER_CONCURRENCY: "4" } }, 2],
+    ["override applies to hyperframes too (Chrome is still serialised)", { family: "hyperframes" as const, override: 3 }, 3],
+    ["out-of-range override is ignored", { freeMemBytes: 16 * GiB, cpus: 8, env: { VS_RENDER_CONCURRENCY: "9" } }, 2],
+    ["non-integer override is ignored", { freeMemBytes: 2 * GiB, cpus: 8, env: { VS_RENDER_CONCURRENCY: "fast" } }, 1],
+  ])("%s", (_name, o, expected) => {
+    expect(autoSceneConcurrency(o).concurrency).toBe(expected);
+  });
+});
+
+describe("parseVmStat", () => {
+  it("adds free, inactive, speculative and purgeable pages", () => {
+    const out = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:      100.\nPages active:    999.\nPages inactive:  200.\nPages speculative: 10.\nPages wired down: 5.\nPages purgeable:  2.\n";
+    expect(parseVmStat(out)).toBe(312 * 16384);
+    expect(parseVmStat("nonsense")).toBeNull();
   });
 });

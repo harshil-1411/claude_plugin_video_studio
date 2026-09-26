@@ -50,6 +50,7 @@ import {
   getStyle,
   styleRef,
   parseFontChain,
+  autoSceneConcurrency,
   rendererFamily,
   renderScenes,
   resolveTokens,
@@ -511,7 +512,12 @@ export async function stageScenes(
   let done = 0;
   const sceneStart = new Map<string, string>();
   const sceneEnd = new Map<string, string>();
-  progress({ stage: "scenes", message: `rendering ${count} scene(s)`, scene_index: 0, scene_count: count });
+  // Parallel scene renders: memory-aware for ffmpeg/footage, 1 when HyperFrames draws (Chrome is heavy;
+  // renderScenes also serialises Chrome whatever the number). Outputs do not depend on it.
+  const family = probe.renderer ? rendererFamily(probe.renderer) : "ffmpeg";
+  const pick = (fam: typeof family) => autoSceneConcurrency({ family: fam, env: env as NodeJS.ProcessEnv, ...(o.sceneConcurrency !== undefined ? { override: o.sceneConcurrency } : {}) }).concurrency;
+  const concurrency = Math.min(pick(family), Math.max(1, count));
+  progress({ stage: "scenes", message: `rendering ${count} scene(s)${concurrency > 1 ? `, ${concurrency} at a time` : ""}`, scene_index: 0, scene_count: count });
   const onScene = (e: SceneRenderEntry) => {
     done++;
     sceneEnd.set(e.scene_id, now().toISOString());
@@ -534,7 +540,7 @@ export async function stageScenes(
     footageRenderer: o.footageRenderer ?? createFootageRenderer({ encodePreset: o.encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") }),
     ...(sceneCues.size ? { cues: sceneCues } : {}),
   };
-  const first = await renderScenes({ scenes: planScenes }, { ...baseOpts, preference, onScene });
+  const first = await renderScenes({ scenes: planScenes }, { ...baseOpts, preference, concurrency, onScene });
   const entries = new Map(first.scenes.map((e) => [e.scene_id, e]));
   const reasons: string[] = [probe.reason];
   const failed = first.scenes.filter((e) => e.status === "failed");
@@ -542,7 +548,7 @@ export async function stageScenes(
     // A renderer that passed its probe can still fail on a scene (e.g. Chrome dies): retry with ffmpeg.
     for (const f of failed) reasons.push(`${f.scene_id}: ${f.reason ?? "failed"}; retrying with ffmpeg`);
     done -= failed.length;
-    const retry = await renderScenes({ scenes: planScenes }, { ...baseOpts, preference: "ffmpeg", only: failed.map((f) => f.scene_id), onScene });
+    const retry = await renderScenes({ scenes: planScenes }, { ...baseOpts, preference: "ffmpeg", concurrency: pick("ffmpeg"), only: failed.map((f) => f.scene_id), onScene });
     for (const e of retry.scenes) entries.set(e.scene_id, e);
   }
   const ordered = planScenes.map((s) => entries.get(s.id)!);

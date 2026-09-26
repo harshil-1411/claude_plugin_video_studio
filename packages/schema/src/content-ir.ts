@@ -151,6 +151,27 @@ export const MediaInfo = z
       .array(FootageNote)
       .optional()
       .describe("Per-shot notes Claude wrote after looking at the footage (footage_look → footage_notes): subject, action, on-screen text, b-roll use, quality. Observations, not evidence."),
+    rotation: z
+      .union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)])
+      .optional()
+      .describe("Display rotation of the video (degrees, counter-clockwise as ffprobe reports it; phone footage). width/height are the displayed size, after rotation."),
+    color_transfer: z.string().optional().describe("Video transfer characteristic as probed, e.g. bt709, smpte2084 (PQ), arib-std-b67 (HLG)."),
+    color_primaries: z.string().optional().describe("Video colour primaries as probed, e.g. bt709, bt2020."),
+    bit_depth: z.int().positive().optional().describe("Bits per luma sample (8, 10, 12)."),
+    hdr: z.boolean().optional().describe("true for PQ or HLG video (iPhone HDR, HDR10): the footage renderer tonemaps it to SDR BT.709."),
+    quality: z
+      .strictObject({
+        exposure: z.enum(["dark", "ok", "bright"]).optional().describe("Picture exposure from the mean luma and the share of near-black / near-white pixels (video)."),
+        luma_mean: z.number().min(0).max(255).optional().describe("Mean luma of sampled frames (8-bit code values, 16–235 video range)."),
+        contrast: z.number().min(0).max(255).optional().describe("Mean spread between the 10th and 90th luma percentiles of sampled frames (8-bit)."),
+        dark_fraction: z.number().min(0).max(1).optional().describe("Share of sampled pixels that are near black."),
+        bright_fraction: z.number().min(0).max(1).optional().describe("Share of sampled pixels that are near white."),
+        clipped_audio: z.boolean().optional().describe("true when the audio hits full scale (≥ −0.1 dBFS) in several places: distortion."),
+        snr_db: z.number().optional().describe("Speech-clarity proxy: loud (90th percentile) minus quiet (10th percentile) 50 ms RMS levels, in dB. Low means noise or a constant bed under the speech."),
+        notes: z.array(z.string()).describe("Plain-language quality problems with a suggestion each; empty when none."),
+      })
+      .optional()
+      .describe("Cheap footage quality checks measured at ingest (low-res, low-fps decode)."),
   })
   .describe("Probe results for a video or audio asset.");
 

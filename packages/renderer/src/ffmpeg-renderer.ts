@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { dirname, extname, isAbsolute, join } from "node:path";
 import { codeLabel } from "./hyperframes-highlight.js";
 import { projectPaths, resolveInsideProject } from "@video-studio/core";
@@ -89,9 +89,19 @@ export interface FfmpegEncodeSettings {
   preset?: string;
   /** Default 18. */
   crf?: number;
-  /** x264 threads; fixed so output bytes are reproducible. Default 1. */
+  /** x264 threads. Default {@link SCENE_X264_THREADS}. */
   threads?: number;
 }
+
+/**
+ * x264 threads per scene encode: `clamp(floor(cpus / 3), 1, 4)`, sized for up to three scenes in
+ * parallel (see `autoSceneConcurrency`). Determinism: x264 output is byte-identical for a fixed
+ * thread count, but can differ between counts. So this depends only on the CPU count (never on
+ * free memory or the chosen concurrency): on one machine a scene always encodes the same bytes.
+ * Clips from a machine with a different CPU count may differ in bytes (not visibly); scene cache
+ * keys do not include threads, and `test`/`diff`/golden frames compare frames by SSIM.
+ */
+export const SCENE_X264_THREADS = Math.max(1, Math.min(4, Math.floor(availableParallelism() / 3)));
 
 /** Resolve a ContentIR asset id to an absolute file path (null if unknown). */
 export type AssetResolver = (assetId: string, projectDir: string) => Promise<string | null>;
@@ -2063,7 +2073,7 @@ export function ffmpegRenderArgs(built: BuiltGraph, target: RenderTarget, tokens
     String(target.fps),
     ...h264Args({ preset: encode.preset ?? "veryfast", crf: encode.crf ?? 18 }),
     "-threads",
-    String(encode.threads ?? 1),
+    String(encode.threads ?? SCENE_X264_THREADS),
     "-an",
     "-sn",
     "-dn",

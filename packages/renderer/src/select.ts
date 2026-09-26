@@ -1,4 +1,6 @@
 import { readFile, rename, rm, stat } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { availableParallelism, freemem } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { canonicalJson, ensureDir, hashFile, readJson, sha256Hex, writeJsonAtomic } from "@video-studio/core";
 import type { LayoutZones } from "@video-studio/platforms";
@@ -75,6 +77,76 @@ export async function selectRenderer(
   };
 }
 
+// ---------------------------------------------------------------------------------- concurrency
+
+/** Most scenes the automatic choice renders at once (explicit overrides go up to 4). */
+/** Capped at 2: this plugin targets laptops, and a 1080p final scene can use several hundred MB (raise it with VS_RENDER_CONCURRENCY). */
+export const MAX_AUTO_SCENE_CONCURRENCY = 2;
+/** Free memory budgeted per parallel ffmpeg scene render. */
+const GIB_PER_SCENE = 1.5;
+
+/**
+ * Parallel scene renders for this machine: `min(2, floor(freeGiB / 1.5), cpus − 1)`, at least 1.
+ * HyperFrames is 1 (Chrome is heavy). `override` (a RenderProjectOptions field, else the
+ * `VS_RENDER_CONCURRENCY` env var) wins when it is an integer 1–4; anything else is ignored.
+ * Only the speed changes: outputs are identical at any concurrency.
+ */
+export function autoSceneConcurrency(o: {
+  family?: RendererFamily | "footage";
+  override?: number | string;
+  env?: NodeJS.ProcessEnv;
+  freeMemBytes?: number;
+  cpus?: number;
+} = {}): { concurrency: number; reason: string } {
+  const explicit = o.override ?? o.env?.VS_RENDER_CONCURRENCY;
+  if (explicit !== undefined && explicit !== "") {
+    const n = Number(explicit);
+    if (Number.isInteger(n) && n >= 1 && n <= 4) return { concurrency: n, reason: `override ${n}` };
+  }
+  if (o.family === "hyperframes") return { concurrency: 1, reason: "HyperFrames renders one scene at a time" };
+  const cpus = o.cpus ?? availableParallelism();
+  const freeGiB = (o.freeMemBytes ?? availableMemoryBytes()) / 1024 ** 3;
+  const n = Math.max(1, Math.min(MAX_AUTO_SCENE_CONCURRENCY, Math.floor(freeGiB / GIB_PER_SCENE), cpus - 1));
+  return { concurrency: n, reason: `auto ${n} (${freeGiB.toFixed(1)} GiB free, ${cpus} cpus)` };
+}
+
+/**
+ * Memory the OS can hand out now. On macOS `os.freemem()` counts only never-used pages (often
+ * < 1 GiB on a busy machine with plenty reclaimable), so this adds inactive, speculative and
+ * purgeable pages from `vm_stat`, as Activity Monitor's pressure does. Elsewhere: `os.freemem()`
+ * (Linux reports MemAvailable there).
+ */
+export function availableMemoryBytes(platform: NodeJS.Platform = process.platform): number {
+  if (platform === "darwin") {
+    try {
+      const out = execFileSync("/usr/bin/vm_stat", { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] });
+      return parseVmStat(out) ?? freemem();
+    } catch {
+      return freemem();
+    }
+  }
+  return freemem();
+}
+
+/** Reclaimable bytes from `vm_stat` output (free + inactive + speculative + purgeable), or null. */
+export function parseVmStat(out: string): number | null {
+  const page = Number(/page size of (\d+) bytes/.exec(out)?.[1]);
+  const pages = (name: string) => Number(new RegExp(`Pages ${name}:\\s+(\\d+)`).exec(out)?.[1] ?? 0);
+  const free = pages("free");
+  if (!page || !free) return null;
+  return (free + pages("inactive") + pages("speculative") + pages("purgeable")) * page;
+}
+
+/** Runs tasks one at a time, in call order (a failed task does not block the next). */
+function serialQueue() {
+  let tail: Promise<unknown> = Promise.resolve();
+  return <T>(fn: () => Promise<T>): Promise<T> => {
+    const p = tail.then(fn);
+    tail = p.catch(() => undefined);
+    return p;
+  };
+}
+
 // ---------------------------------------------------------------------------------- renderScenes
 
 export type SceneStatus = "rendered" | "cached" | "pending" | "failed";
@@ -108,7 +180,10 @@ export interface RenderScenesOptions {
   /** Layout zones for the enabled platform targets; part of the cache key when given. */
   zones?: LayoutZones;
   preference?: RendererPreference;
-  /** Scenes rendered in parallel. Default 1 (low-RAM machines). */
+  /**
+   * Scenes rendered in parallel. Default 1 (low-RAM machines); see {@link autoSceneConcurrency}.
+   * HyperFrames renders (one Chrome each) are always serialised, whatever this is.
+   */
   concurrency?: number;
   /** Render titled stand-in cards for non-deterministic scenes so a full cut can be assembled. */
   placeholder?: boolean;
@@ -304,6 +379,8 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
   const results: SceneRenderEntry[] = new Array(scenes.length);
 
   let footageRenderer: SceneRenderer | undefined = o.footageRenderer;
+  // One Chrome at a time, even when ffmpeg/footage scenes run in parallel beside it.
+  const chromeGate = serialQueue();
   let irAssets: Promise<Map<string, string>> | undefined;
   const renderOne = async (given: Scene): Promise<SceneRenderEntry> => {
     // A cutaway draws its graphic instead of the footage (the clip only supplies sound and words),
@@ -359,10 +436,12 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
     }
     const tmp = join(dir, `.${orig.id}.${process.pid}.tmp.mp4`);
     try {
-      const res = await r.render(
-        { scene, target: o.target, tokens: o.tokens, out_path: tmp, project_dir: o.project_dir, ...(o.zones ? { zones: o.zones } : {}), ...(footage ? { footage } : {}), ...(cues?.length ? { cues } : {}) },
-        { signal: o.signal },
-      );
+      const draw = () =>
+        r.render(
+          { scene, target: o.target, tokens: o.tokens, out_path: tmp, project_dir: o.project_dir, ...(o.zones ? { zones: o.zones } : {}), ...(footage ? { footage } : {}), ...(cues?.length ? { cues } : {}) },
+          { signal: o.signal },
+        );
+      const res = await (rendererFamily(r) === "hyperframes" ? chromeGate(draw) : draw());
       await rename(tmp, out);
       const sidecar: SceneSidecar = {
         scene_id: orig.id,
@@ -390,6 +469,7 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
     }
   };
 
+  // Workers take scenes in spec order; `onScene` fires in completion order, `results` stays in spec order.
   let next = 0;
   const worker = async () => {
     while (next < scenes.length) {

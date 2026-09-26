@@ -42,6 +42,12 @@ allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_
    starting Claude Code with `VS_ALLOW_PRIVATE_URLS=1`. Never set it yourself.
    Secrets found in any source are replaced by `[REDACTED:<rule>]` markers in
    the ContentIR; mention the `secret_redacted` warnings.
+   Video and audio get cheap quality checks (`media.quality`): relay each
+   `footage_quality` warning (dark or blown-out picture, flat contrast,
+   clipped or noisy sound) with its suggestion. There is no colour grade:
+   the fix is another span or clip, or replace / re-record the audio. Phone
+   footage records its `rotation` (width/height are the displayed size), and
+   HDR (PQ/HLG) footage is marked `hdr: true` and tonemapped to SDR at render.
 
 ## Video URLs
 

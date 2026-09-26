@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -938,6 +939,28 @@ describe("sound-event cues (pure)", () => {
   });
 });
 
+describe("parallel scene renders", () => {
+  it(
+    "renders the same clips at sceneConcurrency 1 and 3, with scene progress for every scene",
+    async () => {
+      const run = async (n: number) => {
+        const dir = await makeProject(`concurrency-${n}`);
+        const msgs: { message: string; scene_index?: number; scene_count?: number }[] = [];
+        await renderProject(dir, opts({ sceneConcurrency: n, onProgress: (p) => p.stage === "scenes" && msgs.push(p) }));
+        const clips = await Promise.all(spec.scenes.map(async (s) => createHash("sha256").update(await readFile(join(dir, "renders", "preview", "scenes", `${s.id}.mp4`))).digest("hex")));
+        return { msgs, clips };
+      };
+      const one = await run(1);
+      const three = await run(3);
+      expect(three.clips).toEqual(one.clips);
+      expect(three.msgs[0]!.message).toMatch(/3 at a time/);
+      expect(three.msgs.at(-1)).toMatchObject({ scene_index: spec.scenes.length, scene_count: spec.scenes.length });
+      expect(one.msgs[0]!.message).not.toMatch(/at a time/);
+    },
+    T,
+  );
+});
+
 describe("brand logo placement", () => {
   /** The RGB of one pixel of the reel at `atS`. */
   async function pixel(video: string, atS: number, x: number, y: number): Promise<[number, number, number]> {
@@ -973,6 +996,10 @@ describe("brand logo placement", () => {
       // The end card draws the logo itself (centred), not in the corner.
       const [red3] = await pixel(r.dist.reel, 2.5, cx, cy);
       expect(red3).toBeLessThan(150);
+      // The clean master carries the logo too (it is drawn in the concat encode).
+      const [mRed, mGreen] = await pixel(join(dir, "renders", "preview", "master.mp4"), 0.5, cx, cy);
+      expect(mRed).toBeGreaterThan(200);
+      expect(mGreen).toBeLessThan(60);
       expect(r.warnings.filter((m) => m.startsWith("brand:"))).toEqual([]);
     },
     T,

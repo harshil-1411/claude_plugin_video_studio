@@ -25,6 +25,20 @@
             "description": "For video and audio assets.",
             "additionalProperties": false,
             "properties": {
+              "bit_depth": {
+                "description": "Bits per luma sample (8, 10, 12).",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              "color_primaries": {
+                "description": "Video colour primaries as probed, e.g. bt709, bt2020.",
+                "type": "string"
+              },
+              "color_transfer": {
+                "description": "Video transfer characteristic as probed, e.g. bt709, smpte2084 (PQ), arib-std-b67 (HLG).",
+                "type": "string"
+              },
               "content_box": {
                 "description": "The real picture inside baked-in black bars (letterbox/pillarbox), in source pixels; the footage renderer crops to it.",
                 "additionalProperties": false,
@@ -70,6 +84,10 @@
                 "type": "boolean"
               },
               "has_video": {
+                "type": "boolean"
+              },
+              "hdr": {
+                "description": "true for PQ or HLG video (iPhone HDR, HDR10): the footage renderer tonemaps it to SDR BT.709.",
                 "type": "boolean"
               },
               "height": {
@@ -151,6 +169,85 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "quality": {
+                "description": "Cheap footage quality checks measured at ingest (low-res, low-fps decode).",
+                "additionalProperties": false,
+                "properties": {
+                  "bright_fraction": {
+                    "description": "Share of sampled pixels that are near white.",
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "clipped_audio": {
+                    "description": "true when the audio hits full scale (≥ −0.1 dBFS) in several places: distortion.",
+                    "type": "boolean"
+                  },
+                  "contrast": {
+                    "description": "Mean spread between the 10th and 90th luma percentiles of sampled frames (8-bit).",
+                    "maximum": 255,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "dark_fraction": {
+                    "description": "Share of sampled pixels that are near black.",
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "exposure": {
+                    "description": "Picture exposure from the mean luma and the share of near-black / near-white pixels (video).",
+                    "enum": [
+                      "dark",
+                      "ok",
+                      "bright"
+                    ],
+                    "type": "string"
+                  },
+                  "luma_mean": {
+                    "description": "Mean luma of sampled frames (8-bit code values, 16–235 video range).",
+                    "maximum": 255,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "notes": {
+                    "description": "Plain-language quality problems with a suggestion each; empty when none.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "snr_db": {
+                    "description": "Speech-clarity proxy: loud (90th percentile) minus quiet (10th percentile) 50 ms RMS levels, in dB. Low means noise or a constant bed under the speech.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "notes"
+                ],
+                "type": "object"
+              },
+              "rotation": {
+                "description": "Display rotation of the video (degrees, counter-clockwise as ffprobe reports it; phone footage). width/height are the displayed size, after rotation.",
+                "anyOf": [
+                  {
+                    "const": 0,
+                    "type": "number"
+                  },
+                  {
+                    "const": 90,
+                    "type": "number"
+                  },
+                  {
+                    "const": 180,
+                    "type": "number"
+                  },
+                  {
+                    "const": 270,
+                    "type": "number"
+                  }
+                ]
               },
               "shots": {
                 "description": "Shot boundaries from scene detection.",

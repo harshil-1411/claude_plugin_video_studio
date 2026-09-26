@@ -11,6 +11,7 @@ import {
   buildFilterGraph,
   composeScene,
   ffColor,
+  SCENE_X264_THREADS,
   frameCount,
   revealChains,
   sceneMotionChains,
@@ -42,8 +43,22 @@ export const FOOTAGE_RENDERER_ID = "ffmpeg-footage";
  * 0.2.2: word cues (`req.cues`) time the overlay's reveal items.
  * 0.3.0: overlays open half-in (entrance.ts) and stat values count up, as in the FFmpeg renderer 0.5.0.
  * 0.4.0: `focus_track` (fit cover) moves the crop over time to keep the subject centred (reframe.ts).
+ * 0.5.0: HDR (PQ/HLG) sources are tonemapped to SDR BT.709 before the fit (zscale + tonemap).
  */
-export const FOOTAGE_RENDERER_VERSION = "0.4.0";
+export const FOOTAGE_RENDERER_VERSION = "0.5.0";
+
+/**
+ * HDR → SDR BT.709: linearise (100 nits nominal peak), convert primaries, hable tonemap, back to
+ * BT.709 video range. Needs zscale (libzimg). Rotation needs nothing here: ffmpeg auto-rotates on
+ * decode, so every filter (and `media.width/height`, `content_box`) is in the displayed orientation.
+ */
+export const HDR_TONEMAP_CHAIN = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
+
+/** How the renderer's ffmpeg handles colour (only consulted for HDR sources). */
+export interface FootageColorOptions {
+  /** zscale (libzimg) is available: tonemap HDR. Without it HDR passes through with a warning. */
+  zscale?: boolean;
+}
 
 /** Deterministic kinds drawn over footage. Others are ignored with a warning. */
 export const FOOTAGE_OVERLAY_KINDS = ["lower_third", "kinetic_text", "typography", "quote", "stat"] as const satisfies readonly DeterministicKind[];
@@ -165,12 +180,13 @@ function fitChains(
  */
 export function planFootage(
   clip: FootageClip,
-  media: Pick<MediaInfo, "duration_sec" | "content_box" | "width" | "height">,
+  media: Pick<MediaInfo, "duration_sec" | "content_box" | "width" | "height" | "hdr" | "color_transfer">,
   path: string,
   target: RenderTarget,
   durationSec: number,
   background: string,
   camera: FootageCamera = {},
+  color: FootageColorOptions = {},
 ): FootagePlan {
   const { width: W, height: H, fps } = target;
   const frames = frameCount(durationSec, fps);
@@ -223,6 +239,13 @@ export function planFootage(
     );
   }
   const clipFrames = Math.max(1, Math.floor(play * fps + 1e-6));
+  // HDR: tonemap first, so redaction, crop and fit work on SDR pixels. SDR sources: no change at all.
+  let tonemap = "";
+  if (media.hdr) {
+    const what = media.color_transfer === "arib-std-b67" ? "HLG" : "PQ";
+    if (color.zscale) tonemap = `${HDR_TONEMAP_CHAIN},`;
+    else warnings.push(`footage: HDR (${what}) source rendered without tonemapping because this ffmpeg lacks zscale (libzimg); colours will look washed out or clipped. Install a full ffmpeg build (e.g. brew install ffmpeg) or use an SDR export of the clip`);
+  }
   // scene.motion after the fit and fill, on the exact-length clip (hold: no chains).
   const moveChains = motion ? sceneMotionChains(motion, target, frames, background, camera.easing, "[mv]", "[fg]") : [];
   const fillFilter = fill === "loop" ? [`loop=loop=-1:size=${clipFrames}:start=0`, "setpts=N/FRAME_RATE/TB"] : fill === "hold" ? [`tpad=stop_mode=clone:stop_duration=${n3(D)}`] : [];
@@ -230,7 +253,7 @@ export function planFootage(
     kind: "video",
     input: ["-ss", n3(clip.in_sec), "-t", n3(span), "-i", path],
     chains: [
-      `[0:v]setpts=PTS-STARTPTS${speed !== 1 ? `,setpts=PTS/${speed}` : ""},fps=${fps}[src0]`,
+      `[0:v]${tonemap}setpts=PTS-STARTPTS${speed !== 1 ? `,setpts=PTS/${speed}` : ""},fps=${fps}[src0]`,
       // Redaction before the fit, in source coordinates, so it stays on the content whatever the crop.
       ...redactChains(clip.redact ?? [], clip.in_sec, speed, "[src0]", "[src1]"),
       // Then drop baked-in black bars, so cover fills the frame with picture, not bars.
@@ -278,7 +301,7 @@ export function footageRenderArgs(plan: FootagePlan, overlay: BuiltGraph | null,
     String(target.fps),
     ...h264Args({ preset: encode.preset ?? "veryfast", crf: encode.crf ?? 18 }),
     "-threads",
-    String(encode.threads ?? 1),
+    String(encode.threads ?? SCENE_X264_THREADS),
     "-an",
     "-sn",
     "-dn",
@@ -297,6 +320,19 @@ export function createFootageRenderer(opts: FootageRendererOptions = {}): SceneR
   const fontResolver = opts.fontResolver ?? createFontResolver();
   const encode: FfmpegEncodeSettings = { ...opts.encode, ...(opts.encodePreset ? { preset: opts.encodePreset } : {}) };
   const availability = new Map<string, Promise<Availability>>();
+  const zscaleByBin = new Map<string, Promise<boolean>>();
+  /** zscale support of this ffmpeg, checked once and only when an HDR clip needs it. */
+  const hasZscale = (tools: FfmpegTools): Promise<boolean> => {
+    let p = zscaleByBin.get(tools.ffmpeg);
+    if (!p) {
+      p = ffmpegFeatures({ tools }).then(
+        (f) => f.zscale,
+        () => false,
+      );
+      zscaleByBin.set(tools.ffmpeg, p);
+    }
+    return p;
+  };
 
   const checkAvailable = async (env: NodeJS.ProcessEnv): Promise<Availability> => {
     try {
@@ -331,10 +367,20 @@ export function createFootageRenderer(opts: FootageRendererOptions = {}): SceneR
       if (!scene.footage) throw new Error(`scene ${scene.id} has no footage`);
       if (!req.footage) throw new Error(`scene ${scene.id}: footage asset "${scene.footage.asset}" was not resolved`);
       const tools = await getTools(opts.tools);
-      const plan = planFootage(scene.footage, req.footage.media, req.footage.path, target, scene.duration_sec, tokens.color_background, {
-        ...(scene.motion ? { motion: scene.motion } : {}),
-        ...(tokens.motion ? { easing: tokens.motion.easing } : {}),
-      });
+      const color: FootageColorOptions = req.footage.media.hdr && !isStillPath(req.footage.path) ? { zscale: await hasZscale(tools) } : {};
+      const plan = planFootage(
+        scene.footage,
+        req.footage.media,
+        req.footage.path,
+        target,
+        scene.duration_sec,
+        tokens.color_background,
+        {
+          ...(scene.motion ? { motion: scene.motion } : {}),
+          ...(tokens.motion ? { easing: tokens.motion.easing } : {}),
+        },
+        color,
+      );
       const warnings = [...plan.warnings];
       const { comp, warnings: ow } = footageOverlay(req);
       warnings.push(...ow);

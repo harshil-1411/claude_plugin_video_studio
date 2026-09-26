@@ -44,8 +44,8 @@ export type Env = Record<string, string | undefined>;
 export const ENGINE_VERSION = "0.1.0";
 /** Bump when technical QA's checks change, so cached QA results are re-run. 2: background-aware black frames, intended silence. */
 export const QA_VERSION = 3;
-/** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). 4: the caption plate is its own ASS layer (no dark bars around highlighted words). 5: loudness true peak −1.5 dBTP (headroom for the AAC encode). */
-export const ASSEMBLY_VERSION = 5;
+/** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). 4: the caption plate is its own ASS layer (no dark bars around highlighted words). 5: loudness true peak −1.5 dBTP (headroom for the AAC encode). 6: the brand logo is overlaid in the concat encode (one fewer H.264 generation). */
+export const ASSEMBLY_VERSION = 6;
 /** Scene transition length when neither the scene nor the style sets one (ms). */
 export const DEFAULT_TRANSITION_MS = 400;
 
@@ -76,6 +76,11 @@ export interface RenderProjectOptions {
   // ---- advanced / tests
   /** Override the quality's frame size (short side) and fps. */
   target?: { shortSide?: number; fps?: number };
+  /**
+   * Scene clips rendered in parallel, 1–4 (overrides `VS_RENDER_CONCURRENCY` and the automatic,
+   * memory-aware choice). HyperFrames scenes are always rendered one at a time.
+   */
+  sceneConcurrency?: number;
   /** x264 preset for scene clips and assembly (default: preview ultrafast, final veryfast/medium). */
   encodePreset?: string;
   voiceBackends?: Partial<BackendSet>;

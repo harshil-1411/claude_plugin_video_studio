@@ -319,7 +319,7 @@ describe("scene motion on footage", () => {
     });
 
   it("folds the motion into the plan after the fit; without it the plan is unchanged", () => {
-    expect(FOOTAGE_RENDERER_VERSION).toBe("0.4.0");
+    expect(FOOTAGE_RENDERER_VERSION).toBe("0.5.0");
     const clip: FootageClip = { asset: "v", in_sec: 0 };
     const base = planFootage(clip, rampMedia, ramp, target, 1, "#112233");
     expect(planFootage(clip, rampMedia, ramp, target, 1, "#112233", {})).toEqual(base);

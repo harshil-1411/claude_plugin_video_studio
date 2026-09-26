@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { concatAudio, loudnorm2pass, measureLoudness } from "./audio.js";
 import { groupCaptionLines, toAss } from "./captions.js";
-import { assemble, burnCaptions, concatVideos, makeThumbnail, muxAudio, subtitlesFilter } from "./compose.js";
+import { assemble, burnCaptions, concatVideos, makeThumbnail, muxAudio, overlayLogo, subtitlesFilter } from "./compose.js";
 import {
   FfmpegError,
   type FfmpegProgress,
@@ -127,6 +127,37 @@ describe.skipIf(!hasFf)("ffmpeg integration", () => {
     await concatVideos([{ path: p("blue.mp4"), duration_ms: 1600 }], p("held.mp4"), { width: 180, height: 320, fps: 25 }, { tools: tools!, ...FAST });
     const pr = await ffprobe(p("held.mp4"), { tools: tools! });
     expect(Math.abs(pr.duration_s - 1.6)).toBeLessThan(0.05);
+  }, T);
+
+  it("draws the logo inside the concat encode, matching a separate overlay pass", async () => {
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", "color=c=0xFF0000:s=40x20", "-frames:v", "1", p("logo.png")], { tools: tools! });
+    const logo = { path: p("logo.png"), x: 120, y: 20, w: 40, h: 20, ranges_ms: [[0, 1000]] as const };
+    const target = { width: 180, height: 320, fps: 25 };
+    const px = async (video: string, atS: number, x: number, y: number) => {
+      const out = p(`px-${x}-${y}-${atS}.rgb`);
+      await runFfmpeg(["-y", "-ss", atS.toFixed(3), "-i", video, "-frames:v", "1", "-vf", `format=rgb24,crop=1:1:${x}:${y}`, "-f", "rawvideo", "-pix_fmt", "rgb24", out], { tools: tools! });
+      return [...(await readFile(out))];
+    };
+    for (const transition of [undefined, { kind: "crossfade" as const, ms: 400 }]) {
+      const segs = [
+        { path: p("blue.mp4"), duration_ms: 1000 },
+        { path: p("wide.mp4"), duration_ms: 1000, ...(transition ? { transition_in: transition } : {}) },
+      ];
+      const one = await concatVideos(segs, p("logo-one.mp4"), target, { tools: tools!, ...FAST, logo });
+      expect(one.frames).toBe(50);
+      await concatVideos(segs, p("logo-base.mp4"), target, { tools: tools!, ...FAST });
+      await overlayLogo(p("logo-base.mp4"), logo, p("logo-two.mp4"), { tools: tools!, ...FAST });
+      const pr = await ffprobe(p("logo-one.mp4"), { tools: tools! });
+      expect(Math.abs(pr.duration_s - 2)).toBeLessThan(0.05);
+      for (const [t, x, y] of [[0.5, 140, 30], [0.5, 60, 200], [1.5, 140, 30]] as const) {
+        const a = await px(p("logo-one.mp4"), t, x, y);
+        const b = await px(p("logo-two.mp4"), t, x, y);
+        for (let i = 0; i < 3; i++) expect(Math.abs(a[i]! - b[i]!)).toBeLessThan(24);
+      }
+      // Logo shows inside its range, not after it.
+      expect((await px(p("logo-one.mp4"), 0.5, 140, 30))[0]).toBeGreaterThan(200);
+      expect((await px(p("logo-one.mp4"), 1.5, 140, 30))[0]).toBeLessThan(150);
+    }
   }, T);
 
   it("concatenates audio slots with exact-length silence gaps", async () => {

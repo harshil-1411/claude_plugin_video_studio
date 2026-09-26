@@ -3,7 +3,7 @@ name: render
 description: Render a planned video-studio project (project/video-spec.json) into a finished package in dist/ - captioned 9:16/16:9 reel, clean master, SRT/VTT captions, transcript, thumbnail, social copy, render manifest and provenance - using only local tools (system TTS or silent voice, HyperFrames or ffmpeg motion graphics). Use when the user runs /video-studio:render, approves a plan, or asks to render, preview or export the video.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+) and ffmpeg with libass and libx264.
-allowed-tools: mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__render_cancel mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__doctor mcp__plugin_video-studio_engine__review Read Write Edit
+allowed-tools: mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__render_cancel mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__doctor mcp__plugin_video-studio_engine__review mcp__plugin_video-studio_engine__footage_focus Read Write Edit
 ---
 
 # Render a video
@@ -77,8 +77,22 @@ subject. Look closer where needed:
 - `mode: "crop"` with `crop {x, y, w, h}` (fractions of the frame): caption
   and small-text legibility, faces.
 
-Fix what you find in the spec (it is cheap: only changed scenes re-render),
-then re-render and look again. Mention anything you chose not to fix.
+**Review → fix → re-render loop (at most 2 passes).**
+1. Collect the problems: the `flagged` scenes in the review result (lint
+   findings: read `qa/lint.md` for their `fix`) plus what you saw on the
+   sheet. Keep only problems you can fix in the spec without asking the
+   user: text too long or overflowing, a caption or headline under the UI, a
+   cue on the wrong word, a crop that loses the subject (`footage_focus` /
+   `focus_track`), a scene too short for its reads, a motion or transition
+   hiding a reveal.
+2. Apply those fixes to `project/video-spec.json`, keeping every other
+   value. Don't change the story, the facts, the voice or the look: those
+   are the user's decisions (list them instead).
+3. `spec_validate`, then re-render the same quality (only changed scenes
+   re-render) and `review` again.
+4. Stop when nothing is left to fix, when a problem comes back unchanged
+   after its fix, or after the second pass. Then present, listing what you
+   fixed and what you left and why.
 
 ## 5. Present the result
 

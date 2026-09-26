@@ -5,11 +5,11 @@ import path, { basename, delimiter, dirname, extname, isAbsolute, join, normaliz
 import fs, { accessSync, closeSync, constants, createReadStream, createWriteStream, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
 import * as fs$1 from "node:fs/promises";
 import fsPromises, { access, chmod, copyFile, cp, link, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, rmdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
-import os, { homedir, hostname, platform, tmpdir } from "node:os";
+import os, { availableParallelism, freemem, homedir, hostname, platform, tmpdir } from "node:os";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
 import { DatabaseSync } from "node:sqlite";
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import http from "node:http";
 import https from "node:https";
@@ -9056,6 +9056,32 @@ function parseProgressBlock(b) {
 	if (b.speed) p.speed = b.speed.trim();
 	return p;
 }
+/** HDR transfer characteristics: PQ and HLG. */
+const HDR_TRANSFERS = /* @__PURE__ */ new Set(["smpte2084", "arib-std-b67"]);
+/** Normalise a rotation in degrees to 0/90/180/270 (nearest quarter turn). */
+function normalizeRotation(deg) {
+	if (!Number.isFinite(deg)) return 0;
+	return (Math.round(deg / 90) % 4 + 4) % 4 * 90;
+}
+/** Bits per sample from a pixel format name (yuv420p10le: 10, p010le: 10, yuv420p: 8); null when unknown. */
+function pixFmtBitDepth(pixFmt) {
+	if (!pixFmt) return null;
+	const m = /(\d{2})(?:le|be)$/.exec(pixFmt);
+	if (m) {
+		const n = Number(m[1]);
+		if (n >= 9 && n <= 16) return n;
+	}
+	if (/^(?:yuvj?4[024][024]p|nv12|nv21|rgb24|bgr24|rgba|bgra|argb|abgr|gray|yuyv422|uyvy422)$/.test(pixFmt)) return 8;
+	return null;
+}
+/** Rotation of a stream: the display matrix side data first, else the legacy clockwise `rotate` tag. */
+function streamRotation(v) {
+	if (!v) return 0;
+	const dm = v.side_data_list?.find((d) => d.rotation !== void 0 && /display matrix/i.test(d.side_data_type ?? "Display Matrix"));
+	if (dm) return normalizeRotation(Number(dm.rotation));
+	if (v.tags?.rotate !== void 0) return normalizeRotation(-Number(v.tags.rotate));
+	return 0;
+}
 function parseRate(r) {
 	if (!r) return null;
 	const [n, d] = r.split("/").map(Number);
@@ -9069,6 +9095,11 @@ function parseProbeJson(json) {
 	const v = streams.find((s) => s.codec_type === "video" && !s.disposition?.attached_pic);
 	const a = streams.find((s) => s.codec_type === "audio");
 	const dur = Number(data.format?.duration ?? v?.duration ?? a?.duration ?? 0);
+	const rotation = streamRotation(v);
+	const swap = rotation === 90 || rotation === 270;
+	const known = (x) => x && x !== "unknown" ? x : null;
+	const transfer = known(v?.color_transfer);
+	const raw = Number(v?.bits_per_raw_sample);
 	return {
 		duration_s: Number.isFinite(dur) ? dur : 0,
 		width: v?.width ?? null,
@@ -9081,7 +9112,14 @@ function parseProbeJson(json) {
 		has_audio: Boolean(a),
 		has_video: Boolean(v),
 		pix_fmt: v?.pix_fmt ?? null,
-		format_name: data.format?.format_name ?? null
+		format_name: data.format?.format_name ?? null,
+		rotation,
+		display_width: (swap ? v?.height : v?.width) ?? null,
+		display_height: (swap ? v?.width : v?.height) ?? null,
+		color_transfer: transfer,
+		color_primaries: known(v?.color_primaries),
+		bit_depth: pixFmtBitDepth(v?.pix_fmt) ?? (Number.isInteger(raw) && raw > 0 ? raw : null),
+		hdr: transfer !== null && HDR_TRANSFERS.has(transfer)
 	};
 }
 /** ffprobe a media file. */
@@ -9110,6 +9148,10 @@ function parseBuildconf(text) {
 		libx264: /--enable-libx264\b/.test(text)
 	};
 }
+/** `--enable-libzimg` in the build configuration: the `zscale` filter (HDR tonemapping) is available. */
+function hasZimg(buildconf) {
+	return /--enable-libzimg\b/.test(buildconf);
+}
 async function ffmpegFeatures(opts = {}) {
 	const { ffmpeg } = await getTools(opts.tools);
 	const [conf, ver] = await Promise.all([runProcess(ffmpeg, ["-hide_banner", "-buildconf"], {
@@ -9120,8 +9162,10 @@ async function ffmpegFeatures(opts = {}) {
 		captureStdout: true
 	})]);
 	const first = ver.stdout.split("\n")[0] ?? "";
+	const text = `${conf.stdout}\n${conf.stderr}`;
 	return {
-		...parseBuildconf(`${conf.stdout}\n${conf.stderr}`),
+		...parseBuildconf(text),
+		zscale: hasZimg(text),
 		version: /version\s+(\S+)/.exec(first)?.[1] ?? "unknown"
 	};
 }
@@ -10406,12 +10450,15 @@ function normalizeFilters(t, durationMs) {
 * Concatenate video segments with the concat *filter* (tolerates mixed codecs, sizes and
 * frame rates): every segment is normalised to the target size/aspect/fps first. Video only;
 * audio is handled by `concatAudio` + `muxAudio`. Output uses the final H.264 settings.
+* With `logo` (and at least one range), the logo is overlaid inside the same filtergraph.
 */
 async function concatVideos(segments, out, target, opts = {}) {
 	assertEven(target.width, target.height);
 	if (!segments.length) throw new Error("concatVideos: no segments");
 	const inputs = [];
 	const chains = [];
+	const logo = opts.logo?.ranges_ms.length ? opts.logo : void 0;
+	const vcat = logo ? "[vcat]" : "[vout]";
 	let frames = 0;
 	segments.forEach((s, i) => {
 		if (!(s.duration_ms > 0)) throw new Error(`segment ${i}: duration_ms must be > 0`);
@@ -10430,7 +10477,7 @@ async function concatVideos(segments, out, target, opts = {}) {
 			d: 0
 		};
 	});
-	if (joins.every((j) => j.d === 0)) chains.push([`${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0[vout]`]);
+	if (joins.every((j) => j.d === 0)) chains.push([`${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0${vcat}`]);
 	else {
 		let acc = "[v0]";
 		let accFrames = Math.max(1, Math.round(segments[0].duration_ms * target.fps / 1e3));
@@ -10448,7 +10495,11 @@ async function concatVideos(segments, out, target, opts = {}) {
 			acc = out;
 			accFrames += n;
 		});
-		chains.push([`[vx]fps=${target.fps},trim=end_frame=${frames},setpts=N/FRAME_RATE/TB[vout]`]);
+		chains.push([`[vx]fps=${target.fps},trim=end_frame=${frames},setpts=N/FRAME_RATE/TB${vcat}`]);
+	}
+	if (logo) {
+		inputs.push("-loop", "1", "-i", logo.path);
+		chains.push([logoOverlayFilter(logo, vcat, `[${segments.length}:v]`, "[vout]")]);
 	}
 	await runFfmpeg([
 		"-y",
@@ -10470,28 +10521,13 @@ async function concatVideos(segments, out, target, opts = {}) {
 		duration_ms: Math.round(frames * 1e3 / target.fps)
 	};
 }
-/** Overlay `logo` on `video` (re-encoded with the same settings; no audio). */
-async function overlayLogo(video, logo, out, opts = {}) {
+/**
+* Filtergraph drawing `logo` (input label `logoIn`, a looped still) over `main` → `out`.
+* The looped still is endless: the overlay ends with the video (shortest=1 on the filter itself).
+*/
+function logoOverlayFilter(logo, main, logoIn, out) {
 	const enable = logo.ranges_ms.map(([a, b]) => `between(t,${(a / 1e3).toFixed(3)},${(b / 1e3).toFixed(3)})`).join("+") || "0";
-	const graph = `[1:v]scale=${Math.round(logo.w)}:${Math.round(logo.h)}:flags=lanczos,format=rgba[logo];[0:v][logo]overlay=x=${Math.round(logo.x)}:y=${Math.round(logo.y)}:enable='${enable}':format=auto:shortest=1[v]`;
-	await runFfmpeg([
-		"-y",
-		"-i",
-		video,
-		"-loop",
-		"1",
-		"-i",
-		logo.path,
-		"-filter_complex",
-		graph,
-		"-map",
-		"[v]",
-		...h264Args(opts.encode),
-		"-an",
-		...FASTSTART,
-		out
-	], opts);
-	return { path: out };
+	return `${logoIn}scale=${Math.round(logo.w)}:${Math.round(logo.h)}:flags=lanczos,format=rgba[logo];${main}[logo]overlay=x=${Math.round(logo.x)}:y=${Math.round(logo.y)}:enable='${enable}':format=auto:shortest=1${out}`;
 }
 /**
 * Mux an audio track onto a video: video is stream-copied, audio encoded to AAC 192k/48 kHz
@@ -10568,16 +10604,19 @@ async function makeThumbnail(video, out, o = {}) {
 	};
 }
 /**
-* concat → (voice concat) → loudnorm → mux = clean master; master + ASS burn-in = captioned reel.
-* The reel is only one generation away from the master (video re-encoded once for the burn-in).
+* concat (+ logo, same encode) → (voice concat) → loudnorm → mux (video stream-copied) = clean
+* master; master + ASS burn-in = captioned reel. The master is one video encode from the scene
+* clips and the reel one more (the burn-in); the logo costs no extra generation.
 */
 async function assemble(input, opts = {}) {
 	const work = input.workDir ?? await mkdtemp(join(tmpdir(), "vs-media-"));
 	await mkdir(work, { recursive: true });
 	try {
-		let silentVideo = join(work, "video.mp4");
-		const v = await concatVideos(input.segments, silentVideo, input, opts);
-		if (input.logo && input.logo.ranges_ms.length) silentVideo = (await overlayLogo(silentVideo, input.logo, join(work, "video.logo.mp4"), opts)).path;
+		const silentVideo = join(work, "video.mp4");
+		const v = await concatVideos(input.segments, silentVideo, input, {
+			...opts,
+			...input.logo ? { logo: input.logo } : {}
+		});
 		if (input.audio === void 0 && !input.music && !input.sceneAudio) {
 			await concatAudio([{ duration_ms: v.duration_ms }], join(work, "silence.wav"), opts);
 			await muxAudio(silentVideo, join(work, "silence.wav"), input.master, opts);
@@ -10650,7 +10689,7 @@ function blackThreshold(background) {
 		nearBlack: l < .02
 	};
 }
-const r3$2 = (n) => Math.round(n * 1e3) / 1e3;
+const r3$3 = (n) => Math.round(n * 1e3) / 1e3;
 function ranges(stderr, startRe, endRe, totalS) {
 	const events = [];
 	for (const m of stderr.matchAll(startRe)) events.push({
@@ -10669,16 +10708,16 @@ function ranges(stderr, startRe, endRe, totalS) {
 	for (const e of events) if (e.kind === "s") open = e.t;
 	else if (open !== null) {
 		out.push({
-			start_s: r3$2(open),
-			end_s: r3$2(e.t),
-			duration_s: r3$2(e.t - open)
+			start_s: r3$3(open),
+			end_s: r3$3(e.t),
+			duration_s: r3$3(e.t - open)
 		});
 		open = null;
 	}
 	if (open !== null && totalS > open) out.push({
-		start_s: r3$2(open),
-		end_s: r3$2(totalS),
-		duration_s: r3$2(totalS - open)
+		start_s: r3$3(open),
+		end_s: r3$3(totalS),
+		duration_s: r3$3(totalS - open)
 	});
 	return out;
 }
@@ -10686,9 +10725,9 @@ function ranges(stderr, startRe, endRe, totalS) {
 function parseDetections(stderr, totalS) {
 	const black = [];
 	for (const m of stderr.matchAll(/black_start:\s*(-?[\d.]+)\s+black_end:\s*(-?[\d.]+)\s+black_duration:\s*(-?[\d.]+)/g)) black.push({
-		start_s: r3$2(Number(m[1])),
-		end_s: r3$2(Number(m[2])),
-		duration_s: r3$2(Number(m[3]))
+		start_s: r3$3(Number(m[1])),
+		end_s: r3$3(Number(m[2])),
+		duration_s: r3$3(Number(m[3]))
 	});
 	return {
 		black,
@@ -11730,7 +11769,7 @@ function pickPrimary(det, prev) {
 	return null;
 }
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
-const r3$1 = (v) => Math.round(v * 1e3) / 1e3;
+const r3$2 = (v) => Math.round(v * 1e3) / 1e3;
 /**
 * Per-frame picks → keyframes: misses carry the previous subject forward (leading misses take the
 * first detection), a 1-2-1 average removes jitter, and runs that stay inside the dead zone keep
@@ -11781,9 +11820,9 @@ function picksToTrack(times, picks) {
 	});
 	const same = (a, b) => !!a && a.x === b.x && a.y === b.y;
 	const keys = dz.filter((p, i) => !(same(dz[i - 1], p) && same(dz[i + 1], p))).map((k) => ({
-		t: r3$1(k.t),
-		x: r3$1(k.x),
-		y: r3$1(k.y)
+		t: r3$2(k.t),
+		x: r3$2(k.x),
+		y: r3$2(k.y)
 	}));
 	return keys.filter((k, i) => i === 0 || k.t > keys[i - 1].t).slice(0, 200);
 }
@@ -11800,7 +11839,7 @@ async function suggestFocusTrack(video, opts) {
 	let fps = opts.fps ?? 2;
 	if (span * fps > 180) {
 		fps = 180 / span;
-		notes.push(`sampled ${r3$1(fps)} frames/s so at most 180 frames are checked`);
+		notes.push(`sampled ${r3$2(fps)} frames/s so at most 180 frames are checked`);
 	}
 	const dir = await mkdtemp(join(tmpdir(), "vs-focus-"));
 	try {
@@ -13028,7 +13067,31 @@ const MediaInfo = strictObject({
 		w: int().positive(),
 		h: int().positive()
 	}).optional().describe("The real picture inside baked-in black bars (letterbox/pillarbox), in source pixels; the footage renderer crops to it."),
-	notes: array(FootageNote).optional().describe("Per-shot notes Claude wrote after looking at the footage (footage_look → footage_notes): subject, action, on-screen text, b-roll use, quality. Observations, not evidence.")
+	notes: array(FootageNote).optional().describe("Per-shot notes Claude wrote after looking at the footage (footage_look → footage_notes): subject, action, on-screen text, b-roll use, quality. Observations, not evidence."),
+	rotation: union([
+		literal(0),
+		literal(90),
+		literal(180),
+		literal(270)
+	]).optional().describe("Display rotation of the video (degrees, counter-clockwise as ffprobe reports it; phone footage). width/height are the displayed size, after rotation."),
+	color_transfer: string().optional().describe("Video transfer characteristic as probed, e.g. bt709, smpte2084 (PQ), arib-std-b67 (HLG)."),
+	color_primaries: string().optional().describe("Video colour primaries as probed, e.g. bt709, bt2020."),
+	bit_depth: int().positive().optional().describe("Bits per luma sample (8, 10, 12)."),
+	hdr: boolean().optional().describe("true for PQ or HLG video (iPhone HDR, HDR10): the footage renderer tonemaps it to SDR BT.709."),
+	quality: strictObject({
+		exposure: _enum([
+			"dark",
+			"ok",
+			"bright"
+		]).optional().describe("Picture exposure from the mean luma and the share of near-black / near-white pixels (video)."),
+		luma_mean: number().min(0).max(255).optional().describe("Mean luma of sampled frames (8-bit code values, 16–235 video range)."),
+		contrast: number().min(0).max(255).optional().describe("Mean spread between the 10th and 90th luma percentiles of sampled frames (8-bit)."),
+		dark_fraction: number().min(0).max(1).optional().describe("Share of sampled pixels that are near black."),
+		bright_fraction: number().min(0).max(1).optional().describe("Share of sampled pixels that are near white."),
+		clipped_audio: boolean().optional().describe("true when the audio hits full scale (≥ −0.1 dBFS) in several places: distortion."),
+		snr_db: number().optional().describe("Speech-clarity proxy: loud (90th percentile) minus quiet (10th percentile) 50 ms RMS levels, in dB. Low means noise or a constant bed under the speech."),
+		notes: array(string()).describe("Plain-language quality problems with a suggestion each; empty when none.")
+	}).optional().describe("Cheap footage quality checks measured at ingest (low-res, low-fps decode).")
 }).describe("Probe results for a video or audio asset.");
 const IrAsset = strictObject({
 	id: Id,
@@ -22953,6 +23016,15 @@ const FFMPEG_RENDERER_KINDS = [
 	"kinetic_text",
 	"map"
 ];
+/**
+* x264 threads per scene encode: `clamp(floor(cpus / 3), 1, 4)`, sized for up to three scenes in
+* parallel (see `autoSceneConcurrency`). Determinism: x264 output is byte-identical for a fixed
+* thread count, but can differ between counts. So this depends only on the CPU count (never on
+* free memory or the chosen concurrency): on one machine a scene always encodes the same bytes.
+* Clips from a machine with a different CPU count may differ in bytes (not visibly); scene cache
+* keys do not include threads, and `test`/`diff`/golden frames compare frames by SSIM.
+*/
+const SCENE_X264_THREADS = Math.max(1, Math.min(4, Math.floor(availableParallelism() / 3)));
 function rgb(hex) {
 	const h = hex.replace(/^#/, "");
 	const full = h.length === 3 ? h.replace(/./g, (c) => c + c) : h.slice(0, 6);
@@ -25758,7 +25830,7 @@ function ffmpegRenderArgs(built, target, tokens, frames, encode, out) {
 			crf: encode.crf ?? 18
 		}),
 		"-threads",
-		String(encode.threads ?? 1),
+		String(encode.threads ?? SCENE_X264_THREADS),
 		"-an",
 		"-sn",
 		"-dn",
@@ -26225,8 +26297,15 @@ const FOOTAGE_RENDERER_ID = "ffmpeg-footage";
 * 0.2.2: word cues (`req.cues`) time the overlay's reveal items.
 * 0.3.0: overlays open half-in (entrance.ts) and stat values count up, as in the FFmpeg renderer 0.5.0.
 * 0.4.0: `focus_track` (fit cover) moves the crop over time to keep the subject centred (reframe.ts).
+* 0.5.0: HDR (PQ/HLG) sources are tonemapped to SDR BT.709 before the fit (zscale + tonemap).
 */
-const FOOTAGE_RENDERER_VERSION = "0.4.0";
+const FOOTAGE_RENDERER_VERSION = "0.5.0";
+/**
+* HDR → SDR BT.709: linearise (100 nits nominal peak), convert primaries, hable tonemap, back to
+* BT.709 video range. Needs zscale (libzimg). Rotation needs nothing here: ffmpeg auto-rotates on
+* decode, so every filter (and `media.width/height`, `content_box`) is in the displayed orientation.
+*/
+const HDR_TONEMAP_CHAIN = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
 /** Deterministic kinds drawn over footage. Others are ignored with a warning. */
 const FOOTAGE_OVERLAY_KINDS = [
 	"lower_third",
@@ -26309,7 +26388,7 @@ function fitChains(fit, W, H, focus, bg, inLabel, outLabel, tag, track) {
 * Pure plan of the footage part of the graph (exported for tests): input args and the chains that
 * end in `[fg]` with exactly `frames` frames at the target size and fps.
 */
-function planFootage(clip, media, path, target, durationSec, background, camera = {}) {
+function planFootage(clip, media, path, target, durationSec, background, camera = {}, color = {}) {
 	const { width: W, height: H, fps } = target;
 	const frames = frameCount(durationSec, fps);
 	const D = frames / fps;
@@ -26356,6 +26435,12 @@ function planFootage(clip, media, path, target, durationSec, background, camera 
 	const fill = short ? clip.loop ? "loop" : "hold" : play > D + .5 / fps ? "trim" : "exact";
 	if (short && D - play > Math.max(1.5 / fps, .1)) warnings.push(`footage: the clip gives ${n3(play)}s${speed !== 1 ? ` at speed ${speed}` : ""}, shorter than the ${n3(D)}s scene; ${clip.loop ? "looped" : "last frame held"}`);
 	const clipFrames = Math.max(1, Math.floor(play * fps + 1e-6));
+	let tonemap = "";
+	if (media.hdr) {
+		const what = media.color_transfer === "arib-std-b67" ? "HLG" : "PQ";
+		if (color.zscale) tonemap = `${HDR_TONEMAP_CHAIN},`;
+		else warnings.push(`footage: HDR (${what}) source rendered without tonemapping because this ffmpeg lacks zscale (libzimg); colours will look washed out or clipped. Install a full ffmpeg build (e.g. brew install ffmpeg) or use an SDR export of the clip`);
+	}
 	const moveChains = motion ? sceneMotionChains(motion, target, frames, background, camera.easing, "[mv]", "[fg]") : [];
 	const fillFilter = fill === "loop" ? [`loop=loop=-1:size=${clipFrames}:start=0`, "setpts=N/FRAME_RATE/TB"] : fill === "hold" ? [`tpad=stop_mode=clone:stop_duration=${n3(D)}`] : [];
 	return {
@@ -26369,7 +26454,7 @@ function planFootage(clip, media, path, target, durationSec, background, camera 
 			path
 		],
 		chains: [
-			`[0:v]setpts=PTS-STARTPTS${speed !== 1 ? `,setpts=PTS/${speed}` : ""},fps=${fps}[src0]`,
+			`[0:v]${tonemap}setpts=PTS-STARTPTS${speed !== 1 ? `,setpts=PTS/${speed}` : ""},fps=${fps}[src0]`,
 			...redactChains(clip.redact ?? [], clip.in_sec, speed, "[src0]", "[src1]"),
 			`[src1]${contentCrop(media.content_box)}[src]`,
 			...fitChains(fit, W, H, focus, background, "[src]", "[fit]", "b", tracked ? prepareFocusTrack(clip.focus_track, {
@@ -26435,7 +26520,7 @@ function footageRenderArgs(plan, overlay, target, encode, out) {
 			crf: encode.crf ?? 18
 		}),
 		"-threads",
-		String(encode.threads ?? 1),
+		String(encode.threads ?? SCENE_X264_THREADS),
 		"-an",
 		"-sn",
 		"-dn",
@@ -26456,6 +26541,16 @@ function createFootageRenderer(opts = {}) {
 		...opts.encodePreset ? { preset: opts.encodePreset } : {}
 	};
 	const availability = /* @__PURE__ */ new Map();
+	const zscaleByBin = /* @__PURE__ */ new Map();
+	/** zscale support of this ffmpeg, checked once and only when an HDR clip needs it. */
+	const hasZscale = (tools) => {
+		let p = zscaleByBin.get(tools.ffmpeg);
+		if (!p) {
+			p = ffmpegFeatures({ tools }).then((f) => f.zscale, () => false);
+			zscaleByBin.set(tools.ffmpeg, p);
+		}
+		return p;
+	};
 	const checkAvailable = async (env) => {
 		try {
 			const tools = opts.tools ?? await resolveFfmpeg(env);
@@ -26510,10 +26605,11 @@ function createFootageRenderer(opts = {}) {
 			if (!scene.footage) throw new Error(`scene ${scene.id} has no footage`);
 			if (!req.footage) throw new Error(`scene ${scene.id}: footage asset "${scene.footage.asset}" was not resolved`);
 			const tools = await getTools(opts.tools);
+			const color = req.footage.media.hdr && !isStillPath(req.footage.path) ? { zscale: await hasZscale(tools) } : {};
 			const plan = planFootage(scene.footage, req.footage.media, req.footage.path, target, scene.duration_sec, tokens.color_background, {
 				...scene.motion ? { motion: scene.motion } : {},
 				...tokens.motion ? { easing: tokens.motion.easing } : {}
-			});
+			}, color);
 			const warnings = [...plan.warnings];
 			const { comp, warnings: ow } = footageOverlay(req);
 			warnings.push(...ow);
@@ -26615,6 +26711,74 @@ async function selectRenderer(kind, renderers, env = process.env, preference = "
 	return {
 		renderer: null,
 		reason: renderers.length === 0 ? "no renderers registered" : `no available renderer draws "${kind}": ${skipped.join("; ")}`
+	};
+}
+/** Free memory budgeted per parallel ffmpeg scene render. */
+const GIB_PER_SCENE = 1.5;
+/**
+* Parallel scene renders for this machine: `min(2, floor(freeGiB / 1.5), cpus − 1)`, at least 1.
+* HyperFrames is 1 (Chrome is heavy). `override` (a RenderProjectOptions field, else the
+* `VS_RENDER_CONCURRENCY` env var) wins when it is an integer 1–4; anything else is ignored.
+* Only the speed changes: outputs are identical at any concurrency.
+*/
+function autoSceneConcurrency(o = {}) {
+	const explicit = o.override ?? o.env?.VS_RENDER_CONCURRENCY;
+	if (explicit !== void 0 && explicit !== "") {
+		const n = Number(explicit);
+		if (Number.isInteger(n) && n >= 1 && n <= 4) return {
+			concurrency: n,
+			reason: `override ${n}`
+		};
+	}
+	if (o.family === "hyperframes") return {
+		concurrency: 1,
+		reason: "HyperFrames renders one scene at a time"
+	};
+	const cpus = o.cpus ?? availableParallelism();
+	const freeGiB = (o.freeMemBytes ?? availableMemoryBytes()) / 1024 ** 3;
+	const n = Math.max(1, Math.min(2, Math.floor(freeGiB / GIB_PER_SCENE), cpus - 1));
+	return {
+		concurrency: n,
+		reason: `auto ${n} (${freeGiB.toFixed(1)} GiB free, ${cpus} cpus)`
+	};
+}
+/**
+* Memory the OS can hand out now. On macOS `os.freemem()` counts only never-used pages (often
+* < 1 GiB on a busy machine with plenty reclaimable), so this adds inactive, speculative and
+* purgeable pages from `vm_stat`, as Activity Monitor's pressure does. Elsewhere: `os.freemem()`
+* (Linux reports MemAvailable there).
+*/
+function availableMemoryBytes(platform = process.platform) {
+	if (platform === "darwin") try {
+		return parseVmStat(execFileSync("/usr/bin/vm_stat", {
+			encoding: "utf8",
+			timeout: 2e3,
+			stdio: [
+				"ignore",
+				"pipe",
+				"ignore"
+			]
+		})) ?? freemem();
+	} catch {
+		return freemem();
+	}
+	return freemem();
+}
+/** Reclaimable bytes from `vm_stat` output (free + inactive + speculative + purgeable), or null. */
+function parseVmStat(out) {
+	const page = Number(/page size of (\d+) bytes/.exec(out)?.[1]);
+	const pages = (name) => Number(new RegExp(`Pages ${name}:\\s+(\\d+)`).exec(out)?.[1] ?? 0);
+	const free = pages("free");
+	if (!page || !free) return null;
+	return (free + pages("inactive") + pages("speculative") + pages("purgeable")) * page;
+}
+/** Runs tasks one at a time, in call order (a failed task does not block the next). */
+function serialQueue() {
+	let tail = Promise.resolve();
+	return (fn) => {
+		const p = tail.then(fn);
+		tail = p.catch(() => void 0);
+		return p;
 	};
 }
 /** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version. */
@@ -26748,6 +26912,7 @@ async function renderScenes(spec, o) {
 	const scenes = o.only ? spec.scenes.filter((s) => o.only.includes(s.id)) : spec.scenes;
 	const results = new Array(scenes.length);
 	let footageRenderer = o.footageRenderer;
+	const chromeGate = serialQueue();
 	let irAssets;
 	const renderOne = async (given) => {
 		const orig = cutawayPicture(given);
@@ -26819,7 +26984,7 @@ async function renderScenes(spec, o) {
 		}
 		const tmp = join(dir, `.${orig.id}.${process.pid}.tmp.mp4`);
 		try {
-			const res = await r.render({
+			const draw = () => r.render({
 				scene,
 				target: o.target,
 				tokens: o.tokens,
@@ -26829,6 +26994,7 @@ async function renderScenes(spec, o) {
 				...footage ? { footage } : {},
 				...cues?.length ? { cues } : {}
 			}, { signal: o.signal });
+			const res = await (rendererFamily(r) === "hyperframes" ? chromeGate(draw) : draw());
 			await rename(tmp, out);
 			await writeJsonAtomic(sidecarPath, {
 				scene_id: orig.id,
@@ -32569,6 +32735,41 @@ function checkCutaways(spec, out) {
 		});
 	});
 }
+/** Below this SNR proxy (dB) a clip's own sound counts as noisy (matches the ingest note). */
+const FOOTAGE_LOW_SNR_DB = 15;
+/**
+* Footage flagged at ingest (media.quality): a dark or blown-out picture on screen, or clipped /
+* noisy sound when the scene plays the clip's own audio (audio mode native or mix, the default).
+*/
+function checkFootageQuality(spec, ir, out) {
+	for (const s of spec.scenes) {
+		const f = s.footage;
+		if (!f) continue;
+		const q = ir?.assets?.find((a) => a.id === f.asset)?.media?.quality;
+		if (!q) continue;
+		const problems = [];
+		const fixes = [];
+		if (!f.cutaway && (q.exposure === "dark" || q.exposure === "bright")) {
+			problems.push(`the picture is ${q.exposure === "dark" ? "underexposed (dark)" : "overexposed (bright)"}${q.luma_mean !== void 0 ? `, mean luma ${q.luma_mean}` : ""}`);
+			fixes.push("pick a better-exposed span or another clip (there is no colour grade option yet), or cut away to a graphic");
+		}
+		const mode = s.audio?.mode ?? "native";
+		const playsSound = mode === "native" || mode === "mix";
+		const noisy = q.snr_db !== void 0 && q.snr_db < FOOTAGE_LOW_SNR_DB && (q.notes ?? []).some((n) => /noisy or unclear audio/.test(n));
+		if (playsSound && (q.clipped_audio || noisy)) {
+			problems.push(q.clipped_audio ? "the clip's sound clips (distorts)" : `the clip's sound is noisy (SNR about ${q.snr_db} dB)`);
+			fixes.push("replace or re-record the audio, or set audio.mode to music/mute and carry the words with a voiceover");
+		}
+		if (!problems.length) continue;
+		out.push({
+			id: "footage_quality",
+			severity: "warning",
+			scene_id: s.id,
+			message: `${s.id}: footage "${f.asset}": ${problems.join("; ")}`,
+			fix: fixes.join("; ")
+		});
+	}
+}
 /**
 * Reframed footage (`fit: cover` with a focus_track): the subject centre should not sit within
 * REFRAME.edge_margin of the crop edge at any keyframe, computed with the renderer's own smoothed
@@ -32718,7 +32919,9 @@ async function lintProject(projectDir, opts = {}) {
 	await checkTiming(paths.root, spec, state, brand, findings);
 	checkStory(spec, findings);
 	checkCutaways(spec, findings);
-	checkSubjectNearEdge(spec, await readOptionalJson$1(join(paths.root, "source", "content-ir.json")), master.width, master.height, findings);
+	const irMedia = await readOptionalJson$1(join(paths.root, "source", "content-ir.json"));
+	checkSubjectNearEdge(spec, irMedia, master.width, master.height, findings);
+	checkFootageQuality(spec, irMedia, findings);
 	checkLogo(state, boxes, findings);
 	checkForbidden(spec, brand, findings);
 	checkPostCopy(spec, contracts, findings);
@@ -234176,16 +234379,158 @@ async function copyIntoProject(projectDir, src, sha256, move = false) {
 	}
 	return rel.split(sep).join("/");
 }
-function describe(kind, p, shots, loudness) {
+/** Quality sampling: frames per second and width of the analysis decode. */
+const QUALITY_FPS = 2;
+const QUALITY_WIDTH = 160;
+/** Above this length the analysis decodes keyframes only (fast on long clips). */
+const QUALITY_FULL_DECODE_MAX_SEC = 30;
+/** RMS window for the audio SNR proxy (samples at 16 kHz: 50 ms). */
+const QUALITY_AUDIO_WINDOW = 800;
+/** A window peak at or above this (dBFS) counts as clipped. */
+const CLIP_PEAK_DBFS = -.1;
+/** Thresholds (see footageQualityVerdict). */
+const QUALITY_LIMITS = {
+	dark_mean: 55,
+	dark_fraction: .6,
+	bright_mean: 200,
+	bright_fraction: .5,
+	low_contrast: 30,
+	clipped_windows: 3,
+	low_snr_db: 15,
+	/** A quiet floor below this (dBFS) is effectively silence: the SNR is fine whatever the spread. */
+	silent_floor_db: -60
+};
+/** Parse `signalstats` metadata and the two named `blackframe` instances from ffmpeg stderr. */
+function parseVideoQuality(stderr) {
+	const pick = (re) => [...stderr.matchAll(re)].map((m) => Number(m[1])).filter(Number.isFinite);
+	return {
+		yavg: pick(/lavfi\.signalstats\.YAVG=([\d.]+)/g),
+		ylow: pick(/lavfi\.signalstats\.YLOW=([\d.]+)/g),
+		yhigh: pick(/lavfi\.signalstats\.YHIGH=([\d.]+)/g),
+		pdark: pick(/\[blackframe@dark[^\]]*\][^\n]*?pblack:(\d+)/g),
+		pbright: pick(/\[blackframe@bright[^\]]*\][^\n]*?pblack:(\d+)/g)
+	};
+}
+/** Per-window RMS and peak levels (dBFS; -inf for digital silence) from `astats` + `ametadata=print`. */
+function parseAudioWindows(stderr) {
+	const num = (v) => /^-?inf$/i.test(v) ? Number.NEGATIVE_INFINITY : Number(v);
+	const pick = (key) => [...stderr.matchAll(new RegExp(`lavfi\\.astats\\.Overall\\.${key}=(\\S+)`, "g"))].map((m) => num(m[1])).filter((x) => !Number.isNaN(x));
+	return {
+		rms: pick("RMS_level"),
+		peak: pick("Peak_level")
+	};
+}
+const mean = (xs) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN;
+function percentile(xs, p) {
+	const s = [...xs].sort((a, b) => a - b);
+	return s[Math.min(s.length - 1, Math.max(0, Math.floor(p * (s.length - 1) + .5)))];
+}
+const r1 = (x) => Math.round(x * 10) / 10;
+const r3$1 = (x) => Math.round(x * 1e3) / 1e3;
+/**
+* Turn the sampled measurements into `media.quality` with a plain note (and a suggestion) per
+* problem. Exposure is not judged on HDR sources: their code values are PQ/HLG, not SDR luma.
+*/
+function footageQualityVerdict(v, a, opts = {}) {
+	const L = QUALITY_LIMITS;
+	const q = { notes: [] };
+	let any = false;
+	if (v && v.yavg.length) {
+		any = true;
+		const lumaMean = mean(v.yavg);
+		const contrast = v.ylow.length && v.yhigh.length ? mean(v.yhigh) - mean(v.ylow) : NaN;
+		const dark = v.pdark.length ? mean(v.pdark) / 100 : NaN;
+		const bright = v.pbright.length ? mean(v.pbright) / 100 : NaN;
+		q.luma_mean = r1(lumaMean);
+		if (Number.isFinite(contrast)) q.contrast = r1(Math.max(0, contrast));
+		if (Number.isFinite(dark)) q.dark_fraction = r3$1(dark);
+		if (Number.isFinite(bright)) q.bright_fraction = r3$1(bright);
+		if (opts.hdr) q.notes.push("HDR footage: exposure is not judged on the PQ/HLG signal; the footage renderer tonemaps it to SDR");
+		else {
+			const isDark = lumaMean < L.dark_mean || dark > L.dark_fraction;
+			const isBright = !isDark && (lumaMean > L.bright_mean || bright > L.bright_fraction);
+			q.exposure = isDark ? "dark" : isBright ? "bright" : "ok";
+			if (isDark) q.notes.push(`underexposed: mean luma ${r1(lumaMean)}${Number.isFinite(dark) ? `, ${Math.round(dark * 100)}% near black` : ""}; pick a brighter span or re-shoot with more light (no colour grade option exists yet)`);
+			if (isBright) q.notes.push(`overexposed: mean luma ${r1(lumaMean)}${Number.isFinite(bright) ? `, ${Math.round(bright * 100)}% near white` : ""}; highlights are likely blown out, pick another span or re-shoot with less light`);
+			if (Number.isFinite(contrast) && contrast < L.low_contrast) q.notes.push(`low contrast (luma spread ${r1(contrast)}): the picture looks flat or hazy; pick another span (text over it needs a scrim)`);
+		}
+	}
+	if (a && a.rms.length) {
+		any = true;
+		const clippedWindows = a.peak.filter((p) => p >= CLIP_PEAK_DBFS).length;
+		q.clipped_audio = clippedWindows >= L.clipped_windows;
+		if (q.clipped_audio) q.notes.push(`audio clips (reaches full scale in ${clippedWindows} places): it will sound distorted; replace or re-record the audio at a lower input level`);
+		const audible = a.rms.filter(Number.isFinite);
+		if (audible.length >= Math.max(4, a.rms.length * .1)) {
+			const loud = percentile(audible, .9);
+			const floor = Math.max(-120, percentile(a.rms.map((x) => Number.isFinite(x) ? x : -120), .1));
+			const snr = loud - floor;
+			q.snr_db = r1(snr);
+			if (floor > L.silent_floor_db && snr < L.low_snr_db) q.notes.push(`noisy or unclear audio (estimated SNR ${r1(snr)} dB, noise floor ${r1(floor)} dBFS): no quiet gaps above the noise; if this clip has speech it may be hard to follow (replace or re-record, or put voiceover or music over it). Steady music, ambience or hum also reads this way: ignore it for b-roll`);
+		}
+	}
+	return any ? q : void 0;
+}
+/** Sample exposure/contrast of a video at low res and fps (keyframes only for long clips). */
+async function measureVideoQuality(path, durationSec, opts = {}) {
+	const t = 32;
+	const long = durationSec > QUALITY_FULL_DECODE_MAX_SEC;
+	const graph = `[0:v]${long ? "" : `fps=${QUALITY_FPS},`}scale=${QUALITY_WIDTH}:-2,format=yuv420p,signalstats,metadata=print,split[qa][qb];[qa]blackframe@dark=amount=0:threshold=${t},nullsink;[qb]negate,blackframe@bright=amount=0:threshold=${t}[qo]`;
+	return parseVideoQuality((await runFfmpeg([
+		...long ? ["-skip_frame", "nokey"] : [],
+		"-i",
+		path,
+		"-map",
+		"0:v:0",
+		"-an",
+		"-sn",
+		"-filter_complex",
+		graph,
+		"-map",
+		"[qo]",
+		"-f",
+		"null",
+		"-"
+	], {
+		keepStderr: true,
+		timeoutMs: 18e5,
+		...opts.signal ? { signal: opts.signal } : {}
+	})).stderr);
+}
+/** Per-50 ms RMS and peak levels of the first audio stream (16 kHz, 16-bit: overshoot saturates and counts as clipped). */
+async function measureAudioQuality(path, opts = {}) {
+	return parseAudioWindows((await runFfmpeg([
+		"-i",
+		path,
+		"-map",
+		"0:a:0",
+		"-vn",
+		"-sn",
+		"-af",
+		`aresample=16000,aformat=sample_fmts=s16,asetnsamples=n=${QUALITY_AUDIO_WINDOW}:p=0,astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=RMS_level+Peak_level,ametadata=print`,
+		"-f",
+		"null",
+		"-"
+	], {
+		keepStderr: true,
+		timeoutMs: 18e5,
+		...opts.signal ? { signal: opts.signal } : {}
+	})).stderr);
+}
+function describe(kind, p, shots, loudness, quality) {
 	const parts = [`${kind === "video" ? "Video" : "Audio"} file, ${p.duration_s.toFixed(1)} s`];
-	if (p.has_video && p.width && p.height) parts.push(`${p.width}x${p.height}${p.fps ? ` at ${p.fps} fps` : ""}`);
+	const w = p.display_width ?? p.width;
+	const h = p.display_height ?? p.height;
+	if (p.has_video && w && h) parts.push(`${w}x${h}${p.fps ? ` at ${p.fps} fps` : ""}${p.rotation ? ` (rotated ${p.rotation}°)` : ""}`);
+	if (p.has_video && p.hdr) parts.push(`HDR (${p.color_transfer === "arib-std-b67" ? "HLG" : "PQ"}${p.bit_depth ? `, ${p.bit_depth}-bit` : ""}; tonemapped to SDR when rendered)`);
 	parts.push(p.has_audio ? `audio track (${p.audio_codec ?? "unknown codec"})` : "no audio track");
 	if (p.has_video) parts.push(`${shots} shot${shots === 1 ? "" : "s"} detected`);
 	if (loudness !== void 0) parts.push(`integrated loudness ${loudness.toFixed(1)} LUFS`);
+	if (quality?.notes.length) parts.push(`quality: ${quality.notes.join("; ")}`);
 	return `${parts.join(", ")}. No transcript yet: run transcribe to add what is said as evidence.`;
 }
 const mediaExtractor = {
-	version: "media-2",
+	version: "media-3",
 	kinds: ["video", "audio"],
 	extract(input) {
 		return extractMediaFile(input.uri, {
@@ -234219,6 +234564,8 @@ async function extractMediaFile(path, opts = {}) {
 	const kind = probe.has_video ? "video" : "audio";
 	const refBase = fileRef(kind, opts.refPath ?? displayPath(input.uri, input.projectDir));
 	const warnings = [];
+	const dispW = probe.display_width ?? probe.width;
+	const dispH = probe.display_height ?? probe.height;
 	const shots = [];
 	const keyframeAssets = [];
 	if (probe.has_video && probe.duration_s > 0) {
@@ -234270,11 +234617,11 @@ async function extractMediaFile(path, opts = {}) {
 		}
 	}
 	let contentBox = null;
-	if (probe.has_video && probe.width && probe.height) try {
+	if (probe.has_video && dispW && dispH) try {
 		contentBox = await detectLetterbox(input.uri, {
 			duration_sec: probe.duration_s,
-			width: probe.width,
-			height: probe.height
+			width: dispW,
+			height: dispH
 		});
 	} catch {
 		contentBox = null;
@@ -234290,16 +234637,42 @@ async function extractMediaFile(path, opts = {}) {
 			message: `${basename(input.uri)} has audio but no transcript; run transcribe (local whisper.cpp, or a .srt/.vtt the user supplies)`
 		});
 	}
+	let videoQ = null;
+	let audioQ = null;
+	if (probe.has_video) try {
+		videoQ = await measureVideoQuality(input.uri, probe.duration_s, opts.signal ? { signal: opts.signal } : {});
+	} catch {
+		videoQ = null;
+	}
+	if (probe.has_audio) try {
+		audioQ = await measureAudioQuality(input.uri, opts.signal ? { signal: opts.signal } : {});
+	} catch {
+		audioQ = null;
+	}
+	const quality = footageQualityVerdict(videoQ, audioQ, { hdr: probe.hdr });
+	for (const note of quality?.notes ?? []) {
+		if (/^HDR footage/.test(note)) continue;
+		warnings.push({
+			code: "footage_quality",
+			message: `${basename(input.uri)}: ${note}`
+		});
+	}
 	const media = {
 		duration_sec: Math.round(probe.duration_s * 1e3) / 1e3,
-		...probe.width ? { width: probe.width } : {},
-		...probe.height ? { height: probe.height } : {},
+		...dispW ? { width: dispW } : {},
+		...dispH ? { height: dispH } : {},
 		...probe.fps ? { fps: probe.fps } : {},
 		has_video: probe.has_video,
 		has_audio: probe.has_audio,
 		...shots.length ? { shots } : {},
 		...loudness !== void 0 ? { loudness_lufs: Math.round(loudness * 10) / 10 } : {},
-		...contentBox ? { content_box: contentBox } : {}
+		...contentBox ? { content_box: contentBox } : {},
+		...probe.has_video && probe.rotation ? { rotation: probe.rotation } : {},
+		...probe.has_video && probe.color_transfer ? { color_transfer: probe.color_transfer } : {},
+		...probe.has_video && probe.color_primaries ? { color_primaries: probe.color_primaries } : {},
+		...probe.has_video && probe.bit_depth ? { bit_depth: probe.bit_depth } : {},
+		...probe.has_video && probe.hdr ? { hdr: true } : {},
+		...quality ? { quality } : {}
 	};
 	const assets = [];
 	if (input.projectDir) {
@@ -234325,7 +234698,7 @@ async function extractMediaFile(path, opts = {}) {
 		},
 		sections: [{
 			heading: opts.title ?? basename(input.uri),
-			text: describe(kind, probe, shots.length, loudness)
+			text: describe(kind, probe, shots.length, loudness, quality)
 		}],
 		evidence: [],
 		assets,
@@ -237818,9 +238191,16 @@ async function stageScenes(run, input) {
 	let done = 0;
 	const sceneStart = /* @__PURE__ */ new Map();
 	const sceneEnd = /* @__PURE__ */ new Map();
+	const family = probe.renderer ? rendererFamily(probe.renderer) : "ffmpeg";
+	const pick = (fam) => autoSceneConcurrency({
+		family: fam,
+		env,
+		...o.sceneConcurrency !== void 0 ? { override: o.sceneConcurrency } : {}
+	}).concurrency;
+	const concurrency = Math.min(pick(family), Math.max(1, count));
 	progress({
 		stage: "scenes",
-		message: `rendering ${count} scene(s)`,
+		message: `rendering ${count} scene(s)${concurrency > 1 ? `, ${concurrency} at a time` : ""}`,
 		scene_index: 0,
 		scene_count: count
 	});
@@ -237855,6 +238235,7 @@ async function stageScenes(run, input) {
 	const first = await renderScenes({ scenes: planScenes }, {
 		...baseOpts,
 		preference,
+		concurrency,
 		onScene
 	});
 	const entries = new Map(first.scenes.map((e) => [e.scene_id, e]));
@@ -237866,6 +238247,7 @@ async function stageScenes(run, input) {
 		const retry = await renderScenes({ scenes: planScenes }, {
 			...baseOpts,
 			preference: "ffmpeg",
+			concurrency: pick("ffmpeg"),
 			only: failed.map((f) => f.scene_id),
 			onScene
 		});
@@ -238052,7 +238434,7 @@ async function stageAssembly(run, input) {
 	const assSha = captionFiles?.ass ? sha256Hex(await readFile(captionFiles.ass)) : null;
 	const logo = await planLogo(root, brand, tokens, zones, target, planScenes, bounds, frameMs, warnings);
 	const assemblyKey = sha256Hex(canonicalJson({
-		v: 5,
+		v: 6,
 		target,
 		encode: encodePreset ?? null,
 		pad: tokens.color_background,
@@ -239167,7 +239549,7 @@ async function lockFromState(root, state, projectId, outputs) {
 		...state.content_ir_sha256 ? { content_ir_sha256: state.content_ir_sha256 } : {},
 		engine: {
 			engine: ENGINE_VERSION,
-			assembly: String(5),
+			assembly: String(6),
 			cover: String(3),
 			target_package: String(1),
 			zones: String(2),

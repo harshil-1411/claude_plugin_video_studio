@@ -107,16 +107,25 @@ export function normalizeFilters(t: TargetFormat, durationMs: number): string[] 
   ];
 }
 
+export interface ConcatOptions extends ComposeOptions {
+  /** Brand logo drawn in the same encode (no extra generation for the logo). */
+  logo?: LogoOverlay;
+}
+
 /**
  * Concatenate video segments with the concat *filter* (tolerates mixed codecs, sizes and
  * frame rates): every segment is normalised to the target size/aspect/fps first. Video only;
  * audio is handled by `concatAudio` + `muxAudio`. Output uses the final H.264 settings.
+ * With `logo` (and at least one range), the logo is overlaid inside the same filtergraph.
  */
-export async function concatVideos(segments: readonly VideoSegment[], out: string, target: TargetFormat, opts: ComposeOptions = {}): Promise<{ path: string; duration_ms: number; frames: number }> {
+export async function concatVideos(segments: readonly VideoSegment[], out: string, target: TargetFormat, opts: ConcatOptions = {}): Promise<{ path: string; duration_ms: number; frames: number }> {
   assertEven(target.width, target.height);
   if (!segments.length) throw new Error("concatVideos: no segments");
   const inputs: string[] = [];
   const chains: string[][] = [];
+  const logo = opts.logo?.ranges_ms.length ? opts.logo : undefined;
+  // Without a logo the timeline is the output; with one, the logo overlay turns it into [vout].
+  const vcat = logo ? "[vcat]" : "[vout]";
   let frames = 0;
   segments.forEach((s, i) => {
     if (!(s.duration_ms > 0)) throw new Error(`segment ${i}: duration_ms must be > 0`);
@@ -133,7 +142,7 @@ export async function concatVideos(segments: readonly VideoSegment[], out: strin
     return t && t.kind !== "cut" ? { kind: t.kind, d: transitionSeconds(t.ms, s.duration_ms, target.fps) } : { kind: "cut" as const, d: 0 };
   });
   if (joins.every((j) => j.d === 0)) {
-    chains.push([`${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0[vout]`]);
+    chains.push([`${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0${vcat}`]);
   } else {
     // Timeline-preserving transitions: each incoming segment still starts on its slot boundary.
     // The outgoing picture holds its last frame for the transition (tpad) and xfade blends from it
@@ -156,7 +165,11 @@ export async function concatVideos(segments: readonly VideoSegment[], out: strin
       acc = out;
       accFrames += n;
     });
-    chains.push([`[vx]fps=${target.fps},trim=end_frame=${frames},setpts=N/FRAME_RATE/TB[vout]`]);
+    chains.push([`[vx]fps=${target.fps},trim=end_frame=${frames},setpts=N/FRAME_RATE/TB${vcat}`]);
+  }
+  if (logo) {
+    inputs.push("-loop", "1", "-i", logo.path);
+    chains.push([logoOverlayFilter(logo, vcat, `[${segments.length}:v]`, "[vout]")]);
   }
   await runFfmpeg(
     ["-y", ...inputs, "-filter_complex", filterGraph(chains), "-map", "[vout]", "-r", String(target.fps), ...h264Args(opts.encode), "-an", ...FASTSTART, out],
@@ -177,11 +190,21 @@ export interface LogoOverlay {
   ranges_ms: ReadonlyArray<readonly [number, number]>;
 }
 
-/** Overlay `logo` on `video` (re-encoded with the same settings; no audio). */
-export async function overlayLogo(video: string, logo: LogoOverlay, out: string, opts: ComposeOptions = {}): Promise<{ path: string }> {
+/**
+ * Filtergraph drawing `logo` (input label `logoIn`, a looped still) over `main` → `out`.
+ * The looped still is endless: the overlay ends with the video (shortest=1 on the filter itself).
+ */
+export function logoOverlayFilter(logo: LogoOverlay, main: string, logoIn: string, out: string): string {
   const enable = logo.ranges_ms.map(([a, b]) => `between(t,${(a / 1000).toFixed(3)},${(b / 1000).toFixed(3)})`).join("+") || "0";
-  const graph = `[1:v]scale=${Math.round(logo.w)}:${Math.round(logo.h)}:flags=lanczos,format=rgba[logo];[0:v][logo]overlay=x=${Math.round(logo.x)}:y=${Math.round(logo.y)}:enable='${enable}':format=auto:shortest=1[v]`;
-  // The looped still is endless: the overlay ends with the video (shortest=1 on the filter itself).
+  return `${logoIn}scale=${Math.round(logo.w)}:${Math.round(logo.h)}:flags=lanczos,format=rgba[logo];${main}[logo]overlay=x=${Math.round(logo.x)}:y=${Math.round(logo.y)}:enable='${enable}':format=auto:shortest=1${out}`;
+}
+
+/**
+ * Overlay `logo` on `video` (re-encoded with the same settings; no audio). `assemble` no longer
+ * uses this (the logo is drawn in the concat encode); kept for callers with a finished video.
+ */
+export async function overlayLogo(video: string, logo: LogoOverlay, out: string, opts: ComposeOptions = {}): Promise<{ path: string }> {
+  const graph = logoOverlayFilter(logo, "[0:v]", "[1:v]", "[v]");
   await runFfmpeg(["-y", "-i", video, "-loop", "1", "-i", logo.path, "-filter_complex", graph, "-map", "[v]", ...h264Args(opts.encode), "-an", ...FASTSTART, out], opts);
   return { path: out };
 }
@@ -268,16 +291,16 @@ export interface AssembleResult {
 }
 
 /**
- * concat → (voice concat) → loudnorm → mux = clean master; master + ASS burn-in = captioned reel.
- * The reel is only one generation away from the master (video re-encoded once for the burn-in).
+ * concat (+ logo, same encode) → (voice concat) → loudnorm → mux (video stream-copied) = clean
+ * master; master + ASS burn-in = captioned reel. The master is one video encode from the scene
+ * clips and the reel one more (the burn-in); the logo costs no extra generation.
  */
 export async function assemble(input: AssembleInput, opts: ComposeOptions = {}): Promise<AssembleResult> {
   const work = input.workDir ?? (await mkdtemp(join(tmpdir(), "vs-media-")));
   await mkdir(work, { recursive: true });
   try {
-    let silentVideo = join(work, "video.mp4");
-    const v = await concatVideos(input.segments, silentVideo, input, opts);
-    if (input.logo && input.logo.ranges_ms.length) silentVideo = (await overlayLogo(silentVideo, input.logo, join(work, "video.logo.mp4"), opts)).path;
+    const silentVideo = join(work, "video.mp4");
+    const v = await concatVideos(input.segments, silentVideo, input, { ...opts, ...(input.logo ? { logo: input.logo } : {}) });
     if (input.audio === undefined && !input.music && !input.sceneAudio) {
       // Silent video: add a silent AAC track so players and platforms see a normal file.
       await concatAudio([{ duration_ms: v.duration_ms }], join(work, "silence.wav"), opts);

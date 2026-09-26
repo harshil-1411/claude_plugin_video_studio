@@ -1089,9 +1089,55 @@ export function checkCutaways(spec: VideoSpec, out: LintFinding[]): void {
   });
 }
 
-/** The ContentIR asset fields subject_near_edge needs. */
+/** The ContentIR asset fields subject_near_edge and footage_quality need. */
 interface IrMediaView {
-  assets?: Array<{ id: string; media?: { width?: number; height?: number; content_box?: { x: number; y: number; w: number; h: number } } }>;
+  assets?: Array<{
+    id: string;
+    media?: {
+      width?: number;
+      height?: number;
+      content_box?: { x: number; y: number; w: number; h: number };
+      quality?: { exposure?: "dark" | "ok" | "bright"; luma_mean?: number; clipped_audio?: boolean; snr_db?: number; notes?: string[] };
+    };
+  }>;
+}
+
+/** Below this SNR proxy (dB) a clip's own sound counts as noisy (matches the ingest note). */
+const FOOTAGE_LOW_SNR_DB = 15;
+
+/**
+ * Footage flagged at ingest (media.quality): a dark or blown-out picture on screen, or clipped /
+ * noisy sound when the scene plays the clip's own audio (audio mode native or mix, the default).
+ */
+export function checkFootageQuality(spec: VideoSpec, ir: IrMediaView | undefined, out: LintFinding[]): void {
+  for (const s of spec.scenes) {
+    const f = s.footage;
+    if (!f) continue;
+    const q = ir?.assets?.find((a) => a.id === f.asset)?.media?.quality;
+    if (!q) continue;
+    const problems: string[] = [];
+    const fixes: string[] = [];
+    // A cutaway shows the scene's graphic instead of the picture.
+    if (!f.cutaway && (q.exposure === "dark" || q.exposure === "bright")) {
+      problems.push(`the picture is ${q.exposure === "dark" ? "underexposed (dark)" : "overexposed (bright)"}${q.luma_mean !== undefined ? `, mean luma ${q.luma_mean}` : ""}`);
+      fixes.push("pick a better-exposed span or another clip (there is no colour grade option yet), or cut away to a graphic");
+    }
+    const mode = s.audio?.mode ?? "native";
+    const playsSound = mode === "native" || mode === "mix";
+    const noisy = q.snr_db !== undefined && q.snr_db < FOOTAGE_LOW_SNR_DB && (q.notes ?? []).some((n) => /noisy or unclear audio/.test(n));
+    if (playsSound && (q.clipped_audio || noisy)) {
+      problems.push(q.clipped_audio ? "the clip's sound clips (distorts)" : `the clip's sound is noisy (SNR about ${q.snr_db} dB)`);
+      fixes.push("replace or re-record the audio, or set audio.mode to music/mute and carry the words with a voiceover");
+    }
+    if (!problems.length) continue;
+    out.push({
+      id: "footage_quality",
+      severity: "warning",
+      scene_id: s.id,
+      message: `${s.id}: footage "${f.asset}": ${problems.join("; ")}`,
+      fix: fixes.join("; "),
+    });
+  }
 }
 
 /**
@@ -1252,7 +1298,9 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   await checkTiming(paths.root, spec, state, brand, findings);
   checkStory(spec, findings);
   checkCutaways(spec, findings);
-  checkSubjectNearEdge(spec, await readOptionalJson<IrMediaView>(join(paths.root, "source", "content-ir.json")), master.width, master.height, findings);
+  const irMedia = await readOptionalJson<IrMediaView>(join(paths.root, "source", "content-ir.json"));
+  checkSubjectNearEdge(spec, irMedia, master.width, master.height, findings);
+  checkFootageQuality(spec, irMedia, findings);
   checkLogo(state, boxes, findings);
   checkForbidden(spec, brand, findings);
   checkPostCopy(spec, contracts, findings);

@@ -401,6 +401,45 @@ export interface ProbeResult {
   has_video: boolean;
   pix_fmt: string | null;
   format_name: string | null;
+  /**
+   * Display rotation of the video stream in degrees (0, 90, 180 or 270), from the display matrix
+   * side data (counter-clockwise, as ffprobe reports it; -90 becomes 270) or the legacy `rotate`
+   * tag. ffmpeg auto-rotates on decode, so filters see the displayed orientation.
+   */
+  rotation: 0 | 90 | 180 | 270;
+  /** Width and height as displayed (after rotation): what every decode and filter sees. */
+  display_width: number | null;
+  display_height: number | null;
+  /** `color_transfer`, e.g. bt709, smpte2084 (PQ), arib-std-b67 (HLG). */
+  color_transfer: string | null;
+  /** `color_primaries`, e.g. bt709, bt2020. */
+  color_primaries: string | null;
+  /** Bits per luma sample, from the pixel format (yuv420p10le: 10) or bits_per_raw_sample. */
+  bit_depth: number | null;
+  /** True for a PQ (smpte2084) or HLG (arib-std-b67) transfer: needs tonemapping for SDR output. */
+  hdr: boolean;
+}
+
+/** HDR transfer characteristics: PQ and HLG. */
+export const HDR_TRANSFERS: ReadonlySet<string> = new Set(["smpte2084", "arib-std-b67"]);
+
+/** Normalise a rotation in degrees to 0/90/180/270 (nearest quarter turn). */
+export function normalizeRotation(deg: number): 0 | 90 | 180 | 270 {
+  if (!Number.isFinite(deg)) return 0;
+  const q = ((Math.round(deg / 90) % 4) + 4) % 4;
+  return (q * 90) as 0 | 90 | 180 | 270;
+}
+
+/** Bits per sample from a pixel format name (yuv420p10le: 10, p010le: 10, yuv420p: 8); null when unknown. */
+export function pixFmtBitDepth(pixFmt: string | null | undefined): number | null {
+  if (!pixFmt) return null;
+  const m = /(\d{2})(?:le|be)$/.exec(pixFmt);
+  if (m) {
+    const n = Number(m[1]);
+    if (n >= 9 && n <= 16) return n;
+  }
+  if (/^(?:yuvj?4[024][024]p|nv12|nv21|rgb24|bgr24|rgba|bgra|argb|abgr|gray|yuyv422|uyvy422)$/.test(pixFmt)) return 8;
+  return null;
 }
 
 interface RawStream {
@@ -415,6 +454,21 @@ interface RawStream {
   pix_fmt?: string;
   duration?: string;
   disposition?: { attached_pic?: number };
+  color_transfer?: string;
+  color_primaries?: string;
+  bits_per_raw_sample?: string;
+  tags?: { rotate?: string };
+  side_data_list?: Array<{ side_data_type?: string; rotation?: number | string }>;
+}
+
+/** Rotation of a stream: the display matrix side data first, else the legacy clockwise `rotate` tag. */
+function streamRotation(v: RawStream | undefined): 0 | 90 | 180 | 270 {
+  if (!v) return 0;
+  const dm = v.side_data_list?.find((d) => d.rotation !== undefined && /display matrix/i.test(d.side_data_type ?? "Display Matrix"));
+  if (dm) return normalizeRotation(Number(dm.rotation));
+  // The old tag is clockwise; the display matrix convention is counter-clockwise.
+  if (v.tags?.rotate !== undefined) return normalizeRotation(-Number(v.tags.rotate));
+  return 0;
 }
 
 function parseRate(r: string | undefined): number | null {
@@ -431,6 +485,11 @@ export function parseProbeJson(json: string): ProbeResult {
   const v = streams.find((s) => s.codec_type === "video" && !s.disposition?.attached_pic);
   const a = streams.find((s) => s.codec_type === "audio");
   const dur = Number(data.format?.duration ?? v?.duration ?? a?.duration ?? 0);
+  const rotation = streamRotation(v);
+  const swap = rotation === 90 || rotation === 270;
+  const known = (x: string | undefined) => (x && x !== "unknown" ? x : null);
+  const transfer = known(v?.color_transfer);
+  const raw = Number(v?.bits_per_raw_sample);
   return {
     duration_s: Number.isFinite(dur) ? dur : 0,
     width: v?.width ?? null,
@@ -444,6 +503,13 @@ export function parseProbeJson(json: string): ProbeResult {
     has_video: Boolean(v),
     pix_fmt: v?.pix_fmt ?? null,
     format_name: data.format?.format_name ?? null,
+    rotation,
+    display_width: (swap ? v?.height : v?.width) ?? null,
+    display_height: (swap ? v?.width : v?.height) ?? null,
+    color_transfer: transfer,
+    color_primaries: known(v?.color_primaries),
+    bit_depth: pixFmtBitDepth(v?.pix_fmt) ?? (Number.isInteger(raw) && raw > 0 ? raw : null),
+    hdr: transfer !== null && HDR_TRANSFERS.has(transfer),
   };
 }
 
@@ -463,14 +529,20 @@ export function parseBuildconf(text: string): { libass: boolean; libx264: boolea
   return { libass: /--enable-libass\b/.test(text), libx264: /--enable-libx264\b/.test(text) };
 }
 
-export async function ffmpegFeatures(opts: Pick<RunOptions, "tools"> = {}): Promise<{ libass: boolean; libx264: boolean; version: string }> {
+/** `--enable-libzimg` in the build configuration: the `zscale` filter (HDR tonemapping) is available. */
+export function hasZimg(buildconf: string): boolean {
+  return /--enable-libzimg\b/.test(buildconf);
+}
+
+export async function ffmpegFeatures(opts: Pick<RunOptions, "tools"> = {}): Promise<{ libass: boolean; libx264: boolean; zscale: boolean; version: string }> {
   const { ffmpeg } = await getTools(opts.tools);
   const [conf, ver] = await Promise.all([
     runProcess(ffmpeg, ["-hide_banner", "-buildconf"], { timeoutMs: 10_000, captureStdout: true }),
     runProcess(ffmpeg, ["-hide_banner", "-version"], { timeoutMs: 10_000, captureStdout: true }),
   ]);
   const first = ver.stdout.split("\n")[0] ?? "";
-  return { ...parseBuildconf(`${conf.stdout}\n${conf.stderr}`), version: /version\s+(\S+)/.exec(first)?.[1] ?? "unknown" };
+  const text = `${conf.stdout}\n${conf.stderr}`;
+  return { ...parseBuildconf(text), zscale: hasZimg(text), version: /version\s+(\S+)/.exec(first)?.[1] ?? "unknown" };
 }
 
 // ---------------------------------------------------------------------------------- filtergraph escaping
