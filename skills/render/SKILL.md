@@ -62,8 +62,9 @@ From `result`:
   (how it looks cropped to a square grid tile); open both with Read to check
   the headline is legible.
 - **QA**: `pass`, or each finding as `id: detail` with its fix. With the
-  silent voice, `silence` and `loudness` warnings are expected; frozen
-  frames are expected for static motion-graphic scenes. Report `fail`
+  silent voice, silence and loudness are not measured (a preview without
+  narration audio); frozen frames are expected for static motion-graphic
+  scenes. Report `fail`
   findings prominently.
 - **Voice and renderer used, and why**: quote `voice.reason` and
   `renderer.reasons` briefly. If the voice fell back to silent, say why

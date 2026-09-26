@@ -137,6 +137,7 @@ interface RenderStateView {
   voice_mode?: string;
   beat_sync?: { bpm?: number | null; beats?: number; moved_cuts?: number; beat_times_ms?: number[] };
   cues?: Array<{ scene_id: string; word: string; item: number; at_ms?: number; status: string }>;
+  logo?: { path: string; box: PxBox; scenes: string[] };
 }
 
 /** captions/captions.json (media `CaptionJson`): the words and the captions built from them. */
@@ -646,6 +647,62 @@ function checkBanned(spec: VideoSpec, brand: Brand | undefined, out: LintFinding
   }
 }
 
+/** Text the renderers fitted into boxes that the brand's corner logo covers. */
+export function checkLogo(state: Pick<RenderStateView, "logo"> | undefined, boxes: ReadonlyArray<{ scene_id: string; box: TextBox }>, out: LintFinding[]): void {
+  const logo = state?.logo;
+  if (!logo) return;
+  const shown = new Set(logo.scenes);
+  const hit = new Map<string, string[]>();
+  for (const { scene_id, box } of boxes) {
+    if (!shown.has(scene_id) || box.role === "caption") continue;
+    const r = box.rect;
+    const l = logo.box;
+    if (r.x < l.x + l.w && r.x + r.w > l.x && r.y < l.y + l.h && r.y + r.h > l.y) hit.set(scene_id, [...(hit.get(scene_id) ?? []), box.role]);
+  }
+  for (const [scene_id, roles] of hit) {
+    out.push({
+      id: "logo_overlap",
+      severity: "warning",
+      scene_id,
+      message: `the brand logo (${logo.path}) overlaps the ${[...new Set(roles)].join(", ")} text box in scene ${scene_id}`,
+      fix: "move the logo to another corner (brand.yaml visual.logo_placement.position), make it smaller (max_fraction), or shorten the text so it sits clear of the corner",
+    });
+  }
+}
+
+/**
+ * Brand `visual.forbidden` treatments ("drop shadows", "zoom transitions", "kinetic text") named by
+ * a scene: its visual requirements, transition, motion pattern or graphic kind. Text match only:
+ * the rest of the list is guidance for planning.
+ */
+export function checkForbidden(spec: VideoSpec, brand: Brand | undefined, out: LintFinding[]): void {
+  const forbidden = brand?.visual?.forbidden ?? [];
+  if (!forbidden.length) return;
+  const norm = (s: string) => ` ${s.toLowerCase().replace(/[_-]+/g, " ").replace(/[^\p{L}\p{N} ]+/gu, " ").replace(/\s+/g, " ").trim()} `;
+  const stem = (w: string) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w);
+  for (const s of spec.scenes) {
+    const parts = [
+      ...strings(s.visual_requirements),
+      s.transition ? `${s.transition} transition` : "",
+      s.motion ? `${s.motion.pattern} motion` : "",
+      s.deterministic ? s.deterministic.kind : "",
+    ].filter(Boolean);
+    const text = norm(parts.join(" ")).split(" ").map(stem).join(" ");
+    for (const phrase of forbidden) {
+      const want = norm(phrase).trim().split(" ").map(stem);
+      if (!want.length || !want[0]) continue;
+      if (!text.includes(` ${want.join(" ")} `)) continue;
+      out.push({
+        id: "brand_forbidden",
+        severity: "warning",
+        scene_id: s.id,
+        message: `scene ${s.id} uses "${phrase}", which brand.yaml lists under visual.forbidden`,
+        fix: `change scene ${s.id}'s transition, motion, graphic kind or visual_requirements so it no longer uses "${phrase}"`,
+      });
+    }
+  }
+}
+
 // ------------------------------------------------------------------------------------ timing
 
 const sec = (ms: number) => `${round2(ms / 1000)}s`;
@@ -1104,6 +1161,8 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   await checkTiming(paths.root, spec, state, brand, findings);
   checkStory(spec, findings);
   checkCutaways(spec, findings);
+  checkLogo(state, boxes, findings);
+  checkForbidden(spec, brand, findings);
   checkPostCopy(spec, contracts, findings);
   const coverView: CoverView | undefined = state?.cover
     ? {

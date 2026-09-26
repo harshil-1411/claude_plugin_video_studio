@@ -19,6 +19,7 @@ import { formatTighten, tightenAsset } from "./tighten.js";
 import { diffProjects, formatDiff } from "./diff.js";
 import { formatGolden, testProject } from "./golden.js";
 import { type ReviewOptions, formatReview, reviewRender } from "./review.js";
+import { type CompareSide, compareVideos, formatCompare } from "./compare.js";
 import { formatLint, lintProject } from "./lint.js";
 import { formatIssues, renderStoryboard, scaffoldSpec, validateBrief } from "./plan.js";
 import { type RenderProjectOptions, SpecInvalidError, exportProject, loadValidSpec, runQa } from "./pipeline.js";
@@ -522,7 +523,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Review frames of a render",
       description:
-        "Write an image of <project_dir>'s rendered reel for you to Read and check before handing it over: mode sheet (default; every scene's opening, middle and closing frame), strip (every frame of a span: from_sec/to_sec or one scene; for motion, transitions and word cues) or crop (a region, as fractions of the frame, at full resolution: captions, small text, faces). Tiles are labelled with scene and time. Writes qa/review/<mode>-<quality>[-<scene>].jpg. Returns {image, tiles[{index, time_sec, scene_id, label}], notes}.",
+        "Write an image of <project_dir>'s rendered reel for you to Read and check before handing it over: mode sheet (default; every scene's opening, middle and closing frame), strip (every frame of a span: from_sec/to_sec or one scene; for motion, transitions and word cues) or crop (a region, as fractions of the frame, at full resolution: captions, small text, faces). Tiles are labelled with scene and time; tiles of scenes with lint findings get a red (error) or amber (warning) border, and strip tiles show the word cues spoken on them. Writes qa/review/<mode>-<quality>[-<scene>].jpg (and qa/lint.{json,md}). Returns {image, tiles[{index, time_sec, scene_id, label, flags?, severity?, cues?}], flagged[{scene_id, severity, findings}], notes}.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Rendered project folder"),
         quality: QUALITY.optional().describe("Which render (default: the latest)"),
@@ -543,6 +544,35 @@ export function createServer(options: ServerOptions = {}): McpServer {
     safe(async ({ project_dir, ...o }: { project_dir: string } & ReviewOptions) => {
       const r = await reviewRender(resolveInputPath(project_dir, cwd()), o);
       return jsonResult(formatReview(r), r as unknown as Record<string, unknown>);
+    }),
+  );
+
+  const compareSide = z
+    .union([
+      z.object({ quality: QUALITY, label: z.string().min(1).optional() }).strict(),
+      z.object({ project_dir: z.string().min(1), quality: QUALITY.optional(), label: z.string().min(1).optional() }).strict(),
+      z.object({ file: z.string().min(1), label: z.string().min(1).optional() }).strict(),
+    ])
+    .describe("{quality} (this project's render), {project_dir, quality?} (another project's render, e.g. a variant or a short) or {file} (a project-relative video, e.g. assets/supplied/talk-tight.mp4); optional label");
+  server.registerTool(
+    "compare",
+    {
+      title: "Before/after comparison page",
+      description:
+        "Build a before/after page for two videos of <project_dir> at qa/compare/index.html, with both videos copied next to it as a.mp4/b.mp4 (self-contained: inline CSS/JS, no network; the folder can be zipped and shared). Views: side by side, stacked and wipe (draggable divider); one play/pause, scrubber and time readout drive both in sync, frame step (arrow keys), speed, per-side mute (b audible by default). Default: a = this project's preview render, b = its final render. Returns {html, a: {label, path, duration_sec, width, height}, b}. You cannot open a browser: give the user the path to open.",
+      inputSchema: {
+        project_dir: z.string().min(1).describe("Project folder (the page is written to its qa/compare/)"),
+        a: compareSide.optional(),
+        b: compareSide.optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async ({ project_dir, a, b }: { project_dir: string; a?: CompareSide; b?: CompareSide }) => {
+      const side = (s: CompareSide | undefined) => (s && "project_dir" in s ? { ...s, project_dir: resolveInputPath(s.project_dir, cwd()) } : s);
+      const sa = side(a);
+      const sb = side(b);
+      const r = await compareVideos(resolveInputPath(project_dir, cwd()), { ...(sa ? { a: sa } : {}), ...(sb ? { b: sb } : {}) });
+      return jsonResult(formatCompare(r), r as unknown as Record<string, unknown>);
     }),
   );
 

@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runFfmpeg, getTools } from "@video-studio/media";
 import { DETERMINISTIC_PROPS_EXAMPLES, type DeterministicKind, type Scene, cueItems, kineticUnits } from "@video-studio/schema";
+import { COUNT_UP_ENTRANCE_LEAD_S, countUpSpan } from "./count-up.js";
 import { CUE_LEAD_S, countUpWindow } from "./cue-timing.js";
+import { openingStart } from "./entrance.js";
 import { type Composition, FFMPEG_RENDERER_KINDS, buildFilterGraph, composeScene, createFfmpegRenderer, elementStarts, kineticChunks, motionTiming } from "./ffmpeg-renderer.js";
 import { footageOverlay } from "./footage.js";
 import { resolveTokens, targetForAspect } from "./tokens.js";
@@ -111,12 +113,16 @@ describe("word cues: item mapping per kind", () => {
     expect(t.comp.elements.some((e) => e.item === undefined)).toBe(true);
   });
 
-  it("stat: the value's fade ends on its word; the label follows", () => {
+  it("stat: the value's count-up ends on its word; the label follows", () => {
     const props = { value: 40, unit: "%", label: "faster", context: "since v2" };
     const t = timed("stat", props, [{ item: 0, at_s: 2 }]);
-    const items = itemStarts(t.comp, t.cued);
-    near(items.get(0)!, countUpWindow(2, t.fade).start);
+    // Without the count length the value's fade ends on the word (a value that does not count).
+    near(itemStarts(t.comp, t.cued).get(0)!, countUpWindow(2, t.fade).start);
     expect(countUpWindow(2, t.fade).start + t.fade).toBeLessThanOrEqual(2);
+    // Counting: the entrance starts just before a count that finishes on the word, as in HyperFrames.
+    const span = countUpSpan(DUR);
+    const items = itemStarts(t.comp, elementStarts(t.comp, t.step, t.fade, [{ item: 0, at_s: 2 }], span));
+    near(items.get(0)!, countUpWindow(2, span).start - COUNT_UP_ENTRANCE_LEAD_S);
     expect(items.get(1)!).toBeGreaterThan(items.get(0)!);
     // The label's own cue lands it normally.
     expectCued("stat", props, 1, 2.2);
@@ -174,7 +180,9 @@ describe("word cues: no cues changes nothing", () => {
       expect(b.filtergraph, kind).toBe(a.filtergraph);
       expect(b.inputs, kind).toEqual(a.inputs);
       const { step, fade } = motionTiming(DUR, Math.max(0, ...comp.elements.map((e) => e.beat)));
-      expect(elementStarts(comp, step, fade, []), kind).toEqual(comp.elements.map((e) => Math.round(e.beat * step * 1000) / 1000));
+      // beat × step, except the first reveal, which opens the scene before frame 0 (entrance.ts).
+      const first = Math.min(...comp.elements.map((e) => e.beat));
+      expect(elementStarts(comp, step, fade, []), kind).toEqual(comp.elements.map((e) => (e.beat === first ? openingStart(fade) : Math.round(e.beat * step * 1000) / 1000)));
     }
   });
 

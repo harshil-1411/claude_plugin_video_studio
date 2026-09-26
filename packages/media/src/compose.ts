@@ -165,6 +165,27 @@ export async function concatVideos(segments: readonly VideoSegment[], out: strin
   return { path: out, frames, duration_ms: Math.round((frames * 1000) / target.fps) };
 }
 
+/** A brand logo drawn over the video at a fixed box, during the given time ranges only. */
+export interface LogoOverlay {
+  /** Absolute path of the logo image (PNG with alpha, JPEG or SVG rasterised by ffmpeg). */
+  path: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** [start, end) in ms on the video timeline where the logo shows. */
+  ranges_ms: ReadonlyArray<readonly [number, number]>;
+}
+
+/** Overlay `logo` on `video` (re-encoded with the same settings; no audio). */
+export async function overlayLogo(video: string, logo: LogoOverlay, out: string, opts: ComposeOptions = {}): Promise<{ path: string }> {
+  const enable = logo.ranges_ms.map(([a, b]) => `between(t,${(a / 1000).toFixed(3)},${(b / 1000).toFixed(3)})`).join("+") || "0";
+  const graph = `[1:v]scale=${Math.round(logo.w)}:${Math.round(logo.h)}:flags=lanczos,format=rgba[logo];[0:v][logo]overlay=x=${Math.round(logo.x)}:y=${Math.round(logo.y)}:enable='${enable}':format=auto:shortest=1[v]`;
+  // The looped still is endless: the overlay ends with the video (shortest=1 on the filter itself).
+  await runFfmpeg(["-y", "-i", video, "-loop", "1", "-i", logo.path, "-filter_complex", graph, "-map", "[v]", ...h264Args(opts.encode), "-an", ...FASTSTART, out], opts);
+  return { path: out };
+}
+
 /**
  * Mux an audio track onto a video: video is stream-copied, audio encoded to AAC 192k/48 kHz
  * and padded or trimmed to exactly the video's duration.
@@ -234,6 +255,8 @@ export interface AssembleInput extends TargetFormat {
   reel?: string;
   assPath?: string;
   fontsDir?: string;
+  /** Brand logo over the scenes (part of the clean master). */
+  logo?: LogoOverlay;
   /** Scratch directory for intermediates; a temp dir is created and removed when omitted. */
   workDir?: string;
 }
@@ -252,8 +275,9 @@ export async function assemble(input: AssembleInput, opts: ComposeOptions = {}):
   const work = input.workDir ?? (await mkdtemp(join(tmpdir(), "vs-media-")));
   await mkdir(work, { recursive: true });
   try {
-    const silentVideo = join(work, "video.mp4");
+    let silentVideo = join(work, "video.mp4");
     const v = await concatVideos(input.segments, silentVideo, input, opts);
+    if (input.logo && input.logo.ranges_ms.length) silentVideo = (await overlayLogo(silentVideo, input.logo, join(work, "video.logo.mp4"), opts)).path;
     if (input.audio === undefined && !input.music && !input.sceneAudio) {
       // Silent video: add a silent AAC track so players and platforms see a normal file.
       await concatAudio([{ duration_ms: v.duration_ms }], join(work, "silence.wav"), opts);

@@ -1,11 +1,11 @@
 import { createRequire } from "node:module";
 import process$1 from "node:process";
-import fs, { accessSync, closeSync, constants, createReadStream, createWriteStream, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
+import fs, { accessSync, closeSync, constants, createReadStream, createWriteStream, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
 import * as fs$1 from "node:fs/promises";
 import fsPromises, { access, chmod, copyFile, cp, link, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path, { basename, delimiter, dirname, extname, isAbsolute, join, normalize, posix, relative, resolve, sep } from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import os, { homedir, platform, tmpdir } from "node:os";
+import os, { homedir, hostname, platform, tmpdir } from "node:os";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
 import { DatabaseSync } from "node:sqlite";
@@ -169,7 +169,7 @@ function mergeDefs(...defs) {
 	}
 	return Object.defineProperties({}, mergedDescriptors);
 }
-function esc$1(str) {
+function esc$2(str) {
 	return JSON.stringify(str);
 }
 function slugify$1(input) {
@@ -2207,7 +2207,7 @@ const $ZodObjectJIT = /*@__PURE__*/ $constructor("$ZodObjectJIT", (inst, def) =>
 		for (const key of normalized.allKeys) {
 			if (key === "__proto__") continue;
 			const id = ids[key];
-			const k = typeof key === "symbol" ? `syms[${syms.indexOf(key)}]` : esc$1(key);
+			const k = typeof key === "symbol" ? `syms[${syms.indexOf(key)}]` : esc$2(key);
 			const isPresent = `${k} in input`;
 			const schema = shape[key];
 			const optin = schema?._zod?.optin;
@@ -116714,19 +116714,19 @@ var esm_default = (camel) => camel.replace(/(([A-Z0-9])([A-Z0-9][a-z]))|(([a-z0-
 //#endregion
 //#region ../../node_modules/.pnpm/linkedom@0.18.13/node_modules/linkedom/esm/dom/string-map.js
 const refs$1 = /* @__PURE__ */ new WeakMap();
-const key = (name) => `data-${esm_default(name)}`;
+const key$1 = (name) => `data-${esm_default(name)}`;
 const prop = (name) => name.slice(5).replace(/-([a-z])/g, (_, $1) => $1.toUpperCase());
 const handler$2 = {
 	get(dataset, name) {
-		if (name in dataset) return refs$1.get(dataset).getAttribute(key(name));
+		if (name in dataset) return refs$1.get(dataset).getAttribute(key$1(name));
 	},
 	set(dataset, name, value) {
 		dataset[name] = value;
-		refs$1.get(dataset).setAttribute(key(name), value);
+		refs$1.get(dataset).setAttribute(key$1(name), value);
 		return true;
 	},
 	deleteProperty(dataset, name) {
-		if (name in dataset) refs$1.get(dataset).removeAttribute(key(name));
+		if (name in dataset) refs$1.get(dataset).removeAttribute(key$1(name));
 		return delete dataset[name];
 	}
 };
@@ -230724,6 +230724,29 @@ async function concatVideos(segments, out, target, opts = {}) {
 		duration_ms: Math.round(frames * 1e3 / target.fps)
 	};
 }
+/** Overlay `logo` on `video` (re-encoded with the same settings; no audio). */
+async function overlayLogo(video, logo, out, opts = {}) {
+	const enable = logo.ranges_ms.map(([a, b]) => `between(t,${(a / 1e3).toFixed(3)},${(b / 1e3).toFixed(3)})`).join("+") || "0";
+	const graph = `[1:v]scale=${Math.round(logo.w)}:${Math.round(logo.h)}:flags=lanczos,format=rgba[logo];[0:v][logo]overlay=x=${Math.round(logo.x)}:y=${Math.round(logo.y)}:enable='${enable}':format=auto:shortest=1[v]`;
+	await runFfmpeg([
+		"-y",
+		"-i",
+		video,
+		"-loop",
+		"1",
+		"-i",
+		logo.path,
+		"-filter_complex",
+		graph,
+		"-map",
+		"[v]",
+		...h264Args(opts.encode),
+		"-an",
+		...FASTSTART,
+		out
+	], opts);
+	return { path: out };
+}
 /**
 * Mux an audio track onto a video: video is stream-copied, audio encoded to AAC 192k/48 kHz
 * and padded or trimmed to exactly the video's duration.
@@ -230806,8 +230829,9 @@ async function assemble(input, opts = {}) {
 	const work = input.workDir ?? await mkdtemp(join(tmpdir(), "vs-media-"));
 	await mkdir(work, { recursive: true });
 	try {
-		const silentVideo = join(work, "video.mp4");
+		let silentVideo = join(work, "video.mp4");
 		const v = await concatVideos(input.segments, silentVideo, input, opts);
+		if (input.logo && input.logo.ranges_ms.length) silentVideo = (await overlayLogo(silentVideo, input.logo, join(work, "video.logo.mp4"), opts)).path;
 		if (input.audio === void 0 && !input.music && !input.sceneAudio) {
 			await concatAudio([{ duration_ms: v.duration_ms }], join(work, "silence.wav"), opts);
 			await muxAudio(silentVideo, join(work, "silence.wav"), input.master, opts);
@@ -231032,15 +231056,16 @@ async function technicalQa(videoPath, expect, opts = {}) {
 		});
 	}
 	if (probe.has_audio && expect.intended_silence) {
+		const why = expect.silence_reason ?? "silent on purpose (no narration, no music)";
 		checks.push({
 			id: "silence",
 			status: "ok",
-			detail: "silent on purpose (no narration, no music)"
+			detail: why
 		});
 		checks.push({
 			id: "loudness",
 			status: "ok",
-			detail: "not measured: silent on purpose"
+			detail: `not measured: ${why}`
 		});
 	} else if (probe.has_audio) {
 		checks.push(det.silence.length === 0 ? {
@@ -232612,7 +232637,8 @@ const VoiceSettings = strictObject({
 	rate_wpm: int().min(110).max(230).optional().describe("Speaking rate in words per minute for system TTS (default 160; 145–165 sounds natural for explainers)."),
 	provider_preference: array(Id).optional().describe("Preferred TTS providers in order; the router may override on policy."),
 	voice_id: string().optional(),
-	style: string().optional()
+	style: string().optional(),
+	align: boolean().optional().describe("Re-time estimated word timings (system TTS) from the audio with local whisper when whisper.cpp and its model are installed, so captions and word cues land exactly (default true).")
 });
 const CaptionSettings = strictObject({
 	preset: Id,
@@ -237987,13 +238013,13 @@ function cueItemStarts(defaults, cues, step) {
 	defaults.forEach((d, i) => {
 		const cue = at.get(i);
 		if (cue !== void 0) {
-			const start = round3$2(Math.max(0, cue - CUE_LEAD_S));
+			const start = round3$3(Math.max(0, cue - CUE_LEAD_S));
 			out.push(start);
 			lastCued = {
 				index: i,
 				start
 			};
-		} else out.push(lastCued ? round3$2(Math.max(d, lastCued.start + step * (i - lastCued.index))) : d);
+		} else out.push(lastCued ? round3$3(Math.max(d, lastCued.start + step * (i - lastCued.index))) : d);
 	});
 	return out;
 }
@@ -238005,12 +238031,107 @@ function cueItemStarts(defaults, cues, step) {
 function countUpWindow(atS, defaultLen) {
 	const start = Math.max(0, atS - Math.max(MIN_COUNT_UP_S, defaultLen));
 	return {
-		start: round3$2(start),
-		end: round3$2(Math.max(atS, start + MIN_COUNT_UP_S))
+		start: round3$3(start),
+		end: round3$3(Math.max(atS, start + MIN_COUNT_UP_S))
 	};
 }
-function round3$2(x) {
+function round3$3(x) {
 	return Math.round(x * 1e3) / 1e3;
+}
+/** Default start of the count (scene-local seconds) when the value has no word cue. */
+const COUNT_UP_AT_S = .1;
+/** A cued value's entrance starts this long before its count, so it is in place as the digits roll. */
+const COUNT_UP_ENTRANCE_LEAD_S = .05;
+/** Default length of a count-up in a scene of `durS` seconds. */
+function countUpSpan(durS) {
+	return Math.max(.4, Math.min(1.2, durS * .35));
+}
+/**
+* Start and length of a count-up: by default it starts at COUNT_UP_AT_S and lasts `span`; with
+* a word cue (`cueAt`, scene-local s) it finishes on the word (`countUpWindow`).
+*/
+function countUpTiming(span, cueAt) {
+	if (cueAt === void 0) return {
+		at: COUNT_UP_AT_S,
+		span
+	};
+	const w = countUpWindow(cueAt, span);
+	return {
+		at: w.start,
+		span: w.end - w.start
+	};
+}
+/** Decimals a count-up keeps: those of the final value, at most 2. */
+function countUpDecimals(value) {
+	return Number.isInteger(value) ? 0 : Math.min(2, (String(value).split(".")[1] ?? "").length);
+}
+/** The steps of a count-up to `value` starting at `at` over `span` seconds. */
+function countUpSteps(value, at, span, frames = 8) {
+	const scale = 10 ** countUpDecimals(value);
+	const dt = span / frames;
+	const steps = [];
+	for (let k = 0; k < frames; k++) {
+		const f = 1 - (1 - k / frames) ** 3;
+		steps.push({
+			value: Math.round(value * f * scale) / scale,
+			start: at + k * dt,
+			len: dt
+		});
+	}
+	return {
+		steps,
+		done: at + span
+	};
+}
+/**
+* When the value's entrance starts before its count (the scene opening pulls it before frame 0),
+* the first step is shown from the entrance start, so the opening frame shows the first value
+* half-in instead of an empty slot. Otherwise the steps are returned as they are.
+*/
+function withEarlyFirstStep(count, entranceStart) {
+	const first = count.steps[0];
+	if (!first || entranceStart >= 0 || entranceStart >= first.start) return count;
+	return {
+		...count,
+		steps: [{
+			...first,
+			start: entranceStart,
+			len: first.start + first.len - entranceStart
+		}, ...count.steps.slice(1)]
+	};
+}
+//#endregion
+//#region ../renderer/dist/entrance.js
+/**
+* Scene opening, shared by the FFmpeg (and footage overlay) and HyperFrames renderers.
+*
+* Every element enters with a fade (and a slide or scale) from its start time, so a scene whose
+* first reveal starts at or after 0 opens on an empty background frame, which reads as a blank
+* flash at every hard cut. The elements of the scene's FIRST default reveal (the earliest default
+* start: typically item 0 plus the chrome drawn with it, like panels and titles) therefore start
+* their entrance before frame 0, at −openingLead(len): on frame 0 they are already about half-way
+* in, and they finish their entrance that much sooner. Everything later keeps its timing, and
+* items placed by a word cue keep exactly their cue timing (never pulled earlier).
+*
+* OPENING_LEAD_MAX_S = 0.2 s: half of the default FFmpeg fade (0.4 s), so with the renderer's
+* linear alpha the opening frame is exactly half-way in; the cap keeps a long entrance (a slow
+* style's enter_ms, HyperFrames' 0.5–0.6 s eased entrances) from looking already finished on the
+* first frame while still showing it clearly (an ease-out entrance is over half its travel at a
+* third of its length).
+*/
+const OPENING_LEAD_MAX_S = .2;
+/** How long before frame 0 an opening entrance of length `len` (s) starts: min(len / 2, 0.2 s). */
+function openingLead(len) {
+	return Math.round(Math.min(Math.max(0, len) / 2, OPENING_LEAD_MAX_S) * 1e3) / 1e3;
+}
+/** Start (s, ≤ 0) of an opening entrance of length `len`. */
+function openingStart(len) {
+	const lead = openingLead(len);
+	return lead > 0 ? -lead : 0;
+}
+/** Two entrance times are the same moment (they come from the same arithmetic, up to rounding). */
+function sameTime(a, b) {
+	return Math.abs(a - b) < 1e-6;
 }
 //#endregion
 //#region ../renderer/dist/ffmpeg-renderer.js
@@ -238034,8 +238155,9 @@ const FFMPEG_RENDERER_ID = "ffmpeg-drawtext";
 * 0.4.0: script fonts for CJK lines; Devanagari/Arabic/Hebrew lines drawn through libass (shaping + bidi).
 * 0.4.1: `scene.motion` (push_in, pull_out, punch, reveal, drift, hold) moves the whole frame.
 * 0.4.2: word cues (`req.cues`) land each reveal item on its spoken word.
+* 0.5.0: stat values count up (count-up.ts, as in HyperFrames); the first reveal opens the scene half-in (entrance.ts).
 */
-const FFMPEG_RENDERER_VERSION = "0.4.2";
+const FFMPEG_RENDERER_VERSION = "0.5.0";
 const FFMPEG_RENDERER_KINDS = [
 	"typography",
 	"code",
@@ -238714,7 +238836,7 @@ const MAX_BARS = 12;
 function chart(p, c) {
 	const warnings = [];
 	const type = asStr(p.type) ?? "stat";
-	const unit = typeof p.unit === "string" ? p.unit : "";
+	const unit = spacedUnit(typeof p.unit === "string" ? p.unit : "");
 	const label = asStr(p.label);
 	const rawSeries = Array.isArray(p.series) ? p.series : [];
 	const series = rawSeries.flatMap((s, item) => !!s && typeof s === "object" && typeof s.value === "number" ? [{
@@ -239371,10 +239493,19 @@ function quote(p, c) {
 		warnings
 	};
 }
+/**
+* A unit as written after its number: symbols and short abbreviations attach ("40%", "3x", "10ms"),
+* word units get a space ("1 package", "5 users").
+*/
+function spacedUnit(unit) {
+	if (!unit || /^\s/.test(unit)) return unit;
+	return /\s/.test(unit.trim()) || /^\p{L}{3,}/u.test(unit) ? ` ${unit}` : unit;
+}
 function stat$1(p, c) {
 	const warnings = [];
 	const raw = p.value;
-	const value = `${typeof raw === "number" ? formatNumber(raw) : asStr(raw) ?? ""}${typeof p.unit === "string" ? p.unit : ""}`;
+	const unit = spacedUnit(typeof p.unit === "string" ? p.unit : "");
+	const value = `${typeof raw === "number" ? formatNumber(raw) : asStr(raw) ?? ""}${unit}`;
 	const label = asStr(p.label);
 	const context = asStr(p.context);
 	const gap = r(c.u * .035);
@@ -239428,12 +239559,14 @@ function stat$1(p, c) {
 		w,
 		h: r(vf.height)
 	};
-	els.push(...textLines(vf, vRect, {
+	const valueEls = textLines(vf, vRect, {
 		font: "heading",
 		color: c.colors.primary,
 		beat: 0,
 		item: 0
-	}));
+	});
+	const counted = typeof raw === "number" && Number.isFinite(raw) && raw !== 0 && valueEls.length === 1 ? countUpEls(valueEls[0], raw, unit) : void 0;
+	els.push(...counted ?? valueEls);
 	note(c, c.main, value, vRect, vf, c.colors.primary);
 	const barW = r(c.u * .14);
 	els.push({
@@ -239482,6 +239615,48 @@ function stat$1(p, c) {
 		warnings,
 		count_item: 0
 	};
+}
+/**
+* A stat value that counts up: its digits (with `count`) and its unit as separate elements, so the
+* unit stays put while the digits change. Without a unit the digits stay centred on the line's
+* centre. With one, the unit's left edge is a fixed anchor (placed so the estimated whole value is
+* centred) and the digits end there; undefined when the line cannot be split (it needs libass or a
+* script font, or is right-aligned).
+*/
+function countUpEls(line, value, unit) {
+	const digits = formatNumber(value);
+	if (line.cx === void 0 || line.text !== digits + unit || textRoute(digits).kind !== "drawtext" || textRoute(digits).script) return void 0;
+	if (!unit) return [{
+		...line,
+		count: value
+	}];
+	const anchor = r(line.cx + (estimateTextWidth(digits, line.size) - estimateTextWidth(unit, line.size)) / 2);
+	const { cx: _cx, ...rest } = line;
+	return [{
+		...rest,
+		text: digits,
+		x: r(anchor - estimateTextWidth(digits, line.size)),
+		rx: anchor,
+		count: value
+	}, {
+		...rest,
+		text: unit,
+		x: anchor
+	}];
+}
+/**
+* drawtext `x` of a count-up string `text` whose final digits are `final`, for the element's
+* anchor: centred on `cx`; or, before a unit at `rx`, centred in the final digits' box (its width
+* estimated from the string's own measured width per character) but never ending past `rx`, so a
+* wider intermediate ("0" before a narrow "1") cannot reach the unit. A string as long as the
+* final one ends exactly at `rx`, like the final value.
+*/
+function countX(el, text, final) {
+	if (el.cx !== void 0) return `${el.cx}-text_w/2`;
+	if (el.rx === void 0) return String(el.x);
+	const n = Math.max(1, Array.from(text).length);
+	const k = Math.max(1, Math.round((Array.from(final).length + n) / (2 * n) * 1e4) / 1e4);
+	return k === 1 ? `${el.rx}-text_w` : `${el.rx}-text_w*${k}`;
 }
 const MAX_TIMELINE_EVENTS = 6;
 function timeline(p, c) {
@@ -240231,14 +240406,14 @@ function motionTiming(durationS, maxBeat, motion) {
 	if (motion) {
 		const fade = Math.max(.04, Math.min(motion.enter_ms / 1e3, durationS * .3));
 		return {
-			step: round3$1(maxBeat > 0 ? Math.min(motion.stagger_ms / 1e3, Math.max(0, durationS * .6 - fade) / maxBeat) : 0),
-			fade: round3$1(fade)
+			step: round3$2(maxBeat > 0 ? Math.min(motion.stagger_ms / 1e3, Math.max(0, durationS * .6 - fade) / maxBeat) : 0),
+			fade: round3$2(fade)
 		};
 	}
 	const fade = Math.min(.4, durationS * .2);
 	return {
-		step: round3$1(maxBeat > 0 ? Math.min(.15, durationS * .4 / maxBeat) : 0),
-		fade: round3$1(fade)
+		step: round3$2(maxBeat > 0 ? Math.min(.15, durationS * .4 / maxBeat) : 0),
+		fade: round3$2(fade)
 	};
 }
 /**
@@ -240275,8 +240450,12 @@ function easingExpr(easing, p) {
 		};
 	}
 }
-function round3$1(n) {
+function round3$2(n) {
 	return Math.round(n * 1e3) / 1e3;
+}
+/** FFmpeg expression for the time since `start` (which may be negative: an opening entrance). */
+function since(start) {
+	return start < 0 ? `t+${-start}` : `t-${start}`;
 }
 /**
 * How far each scene motion pattern goes, per intensity: the zoom added for push_in / pull_out,
@@ -240319,9 +240498,9 @@ function sceneMotionParams(motion, durationS) {
 	return {
 		pattern: p,
 		amount,
-		zoom: p === "drift" ? round3$1(Math.max(DRIFT_MIN_ZOOM, 1 + pan + .01)) : 1,
+		zoom: p === "drift" ? round3$2(Math.max(DRIFT_MIN_ZOOM, 1 + pan + .01)) : 1,
 		pan,
-		sec: round3$1(p === "punch" ? Math.min(PUNCH_SEC, durationS / 2) : p === "reveal" ? Math.min(REVEAL_SEC, durationS / 2) : 0)
+		sec: round3$2(p === "punch" ? Math.min(PUNCH_SEC, durationS / 2) : p === "reveal" ? Math.min(REVEAL_SEC, durationS / 2) : 0)
 	};
 }
 /**
@@ -240439,10 +240618,27 @@ function textRoute(text) {
 * Entrance start (seconds) of each element. Without cues: beat × step. With cues, each cue item
 * starts where `cueItemStarts` puts it (its default is its earliest element), and all its
 * elements move with it, keeping their offsets; the count item (a stat's value) instead ends its
-* fade on the word (`countUpWindow` with the fade length). Elements outside any item keep beat × step.
+* fade on the word (`countUpWindow` with the fade length), or, when it counts up (`countSpan`, the
+* count's default length), starts just before a count that finishes on the word, as in HyperFrames.
+* Elements outside any item keep beat × step. Then the opening (entrance.ts): the elements of the
+* first default reveal that no cue moved start at `openingStart(fade)`, before frame 0.
 */
-function elementStarts(comp, step, fade, cues) {
-	const base = comp.elements.map((el) => round3$1(el.beat * step));
+function elementStarts(comp, step, fade, cues, countSpan) {
+	const base = comp.elements.map((el) => round3$2(el.beat * step));
+	return openingStarts(comp.elements, base, cuedStarts(comp, base, step, fade, cues, countSpan), cues, fade);
+}
+/** The first default reveal (earliest `base`) opens the scene, unless a cue placed or moved it. */
+function openingStarts(elements, base, starts, cues, fade) {
+	if (!elements.length) return starts;
+	const first = Math.min(...base);
+	const cued = new Set((cues ?? []).map((c) => c.item));
+	const open = openingStart(fade);
+	return starts.map((s, k) => {
+		const el = elements[k];
+		return !(!sameTime(s, base[k]) || el.item !== void 0 && cued.has(el.item)) && sameTime(base[k], first) ? Math.min(s, open) : s;
+	});
+}
+function cuedStarts(comp, base, step, fade, cues, countSpan) {
 	if (!cues?.length) return base;
 	const n = Math.max(0, ...comp.elements.map((el) => el.item === void 0 ? 0 : el.item + 1));
 	const first = Array.from({ length: n }, () => void 0);
@@ -240454,15 +240650,17 @@ function elementStarts(comp, step, fade, cues) {
 	const starts = cueItemStarts(defaults, cues, step);
 	const ci = comp.count_item;
 	const countCue = ci === void 0 ? void 0 : cues.find((cue) => cue.item === ci);
-	if (countCue && ci < n) starts[ci] = countUpWindow(countCue.at_s, fade).start;
-	return comp.elements.map((el, k) => el.item === void 0 || el.item >= n ? base[k] : round3$1(base[k] + starts[el.item] - defaults[el.item]));
+	const counts = countSpan !== void 0 && comp.elements.some((el) => el.type === "text" && el.count !== void 0 && el.item === ci);
+	if (countCue && ci < n) starts[ci] = counts ? round3$2(Math.max(0, countUpTiming(countSpan, countCue.at_s).at - COUNT_UP_ENTRANCE_LEAD_S)) : countUpWindow(countCue.at_s, fade).start;
+	return comp.elements.map((el, k) => el.item === void 0 || el.item >= n ? base[k] : round3$2(base[k] + starts[el.item] - defaults[el.item]));
 }
 /** Build the filtergraph for a composition. `textDir` is where text files will be written. */
 function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 	const maxBeat = Math.max(0, ...comp.elements.map((e) => e.beat));
 	const { motion } = gm;
 	const { step, fade } = motionTiming(durationS, maxBeat, motion);
-	const starts = elementStarts(comp, step, fade, gm.cues);
+	const countSpan = countUpSpan(durationS);
+	const starts = elementStarts(comp, step, fade, gm.cues, countSpan);
 	const slide = Math.max(2, r(Math.min(target.width, target.height) * .025));
 	const inputs = [];
 	const textFiles = /* @__PURE__ */ new Map();
@@ -240499,7 +240697,7 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 	};
 	for (const [k, el] of comp.elements.entries()) {
 		const start = starts[k];
-		const progress = `min(1,max(0,(t-${start})/${fade}))`;
+		const progress = `min(1,max(0,(${since(start)})/${fade}))`;
 		const ease = easingExpr(motion?.easing, progress);
 		const route = el.type === "text" ? textRoute(el.text) : void 0;
 		if (route?.kind === "ass" && el.type === "text") {
@@ -240528,45 +240726,60 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 			}));
 		} else if (el.type === "text") {
 			flushAss();
-			const name = `t${textFiles.size}.txt`;
-			textFiles.set(name, el.text);
 			const scriptFile = route?.kind === "drawtext" && route.script ? fonts.scripts?.[route.script]?.[el.font] : void 0;
-			chain.push(f$1("drawtext", {
-				fontfile: scriptFile ?? fonts[el.font],
-				textfile: join(textDir, name),
-				expansion: "none",
-				fontsize: el.size,
-				fontcolor: ffColor(el.color),
-				x: el.cx !== void 0 ? `${el.cx}-text_w/2` : el.rx !== void 0 ? `${el.rx}-text_w` : el.x,
-				y: el.slide ? `${el.y}+${slide}*${ease.offset}` : el.y,
-				y_align: "font",
-				alpha: fade > 0 ? ease.alpha : void 0,
-				...el.box ? {
-					box: 1,
-					boxcolor: el.box.color,
-					boxborderw: el.box.border
-				} : {}
-			}));
+			const draw = (text, x, enable) => {
+				const name = `t${textFiles.size}.txt`;
+				textFiles.set(name, text);
+				chain.push(f$1("drawtext", {
+					fontfile: scriptFile ?? fonts[el.font],
+					textfile: join(textDir, name),
+					expansion: "none",
+					fontsize: el.size,
+					fontcolor: ffColor(el.color),
+					x,
+					y: el.slide ? `${el.y}+${slide}*${ease.offset}` : el.y,
+					y_align: "font",
+					alpha: fade > 0 ? ease.alpha : void 0,
+					...el.box ? {
+						box: 1,
+						boxcolor: el.box.color,
+						boxborderw: el.box.border
+					} : {},
+					enable
+				}));
+			};
+			const x = el.cx !== void 0 ? `${el.cx}-text_w/2` : el.rx !== void 0 ? `${el.rx}-text_w` : el.x;
+			if (el.count === void 0) draw(el.text, x);
+			else {
+				const timing = countUpTiming(countSpan, (el.item === comp.count_item ? gm.cues?.find((cu) => cu.item === el.item) : void 0)?.at_s);
+				const count = withEarlyFirstStep(countUpSteps(el.count, timing.at, timing.span), start);
+				for (const st of count.steps) {
+					const text = formatNumber(st.value);
+					draw(text, countX(el, text, el.text), `gte(t,${round3$2(st.start)})*lt(t,${round3$2(st.start + st.len)})`);
+				}
+				draw(el.text, x, `gte(t,${round3$2(count.done)})`);
+			}
 		} else {
 			flush();
 			const idx = inputs.length + 1;
+			const early = start < 0 && fade > 0 ? -start : 0;
 			inputs.push([
 				"-loop",
 				"1",
 				"-framerate",
 				String(target.fps),
 				"-t",
-				durationS.toFixed(3),
+				(durationS + early).toFixed(3),
 				"-i",
 				el.path
 			]);
 			const img = `[i${idx}]`;
 			const fadeF = fade > 0 ? `,${f$1("fade", {
 				t: "in",
-				st: start,
+				st: Math.max(0, start),
 				d: fade,
 				alpha: 1
-			})}` : "";
+			})}${early ? `,${f$1("trim", { start: early })},setpts=PTS-STARTPTS` : ""}` : "";
 			chains.push(`[${idx}:v]${f$1("scale", {
 				w: el.w,
 				h: el.h,
@@ -240588,10 +240801,10 @@ function buildFilterGraph(comp, target, durationS, fonts, textDir, gm = {}) {
 		chains.push(...sceneMotionChains(gm.camera, target, frameCount(durationS, target.fps), gm.background ?? "#000000", motion?.easing, cur, "[cam]"));
 		cur = "[cam]";
 	}
-	const exit = motion && !gm.noExit ? round3$1(Math.min(exitFadeMs(motion) / 1e3, durationS * .2)) : 0;
+	const exit = motion && !gm.noExit ? round3$2(Math.min(exitFadeMs(motion) / 1e3, durationS * .2)) : 0;
 	if (exit >= .02) chain.push(f$1("fade", {
 		t: "out",
-		st: round3$1(Math.max(0, durationS - 1 / target.fps - exit)),
+		st: round3$2(Math.max(0, durationS - 1 / target.fps - exit)),
 		d: exit,
 		color: ffColor(gm.background ?? "#000000")
 	}));
@@ -240677,9 +240890,12 @@ function assEvent(el, fonts, scriptFont, t) {
 	}];
 	const fontTag = (fnt) => `\\fn${fnt.family}\\fs${Math.round(el.size * fnt.scale * 100) / 100}\\b${fnt.bold ? 1 : 0}`;
 	const fadeMs = Math.round(t.fade * 1e3);
+	const doneMs = t.start < 0 ? Math.min(fadeMs, Math.round(-t.start * 1e3)) : 0;
+	const p0 = fadeMs > 0 ? doneMs / fadeMs : 1;
 	const winAsc = Math.max(...runs.map((run) => (run.latin ? latin : script).winAscent));
 	const y = Math.round(el.y - (winAsc - script.ascent) * el.size);
-	const head = `{\\an${an}${t.slide > 0 && fadeMs > 0 ? `\\move(${x},${y + t.slide},${x},${y},0,${fadeMs})` : `\\pos(${x},${y})`}${fadeMs > 0 ? `\\fad(${fadeMs},0)` : ""}\\1c${assTagColour(el.color)}\\bord${el.box ? el.box.border : 0}${el.box ? assBoxTags(el.box.color) : ""}}`;
+	const restMs = fadeMs - doneMs;
+	const head = `{\\an${an}${t.slide > 0 && restMs > 0 ? `\\move(${x},${Math.round(y + t.slide * (1 - p0))},${x},${y},0,${restMs})` : `\\pos(${x},${y})`}${restMs <= 0 ? "" : doneMs > 0 ? `\\fade(${Math.round(255 * (1 - p0))},0,0,0,${restMs},${restMs},${restMs})` : `\\fad(${fadeMs},0)`}\\1c${assTagColour(el.color)}\\bord${el.box ? el.box.border : 0}${el.box ? assBoxTags(el.box.color) : ""}}`;
 	const body = runs.map((run) => `{${fontTag(run.latin ? latin : script)}}${assLiteral(run.text)}`).join("");
 	return `Dialogue: 0,${assTime(t.start)},${assTime(t.end)},${el.box ? "Box" : "Text"},,0,0,0,,${head}${body}`;
 }
@@ -241032,8 +241248,9 @@ const FOOTAGE_RENDERER_ID = "ffmpeg-footage";
 * 0.2.0: crops baked-in letterbox bars (media.content_box) before the fit.
 * 0.2.1: `scene.motion` moves the fitted picture; on stills it replaces the Ken Burns.
 * 0.2.2: word cues (`req.cues`) time the overlay's reveal items.
+* 0.3.0: overlays open half-in (entrance.ts) and stat values count up, as in the FFmpeg renderer 0.5.0.
 */
-const FOOTAGE_RENDERER_VERSION = "0.2.2";
+const FOOTAGE_RENDERER_VERSION = "0.3.0";
 /** Deterministic kinds drawn over footage. Others are ignored with a warning. */
 const FOOTAGE_OVERLAY_KINDS = [
 	"lower_third",
@@ -241419,7 +241636,7 @@ async function selectRenderer(kind, renderers, env = process.env, preference = "
 function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage, cues) {
 	return sha256Hex(canonicalJson({
 		v: 1,
-		layout: 9,
+		layout: 10,
 		scene,
 		tokens,
 		target,
@@ -241654,7 +241871,7 @@ const FALLBACK_TOKENS = {
 	color_primary: "#4F8CFF",
 	color_secondary: "#22C55E"
 };
-const esc = escapeHtml;
+const esc$1 = escapeHtml;
 /** Seconds as a short deterministic decimal string ("0.15", "3"). */
 function fmtSec(n) {
 	return String(Math.round(n * 1e3) / 1e3);
@@ -241725,6 +241942,12 @@ const ENTRANCES = /* @__PURE__ */ new Set([
 * the duration of one build (and always resets it), so anim()/stagger() stay plain functions.
 */
 let activeMotion;
+/**
+* Scene opening of the composition being built (set per build like activeMotion): entrances that
+* start at `at`, the scene's earliest default entrance start, start before frame 0
+* (`openingStart`, see entrance.ts), unless a word cue placed them (`cued`, filled by cueStarts).
+*/
+let activeOpening;
 /** Entrance timing: `n` staggered items, all finished by ~60% of the scene. */
 function stagger(n, dur, first = .1) {
 	if (activeMotion) {
@@ -241750,9 +241973,31 @@ function stagger(n, dur, first = .1) {
 function entranceLen(effect, len) {
 	return activeMotion && ENTRANCES.has(effect) ? Math.max(.05, activeMotion.enter_ms / 1e3) : len;
 }
+/**
+* Where an entrance at `at` actually starts: an entrance of the scene's first default reveal
+* starts before frame 0 (entrance.ts); every other start is unchanged.
+*/
+function openAt(effect, at, len) {
+	const o = activeOpening;
+	const same = (a, b) => sameTime(Number(fmtSec(a)), Number(fmtSec(b)));
+	if (!o || !ENTRANCES.has(effect) || !same(at, o.at) || o.cued.some((c) => same(c, at))) return at;
+	return Math.min(at, openingStart(entranceLen(effect, len)));
+}
+/** Earliest entrance start (`--t`) in built scene content: the scene's first reveal. */
+function firstEntrance(html) {
+	let first;
+	for (const m of html.matchAll(/[" ]vs-a vs-([a-z-]+)" style="--t:(-?[\d.]+)s/g)) if (ENTRANCES.has(m[1])) first = Math.min(first ?? Infinity, Number(m[2]));
+	return first;
+}
+/** Record a start a word cue placed (it is never pulled into the opening). */
+function markCued(at) {
+	activeOpening?.cued.push(at);
+	return at;
+}
 /** Attributes for an animated element. Only computed numbers reach the style attribute. */
 function anim(effect, at, len, cls = "", style = "") {
 	if (activeMotion && ENTRANCES.has(effect)) len = Math.max(.05, activeMotion.enter_ms / 1e3);
+	at = openAt(effect, at, len);
 	return `class="${`${cls ? `${cls} ` : ""}vs-a vs-${effect}`}" style="--t:${fmtSec(at)}s;--d:${fmtSec(len)}s${style ? `;${style}` : ""}"`;
 }
 /**
@@ -241826,7 +242071,8 @@ function cueStarts(ctx, shown, defaults, step) {
 		const k = shown.findIndex((s) => s >= i);
 		return defaults[k < 0 ? defaults.length - 1 : k] ?? 0;
 	}), ctx.cues, step);
-	return shown.map((i) => out[i]);
+	const cued = new Set(ctx.cues.map((c) => c.item));
+	return shown.map((i) => cued.has(i) ? markCued(out[i]) : out[i]);
 }
 /** Spoken time (scene-local s) of the first cue on `item`, if any. */
 function cueAt(ctx, item) {
@@ -241912,12 +242158,12 @@ function renderTypography(ctx) {
 	const at = cueStarts(ctx, items, lines.map((_, i) => st.at(i)), st.step);
 	let found = false;
 	const body = lines.map((line, i) => {
-		let html = esc(line);
+		let html = esc$1(line);
 		if (emphasis) {
 			const idx = line.toLowerCase().indexOf(emphasis.toLowerCase());
 			if (idx >= 0) {
 				found = true;
-				html = esc(line.slice(0, idx)) + `<span class="vs-em">${esc(line.slice(idx, idx + emphasis.length))}</span>` + esc(line.slice(idx + emphasis.length));
+				html = esc$1(line.slice(0, idx)) + `<span class="vs-em">${esc$1(line.slice(idx, idx + emphasis.length))}</span>` + esc$1(line.slice(idx + emphasis.length));
 			}
 		}
 		return `<div ${anim("fade-up", at[i], st.len)}><span class="vs-line">${html}</span></div>`;
@@ -241972,8 +242218,8 @@ function renderCode(ctx) {
 		return `<div ${anim("fade", st.at(i) + blockAt, st.len)}><div ${line}><span class="vs-ln">${n}</span><span class="vs-src">${html || " "}</span></div></div>`;
 	}).join("\n");
 	return [
-		`<div ${anim("scale-in", blockAt, .4, `vs-code-panel`)} data-language="${esc(language)}" data-family="${languageFamily(language)}">`,
-		`<div class="vs-code-bar"><span></span><span></span><span></span>${codeLabel(language) ? `<em>${esc(codeLabel(language))}</em>` : ""}</div>`,
+		`<div ${anim("scale-in", blockAt, .4, `vs-code-panel`)} data-language="${esc$1(language)}" data-family="${languageFamily(language)}">`,
+		`<div class="vs-code-bar"><span></span><span></span><span></span>${codeLabel(language) ? `<em>${esc$1(codeLabel(language))}</em>` : ""}</div>`,
 		`<div class="vs-code" style="font-size:${px(fs)}">`,
 		rows,
 		`</div>`,
@@ -241994,7 +242240,7 @@ function renderChart(ctx) {
 	const unit = str$1(props.unit) ?? "";
 	const label = str$1(props.label);
 	const { u, safe } = stage;
-	const title = label ? `<div ${anim("fade-up", .05, .5, `vs-chart-title`)}>${esc(hc(ctx, label))}</div>` : "";
+	const title = label ? `<div ${anim("fade-up", .05, .5, `vs-chart-title`)}>${esc$1(hc(ctx, label))}</div>` : "";
 	const titleFs = u * 5.5;
 	if (type === "stat" || series.length === 0) {
 		if (type !== "stat") warnings.push(`chart: type "${type}" needs \`series\`; showing the value as a stat`);
@@ -242014,12 +242260,12 @@ function renderChart(ctx) {
 			h: safe.h * .25
 		}, lfit, ctx.colors.text);
 		const cue = cueAt(ctx, 0);
-		const valueAt = cue === void 0 ? .1 : countUpWindow(cue, entranceLen("scale-in", .6)).start;
+		const valueAt = cue === void 0 ? .1 : markCued(countUpWindow(cue, entranceLen("scale-in", .6)).start);
 		const labelAt = cue === void 0 ? .45 : valueAt + .35;
 		return [
 			`<div class="vs-stack vs-stat">`,
-			`<div ${anim("scale-in", valueAt, .6, `vs-stat-value`, `font-size:${px(fs)}`)}><span>${esc(value)}</span><span class="vs-stat-unit">${esc(unit)}</span></div>`,
-			label && lfit ? `<div ${anim("fade-up", labelAt, .5, `vs-stat-label`, `font-size:${px(lfit.fs)}`)}>${esc(label)}</div>` : "",
+			`<div ${anim("scale-in", valueAt, .6, `vs-stat-value`, `font-size:${px(fs)}`)}><span>${esc$1(value)}</span><span class="vs-stat-unit">${esc$1(unit)}</span></div>`,
+			label && lfit ? `<div ${anim("fade-up", labelAt, .5, `vs-stat-label`, `font-size:${px(lfit.fs)}`)}>${esc$1(label)}</div>` : "",
 			`</div>`
 		].filter(Boolean).join("\n");
 	}
@@ -242057,9 +242303,9 @@ function renderChart(ctx) {
 			const x = s.value >= 0 ? zeroX : zeroX - w;
 			const cy = y + barH / 2;
 			return [
-				`<text x="${r2(labelW - u * 2)}" y="${r2(cy)}" text-anchor="end" dominant-baseline="middle" ${anim("fade", at[i], st.len, `vs-axis`)}>${esc(s.label)}</text>`,
+				`<text x="${r2(labelW - u * 2)}" y="${r2(cy)}" text-anchor="end" dominant-baseline="middle" ${anim("fade", at[i], st.len, `vs-axis`)}>${esc$1(s.label)}</text>`,
 				`<rect x="${r2(x)}" y="${r2(y)}" width="${r2(Math.max(1, w))}" height="${r2(barH)}" rx="${r2(Math.min(barH / 4, u))}" fill="${colour(i)}" ${anim(s.value >= 0 ? "grow-x" : "grow-x-rev", at[i], st.len)}/>`,
-				`<text x="${r2(labelW + trackW + u * 2)}" y="${r2(cy)}" dominant-baseline="middle" ${anim("fade", at[i] + st.len * .6, st.len, `vs-value`)}>${esc(fmtNumber(s.value) + unit)}</text>`
+				`<text x="${r2(labelW + trackW + u * 2)}" y="${r2(cy)}" dominant-baseline="middle" ${anim("fade", at[i] + st.len * .6, st.len, `vs-value`)}>${esc$1(fmtNumber(s.value) + unit)}</text>`
 			].join("");
 		}).join("\n");
 	} else if (type === "line") {
@@ -242085,8 +242331,8 @@ function renderChart(ctx) {
 				const at = dotAt[i];
 				return [
 					`<circle cx="${r2(p.x)}" cy="${r2(p.y)}" r="${r2(u * 1.6)}" fill="var(--vs-secondary)" ${anim("pop", at, .3)}/>`,
-					`<text x="${r2(p.x)}" y="${r2(p.y - fs * .9)}" text-anchor="middle" ${anim("fade", at, .3, `vs-value`)}>${esc(fmtNumber(p.s.value) + unit)}</text>`,
-					`<text x="${r2(p.x)}" y="${r2(padT + innerH + fs * 1.5)}" text-anchor="middle" ${anim("fade", .2, .4, `vs-axis`)}>${esc(p.s.label)}</text>`
+					`<text x="${r2(p.x)}" y="${r2(p.y - fs * .9)}" text-anchor="middle" ${anim("fade", at, .3, `vs-value`)}>${esc$1(fmtNumber(p.s.value) + unit)}</text>`,
+					`<text x="${r2(p.x)}" y="${r2(padT + innerH + fs * 1.5)}" text-anchor="middle" ${anim("fade", .2, .4, `vs-axis`)}>${esc$1(p.s.label)}</text>`
 				].join("");
 			})
 		].join("\n");
@@ -242114,7 +242360,7 @@ function renderChart(ctx) {
 			return [
 				`${shape} fill="${fill}" fill-opacity="${opacity}" stroke="var(--vs-bg)" stroke-width="${r2(u * .5)}" ${anim("pop-center", at[i], st.len)}/>`,
 				`<rect x="${r2(chartW * .2)}" y="${r2(ly - fs * .5)}" width="${r2(fs)}" height="${r2(fs)}" fill="${fill}" fill-opacity="${opacity}" ${anim("fade", at[i], st.len)}/>`,
-				`<text x="${r2(chartW * .2 + fs * 1.6)}" y="${r2(ly)}" dominant-baseline="middle" ${anim("fade", at[i], st.len, `vs-axis`)}>${esc(`${s.label} · ${fmtNumber(Math.round(s.value / total * 1e3) / 10)}%`)}</text>`
+				`<text x="${r2(chartW * .2 + fs * 1.6)}" y="${r2(ly)}" dominant-baseline="middle" ${anim("fade", at[i], st.len, `vs-axis`)}>${esc$1(`${s.label} · ${fmtNumber(Math.round(s.value / total * 1e3) / 10)}%`)}</text>`
 			].join("");
 		}).join("\n");
 	}
@@ -242252,7 +242498,7 @@ function renderDiagram(ctx) {
 	const nodeAt = cueStarts(ctx, items, nodes.map((_, i) => layerTime(layers[i])), layerStep);
 	const nodeHtml = nodes.map((label, i) => {
 		const b = boxes[i];
-		return `<div class="vs-node" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)};font-size:${px(fs)}"><div ${anim("scale-in", nodeAt[i], .45)}>${esc(label)}</div></div>`;
+		return `<div class="vs-node" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)};font-size:${px(fs)}"><div ${anim("scale-in", nodeAt[i], .45)}>${esc$1(label)}</div></div>`;
 	}).join("\n");
 	const stroke = Math.max(1.5, u * .45);
 	const head = Math.max(6, u * 2);
@@ -242337,19 +242583,19 @@ function renderComparison(ctx) {
 		.4,
 		...verdict ? [Math.min(.9, stage.dur * .45)] : []
 	], .25);
-	const card = (s, cls, effect, at) => `<div ${anim(effect, at, .5, `vs-card ${cls}`)}><div class="vs-card-label" style="font-size:${px(labelFs)}">${esc(s.label)}</div><div class="vs-card-text" style="font-size:${px(textFs)}">${esc(s.text)}</div></div>`;
+	const card = (s, cls, effect, at) => `<div ${anim(effect, at, .5, `vs-card ${cls}`)}><div class="vs-card-label" style="font-size:${px(labelFs)}">${esc$1(s.label)}</div><div class="vs-card-text" style="font-size:${px(textFs)}">${esc$1(s.text)}</div></div>`;
 	return [
 		`<div class="vs-stack vs-comparison">`,
 		`<div class="vs-compare ${columns ? "vs-columns" : "vs-rows"}">`,
 		card(left, "vs-left", columns ? "slide-right" : "fade-up", leftAt),
 		card(right, "vs-right", columns ? "slide-left" : "fade-up", rightAt),
 		`</div>`,
-		verdict && verdictFit ? `<div ${anim("fade-up", verdictAt, .5, `vs-verdict`, `font-size:${px(verdictFit.fs)}`)}>${esc(verdict)}</div>` : "",
+		verdict && verdictFit ? `<div ${anim("fade-up", verdictAt, .5, `vs-verdict`, `font-size:${px(verdictFit.fs)}`)}>${esc$1(verdict)}</div>` : "",
 		`</div>`
 	].filter(Boolean).join("\n");
 }
 function logoHtml(ctx, at) {
-	return ctx.logo ? `<img src="${esc(ctx.logo)}" alt="" ${anim("fade", at, .5, `vs-logo`)}>` : "";
+	return ctx.logo ? `<img src="${esc$1(ctx.logo)}" alt="" ${anim("fade", at, .5, `vs-logo`)}>` : "";
 }
 function renderCta(ctx) {
 	const { stage, props } = ctx;
@@ -242396,10 +242642,10 @@ function renderCta(ctx) {
 	return [
 		`<div class="vs-stack vs-cta">`,
 		logoHtml(ctx, 0),
-		`<div ${anim("fade-up", headAt, st.len, `vs-headline`, `font-size:${px(hf.fs)}`)}>${esc(headline)}</div>`,
-		`<div class="vs-action-wrap"><div ${anim("pop", actionAt, st.len, `vs-action`, `font-size:${px(af.fs)}`)}>${esc(action)}</div></div>`,
-		command && cf ? `<div ${anim("fade-up", st.at(2) + shift, st.len, `vs-command`, `font-size:${px(cf.fs)}`)}><span class="vs-prompt">$</span> ${esc(command)}</div>` : "",
-		url && uf ? `<div ${anim("fade", st.at(command && cf ? 3 : 2) + shift, st.len, `vs-url`, `font-size:${px(uf.fs)}`)}>${esc(url)}</div>` : "",
+		`<div ${anim("fade-up", headAt, st.len, `vs-headline`, `font-size:${px(hf.fs)}`)}>${esc$1(headline)}</div>`,
+		`<div class="vs-action-wrap"><div ${anim("pop", actionAt, st.len, `vs-action`, `font-size:${px(af.fs)}`)}>${esc$1(action)}</div></div>`,
+		command && cf ? `<div ${anim("fade-up", st.at(2) + shift, st.len, `vs-command`, `font-size:${px(cf.fs)}`)}><span class="vs-prompt">$</span> ${esc$1(command)}</div>` : "",
+		url && uf ? `<div ${anim("fade", st.at(command && cf ? 3 : 2) + shift, st.len, `vs-url`, `font-size:${px(uf.fs)}`)}>${esc$1(url)}</div>` : "",
 		`</div>`
 	].filter(Boolean).join("\n");
 }
@@ -242430,8 +242676,8 @@ function renderEndCard(ctx) {
 	return [
 		`<div class="vs-stack vs-end">`,
 		logoHtml(ctx, .05 + cardShift),
-		title && tf ? `<div ${anim("scale-in", titleAt, .6, `vs-headline`, `font-size:${px(tf.fs)}`)}>${esc(title)}</div>` : "",
-		subtitle && sf ? `<div ${anim("fade-up", subtitleAt, .5, `vs-subtitle`, `font-size:${px(sf.fs)}`)}>${esc(subtitle)}</div>` : "",
+		title && tf ? `<div ${anim("scale-in", titleAt, .6, `vs-headline`, `font-size:${px(tf.fs)}`)}>${esc$1(title)}</div>` : "",
+		subtitle && sf ? `<div ${anim("fade-up", subtitleAt, .5, `vs-subtitle`, `font-size:${px(sf.fs)}`)}>${esc$1(subtitle)}</div>` : "",
 		`<div ${anim("grow-x-center", .6 + cardShift, .5, `vs-rule`)}></div>`,
 		`</div>`
 	].filter(Boolean).join("\n");
@@ -242449,10 +242695,10 @@ function renderScreenshot(ctx) {
 	let img;
 	if (abs) {
 		const src = ctx.asset(abs, "screenshot");
-		img = `<img src="${esc(src)}" alt="" ${anim("zoom", 0, stage.dur, `vs-shot-img`)}>`;
+		img = `<img src="${esc$1(src)}" alt="" ${anim("zoom", 0, stage.dur, `vs-shot-img`)}>`;
 	} else {
 		warnings.push(`screenshot: asset "${id}" could not be resolved to an image in the project; drawing a placeholder`);
-		img = `<div class="vs-shot-missing">${esc(id || "missing asset")}</div>`;
+		img = `<div class="vs-shot-missing">${esc$1(id || "missing asset")}</div>`;
 		rec(ctx, "decorative", id || "missing asset", {
 			w: safe.w,
 			h: safe.h * .6
@@ -242483,9 +242729,9 @@ function renderScreenshot(ctx) {
 				fs: r2(fs),
 				fits: true
 			}, ctx.colors.bg, ctx.colors.primary);
-			positioned.push(`<div class="vs-pin" style="left:${x}%;top:${y}%"><div ${anim("pop", at[i], st.len)}><span class="vs-pin-dot"></span><span class="vs-callout">${esc(text)}</span></div></div>`);
+			positioned.push(`<div class="vs-pin" style="left:${x}%;top:${y}%"><div ${anim("pop", at[i], st.len)}><span class="vs-pin-dot"></span><span class="vs-callout">${esc$1(text)}</span></div></div>`);
 		} else {
-			listed.push(`<div ${anim("fade-up", at[i], st.len, `vs-callout`)}>${esc(text)}</div>`);
+			listed.push(`<div ${anim("fade-up", at[i], st.len, `vs-callout`)}>${esc$1(text)}</div>`);
 			rec(ctx, "label", text, {
 				y: safe.h - Math.min(safe.h * .35, callouts.length * fs * 2.6) + listed.length * fs * 1.6,
 				w: safe.w,
@@ -242587,26 +242833,15 @@ function renderQuote(ctx) {
 	return [
 		`<div class="vs-stack vs-quote" style="gap:${px(gap)}">`,
 		`<div ${anim("pop", st.at(0), st.len, `vs-quote-mark`, `height:${px(markH)};font-size:${px(markFs)}`)}>“</div>`,
-		`<div ${anim("fade-up", qAt[0], st.len, `vs-quote-text`, `min-height:${px(body.h)};font-size:${px(body.fit.fs)}`)}>${esc(text)}</div>`,
-		attribution && attr ? `<div ${anim("fade-up", qAt[1], st.len, `vs-quote-attr`, `min-height:${px(attr.h)};font-size:${px(attr.fit.fs)}`)}>— ${esc(attribution)}</div>` : "",
-		source && src ? `<div ${anim("fade", st.at(attr ? 3 : 2) + shift, st.len, `vs-quote-source vs-muted`, `min-height:${px(src.h)};font-size:${px(src.fit.fs)}`)}>${esc(source)}</div>` : "",
+		`<div ${anim("fade-up", qAt[0], st.len, `vs-quote-text`, `min-height:${px(body.h)};font-size:${px(body.fit.fs)}`)}>${esc$1(text)}</div>`,
+		attribution && attr ? `<div ${anim("fade-up", qAt[1], st.len, `vs-quote-attr`, `min-height:${px(attr.h)};font-size:${px(attr.fit.fs)}`)}>— ${esc$1(attribution)}</div>` : "",
+		source && src ? `<div ${anim("fade", st.at(attr ? 3 : 2) + shift, st.len, `vs-quote-source vs-muted`, `min-height:${px(src.h)};font-size:${px(src.fit.fs)}`)}>${esc$1(source)}</div>` : "",
 		`</div>`
 	].filter(Boolean).join("\n");
 }
-/** Count-up frames for a numeric value: each shows only inside its own time window. */
-function countUp(value, at, span, frames = 8) {
-	const scale = 10 ** (Number.isInteger(value) ? 0 : Math.min(2, (String(value).split(".")[1] ?? "").length));
-	const dt = span / frames;
-	const out = [];
-	for (let k = 0; k < frames; k++) {
-		const f = 1 - (1 - k / frames) ** 3;
-		const v = Math.round(value * f * scale) / scale;
-		out.push(`<span ${anim("flash", at + k * dt, dt, "vs-count-frame")}>${esc(fmtNumber(v))}</span>`);
-	}
-	return {
-		frames: out.join(""),
-		done: at + span
-	};
+/** Count-up frames for a numeric value (count-up.ts): each shows only inside its own time window. */
+function countUpFrames(count) {
+	return count.steps.map((s) => `<span ${anim("flash", s.start, s.len, "vs-count-frame")}>${esc$1(fmtNumber(s.value))}</span>`).join("");
 }
 function renderStat(ctx) {
 	const { stage, props } = ctx;
@@ -242642,19 +242877,19 @@ function renderStat(ctx) {
 		w: safe.w,
 		h: con.h
 	}, con.fit, mutedHex(ctx));
-	const span = Math.max(.4, Math.min(1.2, stage.dur * .35));
 	const counts = numeric !== void 0 && numeric !== 0;
 	const valueCue = cueAt(ctx, 0);
-	const win = counts && valueCue !== void 0 ? countUpWindow(valueCue, span) : void 0;
-	const count = counts ? countUp(numeric, win ? win.start : .1, win ? win.end - win.start : span) : void 0;
-	const digits = count ? `<span class="vs-count"><span ${anim("fade", count.done, .001)}>${esc(value)}</span>${count.frames}</span>` : `<span>${esc(value)}</span>`;
+	const timing = counts ? countUpTiming(countUpSpan(stage.dur), valueCue) : void 0;
+	let count = timing ? countUpSteps(numeric, timing.at, timing.span) : void 0;
 	const [cuedValueAt, labelAt] = cueStarts(ctx, [0, 1], [.05, count ? Math.min(count.done, stage.dur * .5) : .45], .4);
-	const valueAt = win ? Math.max(0, win.start - .05) : cuedValueAt;
+	const valueAt = timing && valueCue !== void 0 ? markCued(Math.max(0, timing.at - COUNT_UP_ENTRANCE_LEAD_S)) : cuedValueAt;
+	if (count) count = withEarlyFirstStep(count, openAt("scale-in", valueAt, .5));
+	const digits = count ? `<span class="vs-count"><span ${anim("fade", count.done, .001)}>${esc$1(value)}</span>${countUpFrames(count)}</span>` : `<span>${esc$1(value)}</span>`;
 	return [
 		`<div class="vs-stack vs-stat" style="gap:${px(gap)}">`,
-		`<div ${anim("scale-in", valueAt, .5, `vs-stat-value`, `min-height:${px(valueH)};font-size:${px(vfit.fs)}`)}>${digits}${unit ? `<span class="vs-stat-unit">${esc(unit)}</span>` : ""}</div>`,
-		label && lab ? `<div ${anim("fade-up", labelAt, .5, `vs-stat-label`, `min-height:${px(lab.h)};font-size:${px(lab.fit.fs)}`)}>${esc(label)}</div>` : "",
-		context && con ? `<div ${anim("fade", labelAt + .25, .5, `vs-stat-context vs-muted`, `min-height:${px(con.h)};font-size:${px(con.fit.fs)}`)}>${esc(context)}</div>` : "",
+		`<div ${anim("scale-in", valueAt, .5, `vs-stat-value`, `min-height:${px(valueH)};font-size:${px(vfit.fs)}`)}>${digits}${unit ? `<span class="vs-stat-unit">${esc$1(unit)}</span>` : ""}</div>`,
+		label && lab ? `<div ${anim("fade-up", labelAt, .5, `vs-stat-label`, `min-height:${px(lab.h)};font-size:${px(lab.fit.fs)}`)}>${esc$1(label)}</div>` : "",
+		context && con ? `<div ${anim("fade", labelAt + .25, .5, `vs-stat-context vs-muted`, `min-height:${px(con.h)};font-size:${px(con.fit.fs)}`)}>${esc$1(context)}</div>` : "",
 		`</div>`
 	].filter(Boolean).join("\n");
 }
@@ -242767,7 +243002,7 @@ function renderTimeline(ctx) {
 			fs: tf.fs,
 			fits: tf.fits[i]
 		}, state === "vs-tl-future" ? muted : ctx.colors.text);
-		html.push(`<div class="vs-tl-pos" style="left:${px(d.x - r)};top:${px(d.y - r)};width:${px(r * 2)};height:${px(r * 2)}"><div ${anim("pop", at[i], st.len, `vs-tl-dot ${state}`)}></div></div>`, `<div class="vs-tl-event ${state}${vertical ? "" : " vs-tl-under"}" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)}"><div ${anim(vertical ? "slide-left" : "fade-up", at[i], st.len)}><div class="vs-tl-label" style="font-size:${px(lf.fs)}">${esc(e.label)}</div>` + (e.text ? `<div class="vs-tl-text" style="font-size:${px(tf.fs)}">${esc(e.text)}</div>` : "") + `</div></div>`);
+		html.push(`<div class="vs-tl-pos" style="left:${px(d.x - r)};top:${px(d.y - r)};width:${px(r * 2)};height:${px(r * 2)}"><div ${anim("pop", at[i], st.len, `vs-tl-dot ${state}`)}></div></div>`, `<div class="vs-tl-event ${state}${vertical ? "" : " vs-tl-under"}" style="left:${px(b.x)};top:${px(b.y)};width:${px(b.w)};height:${px(b.h)}"><div ${anim(vertical ? "slide-left" : "fade-up", at[i], st.len)}><div class="vs-tl-label" style="font-size:${px(lf.fs)}">${esc$1(e.label)}</div>` + (e.text ? `<div class="vs-tl-text" style="font-size:${px(tf.fs)}">${esc$1(e.text)}</div>` : "") + `</div></div>`);
 	});
 	return html.join("\n");
 }
@@ -242840,10 +243075,10 @@ function renderSplitScreen(ctx) {
 		let media = "";
 		if (p.asset) {
 			const abs = ctx.resolveAsset(p.asset);
-			if (abs) media = `<div class="vs-split-media"><img src="${esc(ctx.asset(abs, `split-${i === 0 ? "left" : "right"}`))}" alt="" ${anim("zoom", 0, stage.dur, `vs-split-img`)}></div>`;
+			if (abs) media = `<div class="vs-split-media"><img src="${esc$1(ctx.asset(abs, `split-${i === 0 ? "left" : "right"}`))}" alt="" ${anim("zoom", 0, stage.dur, `vs-split-img`)}></div>`;
 			else {
 				warnings.push(`split_screen: ${i === 0 ? "left" : "right"} asset "${p.asset}" could not be resolved to an image in the project; drawing a placeholder`);
-				media = `<div class="vs-split-media"><div class="vs-shot-missing">${esc(p.asset)}</div></div>`;
+				media = `<div class="vs-split-media"><div class="vs-shot-missing">${esc$1(p.asset)}</div></div>`;
 				rec(ctx, "decorative", p.asset, {
 					x: r.x + pad,
 					y: r.y + pad + labelH,
@@ -242857,7 +243092,7 @@ function renderSplitScreen(ctx) {
 		}
 		const side = i === 0 ? "vs-left" : "vs-right";
 		const effect = columns ? i === 0 ? "slide-right" : "slide-left" : "fade-up";
-		return `<div class="vs-split-pos" style="left:${px(r.x)};top:${px(r.y)};width:${px(r.w)};height:${px(r.h)}"><div ${anim(effect, panelAt[i], .5, `vs-split ${side}${beforeAfter ? i === 0 ? " vs-before" : " vs-after" : ""}`)}>` + (p.label ? `<div class="vs-split-label" style="height:${px(labelH)};font-size:${px(lf.fs)}">${esc(p.label)}</div>` : "") + media + (p.text ? `<div class="vs-split-text${hasMedia[i] ? "" : " vs-split-only"}" style="font-size:${px(fs)}">${esc(p.text)}</div>` : "") + `</div></div>`;
+		return `<div class="vs-split-pos" style="left:${px(r.x)};top:${px(r.y)};width:${px(r.w)};height:${px(r.h)}"><div ${anim(effect, panelAt[i], .5, `vs-split ${side}${beforeAfter ? i === 0 ? " vs-before" : " vs-after" : ""}`)}>` + (p.label ? `<div class="vs-split-label" style="height:${px(labelH)};font-size:${px(lf.fs)}">${esc$1(p.label)}</div>` : "") + media + (p.text ? `<div class="vs-split-text${hasMedia[i] ? "" : " vs-split-only"}" style="font-size:${px(fs)}">${esc$1(p.text)}</div>` : "") + `</div></div>`;
 	});
 	let arrow = "";
 	if (beforeAfter) {
@@ -242908,7 +243143,7 @@ function renderLowerThird(ctx) {
 			w: safe.w,
 			h: hb.h
 		}, hb.fit, ctx.colors.text);
-		head = `<div class="vs-lt-headline" style="left:0;top:${px(hy)};width:${px(safe.w)};height:${px(hb.h)}"><div ${anim("fade-up", headAt, .6, `vs-headline`, `font-size:${px(hb.fit.fs)}`)}>${esc(headline)}</div></div>`;
+		head = `<div class="vs-lt-headline" style="left:0;top:${px(hy)};width:${px(safe.w)};height:${px(hb.h)}"><div ${anim("fade-up", headAt, .6, `vs-headline`, `font-size:${px(hb.fit.fs)}`)}>${esc$1(headline)}</div></div>`;
 	}
 	const at = barAt;
 	return [
@@ -242916,8 +243151,8 @@ function renderLowerThird(ctx) {
 		`<div class="vs-lt-pos" style="left:0;top:${px(barY)};width:${px(barW)};height:${px(barH)}"><div ${anim("slide-right", at, .5, `vs-lt`)}>`,
 		`<div ${anim("grow-y", at + .1, .4, `vs-lt-stripe`, `width:${px(stripe)}`)}></div>`,
 		`<div class="vs-lt-text" style="padding:${px(pad)}">`,
-		`<div ${anim("fade", at + .2, .4, `vs-lt-name`, `font-size:${px(nb.fit.fs)}`)}>${esc(name)}</div>`,
-		title && tb ? `<div ${anim("fade", at + .35, .4, `vs-lt-title`, `margin-top:${px(u)};font-size:${px(tb.fit.fs)}`)}>${esc(title)}</div>` : "",
+		`<div ${anim("fade", at + .2, .4, `vs-lt-name`, `font-size:${px(nb.fit.fs)}`)}>${esc$1(name)}</div>`,
+		title && tb ? `<div ${anim("fade", at + .35, .4, `vs-lt-title`, `margin-top:${px(u)};font-size:${px(tb.fit.fs)}`)}>${esc$1(title)}</div>` : "",
 		`</div>`,
 		`</div></div>`
 	].filter(Boolean).join("\n");
@@ -242972,10 +243207,10 @@ function renderKineticText(ctx) {
 	const len = Math.min(.45, Math.max(.15, step * 1.6 || .45));
 	const at = cueStarts(ctx, seq(chunks.length), chunks.map((_, i) => first + i * step), step);
 	const spans = chunks.map((c, i) => {
-		let html = esc(c.text);
+		let html = esc$1(c.text);
 		const a = Math.max(c.start, es);
 		const b = Math.min(c.end, ee);
-		if (es >= 0 && a < b) html = esc(text.slice(c.start, a)) + `<span class="vs-em">${esc(text.slice(a, b))}</span>` + esc(text.slice(b, c.end));
+		if (es >= 0 && a < b) html = esc$1(text.slice(c.start, a)) + `<span class="vs-em">${esc$1(text.slice(a, b))}</span>` + esc$1(text.slice(b, c.end));
 		return `<span ${anim("kin", at[i], len, `vs-kin-chunk`)}>${html}</span>`;
 	});
 	return `<div class="vs-stack vs-kinetic" data-rhythm="${rhythm}" style="font-size:${px(block.fit.fs)}">\n<div class="vs-kin-line">${spans.join(" ")}</div>\n</div>`;
@@ -243067,10 +243302,10 @@ function renderMap(ctx) {
 	const pins = P.map((p, i) => `<circle cx="${r2(p.px)}" cy="${r2(p.py)}" r="${r2(u * 3.2)}" ${anim("pop", pinAt(i), .35, "vs-map-halo")}/><circle cx="${r2(p.px)}" cy="${r2(p.py)}" r="${r2(u * 1.7)}" ${anim("pop", pinAt(i), .35, "vs-map-pin")}/>`);
 	const labels = P.map((p, i) => {
 		const s = slots[i];
-		return p.label ? `<div class="vs-map-slot${s.right ? "" : " vs-map-left"}" style="left:${px(panel.x + s.x)};top:${px(panel.y + s.y)};width:${px(s.w)};height:${px(labelH)}"><div ${anim("fade", pinAt(i) + .15, .35, `vs-map-label`, `font-size:${px(lfs)}`)}>${esc(p.label)}</div></div>` : "";
+		return p.label ? `<div class="vs-map-slot${s.right ? "" : " vs-map-left"}" style="left:${px(panel.x + s.x)};top:${px(panel.y + s.y)};width:${px(s.w)};height:${px(labelH)}"><div ${anim("fade", pinAt(i) + .15, .35, `vs-map-label`, `font-size:${px(lfs)}`)}>${esc$1(p.label)}</div></div>` : "";
 	});
 	return [
-		title && tb ? `<div class="vs-map-title" style="left:0;top:0;width:${px(safe.w)};height:${px(tb.h)}"><div ${anim("fade-up", .05, .5, `vs-headline`, `font-size:${px(tb.fit.fs)}`)}>${esc(title)}</div></div>` : "",
+		title && tb ? `<div class="vs-map-title" style="left:0;top:0;width:${px(safe.w)};height:${px(tb.h)}"><div ${anim("fade-up", .05, .5, `vs-headline`, `font-size:${px(tb.fit.fs)}`)}>${esc$1(title)}</div></div>` : "",
 		`<svg class="vs-map-svg" width="${r2(panel.w)}" height="${r2(panel.h)}" viewBox="0 0 ${r2(panel.w)} ${r2(panel.h)}" style="left:${px(panel.x)};top:${px(panel.y)}">`,
 		`<g ${anim("scale-in", 0, .5)}><rect x="0" y="0" width="${r2(panel.w)}" height="${r2(panel.h)}" rx="${r2(u * 3)}" class="vs-map-panel"/>`,
 		...grid,
@@ -243415,7 +243650,7 @@ function resolveTokens(tokens, warnings) {
 	};
 }
 /** True when `child` is inside `parent` (both absolute). */
-function inside(parent, child) {
+function inside$1(parent, child) {
 	const rel = relative(parent, child);
 	return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
@@ -243454,7 +243689,7 @@ function buildComposition(req, opts = {}) {
 	/** Project-relative path → absolute, only if it stays inside the project and is an image. */
 	const projectImage = (p) => {
 		const abs = resolve(projectRoot, p);
-		if (!inside(projectRoot, abs)) return void 0;
+		if (!inside$1(projectRoot, abs)) return void 0;
 		if (!IMAGE_EXT.test(extname(abs))) return void 0;
 		return abs;
 	};
@@ -243462,7 +243697,7 @@ function buildComposition(req, opts = {}) {
 		const viaOpt = opts.resolveAsset?.(id);
 		if (viaOpt) {
 			const abs = resolve(projectRoot, viaOpt);
-			if (inside(projectRoot, abs) && IMAGE_EXT.test(extname(abs))) return abs;
+			if (inside$1(projectRoot, abs) && IMAGE_EXT.test(extname(abs))) return abs;
 			warnings.push(`${det.kind}: asset "${id}" resolves outside the project or is not an image; ignored`);
 			return;
 		}
@@ -243519,25 +243754,43 @@ function buildComposition(req, opts = {}) {
 	let content;
 	const cues = (opts.cues ?? req.cues)?.length ? opts.cues ?? req.cues : void 0;
 	const cueCss = [];
+	const kindCtx = () => ({
+		stage,
+		props: det.props ?? {},
+		warnings,
+		asset: addAsset,
+		resolveAsset,
+		logo,
+		main,
+		colors,
+		boxes,
+		head,
+		...cues ? { cues } : {},
+		cueCount: cues ? cueItems(det.kind, det.props ?? {}).length : 0,
+		css: cueCss
+	});
 	activeMotion = t.motion;
 	try {
-		content = render({
-			stage,
-			props: det.props ?? {},
-			warnings,
-			asset: addAsset,
-			resolveAsset,
-			logo,
-			main,
-			colors,
-			boxes,
-			head,
-			...cues ? { cues } : {},
-			cueCount: cues ? cueItems(det.kind, det.props ?? {}).length : 0,
-			css: cueCss
+		const warned = warnings.length;
+		const plain = render({
+			...kindCtx(),
+			warnings: [],
+			asset: (_abs, name) => name,
+			boxes: [],
+			cues: void 0,
+			cueCount: 0,
+			css: []
 		});
+		warnings.length = warned;
+		const first = firstEntrance(plain);
+		activeOpening = first === void 0 ? void 0 : {
+			at: first,
+			cued: []
+		};
+		content = render(kindCtx());
 	} finally {
 		activeMotion = void 0;
+		activeOpening = void 0;
 	}
 	const exitS = t.motion ? Math.min(exitFadeMs(t.motion) / 1e3, dur * .2) : 0;
 	const exitAt = Math.max(0, dur - 1 / target.fps - exitS);
@@ -243563,11 +243816,11 @@ function buildComposition(req, opts = {}) {
 	return {
 		composition_id: compositionId,
 		html: `<!doctype html>
-<html lang="${esc(pageLang)}"${rtl ? " dir=\"rtl\"" : ""}>
+<html lang="${esc$1(pageLang)}"${rtl ? " dir=\"rtl\"" : ""}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=${W}, height=${H}">
-<title>${esc(`${scene.id} ${det.kind}`)}</title>
+<title>${esc$1(`${scene.id} ${det.kind}`)}</title>
 <style>
 ${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}${cam ? cam.css : ""}${cueCss.length ? `\n/* word cues */\n${cueCss.join("\n")}` : ""}
 </style>
@@ -246889,10 +247142,10 @@ async function readOptionalJson$1(path) {
 		return;
 	}
 }
-const round3 = (n) => Math.round(n * 1e3) / 1e3;
+const round3$1 = (n) => Math.round(n * 1e3) / 1e3;
 const rel$2 = (root, p) => relative(root, p).split("\\").join("/");
 /** Time of the middle of frame `i` at `fps`, so seeks never land on a frame boundary. */
-const frameCentre = (i, fps) => round3((i + .5) / fps);
+const frameCentre = (i, fps) => round3$1((i + .5) / fps);
 /**
 * Deterministic sample times: the first frame, each scene's midpoint, and the last frame, each
 * snapped to a frame centre; times within a frame of each other are merged. Without scenes, the
@@ -247318,7 +247571,7 @@ function serializeLock(lock) {
 	return `${JSON.stringify(lock, null, 2)}\n`;
 }
 /** Read and validate a lock file; undefined when it does not exist. Throws on an invalid lock. */
-async function readLock(path) {
+async function readLock$1(path) {
 	let text;
 	try {
 		text = await readFile(path, "utf8");
@@ -247610,7 +247863,7 @@ async function diffProjects(a, b, opts = {}) {
 		};
 	}
 	let lock;
-	const lockFor = async (r) => (r.quality ? await readLock(join(projectPaths(r.root).renders, r.quality, "video.lock")) : void 0) ?? readLock(join(projectPaths(r.root).dist, "video.lock"));
+	const lockFor = async (r) => (r.quality ? await readLock$1(join(projectPaths(r.root).renders, r.quality, "video.lock")) : void 0) ?? readLock$1(join(projectPaths(r.root).dist, "video.lock"));
 	try {
 		const [la, lb] = await Promise.all([lockFor(ra), lockFor(rb)]);
 		if (!la || !lb) lock = {
@@ -247764,197 +248017,6 @@ function formatDiff(r) {
 	for (const c of r.spec.changes.slice(0, 10)) lines.push(`  - ${c.kind} ${c.path || "(root)"}${c.before !== void 0 ? `: ${c.before}` : ""}${c.after !== void 0 ? ` → ${c.after}` : ""}`);
 	if (r.spec.changes.length > 10) lines.push(`  - …${r.spec.changes.length - 10} more in ${r.report_md}`);
 	return lines.join("\n");
-}
-const DEFAULT_WIDTH = {
-	sheet: 240,
-	strip: 180,
-	crop: 540
-};
-const DEFAULT_COLS = {
-	sheet: 6,
-	strip: 8,
-	crop: 2
-};
-async function reviewRender(projectDir, opts = {}) {
-	const mode = opts.mode ?? "sheet";
-	const r = await resolveRender(projectDir, opts.quality);
-	const fps = r.fps;
-	const frame = 1 / fps;
-	const dur = r.duration_ms / 1e3;
-	const lastT = Math.max(0, dur - frame);
-	const notes = [];
-	let t = 0;
-	const spans = (r.state?.scenes ?? []).map((s) => {
-		const span = {
-			id: s.scene_id,
-			start: t,
-			end: t + s.duration_ms / 1e3
-		};
-		t = span.end;
-		return span;
-	});
-	const sceneAt = (x) => spans.find((s) => x >= s.start && x < s.end)?.id ?? spans[spans.length - 1]?.id;
-	let only;
-	if (opts.scene) {
-		only = spans.find((s) => s.id === opts.scene);
-		if (!only) throw new Error(`no scene "${opts.scene}" in this render (scenes: ${spans.map((s) => s.id).join(", ") || "unknown: no render state"})`);
-	}
-	const clamp = (x) => Math.min(lastT, Math.max(0, x));
-	const round3 = (x) => Math.round(x * 1e3) / 1e3;
-	let tiles;
-	if (opts.times?.length) tiles = opts.times.map((x) => ({ time: clamp(x) }));
-	else if (mode === "strip") {
-		const a = clamp(opts.from_sec ?? only?.start ?? 0);
-		const b = clamp(opts.to_sec ?? (only ? only.end - 1e-6 : a + 2));
-		if (b < a) throw new Error(`strip: to_sec ${b} is before from_sec ${a}`);
-		const fa = Math.ceil(a * fps - 1e-6);
-		const n = Math.max(fa, Math.floor(b * fps + 1e-6)) - fa + 1;
-		const take = Math.min(n, 48);
-		if (take < n) notes.push(`${n} frames in ${round3(a)}–${round3(b)}s; showing ${take} evenly spaced (narrow the span for every frame)`);
-		tiles = Array.from({ length: take }, (_, i) => ({ time: (fa + (take === 1 ? 0 : Math.round(i * (n - 1) / (take - 1)))) / fps }));
-	} else {
-		const list = only ? [only] : spans;
-		if (!list.length) {
-			tiles = [
-				.25,
-				.5,
-				.75
-			].map((f) => ({ time: clamp(dur * f) }));
-			notes.push("no render state with scene timings: sampled 25%, 50% and 75%");
-		} else tiles = list.flatMap((s) => {
-			const len = s.end - s.start;
-			return [
-				{
-					time: clamp(s.start + Math.min(.3, len * .2)),
-					tag: "in"
-				},
-				{
-					time: clamp(s.start + len / 2),
-					tag: "mid"
-				},
-				{
-					time: clamp(s.end - Math.max(frame, Math.min(.45, len * .15))),
-					tag: "out"
-				}
-			];
-		});
-	}
-	if (tiles.length > 48) {
-		notes.push(`${tiles.length} tiles requested; showing the first 48 (review one scene at a time with scene)`);
-		tiles = tiles.slice(0, 48);
-	}
-	let crop = "";
-	if (mode === "crop") {
-		const c = opts.crop;
-		if (!c) throw new Error("crop mode needs crop {x, y, w, h} as fractions of the frame (e.g. {x: 0.1, y: 0.6, w: 0.8, h: 0.3})");
-		if (c.x < 0 || c.y < 0 || c.w <= 0 || c.h <= 0 || c.x + c.w > 1.0001 || c.y + c.h > 1.0001) throw new Error("crop must lie inside the frame: 0 ≤ x, y and x + w, y + h ≤ 1");
-		const px = (f, full) => Math.max(0, Math.round(f * full));
-		crop = `crop=${Math.max(2, px(c.w, r.width))}:${Math.max(2, px(c.h, r.height))}:${px(c.x, r.width)}:${px(c.y, r.height)},`;
-		if (!opts.times?.length) {
-			if (!only) tiles = spans.length ? spans.map((s) => ({
-				time: clamp((s.start + s.end) / 2),
-				tag: "mid"
-			})) : [{ time: clamp(dur / 2) }];
-			else tiles = [{
-				time: clamp((only.start + only.end) / 2),
-				tag: "mid"
-			}];
-		}
-	}
-	const width = Math.max(64, Math.round(opts.width ?? DEFAULT_WIDTH[mode]));
-	const cols = Math.max(1, Math.min(opts.cols ?? DEFAULT_COLS[mode], tiles.length));
-	const rows = Math.ceil(tiles.length / cols);
-	const outDir = join(projectPaths(r.root).root, "qa", "review");
-	const work = join(outDir, ".work");
-	await rm(work, {
-		recursive: true,
-		force: true
-	});
-	await mkdir(work, { recursive: true });
-	const fontsDir = findFontsDir();
-	const font = fontsDir ? join(fontsDir, "Inter", "Inter-Bold.ttf") : void 0;
-	const labelSize = Math.max(11, Math.round(width / 14));
-	const out = tiles.map((x, i) => {
-		const scene_id = sceneAt(x.time);
-		const label = [
-			scene_id,
-			x.tag,
-			`${round3(x.time).toFixed(2)}s`
-		].filter(Boolean).join(" ");
-		return {
-			index: i,
-			time_sec: round3(x.time),
-			...scene_id ? { scene_id } : {},
-			label
-		};
-	});
-	try {
-		for (const [i, tile] of out.entries()) {
-			const draw = font && existsSync(font) ? `,drawtext=fontfile=${escapeFilterPath(font)}:text=${escapeFiltergraph(escapeFilterOption(tile.label))}:fontsize=${labelSize}:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=${Math.round(labelSize / 3)}:x=4:y=4` : "";
-			const png = join(work, `${String(i + 1).padStart(4, "0")}.png`);
-			for (let back = 0; back < 4 && !existsSync(png); back++) {
-				const at = Math.max(0, tile.time_sec - back * frame);
-				await runFfmpeg([
-					"-y",
-					"-ss",
-					at.toFixed(3),
-					"-i",
-					r.reel,
-					"-frames:v",
-					"1",
-					"-vf",
-					`${crop}scale=${width}:-2:flags=bicubic${draw}`,
-					png
-				], { timeoutMs: 6e4 });
-				if (back > 0 && existsSync(png)) {
-					tile.time_sec = round3(at);
-					tile.label = tile.label.replace(/[\d.]+s$/, `${tile.time_sec.toFixed(2)}s`);
-				}
-			}
-			if (!existsSync(png)) throw new Error(`no frame at ${tile.time_sec}s in ${r.reel}`);
-		}
-		if (!font || !existsSync(font)) notes.push("bundled fonts not found: tiles are unlabelled; use the tiles list for times");
-		const name = `${mode}-${r.quality ?? "render"}${opts.scene ? `-${opts.scene}` : ""}.jpg`;
-		const image = join(outDir, name);
-		await runFfmpeg([
-			"-y",
-			"-framerate",
-			"1",
-			"-i",
-			join(work, "%04d.png"),
-			"-vf",
-			`tile=${cols}x${rows}:padding=4:margin=4:color=0x808080`,
-			"-frames:v",
-			"1",
-			"-q:v",
-			"3",
-			image
-		], { timeoutMs: 6e4 });
-		return {
-			...r.quality ? { quality: r.quality } : {},
-			source: r.source,
-			mode,
-			image,
-			image_rel: relative(r.root, image),
-			cols,
-			rows,
-			tile_width: width,
-			tiles: out,
-			notes
-		};
-	} finally {
-		await rm(work, {
-			recursive: true,
-			force: true
-		});
-	}
-}
-function formatReview(r) {
-	return [
-		`review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${r.cols}×${r.rows} → ${r.image}`.replace(/ {2}/g, " "),
-		"Read the image and check: text fits and is readable, nothing sits under captions or app UI, graphics land when their words are spoken, crops keep faces and subjects, transitions are clean.",
-		...r.notes.map((n) => `note: ${n}`)
-	].join("\n");
 }
 //#endregion
 //#region src/lint.ts
@@ -248443,6 +248505,57 @@ function checkBanned(spec, brand, out) {
 		}
 	}
 }
+/** Text the renderers fitted into boxes that the brand's corner logo covers. */
+function checkLogo(state, boxes, out) {
+	const logo = state?.logo;
+	if (!logo) return;
+	const shown = new Set(logo.scenes);
+	const hit = /* @__PURE__ */ new Map();
+	for (const { scene_id, box } of boxes) {
+		if (!shown.has(scene_id) || box.role === "caption") continue;
+		const r = box.rect;
+		const l = logo.box;
+		if (r.x < l.x + l.w && r.x + r.w > l.x && r.y < l.y + l.h && r.y + r.h > l.y) hit.set(scene_id, [...hit.get(scene_id) ?? [], box.role]);
+	}
+	for (const [scene_id, roles] of hit) out.push({
+		id: "logo_overlap",
+		severity: "warning",
+		scene_id,
+		message: `the brand logo (${logo.path}) overlaps the ${[...new Set(roles)].join(", ")} text box in scene ${scene_id}`,
+		fix: "move the logo to another corner (brand.yaml visual.logo_placement.position), make it smaller (max_fraction), or shorten the text so it sits clear of the corner"
+	});
+}
+/**
+* Brand `visual.forbidden` treatments ("drop shadows", "zoom transitions", "kinetic text") named by
+* a scene: its visual requirements, transition, motion pattern or graphic kind. Text match only:
+* the rest of the list is guidance for planning.
+*/
+function checkForbidden(spec, brand, out) {
+	const forbidden = brand?.visual?.forbidden ?? [];
+	if (!forbidden.length) return;
+	const norm = (s) => ` ${s.toLowerCase().replace(/[_-]+/g, " ").replace(/[^\p{L}\p{N} ]+/gu, " ").replace(/\s+/g, " ").trim()} `;
+	const stem = (w) => w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w;
+	for (const s of spec.scenes) {
+		const text = norm([
+			...strings(s.visual_requirements),
+			s.transition ? `${s.transition} transition` : "",
+			s.motion ? `${s.motion.pattern} motion` : "",
+			s.deterministic ? s.deterministic.kind : ""
+		].filter(Boolean).join(" ")).split(" ").map(stem).join(" ");
+		for (const phrase of forbidden) {
+			const want = norm(phrase).trim().split(" ").map(stem);
+			if (!want.length || !want[0]) continue;
+			if (!text.includes(` ${want.join(" ")} `)) continue;
+			out.push({
+				id: "brand_forbidden",
+				severity: "warning",
+				scene_id: s.id,
+				message: `scene ${s.id} uses "${phrase}", which brand.yaml lists under visual.forbidden`,
+				fix: `change scene ${s.id}'s transition, motion, graphic kind or visual_requirements so it no longer uses "${phrase}"`
+			});
+		}
+	}
+}
 const sec = (ms) => `${round2(ms / 1e3)}s`;
 /** Seconds a caption needs on screen to be read (design rule; CJK by characters). */
 function captionReadSec(text, language) {
@@ -248876,6 +248989,8 @@ async function lintProject(projectDir, opts = {}) {
 	await checkTiming(paths.root, spec, state, brand, findings);
 	checkStory(spec, findings);
 	checkCutaways(spec, findings);
+	checkLogo(state, boxes, findings);
+	checkForbidden(spec, brand, findings);
 	checkPostCopy(spec, contracts, findings);
 	checkCover(spec, contracts, state?.cover ? {
 		...state.cover.headline_box ? { headline_box: state.cover.headline_box } : {},
@@ -248920,6 +249035,700 @@ async function lintProject(projectDir, opts = {}) {
 /** One-screen summary for the tool result. */
 function formatLint(r) {
 	return [`lint ${r.status}: ${r.counts.errors} error(s), ${r.counts.warnings} warning(s) for ${r.targets.join(", ") || "no targets"} (${r.rendered ? `${r.quality} render checked` : `no ${r.quality} render; spec-only checks`}); report ${r.report_md}`, ...r.findings.map((f) => `- ${f.severity} ${f.id}${f.target ? ` [${f.target}]` : ""}${f.scene_id ? ` ${f.scene_id}` : ""}: ${f.message} (fix: ${f.fix})`)].join("\n");
+}
+const DEFAULT_WIDTH = {
+	sheet: 240,
+	strip: 180,
+	crop: 540
+};
+const DEFAULT_COLS = {
+	sheet: 6,
+	strip: 8,
+	crop: 2
+};
+const BORDER_COLOR = {
+	error: "0xE5484D",
+	warning: "0xF5A524"
+};
+/**
+* Group scene-level lint findings (plus the render's unplaced word cues, when lint did not already
+* report them) by scene, errors first within a scene and across scenes; `order` sorts ties.
+*/
+function flagScenes(findings, cues = [], order = []) {
+	const all = findings.filter((f) => f.scene_id).map((f) => ({
+		scene_id: f.scene_id,
+		id: f.id,
+		severity: f.severity,
+		message: f.message
+	}));
+	for (const c of cues) {
+		if (c.status === "placed") continue;
+		if (all.some((f) => f.scene_id === c.scene_id && f.id === "cue_unmatched" && f.message.includes(`"${c.word}"`))) continue;
+		all.push({
+			scene_id: c.scene_id,
+			id: "cue_unmatched",
+			severity: "warning",
+			message: `cue "${c.word}" (item ${c.item}) was ${c.status === "late" ? "spoken after the scene ends" : "not found in the spoken words"}`
+		});
+	}
+	const byScene = /* @__PURE__ */ new Map();
+	for (const f of all) {
+		const flag = byScene.get(f.scene_id) ?? {
+			scene_id: f.scene_id,
+			severity: "warning",
+			findings: []
+		};
+		flag.findings.push({
+			id: f.id,
+			severity: f.severity,
+			message: f.message
+		});
+		if (f.severity === "error") flag.severity = "error";
+		byScene.set(f.scene_id, flag);
+	}
+	const rank = (s) => s === "error" ? 0 : 1;
+	const pos = (id) => order.includes(id) ? order.indexOf(id) : order.length;
+	const out = [...byScene.values()];
+	for (const f of out) f.findings.sort((a, b) => rank(a.severity) - rank(b.severity));
+	return out.sort((a, b) => rank(a.severity) - rank(b.severity) || pos(a.scene_id) - pos(b.scene_id));
+}
+/** Mark tiles with their scene's flags (finding ids deduplicated, errors first). */
+function applyFlags(tiles, flags) {
+	for (const t of tiles) {
+		const f = t.scene_id ? flags.find((x) => x.scene_id === t.scene_id) : void 0;
+		if (!f) continue;
+		t.flags = [...new Set(f.findings.map((x) => x.id))];
+		t.severity = f.severity;
+	}
+}
+/**
+* Attach each placed word cue to the tile nearest the moment its word is spoken (scene start +
+* at_ms), skipping cues outside the tiles' span (by more than a frame).
+*/
+function applyCues(tiles, cues, spans, frame) {
+	if (!tiles.length) return;
+	const first = tiles[0].time_sec;
+	const last = tiles[tiles.length - 1].time_sec;
+	for (const c of cues) {
+		if (c.status !== "placed" || c.at_ms === void 0) continue;
+		const span = spans.find((s) => s.id === c.scene_id);
+		if (!span) continue;
+		const at = span.start + c.at_ms / 1e3;
+		if (at < first - frame || at > last + frame) continue;
+		let best = tiles[0];
+		for (const t of tiles) if (Math.abs(t.time_sec - at) < Math.abs(best.time_sec - at)) best = t;
+		best.cues = [...best.cues ?? [], c.word];
+	}
+}
+/** The tile's video filter tail: a border when flagged, its label, and a second line for cues. */
+function tileDecor(tile, width, font) {
+	const labelSize = Math.max(11, Math.round(width / 14));
+	const border = Math.max(3, Math.round(width / 40));
+	const parts = [];
+	if (tile.severity) parts.push(`drawbox=x=0:y=0:w=iw:h=ih:color=${BORDER_COLOR[tile.severity]}:t=${border}`);
+	if (font) {
+		const text = (t) => escapeFiltergraph(escapeFilterOption(t));
+		const inset = tile.severity ? border + 2 : 4;
+		const common = `fontfile=${escapeFilterPath(font)}:fontsize=${labelSize}:boxborderw=${Math.round(labelSize / 3)}`;
+		parts.push(`drawtext=${common}:text=${text(tile.label)}:fontcolor=white:box=1:boxcolor=black@0.6:x=${inset}:y=${inset}`);
+		if (tile.cues?.length) parts.push(`drawtext=${common}:text=${text(`cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`)}:fontcolor=black:box=1:boxcolor=0xFFD60A@0.9:x=${inset}:y=h-th-${inset + Math.round(labelSize / 3)}`);
+	}
+	return parts.length ? `,${parts.join(",")}` : "";
+}
+async function reviewRender(projectDir, opts = {}) {
+	const mode = opts.mode ?? "sheet";
+	const r = await resolveRender(projectDir, opts.quality);
+	const fps = r.fps;
+	const frame = 1 / fps;
+	const dur = r.duration_ms / 1e3;
+	const lastT = Math.max(0, dur - frame);
+	const notes = [];
+	let t = 0;
+	const spans = (r.state?.scenes ?? []).map((s) => {
+		const span = {
+			id: s.scene_id,
+			start: t,
+			end: t + s.duration_ms / 1e3
+		};
+		t = span.end;
+		return span;
+	});
+	const sceneAt = (x) => spans.find((s) => x >= s.start && x < s.end)?.id ?? spans[spans.length - 1]?.id;
+	let only;
+	if (opts.scene) {
+		only = spans.find((s) => s.id === opts.scene);
+		if (!only) throw new Error(`no scene "${opts.scene}" in this render (scenes: ${spans.map((s) => s.id).join(", ") || "unknown: no render state"})`);
+	}
+	const clamp = (x) => Math.min(lastT, Math.max(0, x));
+	const round3 = (x) => Math.round(x * 1e3) / 1e3;
+	let tiles;
+	if (opts.times?.length) tiles = opts.times.map((x) => ({ time: clamp(x) }));
+	else if (mode === "strip") {
+		const a = clamp(opts.from_sec ?? only?.start ?? 0);
+		const b = clamp(opts.to_sec ?? (only ? only.end - 1e-6 : a + 2));
+		if (b < a) throw new Error(`strip: to_sec ${b} is before from_sec ${a}`);
+		const fa = Math.ceil(a * fps - 1e-6);
+		const n = Math.max(fa, Math.floor(b * fps + 1e-6)) - fa + 1;
+		const take = Math.min(n, 48);
+		if (take < n) notes.push(`${n} frames in ${round3(a)}–${round3(b)}s; showing ${take} evenly spaced (narrow the span for every frame)`);
+		tiles = Array.from({ length: take }, (_, i) => ({ time: (fa + (take === 1 ? 0 : Math.round(i * (n - 1) / (take - 1)))) / fps }));
+	} else {
+		const list = only ? [only] : spans;
+		if (!list.length) {
+			tiles = [
+				.25,
+				.5,
+				.75
+			].map((f) => ({ time: clamp(dur * f) }));
+			notes.push("no render state with scene timings: sampled 25%, 50% and 75%");
+		} else tiles = list.flatMap((s) => {
+			const len = s.end - s.start;
+			return [
+				{
+					time: clamp(s.start + Math.min(.3, len * .2)),
+					tag: "in"
+				},
+				{
+					time: clamp(s.start + len / 2),
+					tag: "mid"
+				},
+				{
+					time: clamp(s.end - Math.max(frame, Math.min(.45, len * .15))),
+					tag: "out"
+				}
+			];
+		});
+	}
+	if (tiles.length > 48) {
+		notes.push(`${tiles.length} tiles requested; showing the first 48 (review one scene at a time with scene)`);
+		tiles = tiles.slice(0, 48);
+	}
+	let crop = "";
+	if (mode === "crop") {
+		const c = opts.crop;
+		if (!c) throw new Error("crop mode needs crop {x, y, w, h} as fractions of the frame (e.g. {x: 0.1, y: 0.6, w: 0.8, h: 0.3})");
+		if (c.x < 0 || c.y < 0 || c.w <= 0 || c.h <= 0 || c.x + c.w > 1.0001 || c.y + c.h > 1.0001) throw new Error("crop must lie inside the frame: 0 ≤ x, y and x + w, y + h ≤ 1");
+		const px = (f, full) => Math.max(0, Math.round(f * full));
+		crop = `crop=${Math.max(2, px(c.w, r.width))}:${Math.max(2, px(c.h, r.height))}:${px(c.x, r.width)}:${px(c.y, r.height)},`;
+		if (!opts.times?.length) {
+			if (!only) tiles = spans.length ? spans.map((s) => ({
+				time: clamp((s.start + s.end) / 2),
+				tag: "mid"
+			})) : [{ time: clamp(dur / 2) }];
+			else tiles = [{
+				time: clamp((only.start + only.end) / 2),
+				tag: "mid"
+			}];
+		}
+	}
+	const width = Math.max(64, Math.round(opts.width ?? DEFAULT_WIDTH[mode]));
+	const cols = Math.max(1, Math.min(opts.cols ?? DEFAULT_COLS[mode], tiles.length));
+	const rows = Math.ceil(tiles.length / cols);
+	const outDir = join(projectPaths(r.root).root, "qa", "review");
+	const work = join(outDir, ".work");
+	await rm(work, {
+		recursive: true,
+		force: true
+	});
+	await mkdir(work, { recursive: true });
+	const fontsDir = findFontsDir();
+	const font = fontsDir ? join(fontsDir, "Inter", "Inter-Bold.ttf") : void 0;
+	const haveFont = Boolean(font && existsSync(font));
+	const out = tiles.map((x, i) => {
+		const scene_id = sceneAt(x.time);
+		const label = [
+			scene_id,
+			x.tag,
+			`${round3(x.time).toFixed(2)}s`
+		].filter(Boolean).join(" ");
+		return {
+			index: i,
+			time_sec: round3(x.time),
+			...scene_id ? { scene_id } : {},
+			label
+		};
+	});
+	const cues = r.state?.cues ?? [];
+	let findings = [];
+	let lint;
+	if (!r.quality) notes.push("lint skipped: cannot tell this render's quality, so tiles are not flagged");
+	else try {
+		const l = await lintProject(r.root, { quality: r.quality });
+		findings = l.findings;
+		lint = {
+			status: l.status,
+			errors: l.counts.errors,
+			warnings: l.counts.warnings,
+			report_md: relative(r.root, l.report_md)
+		};
+		const general = findings.filter((f) => !f.scene_id).length;
+		if (general) notes.push(`${general} lint finding(s) not tied to a scene (targets, captions, cover, post copy): see ${lint.report_md}`);
+	} catch (err) {
+		notes.push(`lint failed, so tiles are only flagged for unplaced cues: ${err instanceof Error ? err.message : String(err)}`);
+	}
+	const inImage = new Set(out.map((x) => x.scene_id).filter(Boolean));
+	const flagged = flagScenes(findings, mode === "strip" ? [] : cues, spans.map((s) => s.id)).filter((f) => inImage.has(f.scene_id));
+	applyFlags(out, flagged);
+	if (mode === "strip") applyCues(out, cues, spans, frame);
+	try {
+		for (const [i, tile] of out.entries()) {
+			const draw = tileDecor(tile, width, haveFont ? font : void 0);
+			const png = join(work, `${String(i + 1).padStart(4, "0")}.png`);
+			for (let back = 0; back < 4 && !existsSync(png); back++) {
+				const at = Math.max(0, tile.time_sec - back * frame);
+				await runFfmpeg([
+					"-y",
+					"-ss",
+					at.toFixed(3),
+					"-i",
+					r.reel,
+					"-frames:v",
+					"1",
+					"-vf",
+					`${crop}scale=${width}:-2:flags=bicubic${draw}`,
+					png
+				], { timeoutMs: 6e4 });
+				if (back > 0 && existsSync(png)) {
+					tile.time_sec = round3(at);
+					tile.label = tile.label.replace(/[\d.]+s$/, `${tile.time_sec.toFixed(2)}s`);
+				}
+			}
+			if (!existsSync(png)) throw new Error(`no frame at ${tile.time_sec}s in ${r.reel}`);
+		}
+		for (const tile of out) if (tile.cues) tile.label += ` cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`;
+		if (!haveFont) notes.push("bundled fonts not found: tiles are unlabelled; use the tiles list for times");
+		const name = `${mode}-${r.quality ?? "render"}${opts.scene ? `-${opts.scene}` : ""}.jpg`;
+		const image = join(outDir, name);
+		await runFfmpeg([
+			"-y",
+			"-framerate",
+			"1",
+			"-i",
+			join(work, "%04d.png"),
+			"-vf",
+			`tile=${cols}x${rows}:padding=4:margin=4:color=0x808080`,
+			"-frames:v",
+			"1",
+			"-q:v",
+			"3",
+			image
+		], { timeoutMs: 6e4 });
+		return {
+			...r.quality ? { quality: r.quality } : {},
+			source: r.source,
+			mode,
+			image,
+			image_rel: relative(r.root, image),
+			cols,
+			rows,
+			tile_width: width,
+			tiles: out,
+			flagged,
+			...lint ? { lint } : {},
+			notes
+		};
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+function formatReview(r) {
+	return [
+		`review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${r.cols}×${r.rows} → ${r.image}`.replace(/ {2}/g, " "),
+		...r.flagged.length ? [`flagged (bordered tiles; look here first): ${r.flagged.map((f) => `${f.scene_id}: ${[...new Map(f.findings.map((x) => [x.id, x.severity])).entries()].map(([id, sev]) => `${id} (${sev})`).join(", ")}`).join("; ")}`] : r.lint ? [`no scene-level lint findings (lint ${r.lint.status})`] : [],
+		...r.tiles.some((t) => t.cues) ? [`word cues: ${r.tiles.flatMap((t) => (t.cues ?? []).map((w) => `"${w}" at ${t.time_sec.toFixed(2)}s (tile ${t.index + 1})`)).join(", ")}; check the cued item is appearing on that tile`] : [],
+		"Read the image and check: text fits and is readable, nothing sits under captions or app UI, graphics land when their words are spoken, crops keep faces and subjects, transitions are clean.",
+		...r.notes.map((n) => `note: ${n}`)
+	].join("\n");
+}
+//#endregion
+//#region src/compare.ts
+const round3 = (n) => Math.round(n * 1e3) / 1e3;
+function inside(root, p) {
+	const rel = relative(root, p);
+	return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+async function resolveSide(root, side, which) {
+	if ("file" in side) {
+		const abs = resolve(root, side.file);
+		if (!inside(root, abs)) throw new Error(`${which}.file "${side.file}" is outside the project ${root}; give a project-relative path such as assets/supplied/talk.mp4`);
+		if (!existsSync(abs)) throw new Error(`${which}.file "${side.file}" not found in ${root}`);
+		if (!inside(realpathSync(root), realpathSync(abs))) throw new Error(`${which}.file "${side.file}" resolves outside the project ${root}`);
+		const p = await ffprobe(abs);
+		if (!p.has_video || !p.width || !p.height) throw new Error(`${which}.file "${side.file}" has no video stream`);
+		return {
+			label: side.label ?? basename(abs),
+			path: abs,
+			source: relative(root, abs).split("\\").join("/"),
+			duration_sec: round3(p.duration_s),
+			width: p.width,
+			height: p.height,
+			...p.fps ? { fps: p.fps } : {},
+			has_audio: p.has_audio
+		};
+	}
+	const other = "project_dir" in side ? resolve(root, side.project_dir) : root;
+	const r = await resolveRender(other, side.quality).catch((err) => {
+		throw new Error(`${which}: ${err instanceof Error ? err.message : String(err)}`);
+	});
+	if (side.quality && r.quality && r.quality !== side.quality) throw new Error(`${which}: no ${side.quality} render in ${other}`);
+	const p = await ffprobe(r.reel);
+	const name = other === root ? "" : `${basename(other)} `;
+	return {
+		label: side.label ?? `${name}${r.quality ?? "render"}`,
+		path: r.reel,
+		source: `${name}${r.source}`,
+		duration_sec: round3(p.duration_s || r.duration_ms / 1e3),
+		width: p.width ?? r.width,
+		height: p.height ?? r.height,
+		...p.fps || r.fps ? { fps: p.fps ?? r.fps } : {},
+		has_audio: p.has_audio
+	};
+}
+/** Build qa/compare/ for two videos (default: this project's preview against its final render). */
+async function compareVideos(projectDir, opts = {}) {
+	const paths = projectPaths(projectDir);
+	const root = paths.root;
+	const notes = [];
+	if (!opts.a && !opts.b) {
+		const have = ["preview", "final"].filter((q) => existsSync(join(paths.renders, q, "render-state.json")) || existsSync(join(paths.renders, q, "reel.mp4")));
+		if (have.length < 2) throw new Error(`nothing to compare by default: the default is this project's preview against its final render, and ${have.length ? `only a ${have[0]} render` : "no render"} exists in ${root}. Pass a and b: {quality}, {project_dir, quality?} or {file} (project-relative)`);
+	}
+	const a = await resolveSide(root, opts.a ?? { quality: "preview" }, "a");
+	const b = await resolveSide(root, opts.b ?? { quality: "final" }, "b");
+	if (a.path === b.path) notes.push("both sides are the same video");
+	if (a.label === b.label) {
+		a.label = `A: ${a.label}`;
+		b.label = `B: ${b.label}`;
+	}
+	if (Math.abs(a.duration_sec - b.duration_sec) > .05) notes.push(`durations differ (${a.duration_sec}s vs ${b.duration_sec}s): the shorter side holds its last frame`);
+	if (a.width * b.height !== b.width * a.height) notes.push(`aspect ratios differ (${a.width}x${a.height} vs ${b.width}x${b.height}): the wipe view letterboxes b`);
+	const dir = join(paths.qa, "compare");
+	await rm(dir, {
+		recursive: true,
+		force: true
+	});
+	await mkdir(dir, { recursive: true });
+	const fileA = `a${extname(a.path).toLowerCase() || ".mp4"}`;
+	const fileB = `b${extname(b.path).toLowerCase() || ".mp4"}`;
+	await copyFile(a.path, join(dir, fileA));
+	await copyFile(b.path, join(dir, fileB));
+	const html = join(dir, "index.html");
+	const sideA = {
+		...a,
+		copy: join(dir, fileA)
+	};
+	const sideB = {
+		...b,
+		copy: join(dir, fileB)
+	};
+	await writeFile(html, comparePage({
+		a: {
+			...sideA,
+			file: fileA
+		},
+		b: {
+			...sideB,
+			file: fileB
+		}
+	}));
+	return {
+		html,
+		html_rel: relative(root, html),
+		dir,
+		a: sideA,
+		b: sideB,
+		notes
+	};
+}
+function formatCompare(r) {
+	const side = (k, s) => `${k}: ${s.label} (${s.source}; ${s.width}x${s.height}, ${s.duration_sec}s${s.fps ? `, ${s.fps} fps` : ""}${s.has_audio ? "" : ", no audio"})`;
+	return [
+		`compare page → ${r.html}`,
+		side("a", r.a),
+		side("b", r.b),
+		...r.notes.map((n) => `note: ${n}`),
+		`You can't open a browser from here: give the user this path to open (e.g. \`open "${r.html}"\` on macOS). The folder ${r.dir} is self-contained (page + both videos) and can be zipped and shared. Views: side by side, stacked, wipe; space plays, ←/→ step a frame.`
+	].join("\n");
+}
+const esc = (s) => s.replace(/[&<>"']/g, (c) => ({
+	"&": "&amp;",
+	"<": "&lt;",
+	">": "&gt;",
+	"\"": "&quot;",
+	"'": "&#39;"
+})[c]);
+/** The self-contained page: inline CSS and JS only, videos by relative path. */
+function comparePage(d) {
+	const data = {
+		a: {
+			label: d.a.label,
+			file: d.a.file,
+			duration: d.a.duration_sec,
+			width: d.a.width,
+			height: d.a.height,
+			fps: d.a.fps ?? null
+		},
+		b: {
+			label: d.b.label,
+			file: d.b.file,
+			duration: d.b.duration_sec,
+			width: d.b.width,
+			height: d.b.height,
+			fps: d.b.fps ?? null
+		}
+	};
+	const json = JSON.stringify(data).replace(/</g, "\\u003c");
+	const meta = (s) => `${s.width}×${s.height} · ${s.duration_sec.toFixed(2)}s${s.fps ? ` · ${Math.round(s.fps * 100) / 100} fps` : ""}`;
+	return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compare: ${esc(d.a.label)} vs ${esc(d.b.label)}</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #14171c; --muted: #5d6572; --line: #d9dde3;
+  --accent: #2f6fed; --accent-ink: #ffffff; --stage: #0c0e12; --a: #2f6fed; --b: #d9480f;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1115; --panel: #171a20; --ink: #e8eaee; --muted: #9aa3b1; --line: #2a2f38; --accent: #5b8cff; --accent-ink: #0f1115; --stage: #000000; --a: #5b8cff; --b: #ff8a4c; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 18px; margin: 0 0 12px; font-weight: 600; overflow-wrap: anywhere; }
+.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; }
+.seg button + button { border-left: 1px solid var(--line); }
+button, select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-height: 36px; cursor: pointer; }
+button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stage { background: var(--stage); border-radius: 10px; padding: 8px; }
+.grid { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.stage[data-mode="stacked"] .grid { grid-template-columns: minmax(0, 1fr); }
+.cell { position: relative; min-width: 0; }
+.cell video { display: block; width: 100%; height: auto; max-height: 72vh; object-fit: contain; background: #000; border-radius: 6px; }
+.stage[data-mode="stacked"] .cell video { max-height: 60vh; }
+.tag { position: absolute; top: 6px; left: 6px; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; color: #fff; background: var(--a); pointer-events: none; max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag.b { background: var(--b); }
+.wipe { position: relative; margin: 0 auto; max-height: 72vh; overflow: hidden; border-radius: 6px; background: #000; touch-action: none; user-select: none; }
+.wipe video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.wipe .tag.b { left: auto; right: 6px; }
+.divider { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.4); cursor: ew-resize; }
+.divider::after { content: "⟷"; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 32px; height: 32px; border-radius: 50%; background: #fff; color: #000; display: grid; place-items: center; font-size: 16px; }
+[hidden] { display: none !important; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.scrub { flex: 1 1 100%; display: flex; gap: 10px; align-items: center; }
+.scrub input { flex: 1; min-width: 0; accent-color: var(--accent); }
+.time { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+label.inline { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+.cards { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--a); border-radius: 8px; padding: 10px 12px; }
+.card.b { border-left-color: var(--b); }
+.card strong { display: block; overflow-wrap: anywhere; }
+.card span { color: var(--muted); font-variant-numeric: tabular-nums; }
+.hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+@media (max-width: 560px) {
+  h1 { font-size: 16px; }
+  .stage[data-mode="side"] .grid { gap: 4px; }
+}
+</style>
+</head>
+<body>
+<main>
+<h1>${esc(d.a.label)} <span style="color:var(--muted)">vs</span> ${esc(d.b.label)}</h1>
+<div class="bar">
+  <div class="seg" role="group" aria-label="View">
+    <button type="button" data-mode="side" aria-pressed="true">Side by side</button>
+    <button type="button" data-mode="stacked" aria-pressed="false">Stacked</button>
+    <button type="button" data-mode="wipe" aria-pressed="false">Wipe</button>
+  </div>
+</div>
+<div class="stage" id="stage" data-mode="side">
+  <div class="grid" id="grid">
+    <div class="cell" id="cellA"><video id="va" src="${esc(d.a.file)}" preload="auto" playsinline muted></video><span class="tag">A · ${esc(d.a.label)}</span></div>
+    <div class="cell" id="cellB"><video id="vb" src="${esc(d.b.file)}" preload="auto" playsinline></video><span class="tag b">B · ${esc(d.b.label)}</span></div>
+  </div>
+  <div class="wipe" id="wipe" hidden>
+    <div id="wipeA"></div><div id="wipeB"></div>
+    <span class="tag">A · ${esc(d.a.label)}</span><span class="tag b">B · ${esc(d.b.label)}</span>
+    <div class="divider" id="divider" role="slider" tabindex="0" aria-label="Wipe position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div>
+  </div>
+</div>
+<div class="controls">
+  <div class="scrub">
+    <button type="button" id="play" aria-label="Play">▶</button>
+    <input type="range" id="scrub" min="0" max="1" step="0.001" value="0" aria-label="Position">
+    <span class="time" id="time">0:00.00 / 0:00.00</span>
+  </div>
+  <button type="button" id="back" aria-label="Previous frame">◀ frame</button>
+  <button type="button" id="fwd" aria-label="Next frame">frame ▶</button>
+  <label class="inline">Speed <select id="speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
+  <button type="button" id="muteA" aria-pressed="true">A muted</button>
+  <button type="button" id="muteB" aria-pressed="false">B sound on</button>
+</div>
+<div class="cards">
+  <div class="card"><strong>A · ${esc(d.a.label)}</strong><span id="metaA">${esc(meta(d.a))}</span></div>
+  <div class="card b"><strong>B · ${esc(d.b.label)}</strong><span id="metaB">${esc(meta(d.b))}</span></div>
+</div>
+<p class="hint">Space plays and pauses, ← and → step one frame. Both videos share one clock (the longer one drives it, and the shorter one holds its last frame).</p>
+</main>
+<script>
+(function () {
+  "use strict";
+  var D = ${json};
+  var va = document.getElementById("va"), vb = document.getElementById("vb");
+  var stage = document.getElementById("stage"), grid = document.getElementById("grid"), wipe = document.getElementById("wipe");
+  var cellA = document.getElementById("cellA"), cellB = document.getElementById("cellB");
+  var wipeA = document.getElementById("wipeA"), wipeB = document.getElementById("wipeB"), divider = document.getElementById("divider");
+  var play = document.getElementById("play"), scrub = document.getElementById("scrub"), time = document.getElementById("time");
+  var speed = document.getElementById("speed"), muteA = document.getElementById("muteA"), muteB = document.getElementById("muteB");
+  var fps = D.a.fps || D.b.fps || 30, frame = 1 / fps;
+  var durA = D.a.duration || 0, durB = D.b.duration || 0;
+  var playing = false, t = 0, wipePos = 0.5;
+
+  function total() { return Math.max(durA, durB); }
+  // The longer video drives the clock (A when they match); the other follows, clamped to its own end.
+  function driver() { return durA >= durB ? va : vb; }
+  function follower() { return durA >= durB ? vb : va; }
+  function durOf(v) { return v === va ? durA : durB; }
+  function lastT(v) { return Math.max(0, durOf(v) - frame / 2); }
+  function fmt(s) { s = Math.max(0, s); var m = Math.floor(s / 60), r = s - m * 60; return m + ":" + (r < 10 ? "0" : "") + r.toFixed(2); }
+  function show() {
+    scrub.max = String(total());
+    scrub.value = String(t);
+    time.textContent = fmt(t) + " / " + fmt(total());
+  }
+  function seekOne(v, x) {
+    var c = Math.min(x, lastT(v));
+    if (Math.abs(v.currentTime - c) > 0.001) v.currentTime = c;
+  }
+  function seek(x) {
+    t = Math.min(Math.max(0, x), total());
+    seekOne(va, t); seekOne(vb, t);
+    show();
+  }
+  function pause() {
+    playing = false; va.pause(); vb.pause();
+    play.textContent = "▶"; play.setAttribute("aria-label", "Play");
+    t = driver().currentTime; show();
+  }
+  function start() {
+    if (t >= total() - frame) seek(0);
+    playing = true;
+    play.textContent = "❚❚"; play.setAttribute("aria-label", "Pause");
+    var p = driver().play(); if (p && p.catch) p.catch(function () { pause(); });
+    var f = follower();
+    if (t < lastT(f)) { var q = f.play(); if (q && q.catch) q.catch(function () {}); }
+    requestAnimationFrame(tick);
+  }
+  function tick() {
+    if (!playing) return;
+    var d = driver(), f = follower();
+    t = d.currentTime;
+    var target = Math.min(t, lastT(f));
+    if (t >= lastT(f)) { if (!f.paused) f.pause(); seekOne(f, target); }
+    else {
+      if (f.paused && !d.paused) f.play().catch(function () {});
+      // Re-lock the follower when it drifts more than a frame.
+      if (Math.abs(f.currentTime - target) > Math.max(frame, 0.04)) f.currentTime = target;
+    }
+    show();
+    if (d.ended || d.paused) { pause(); return; }
+    requestAnimationFrame(tick);
+  }
+  function step(n) {
+    if (playing) pause();
+    seek((Math.round(t * fps) + n) / fps);
+  }
+
+  play.addEventListener("click", function () { playing ? pause() : start(); });
+  scrub.addEventListener("input", function () { if (playing) pause(); seek(parseFloat(scrub.value)); });
+  document.getElementById("back").addEventListener("click", function () { step(-1); });
+  document.getElementById("fwd").addEventListener("click", function () { step(1); });
+  speed.addEventListener("change", function () { va.playbackRate = vb.playbackRate = parseFloat(speed.value); });
+  function setMute(v, btn, name, muted) {
+    v.muted = muted;
+    btn.setAttribute("aria-pressed", String(muted));
+    btn.textContent = name + (muted ? " muted" : " sound on");
+  }
+  muteA.addEventListener("click", function () { setMute(va, muteA, "A", !va.muted); });
+  muteB.addEventListener("click", function () { setMute(vb, muteB, "B", !vb.muted); });
+  setMute(va, muteA, "A", true); setMute(vb, muteB, "B", false);
+
+  document.addEventListener("keydown", function (e) {
+    var tag = e.target && e.target.tagName;
+    if (tag === "SELECT" || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target === divider) return;
+    if (e.key === " " || e.key === "k") { if (tag === "BUTTON" && e.key === " ") return; e.preventDefault(); playing ? pause() : start(); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); step(1); }
+  });
+
+  // Durations and sizes from the files themselves, when the browser knows them.
+  function meta(v, which) {
+    if (isFinite(v.duration) && v.duration > 0) { if (which === "a") durA = v.duration; else durB = v.duration; }
+    show();
+    if (which === "a") fitWipe();
+  }
+  va.addEventListener("loadedmetadata", function () { meta(va, "a"); });
+  vb.addEventListener("loadedmetadata", function () { meta(vb, "b"); });
+  va.addEventListener("ended", function () { if (driver() === va) pause(); });
+  vb.addEventListener("ended", function () { if (driver() === vb) pause(); });
+
+  // Views. Wipe overlays B on A and reveals B right of the divider.
+  function fitWipe() {
+    var w = D.a.width || va.videoWidth || 16, h = D.a.height || va.videoHeight || 9;
+    var maxH = window.innerHeight * 0.72, avail = stage.clientWidth - 16;
+    var width = Math.min(avail, maxH * w / h);
+    wipe.style.width = width + "px";
+    wipe.style.height = (width * h / w) + "px";
+  }
+  function setWipe(p) {
+    wipePos = Math.min(1, Math.max(0, p));
+    vb.style.clipPath = stage.dataset.mode === "wipe" ? "inset(0 0 0 " + (wipePos * 100) + "%)" : "";
+    divider.style.left = (wipePos * 100) + "%";
+    divider.setAttribute("aria-valuenow", String(Math.round(wipePos * 100)));
+  }
+  function setMode(m) {
+    stage.dataset.mode = m;
+    document.querySelectorAll(".seg button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.mode === m)); });
+    if (m === "wipe") {
+      wipeA.appendChild(va); wipeB.appendChild(vb);
+      grid.hidden = true; wipe.hidden = false; fitWipe();
+    } else {
+      cellA.insertBefore(va, cellA.firstChild); cellB.insertBefore(vb, cellB.firstChild);
+      grid.hidden = false; wipe.hidden = true;
+    }
+    setWipe(wipePos);
+    // Moving a video element can reset its position: put both back on the shared clock.
+    seek(t);
+    if (playing) { pause(); start(); }
+  }
+  document.querySelectorAll(".seg button").forEach(function (b) { b.addEventListener("click", function () { setMode(b.dataset.mode); }); });
+  var dragging = false;
+  function fromEvent(e) { var r = wipe.getBoundingClientRect(); setWipe((e.clientX - r.left) / r.width); }
+  wipe.addEventListener("pointerdown", function (e) { dragging = true; wipe.setPointerCapture(e.pointerId); fromEvent(e); });
+  wipe.addEventListener("pointermove", function (e) { if (dragging) fromEvent(e); });
+  wipe.addEventListener("pointerup", function () { dragging = false; });
+  wipe.addEventListener("pointercancel", function () { dragging = false; });
+  divider.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowLeft") { e.preventDefault(); setWipe(wipePos - 0.05); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); setWipe(wipePos + 0.05); }
+  });
+  window.addEventListener("resize", function () { if (stage.dataset.mode === "wipe") fitWipe(); });
+  setWipe(0.5);
+  show();
+})();
+<\/script>
+</body>
+</html>
+`;
 }
 //#endregion
 //#region src/templates.ts
@@ -249867,6 +250676,237 @@ async function resolveMusic(bed, projectDir, env = process.env) {
 		bed
 	};
 }
+var RenderLockedError = class extends Error {
+	holder;
+	constructor(holder, lockPath) {
+		super(`another render of this project is running (pid ${holder.pid} on ${holder.host}, ${holder.quality ?? "?"} quality, started ${holder.started_at}); wait for it to finish (job_status), or if it crashed, delete ${lockPath}`);
+		this.holder = holder;
+		this.name = "RenderLockedError";
+	}
+};
+function processAlive(pid) {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (err) {
+		return err.code === "EPERM";
+	}
+}
+function isStale(info, host, now, alive) {
+	if (!info || typeof info.pid !== "number") return true;
+	const age = now.getTime() - Date.parse(info.started_at);
+	if (!Number.isFinite(age) || age > 216e5) return true;
+	return info.host === host && !alive(info.pid);
+}
+async function readLock(path) {
+	try {
+		return JSON.parse(await readFile(path, "utf8"));
+	} catch {
+		return;
+	}
+}
+/** Take the lock at `lockPath`, or throw RenderLockedError. Returns the release function. */
+async function acquireRenderLock(lockPath, quality, deps = {}) {
+	const pid = deps.pid ?? process.pid;
+	const host = deps.host ?? hostname();
+	const now = deps.now ?? (() => /* @__PURE__ */ new Date());
+	const alive = deps.alive ?? processAlive;
+	const info = {
+		pid,
+		host,
+		started_at: now().toISOString(),
+		...quality ? { quality } : {}
+	};
+	await mkdir(dirname(lockPath), { recursive: true });
+	for (let attempt = 0; attempt < 2; attempt++) try {
+		const fh = await open(lockPath, "wx");
+		await fh.writeFile(`${JSON.stringify(info)}\n`);
+		await fh.close();
+		return async () => {
+			const held = await readLock(lockPath);
+			if (held?.pid === pid && held.host === host && held.started_at === info.started_at) await rm(lockPath, { force: true });
+		};
+	} catch (err) {
+		if (err.code !== "EEXIST") throw err;
+		const held = await readLock(lockPath);
+		if (!isStale(held, host, now(), alive)) throw new RenderLockedError(held, lockPath);
+		await rm(lockPath, { force: true });
+	}
+	throw new RenderLockedError(await readLock(lockPath) ?? info, lockPath);
+}
+const ALIGN_VERSION = 1;
+/** Matching key: the cue token (lower case, no surrounding punctuation), `%` spelled out. */
+function key(w) {
+	return cueToken(w.replace(/%/g, " percent")).replace(/\s+/g, "");
+}
+function close(a, b) {
+	if (a === b) return true;
+	if (a.length < 4 || b.length < 4 || Math.abs(a.length - b.length) > 1) return false;
+	let i = 0;
+	let j = 0;
+	let edits = 0;
+	while (i < a.length && j < b.length) {
+		if (a[i] === b[j]) {
+			i++;
+			j++;
+			continue;
+		}
+		if (++edits > 1) return false;
+		if (a.length > b.length) i++;
+		else if (b.length > a.length) j++;
+		else {
+			i++;
+			j++;
+		}
+	}
+	return edits + (a.length - i) + (b.length - j) <= 1;
+}
+/**
+* Re-time `expected` (the script's words with estimated times, scene-local ms) from `heard`
+* (whisper's words, same clock). Longest-common-subsequence matching on normalised words; matched
+* words take whisper's times, the rest are placed between their matched neighbours in proportion to
+* their estimated positions. Output is monotonic and inside [0, durationMs].
+*/
+function alignWords(expected, heard, durationMs) {
+	const n = expected.length;
+	const m = heard.length;
+	if (!n) return {
+		words: [],
+		matched: 0
+	};
+	const ek = expected.map((w) => key(w.word));
+	const hk = heard.map((w) => key(w.word));
+	const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+	for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = ek[i] && close(ek[i], hk[j]) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+	const match = new Array(n).fill(-1);
+	for (let i = 0, j = 0; i < n && j < m;) if (ek[i] && close(ek[i], hk[j]) && dp[i][j] === dp[i + 1][j + 1] + 1) {
+		match[i] = j;
+		i++;
+		j++;
+	} else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
+	else j++;
+	const matched = match.filter((j) => j >= 0).length;
+	const out = expected.map((w) => ({ ...w }));
+	const anchors = [];
+	match.forEach((j, i) => {
+		if (j >= 0) anchors.push({
+			i,
+			start: heard[j].start_ms,
+			end: Math.max(heard[j].start_ms, heard[j].end_ms)
+		});
+	});
+	for (const a of anchors) {
+		out[a.i].start_ms = Math.round(a.start);
+		out[a.i].end_ms = Math.round(a.end);
+	}
+	let i = 0;
+	while (i < n) {
+		if (match[i] >= 0) {
+			i++;
+			continue;
+		}
+		let k = i;
+		while (k < n && match[k] < 0) k++;
+		const prev = anchors.filter((a) => a.i < i).pop();
+		const next = anchors.find((a) => a.i >= k);
+		const lo = prev ? prev.end : 0;
+		const hi = next ? next.start : Math.max(lo, durationMs);
+		const e0 = expected[i].start_ms;
+		const e1 = expected[k - 1].end_ms;
+		const span = Math.max(1, e1 - e0);
+		for (let x = i; x < k; x++) {
+			const s = lo + (expected[x].start_ms - e0) / span * (hi - lo);
+			const e = lo + (expected[x].end_ms - e0) / span * (hi - lo);
+			out[x].start_ms = Math.round(s);
+			out[x].end_ms = Math.round(Math.max(s, e));
+		}
+		i = k;
+	}
+	let t = 0;
+	for (const w of out) {
+		w.start_ms = Math.min(Math.max(w.start_ms, t), durationMs);
+		w.end_ms = Math.min(Math.max(w.end_ms, w.start_ms), durationMs);
+		t = w.start_ms;
+	}
+	return {
+		words: out,
+		matched
+	};
+}
+/** whisper.cpp's binary: WHISPER_CPP_PATH, else whisper-cli / whisper-cpp on PATH. */
+function findWhisperBin(env = process.env) {
+	const override = env.WHISPER_CPP_PATH?.trim();
+	if (override && existsSync(override)) return override;
+	for (const dir of (env.PATH ?? "").split(delimiter).filter(Boolean)) for (const name of ["whisper-cli", "whisper-cpp"]) if (existsSync(join(dir, name))) return join(dir, name);
+}
+/** Align every track whose timings are estimated and that has audio. Others pass through. */
+async function alignVoiceTracks(tracks, o) {
+	const env = o.env ?? process.env;
+	const todo = tracks.filter((t) => t.timing_source === "estimated" && t.audio_path && t.words.length);
+	if (!todo.length) return {
+		tracks: [...tracks],
+		aligned: [],
+		warnings: []
+	};
+	const bin = o.whisperBin ?? findWhisperBin(env);
+	const model = o.model ?? resolveWhisperModel(env);
+	const modelPath = typeof model === "string" ? model : model.exists ? model.path : void 0;
+	if (!bin || !modelPath) return {
+		tracks: [...tracks],
+		aligned: [],
+		skipped: !bin ? "whisper.cpp is not installed" : "the whisper model is not downloaded (transcribe with download_model: true, once)",
+		warnings: []
+	};
+	const transcribe = o.transcribe ?? ((audio, m, b) => whisperTranscribe(audio, {
+		model: m,
+		bin: b,
+		...o.signal ? { signal: o.signal } : {}
+	}));
+	await mkdir(o.cacheDir, { recursive: true });
+	const warnings = [];
+	const aligned = [];
+	const byId = /* @__PURE__ */ new Map();
+	for (const t of todo) {
+		o.signal?.throwIfAborted();
+		const audio = join(o.root, t.audio_path);
+		const cacheKey = sha256Hex(canonicalJson({
+			v: ALIGN_VERSION,
+			audio: await hashFile(audio),
+			words: t.words.map((w) => w.word),
+			model: basename(modelPath),
+			ms: t.duration_ms
+		}));
+		const cacheFile = join(o.cacheDir, `${cacheKey}.json`);
+		let heard;
+		if (existsSync(cacheFile)) heard = await readJson(cacheFile).catch(() => void 0);
+		if (!heard) {
+			try {
+				heard = await transcribe(audio, modelPath, bin);
+			} catch (err) {
+				if (o.signal?.aborted) throw err;
+				warnings.push(`align: ${t.scene_id}: whisper failed (${(err instanceof Error ? err.message : String(err)).slice(0, 200)}); kept estimated timings`);
+				continue;
+			}
+			await writeJsonAtomic(cacheFile, heard);
+		}
+		const r = alignWords(t.words, heard, t.duration_ms);
+		if (r.matched / t.words.length < .5) {
+			warnings.push(`align: ${t.scene_id}: whisper matched only ${r.matched} of ${t.words.length} words; kept estimated timings`);
+			continue;
+		}
+		byId.set(t.scene_id, {
+			...t,
+			words: r.words,
+			timing_source: "aligned"
+		});
+		aligned.push(t.scene_id);
+	}
+	return {
+		tracks: tracks.map((t) => byId.get(t.scene_id) ?? t),
+		aligned,
+		warnings
+	};
+}
 /** Headroom under a bitrate or file-size ceiling (container overhead, VBV overshoot). */
 const LIMIT_HEADROOM = .9;
 const even = (n) => Math.max(2, Math.round(n / 2) * 2);
@@ -250196,6 +251236,14 @@ function defaultRenderers(env, quality, encodePreset) {
 * re-run only redoes what changed. The spec is never modified.
 */
 async function renderProject(projectDir, o = {}) {
+	const release = await acquireRenderLock(join(projectPaths(projectDir).renders, ".render.lock"), o.quality ?? "preview");
+	try {
+		return await renderProjectLocked(projectDir, o);
+	} finally {
+		await release();
+	}
+}
+async function renderProjectLocked(projectDir, o) {
 	const env = o.env ?? process.env;
 	const now = o.now ?? (() => /* @__PURE__ */ new Date());
 	const started_at = now().toISOString();
@@ -250218,6 +251266,7 @@ async function renderProject(projectDir, o = {}) {
 	const brand = brandFile?.brand;
 	const style = spec.style ? await getStyle(findStylesDir(env), spec.style) : void 0;
 	const tokens = resolveTokens$1(brand, {}, style, { language: spec.language });
+	if (brand?.visual?.logo_placement?.position === "none") delete tokens.logo_path;
 	const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
 	const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
 	const brandCaptions = style?.captions || brand?.captions ? {
@@ -250269,6 +251318,27 @@ async function renderProject(projectDir, o = {}) {
 			backends,
 			...signal ? { signal } : {}
 		});
+	}
+	if (narrated && spec.voice.align !== false && voice.tracks.some((t) => t.timing_source === "estimated" && t.audio_path)) {
+		progress({
+			stage: "voice",
+			message: "aligning word timings to the audio"
+		});
+		const al = await alignVoiceTracks(voice.tracks, {
+			root,
+			env,
+			cacheDir: join(resolveDataDir(env).cache, "align"),
+			...signal ? { signal } : {}
+		});
+		warnings.push(...al.warnings);
+		if (al.aligned.length) {
+			voice = {
+				...voice,
+				tracks: al.tracks
+			};
+			await writeJsonAtomic(join(root, voice.tracks_path), al.tracks);
+			voiceReason += `; word timings aligned to the audio with whisper (${al.aligned.length} scene(s))`;
+		} else if (al.skipped) voiceReason += `; word timings estimated (${al.skipped}; with it, captions and cues land exactly)`;
 	}
 	const trackById = new Map(voice.tracks.map((t) => [t.scene_id, t]));
 	const hasAudio = voice.tracks.some((t) => t.audio_path);
@@ -250561,6 +251631,7 @@ async function renderProject(projectDir, o = {}) {
 	}));
 	const burn = burnIn && !!captionFiles?.ass;
 	const assSha = captionFiles?.ass ? sha256Hex(await readFile(captionFiles.ass)) : null;
+	const logo = await planLogo(root, brand, tokens, zones, target, planScenes, bounds, frameMs, warnings);
 	const assemblyKey = sha256Hex(canonicalJson({
 		v: 5,
 		target,
@@ -250583,6 +251654,14 @@ async function renderProject(projectDir, o = {}) {
 		} : null,
 		...useSceneAudio ? { scene_audio: sceneAudioOn ? sceneAudio.key : null } : {},
 		burn,
+		...logo ? { logo: {
+			sha: logo.sha256,
+			x: logo.x,
+			y: logo.y,
+			w: logo.w,
+			h: logo.h,
+			ranges: logo.ranges_ms
+		} } : {},
 		ass: burn ? assSha : null,
 		captions: burn ? assOpts : null,
 		fonts: burn ? fonts.present : null
@@ -250614,6 +251693,7 @@ async function renderProject(projectDir, o = {}) {
 				duration_ms,
 				...transition_in ? { transition_in } : {}
 			})),
+			...logo ? { logo } : {},
 			...audio ? { audio } : {},
 			...sceneAudioOn ? { sceneAudio: {
 				slots: sceneAudio.slots,
@@ -250801,6 +251881,16 @@ async function renderProject(projectDir, o = {}) {
 		...sceneAudio?.sfxState.length ? { sfx: sceneAudio.sfxState } : {},
 		...beatSync ? { beat_sync: beatSync } : {},
 		...cueLog.length ? { cues: cueLog } : {},
+		...logo ? { logo: {
+			path: logo.rel,
+			box: {
+				x: logo.x,
+				y: logo.y,
+				w: logo.w,
+				h: logo.h
+			},
+			scenes: logo.scenes
+		} } : {},
 		background: tokens.color_background,
 		...music ? { music: {
 			ref: music.ref,
@@ -250815,7 +251905,7 @@ async function renderProject(projectDir, o = {}) {
 	};
 	const reelSha = await hashFile(reel);
 	let qa;
-	if (state.qa && state.qa.video_sha256 === reelSha && state.qa.version === 2 && await exists(join(paths.qa, "report.json"))) qa = {
+	if (state.qa && state.qa.video_sha256 === reelSha && state.qa.version === 3 && await exists(join(paths.qa, "report.json"))) qa = {
 		status: state.qa.status,
 		findings: state.qa.findings,
 		report_json: join(paths.qa, "report.json"),
@@ -251284,12 +252374,16 @@ const QA_MAP = {
 };
 async function runQaOn(root, state, reelSha) {
 	const reel = join(root, state.reel);
+	const noSound = !state.voice.has_audio && !state.music && !state.scene_audio;
 	const report = await technicalQa(reel, {
 		width: state.target.width,
 		height: state.target.height,
 		duration_s: state.duration_ms / 1e3,
 		require_audio: true,
-		intended_silence: state.voice_mode === "none" && !state.music && !state.scene_audio,
+		...noSound ? {
+			intended_silence: true,
+			silence_reason: state.voice_mode === "none" ? "silent on purpose (no narration, no music)" : "rendered with the silent voice (no narration audio)"
+		} : {},
 		...state.background ? { background: state.background } : {}
 	});
 	report.video = state.reel;
@@ -251300,12 +252394,9 @@ async function runQaOn(root, state, reelSha) {
 		detail: c.detail,
 		...c.fix ? { fix: c.fix } : {}
 	}));
-	if (!state.voice.has_audio && !state.music && !state.scene_audio) {
-		for (const f of findings) if (f.id === "silence" || f.id === "loudness") f.detail += " (expected: rendered with the silent voice backend)";
-	}
 	const status = QA_MAP[report.status];
 	state.qa = {
-		version: 2,
+		version: 3,
 		status,
 		video_sha256: reelSha ?? await hashFile(reel),
 		checks: report.checks.map((c) => ({
@@ -251908,7 +252999,7 @@ async function lockFromState(root, state, projectId, outputs) {
 			cover: String(3),
 			target_package: String(1),
 			zones: String(2),
-			layout: String(9)
+			layout: String(10)
 		},
 		tools,
 		voice: {
@@ -251946,6 +253037,72 @@ async function loadSpecLoose(root) {
 	const parsed = parseYamlOrJson(VideoSpec, await readFile(specPath, "utf8"));
 	if (!parsed.ok) throw new Error(`project/video-spec.json is no longer valid: ${parsed.errors.map((e) => e.message).join("; ")}`);
 	return { spec: parsed.data };
+}
+/**
+* The brand logo overlay: brand `visual.logo_placement` at a corner puts `visual.logo` in that
+* corner of the content zone (above the caption band for bottom corners) on every scene except end
+* cards, which draw the logo themselves. `end_card_only` (the default) and `none` add no overlay.
+*/
+async function planLogo(root, brand, tokens, zones, target, scenes, bounds, frameMs, warnings) {
+	const placement = brand?.visual?.logo_placement;
+	const pos = placement?.position;
+	if (!pos || pos === "end_card_only" || pos === "none") return void 0;
+	if (!tokens.logo_path) {
+		warnings.push(`brand: logo_placement "${pos}" but brand visual.logo is not set; no logo drawn`);
+		return;
+	}
+	let abs;
+	try {
+		abs = await resolveInsideProject(projectPaths(root), tokens.logo_path);
+	} catch {
+		warnings.push(`brand: logo "${tokens.logo_path}" is outside the project; no logo drawn`);
+		return;
+	}
+	if (!await exists(abs)) {
+		warnings.push(`brand: logo file ${tokens.logo_path} is missing; no logo drawn`);
+		return;
+	}
+	const probe = await ffprobe(abs).catch(() => void 0);
+	if (!probe?.width || !probe.height) {
+		warnings.push(`brand: could not read the logo image ${tokens.logo_path}; no logo drawn`);
+		return;
+	}
+	const c = zones.content;
+	const margin = Math.round(Math.min(target.width, target.height) * .03);
+	let w = Math.round(Math.min((placement?.max_fraction ?? .12) * target.width, c.w * .3));
+	let h = Math.round(w * probe.height / probe.width);
+	const maxH = Math.round(c.h * .12);
+	if (h > maxH) {
+		w = Math.round(w * maxH / h);
+		h = maxH;
+	}
+	w -= w % 2;
+	h -= h % 2;
+	const x = pos.endsWith("left") ? c.x + margin : c.x + c.w - margin - w;
+	const bottomEdge = Math.min(c.y + c.h, zones.caption.y);
+	const y = pos.startsWith("top") ? c.y + margin : bottomEdge - margin - h;
+	const shown = [];
+	const ranges = [];
+	scenes.forEach((s, i) => {
+		if (s.deterministic?.kind === "end_card") return;
+		shown.push(s.id);
+		const a = Math.round(frameMs(bounds[i]));
+		const b = Math.round(frameMs(bounds[i + 1]));
+		const last = ranges[ranges.length - 1];
+		if (last && last[1] === a) last[1] = b;
+		else ranges.push([a, b]);
+	});
+	return {
+		path: abs,
+		rel: toPosix(relative(root, abs)),
+		sha256: await hashFile(abs),
+		x,
+		y,
+		w,
+		h,
+		ranges_ms: ranges,
+		scenes: shown
+	};
 }
 //#endregion
 //#region src/render-jobs.ts
@@ -252178,7 +253335,7 @@ async function variantStatus(root, v) {
 	const lockPath = join(dir, "dist", LOCK_FILE);
 	if (v.status === "failed" && v.error) return v;
 	try {
-		const lock = await readLock(lockPath);
+		const lock = await readLock$1(lockPath);
 		if (lock && lock.spec_sha256 === v.spec_sha256) return {
 			...v,
 			status: "rendered",
@@ -252988,7 +254145,7 @@ function createServer(options = {}) {
 	}));
 	server.registerTool("review", {
 		title: "Review frames of a render",
-		description: "Write an image of <project_dir>'s rendered reel for you to Read and check before handing it over: mode sheet (default; every scene's opening, middle and closing frame), strip (every frame of a span: from_sec/to_sec or one scene; for motion, transitions and word cues) or crop (a region, as fractions of the frame, at full resolution: captions, small text, faces). Tiles are labelled with scene and time. Writes qa/review/<mode>-<quality>[-<scene>].jpg. Returns {image, tiles[{index, time_sec, scene_id, label}], notes}.",
+		description: "Write an image of <project_dir>'s rendered reel for you to Read and check before handing it over: mode sheet (default; every scene's opening, middle and closing frame), strip (every frame of a span: from_sec/to_sec or one scene; for motion, transitions and word cues) or crop (a region, as fractions of the frame, at full resolution: captions, small text, faces). Tiles are labelled with scene and time; tiles of scenes with lint findings get a red (error) or amber (warning) border, and strip tiles show the word cues spoken on them. Writes qa/review/<mode>-<quality>[-<scene>].jpg (and qa/lint.{json,md}). Returns {image, tiles[{index, time_sec, scene_id, label, flags?, severity?, cues?}], flagged[{scene_id, severity, findings}], notes}.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Rendered project folder"),
 			quality: QUALITY.optional().describe("Which render (default: the latest)"),
@@ -253019,6 +254176,48 @@ function createServer(options = {}) {
 	}, safe(async ({ project_dir, ...o }) => {
 		const r = await reviewRender(resolveInputPath(project_dir, cwd()), o);
 		return jsonResult(formatReview(r), r);
+	}));
+	const compareSide = union([
+		object$2({
+			quality: QUALITY,
+			label: string().min(1).optional()
+		}).strict(),
+		object$2({
+			project_dir: string().min(1),
+			quality: QUALITY.optional(),
+			label: string().min(1).optional()
+		}).strict(),
+		object$2({
+			file: string().min(1),
+			label: string().min(1).optional()
+		}).strict()
+	]).describe("{quality} (this project's render), {project_dir, quality?} (another project's render, e.g. a variant or a short) or {file} (a project-relative video, e.g. assets/supplied/talk-tight.mp4); optional label");
+	server.registerTool("compare", {
+		title: "Before/after comparison page",
+		description: "Build a before/after page for two videos of <project_dir> at qa/compare/index.html, with both videos copied next to it as a.mp4/b.mp4 (self-contained: inline CSS/JS, no network; the folder can be zipped and shared). Views: side by side, stacked and wipe (draggable divider); one play/pause, scrubber and time readout drive both in sync, frame step (arrow keys), speed, per-side mute (b audible by default). Default: a = this project's preview render, b = its final render. Returns {html, a: {label, path, duration_sec, width, height}, b}. You cannot open a browser: give the user the path to open.",
+		inputSchema: {
+			project_dir: string().min(1).describe("Project folder (the page is written to its qa/compare/)"),
+			a: compareSide.optional(),
+			b: compareSide.optional()
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async ({ project_dir, a, b }) => {
+		const side = (s) => s && "project_dir" in s ? {
+			...s,
+			project_dir: resolveInputPath(s.project_dir, cwd())
+		} : s;
+		const sa = side(a);
+		const sb = side(b);
+		const r = await compareVideos(resolveInputPath(project_dir, cwd()), {
+			...sa ? { a: sa } : {},
+			...sb ? { b: sb } : {}
+		});
+		return jsonResult(formatCompare(r), r);
 	}));
 	server.registerTool("diff", {
 		title: "Diff two renders",

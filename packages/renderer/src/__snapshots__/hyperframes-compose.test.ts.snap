@@ -178,7 +178,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-scene" class="clip vs-kind-chart" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
 <div class="vs-stack vs-stat">
-<div class="vs-stat-value vs-a vs-scale-in" style="--t:0.1s;--d:0.6s;font-size:324px"><span>40</span><span class="vs-stat-unit">%</span></div>
+<div class="vs-stat-value vs-a vs-scale-in" style="--t:-0.2s;--d:0.6s;font-size:324px"><span>40</span><span class="vs-stat-unit">%</span></div>
 <div class="vs-stat-label vs-a vs-fade-up" style="--t:0.45s;--d:0.5s;font-size:75.6px">faster builds</div>
 </div>
 </div>
@@ -411,7 +411,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-code" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-code-panel vs-a vs-scale-in" style="--t:0s;--d:0.4s" data-language="ts" data-family="js">
+<div class="vs-code-panel vs-a vs-scale-in" style="--t:-0.2s;--d:0.4s" data-language="ts" data-family="js">
 <div class="vs-code-bar"><span></span><span></span><span></span><em>ts</em></div>
 <div class="vs-code" style="font-size:45.36px">
 <div class="vs-a vs-fade" style="--t:0.25s;--d:0.6s"><div class="vs-code-line vs-hl"><span class="vs-ln">1</span><span class="vs-src">npm install x</span></div></div>
@@ -649,7 +649,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div class="vs-safe">
 <div class="vs-stack vs-comparison">
 <div class="vs-compare vs-rows">
-<div class="vs-card vs-left vs-a vs-fade-up" style="--t:0.15s;--d:0.5s"><div class="vs-card-label" style="font-size:39.16px">Before</div><div class="vs-card-text" style="font-size:54px">...</div></div>
+<div class="vs-card vs-left vs-a vs-fade-up" style="--t:-0.2s;--d:0.5s"><div class="vs-card-label" style="font-size:39.16px">Before</div><div class="vs-card-text" style="font-size:54px">...</div></div>
 <div class="vs-card vs-right vs-a vs-fade-up" style="--t:0.4s;--d:0.5s"><div class="vs-card-label" style="font-size:39.16px">After</div><div class="vs-card-text" style="font-size:54px">...</div></div>
 </div>
 <div class="vs-verdict vs-a vs-fade-up" style="--t:0.9s;--d:0.5s;font-size:59.4px">...</div>
@@ -885,7 +885,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-scene" class="clip vs-kind-cta" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
 <div class="vs-stack vs-cta">
-<div class="vs-headline vs-a vs-fade-up" style="--t:0.1s;--d:0.6s;font-size:108px">Try it</div>
+<div class="vs-headline vs-a vs-fade-up" style="--t:-0.2s;--d:0.6s;font-size:108px">Try it</div>
 <div class="vs-action-wrap"><div class="vs-action vs-a vs-pop" style="--t:0.28s;--d:0.6s;font-size:64.8px">Install</div></div>
 <div class="vs-command vs-a vs-fade-up" style="--t:0.46s;--d:0.6s;font-size:48.6px"><span class="vs-prompt">$</span> npm install x</div>
 </div>
@@ -1122,7 +1122,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <svg class="vs-edges" width="936" height="1060" viewBox="0 0 936 1060">
 <path d="M468 349.24 L468 689.16" pathLength="1" stroke="var(--vs-text)" stroke-opacity="0.7" stroke-width="4.86" fill="none" class="vs-a vs-draw" style="--t:0.7s;--d:0.4s"/><polygon points="468,710.76 456.12,689.16 479.88,689.16" fill="var(--vs-text)" fill-opacity="0.7" class="vs-a vs-fade" style="--t:1s;--d:0.2s"/>
 </svg>
-<div class="vs-node" style="left:90px;top:189.4px;width:756px;height:151.2px;font-size:54px"><div class="vs-a vs-scale-in" style="--t:0.15s;--d:0.45s">A</div></div>
+<div class="vs-node" style="left:90px;top:189.4px;width:756px;height:151.2px;font-size:54px"><div class="vs-a vs-scale-in" style="--t:-0.2s;--d:0.45s">A</div></div>
 <div class="vs-node" style="left:90px;top:719.4px;width:756px;height:151.2px;font-size:54px"><div class="vs-a vs-scale-in" style="--t:0.6s;--d:0.45s">B</div></div>
 </div>
 </div>
@@ -1355,7 +1355,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-scene" class="clip vs-kind-end-card" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
 <div class="vs-stack vs-end">
-<div class="vs-headline vs-a vs-scale-in" style="--t:0.15s;--d:0.6s;font-size:118.8px">Name</div>
+<div class="vs-headline vs-a vs-scale-in" style="--t:-0.2s;--d:0.6s;font-size:118.8px">Name</div>
 <div class="vs-subtitle vs-a vs-fade-up" style="--t:0.45s;--d:0.5s;font-size:54px">url</div>
 <div class="vs-rule vs-a vs-grow-x-center" style="--t:0.6s;--d:0.5s"></div>
 </div>
@@ -1590,7 +1590,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-scene" class="clip vs-kind-kinetic-text" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
 <div class="vs-stack vs-kinetic" data-rhythm="word" style="font-size:129.6px">
-<div class="vs-kin-line"><span class="vs-kin-chunk vs-a vs-kin" style="--t:0.15s;--d:0.45s">Docs</span> <span class="vs-kin-chunk vs-a vs-kin" style="--t:0.6s;--d:0.45s">in.</span> <span class="vs-kin-chunk vs-a vs-kin" style="--t:1.05s;--d:0.45s"><span class="vs-em">Video</span></span> <span class="vs-kin-chunk vs-a vs-kin" style="--t:1.5s;--d:0.45s">out.</span></div>
+<div class="vs-kin-line"><span class="vs-kin-chunk vs-a vs-kin" style="--t:-0.2s;--d:0.45s">Docs</span> <span class="vs-kin-chunk vs-a vs-kin" style="--t:0.6s;--d:0.45s">in.</span> <span class="vs-kin-chunk vs-a vs-kin" style="--t:1.05s;--d:0.45s"><span class="vs-em">Video</span></span> <span class="vs-kin-chunk vs-a vs-kin" style="--t:1.5s;--d:0.45s">out.</span></div>
 </div>
 </div>
 </div>
@@ -1822,7 +1822,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-lower-third" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-lt-headline" style="left:0;top:322.02px;width:936px;height:118.8px"><div class="vs-headline vs-a vs-fade-up" style="--t:0.1s;--d:0.6s;font-size:108px">Why we built it</div></div>
+<div class="vs-lt-headline" style="left:0;top:322.02px;width:936px;height:118.8px"><div class="vs-headline vs-a vs-fade-up" style="--t:-0.2s;--d:0.6s;font-size:108px">Why we built it</div></div>
 <div class="vs-lt-pos" style="left:0;top:827.64px;width:936px;height:210.76px"><div class="vs-lt vs-a vs-slide-right" style="--t:0.6s;--d:0.5s">
 <div class="vs-lt-stripe vs-a vs-grow-y" style="--t:0.7s;--d:0.4s;width:15.12px"></div>
 <div class="vs-lt-text" style="padding:32.4px">
@@ -2062,7 +2062,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div class="vs-safe">
 <div class="vs-map-title" style="left:0;top:0;width:936px;height:83.16px"><div class="vs-headline vs-a vs-fade-up" style="--t:0.05s;--d:0.5s;font-size:75.6px">Where it runs</div></div>
 <svg class="vs-map-svg" width="936" height="944.44" viewBox="0 0 936 944.44" style="left:0px;top:115.56px">
-<g class="vs-a vs-scale-in" style="--t:0s;--d:0.5s"><rect x="0" y="0" width="936" height="944.44" rx="32.4" class="vs-map-panel"/>
+<g class="vs-a vs-scale-in" style="--t:-0.2s;--d:0.5s"><rect x="0" y="0" width="936" height="944.44" rx="32.4" class="vs-map-panel"/>
 <line x1="129.6" y1="32.4" x2="129.6" y2="912.04" class="vs-map-grid"/>
 <line x1="259.2" y1="32.4" x2="259.2" y2="912.04" class="vs-map-grid"/>
 <line x1="388.8" y1="32.4" x2="388.8" y2="912.04" class="vs-map-grid"/>
@@ -2315,7 +2315,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-scene" class="clip vs-kind-quote" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
 <div class="vs-stack vs-quote" style="gap:27px">
-<div class="vs-quote-mark vs-a vs-pop" style="--t:0.1s;--d:0.6s;height:129.6px;font-size:259.2px">“</div>
+<div class="vs-quote-mark vs-a vs-pop" style="--t:-0.2s;--d:0.6s;height:129.6px;font-size:259.2px">“</div>
 <div class="vs-quote-text vs-a vs-fade-up" style="--t:0.28s;--d:0.6s;min-height:114.75px;font-size:91.8px">It just works.</div>
 <div class="vs-quote-attr vs-a vs-fade-up" style="--t:0.46s;--d:0.6s;min-height:62.21px;font-size:51.84px">— A user</div>
 <div class="vs-quote-source vs-muted vs-a vs-fade" style="--t:0.64s;--d:0.6s;min-height:49.25px;font-size:41.04px">README</div>
@@ -2550,7 +2550,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-screenshot" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-shot vs-a vs-scale-in" style="--t:0s;--d:0.5s;height:932.13px;font-size:36.72px">
+<div class="vs-shot vs-a vs-scale-in" style="--t:-0.2s;--d:0.5s;height:932.13px;font-size:36.72px">
 <div class="vs-shot-missing">a1</div>
 </div>
 <div class="vs-callouts" style="font-size:36.72px">
@@ -2788,7 +2788,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-split-screen" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-split-pos" style="left:0px;top:0px;width:936px;height:486.8px"><div class="vs-split vs-left vs-before vs-a vs-fade-up" style="--t:0.15s;--d:0.5s"><div class="vs-split-label" style="height:77.89px;font-size:59.4px">Before</div><div class="vs-split-text vs-split-only" style="font-size:64.8px">Manual edits</div></div></div>
+<div class="vs-split-pos" style="left:0px;top:0px;width:936px;height:486.8px"><div class="vs-split vs-left vs-before vs-a vs-fade-up" style="--t:-0.2s;--d:0.5s"><div class="vs-split-label" style="height:77.89px;font-size:59.4px">Before</div><div class="vs-split-text vs-split-only" style="font-size:64.8px">Manual edits</div></div></div>
 <div class="vs-split-pos" style="left:0px;top:573.2px;width:936px;height:486.8px"><div class="vs-split vs-right vs-after vs-a vs-fade-up" style="--t:0.45s;--d:0.5s"><div class="vs-split-label" style="height:77.89px;font-size:59.4px">After</div><div class="vs-split-text vs-split-only" style="font-size:64.8px">One command</div></div></div>
 <svg class="vs-split-arrow" width="77.76" height="77.76" viewBox="0 0 24 24" style="left:429.12px;top:491.12px"><g class="vs-a vs-pop" style="--t:0.6s;--d:0.4s"><circle cx="12" cy="12" r="12" fill="var(--vs-primary)"/><path d="M7 12h9M12.5 7.5L17 12l-4.5 4.5" transform="rotate(90 12 12)" fill="none" stroke="var(--vs-bg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g></svg>
 </div>
@@ -3022,7 +3022,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-scene" class="clip vs-kind-stat" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
 <div class="vs-stack vs-stat" style="gap:32.4px">
-<div class="vs-stat-value vs-a vs-scale-in" style="--t:0.05s;--d:0.5s;min-height:324px;font-size:324px"><span class="vs-count"><span class="vs-a vs-fade" style="--t:1.15s;--d:0.001s">40</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.1s;--d:0.131s">0</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.231s;--d:0.131s">13</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.362s;--d:0.131s">23</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.494s;--d:0.131s">30</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.625s;--d:0.131s">35</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.756s;--d:0.131s">38</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.887s;--d:0.131s">39</span><span class="vs-count-frame vs-a vs-flash" style="--t:1.019s;--d:0.131s">40</span></span><span class="vs-stat-unit">%</span></div>
+<div class="vs-stat-value vs-a vs-scale-in" style="--t:-0.2s;--d:0.5s;min-height:324px;font-size:324px"><span class="vs-count"><span class="vs-a vs-fade" style="--t:1.15s;--d:0.001s">40</span><span class="vs-count-frame vs-a vs-flash" style="--t:-0.2s;--d:0.431s">0</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.231s;--d:0.131s">13</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.362s;--d:0.131s">23</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.494s;--d:0.131s">30</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.625s;--d:0.131s">35</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.756s;--d:0.131s">38</span><span class="vs-count-frame vs-a vs-flash" style="--t:0.887s;--d:0.131s">39</span><span class="vs-count-frame vs-a vs-flash" style="--t:1.019s;--d:0.131s">40</span></span><span class="vs-stat-unit">%</span></div>
 <div class="vs-stat-label vs-a vs-fade-up" style="--t:1.15s;--d:0.5s;min-height:86.94px;font-size:75.6px">faster builds</div>
 <div class="vs-stat-context vs-muted vs-a vs-fade" style="--t:1.4s;--d:0.5s;min-height:58.32px;font-size:48.6px">vs. last release</div>
 </div>
@@ -3256,7 +3256,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-root" data-composition-id="vs-s01" data-start="0" data-duration="3" data-width="1080" data-height="1920" data-fps="30">
 <div id="vs-scene" class="clip vs-kind-timeline" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
-<div class="vs-tl-line vs-a vs-grow-y" style="--t:0.1s;--d:0.86s;left:37.8px;top:176.67px;width:6.48px;height:706.67px"></div>
+<div class="vs-tl-line vs-a vs-grow-y" style="--t:-0.2s;--d:0.86s;left:37.8px;top:176.67px;width:6.48px;height:706.67px"></div>
 <div class="vs-tl-pos" style="left:21.6px;top:157.23px;width:38.88px;height:38.88px"><div class="vs-tl-dot vs-tl-past vs-a vs-pop" style="--t:0.3s;--d:0.6s"></div></div>
 <div class="vs-tl-event vs-tl-past" style="left:114.48px;top:90.27px;width:821.52px;height:172.8px"><div class="vs-a vs-slide-left" style="--t:0.3s;--d:0.6s"><div class="vs-tl-label" style="font-size:64.8px">Ingest</div></div></div>
 <div class="vs-tl-pos" style="left:10.8px;top:499.76px;width:60.48px;height:60.48px"><div class="vs-tl-dot vs-tl-current vs-a vs-pop" style="--t:0.48s;--d:0.6s"></div></div>
@@ -3494,7 +3494,7 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--
 <div id="vs-scene" class="clip vs-kind-typography" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
 <div class="vs-stack vs-typography" style="font-size:118.8px">
-<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line"><span class="vs-em">Key</span> line</span></div>
+<div class="vs-a vs-fade-up" style="--t:-0.2s;--d:0.6s"><span class="vs-line"><span class="vs-em">Key</span> line</span></div>
 </div>
 </div>
 </div>
@@ -3565,7 +3565,7 @@ exports[`buildComposition: style tokens > snapshots one styled scene per core st
 <div id="vs-scene" class="clip vs-kind-typography" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
 <div class="vs-stack vs-typography" style="font-size:118.8px">
-<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.45s"><span class="vs-line"><span class="vs-em">Key</span> Line</span></div>
+<div class="vs-a vs-fade-up" style="--t:-0.2s;--d:0.45s"><span class="vs-line"><span class="vs-em">Key</span> Line</span></div>
 </div>
 </div>
 </div>
@@ -3624,7 +3624,7 @@ exports[`buildComposition: style tokens > snapshots one styled scene per core st
 <div id="vs-scene" class="clip vs-kind-typography" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
 <div class="vs-stack vs-typography" style="font-size:133.06px">
-<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.35s"><span class="vs-line"><span class="vs-em">KEY</span> LINE</span></div>
+<div class="vs-a vs-fade-up" style="--t:-0.175s;--d:0.35s"><span class="vs-line"><span class="vs-em">KEY</span> LINE</span></div>
 </div>
 </div>
 </div>
@@ -3683,7 +3683,7 @@ exports[`buildComposition: style tokens > snapshots one styled scene per core st
 <div id="vs-scene" class="clip vs-kind-typography" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
 <div class="vs-stack vs-typography" style="font-size:104.54px">
-<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.6s"><span class="vs-line"><span class="vs-em">Key</span> line</span></div>
+<div class="vs-a vs-fade-up" style="--t:-0.2s;--d:0.6s"><span class="vs-line"><span class="vs-em">Key</span> line</span></div>
 </div>
 </div>
 </div>
@@ -3742,7 +3742,7 @@ exports[`buildComposition: style tokens > snapshots one styled scene per core st
 <div id="vs-scene" class="clip vs-kind-typography" data-start="0" data-duration="3" data-track-index="0">
 <div class="vs-safe">
 <div class="vs-stack vs-typography" style="font-size:111.67px">
-<div class="vs-a vs-fade-up" style="--t:0.1s;--d:0.16s"><span class="vs-line"><span class="vs-em">Key</span> line</span></div>
+<div class="vs-a vs-fade-up" style="--t:-0.08s;--d:0.16s"><span class="vs-line"><span class="vs-em">Key</span> line</span></div>
 </div>
 </div>
 </div>

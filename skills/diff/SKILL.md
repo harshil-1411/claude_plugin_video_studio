@@ -34,5 +34,9 @@ allowed-tools: mcp__plugin_video-studio_engine__diff Read
 4. Connect the three: for example, frames differ but only a renderer version
    changed, so the change is the renderer, not the content.
 
+To watch the change rather than read about it, the `compare` skill builds
+a before/after page of the same two renders (side by side, stacked or wipe,
+played in sync) for the user to open in a browser.
+
 The full report is in project b's `qa/diff.md` (machine-readable:
 `qa/diff.json`). Diff never changes either project apart from those reports.

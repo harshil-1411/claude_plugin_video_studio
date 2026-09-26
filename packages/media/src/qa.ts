@@ -32,6 +32,8 @@ export interface QaExpectations {
   require_audio?: boolean;
   /** The video is silent on purpose (no narration and no music): silence and loudness pass. */
   intended_silence?: boolean;
+  /** Why it is silent, shown in those checks (default: "silent on purpose (no narration, no music)"). */
+  silence_reason?: string;
   /**
    * Scene background colour (#RRGGBB). Dark themes sit near black, so sparse scenes would read as
    * "black" at blackdetect's default threshold; the threshold is set just below this colour.
@@ -207,8 +209,9 @@ export async function technicalQa(videoPath: string, expect: QaExpectations, opt
     );
   }
   if (probe.has_audio && expect.intended_silence) {
-    checks.push({ id: "silence", status: "ok", detail: "silent on purpose (no narration, no music)" });
-    checks.push({ id: "loudness", status: "ok", detail: "not measured: silent on purpose" });
+    const why = expect.silence_reason ?? "silent on purpose (no narration, no music)";
+    checks.push({ id: "silence", status: "ok", detail: why });
+    checks.push({ id: "loudness", status: "ok", detail: `not measured: ${why}` });
   } else if (probe.has_audio) {
     checks.push(
       det.silence.length === 0

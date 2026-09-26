@@ -330,8 +330,9 @@ export function applyTextCase(text: string, mode: "as_is" | "upper" | "title" | 
  * v7: no exit fade when the style blends scenes (crossfade/slide/zoom/whip); the assembly transition replaces it.
  * v8: kinetic_text phrases split only after punctuation followed by a space (`kineticUnits`, shared with word cues).
  * v9: HyperFrames count-ups use tabular digits, so a wider digit mid-count ("0" before "1") no longer overlaps the unit.
+ * v10: scenes open half-in (the first reveal starts before frame 0, entrance.ts); FFmpeg stat values count up.
  */
-export const LAYOUT_VERSION = 9;
+export const LAYOUT_VERSION = 10;
 
 /**
  * The content-safe rectangle of a target, in px (integers): `zones.content` when the pipeline

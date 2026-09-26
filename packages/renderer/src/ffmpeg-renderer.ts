@@ -36,7 +36,9 @@ import {
 import { type Script, baseDirection, charScript, dominantScript, hasCjk, needsShaping, scriptFontFamilies, scriptsIn, textDirection } from "./script.js";
 import { BUNDLED_FONTS, type FontResolver, assFontSize, createFontResolver, findFontsDir, parseFontChain, prepareLibassFontsDir, readFontMetrics, scriptFirstChain } from "./tokens.js";
 import type { Availability, LayoutZones, MotionTokens, RenderTarget, ResolvedCue, SceneRenderRequest, SceneRenderResult, SceneRenderer, VisualTokens } from "./types.js";
+import { COUNT_UP_ENTRANCE_LEAD_S, countUpSpan, countUpSteps, countUpTiming, withEarlyFirstStep } from "./count-up.js";
 import { countUpWindow, cueItemStarts } from "./cue-timing.js";
+import { openingStart, sameTime } from "./entrance.js";
 import { exitFadeMs } from "./tokens.js";
 
 /**
@@ -60,8 +62,9 @@ export const FFMPEG_RENDERER_ID = "ffmpeg-drawtext";
  * 0.4.0: script fonts for CJK lines; Devanagari/Arabic/Hebrew lines drawn through libass (shaping + bidi).
  * 0.4.1: `scene.motion` (push_in, pull_out, punch, reveal, drift, hold) moves the whole frame.
  * 0.4.2: word cues (`req.cues`) land each reveal item on its spoken word.
+ * 0.5.0: stat values count up (count-up.ts, as in HyperFrames); the first reveal opens the scene half-in (entrance.ts).
  */
-export const FFMPEG_RENDERER_VERSION = "0.4.2";
+export const FFMPEG_RENDERER_VERSION = "0.5.0";
 
 export const FFMPEG_RENDERER_KINDS = [
   "typography",
@@ -126,6 +129,13 @@ interface TextEl {
   item?: number;
   slide?: boolean;
   box?: { color: string; border: number };
+  /**
+   * The final value of a count-up (a stat's numeric value; `text` is its formatted digits): the
+   * intermediate values (count-up.ts) are drawn first, each in its own time slot, and `text` from
+   * the end of the count. Positioned by `cx` (no unit: every string centred there) or `rx` (the
+   * unit starts at `rx`: every string ends at or before it, see `countX`).
+   */
+  count?: number;
 }
 
 interface BoxEl {
@@ -574,7 +584,7 @@ const MAX_BARS = 12;
 function chart(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
   const type = asStr(p.type) ?? "stat";
-  const unit = typeof p.unit === "string" ? p.unit : "";
+  const unit = spacedUnit(typeof p.unit === "string" ? p.unit : "");
   const label = asStr(p.label);
   // `item` is the entry's index in `props.series`: its cue item.
   const rawSeries: unknown[] = Array.isArray(p.series) ? p.series : [];
@@ -934,10 +944,20 @@ function quote(p: Record<string, unknown>, c: Ctx): Layout {
   return { elements: els, warnings };
 }
 
+/**
+ * A unit as written after its number: symbols and short abbreviations attach ("40%", "3x", "10ms"),
+ * word units get a space ("1 package", "5 users").
+ */
+export function spacedUnit(unit: string): string {
+  if (!unit || /^\s/.test(unit)) return unit;
+  return /\s/.test(unit.trim()) || /^\p{L}{3,}/u.test(unit) ? ` ${unit}` : unit;
+}
+
 function stat(p: Record<string, unknown>, c: Ctx): Layout {
   const warnings: string[] = [];
   const raw = p.value;
-  const value = `${typeof raw === "number" ? formatNumber(raw) : (asStr(raw) ?? "")}${typeof p.unit === "string" ? p.unit : ""}`;
+  const unit = spacedUnit(typeof p.unit === "string" ? p.unit : "");
+  const value = `${typeof raw === "number" ? formatNumber(raw) : (asStr(raw) ?? "")}${unit}`;
   const label = asStr(p.label);
   const context = asStr(p.context);
   const gap = r(c.u * 0.035);
@@ -953,7 +973,9 @@ function stat(p: Record<string, unknown>, c: Ctx): Layout {
   const ys = vstack(c.safe, heights, gap);
   const els: El[] = [];
   const vRect: Rect = { x: c.safe.x, y: ys[0]!, w, h: r(vf.height) };
-  els.push(...textLines(vf, vRect, { font: "heading", color: c.colors.primary, beat: 0, item: 0 }));
+  const valueEls = textLines(vf, vRect, { font: "heading", color: c.colors.primary, beat: 0, item: 0 });
+  const counted = typeof raw === "number" && Number.isFinite(raw) && raw !== 0 && valueEls.length === 1 ? countUpEls(valueEls[0]!, raw, unit) : undefined;
+  els.push(...(counted ?? valueEls));
   note(c, c.main, value, vRect, vf, c.colors.primary);
   const barW = r(c.u * 0.14);
   els.push({ type: "box", x: r(c.safe.x + (w - barW) / 2), y: ys[1]!, w: barW, h: barH, color: c.colors.primary, beat: 0.5, item: 0 });
@@ -969,6 +991,40 @@ function stat(p: Record<string, unknown>, c: Ctx): Layout {
     note(c, "body", context!, rect, cf, c.colors.muted);
   }
   return { elements: els, warnings, count_item: 0 };
+}
+
+/**
+ * A stat value that counts up: its digits (with `count`) and its unit as separate elements, so the
+ * unit stays put while the digits change. Without a unit the digits stay centred on the line's
+ * centre. With one, the unit's left edge is a fixed anchor (placed so the estimated whole value is
+ * centred) and the digits end there; undefined when the line cannot be split (it needs libass or a
+ * script font, or is right-aligned).
+ */
+function countUpEls(line: TextEl, value: number, unit: string): TextEl[] | undefined {
+  const digits = formatNumber(value);
+  if (line.cx === undefined || line.text !== digits + unit || textRoute(digits).kind !== "drawtext" || textRoute(digits).script) return undefined;
+  if (!unit) return [{ ...line, count: value }];
+  const anchor = r(line.cx + (estimateTextWidth(digits, line.size) - estimateTextWidth(unit, line.size)) / 2);
+  const { cx: _cx, ...rest } = line;
+  return [
+    { ...rest, text: digits, x: r(anchor - estimateTextWidth(digits, line.size)), rx: anchor, count: value },
+    { ...rest, text: unit, x: anchor },
+  ];
+}
+
+/**
+ * drawtext `x` of a count-up string `text` whose final digits are `final`, for the element's
+ * anchor: centred on `cx`; or, before a unit at `rx`, centred in the final digits' box (its width
+ * estimated from the string's own measured width per character) but never ending past `rx`, so a
+ * wider intermediate ("0" before a narrow "1") cannot reach the unit. A string as long as the
+ * final one ends exactly at `rx`, like the final value.
+ */
+export function countX(el: Pick<TextEl, "cx" | "rx" | "x">, text: string, final: string): string {
+  if (el.cx !== undefined) return `${el.cx}-text_w/2`;
+  if (el.rx === undefined) return String(el.x);
+  const n = Math.max(1, Array.from(text).length);
+  const k = Math.max(1, Math.round(((Array.from(final).length + n) / (2 * n)) * 10000) / 10000);
+  return k === 1 ? `${el.rx}-text_w` : `${el.rx}-text_w*${k}`;
 }
 
 const MAX_TIMELINE_EVENTS = 6;
@@ -1430,6 +1486,11 @@ function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
 
+/** FFmpeg expression for the time since `start` (which may be negative: an opening entrance). */
+function since(start: number): string {
+  return start < 0 ? `t+${-start}` : `t-${start}`;
+}
+
 // ------------------------------------------------------------------------------- scene motion
 
 type Intensity = NonNullable<SceneMotion["intensity"]>;
@@ -1651,10 +1712,30 @@ export interface GraphMotion {
  * Entrance start (seconds) of each element. Without cues: beat × step. With cues, each cue item
  * starts where `cueItemStarts` puts it (its default is its earliest element), and all its
  * elements move with it, keeping their offsets; the count item (a stat's value) instead ends its
- * fade on the word (`countUpWindow` with the fade length). Elements outside any item keep beat × step.
+ * fade on the word (`countUpWindow` with the fade length), or, when it counts up (`countSpan`, the
+ * count's default length), starts just before a count that finishes on the word, as in HyperFrames.
+ * Elements outside any item keep beat × step. Then the opening (entrance.ts): the elements of the
+ * first default reveal that no cue moved start at `openingStart(fade)`, before frame 0.
  */
-export function elementStarts(comp: Pick<Composition, "elements" | "count_item">, step: number, fade: number, cues?: readonly ResolvedCue[]): number[] {
+export function elementStarts(comp: Pick<Composition, "elements" | "count_item">, step: number, fade: number, cues?: readonly ResolvedCue[], countSpan?: number): number[] {
   const base = comp.elements.map((el) => round3(el.beat * step));
+  return openingStarts(comp.elements, base, cuedStarts(comp, base, step, fade, cues, countSpan), cues, fade);
+}
+
+/** The first default reveal (earliest `base`) opens the scene, unless a cue placed or moved it. */
+function openingStarts(elements: readonly El[], base: readonly number[], starts: number[], cues: readonly ResolvedCue[] | undefined, fade: number): number[] {
+  if (!elements.length) return starts;
+  const first = Math.min(...base);
+  const cued = new Set((cues ?? []).map((c) => c.item));
+  const open = openingStart(fade);
+  return starts.map((s, k) => {
+    const el = elements[k]!;
+    const moved = !sameTime(s, base[k]!) || (el.item !== undefined && cued.has(el.item));
+    return !moved && sameTime(base[k]!, first) ? Math.min(s, open) : s;
+  });
+}
+
+function cuedStarts(comp: Pick<Composition, "elements" | "count_item">, base: number[], step: number, fade: number, cues: readonly ResolvedCue[] | undefined, countSpan: number | undefined): number[] {
   if (!cues?.length) return base;
   const n = Math.max(0, ...comp.elements.map((el) => (el.item === undefined ? 0 : el.item + 1)));
   const first: (number | undefined)[] = Array.from({ length: n }, () => undefined);
@@ -1667,7 +1748,9 @@ export function elementStarts(comp: Pick<Composition, "elements" | "count_item">
   const starts = cueItemStarts(defaults, cues, step);
   const ci = comp.count_item;
   const countCue = ci === undefined ? undefined : cues.find((cue) => cue.item === ci);
-  if (countCue && ci! < n) starts[ci!] = countUpWindow(countCue.at_s, fade).start;
+  const counts = countSpan !== undefined && comp.elements.some((el) => el.type === "text" && el.count !== undefined && el.item === ci);
+  if (countCue && ci! < n)
+    starts[ci!] = counts ? round3(Math.max(0, countUpTiming(countSpan, countCue.at_s).at - COUNT_UP_ENTRANCE_LEAD_S)) : countUpWindow(countCue.at_s, fade).start;
   return comp.elements.map((el, k) => (el.item === undefined || el.item >= n ? base[k]! : round3(base[k]! + starts[el.item]! - defaults[el.item]!)));
 }
 
@@ -1676,7 +1759,8 @@ export function buildFilterGraph(comp: Pick<Composition, "elements" | "count_ite
   const maxBeat = Math.max(0, ...comp.elements.map((e) => e.beat));
   const { motion } = gm;
   const { step, fade } = motionTiming(durationS, maxBeat, motion);
-  const starts = elementStarts(comp, step, fade, gm.cues);
+  const countSpan = countUpSpan(durationS);
+  const starts = elementStarts(comp, step, fade, gm.cues, countSpan);
   const slide = Math.max(2, r(Math.min(target.width, target.height) * 0.025));
   const inputs: string[][] = [];
   const textFiles = new Map<string, string>();
@@ -1712,7 +1796,7 @@ export function buildFilterGraph(comp: Pick<Composition, "elements" | "count_ite
 
   for (const [k, el] of comp.elements.entries()) {
     const start = starts[k]!;
-    const progress = `min(1,max(0,(t-${start})/${fade}))`;
+    const progress = `min(1,max(0,(${since(start)})/${fade}))`;
     const ease = easingExpr(motion?.easing, progress);
     const route = el.type === "text" ? textRoute(el.text) : undefined;
     if (route?.kind === "ass" && el.type === "text") {
@@ -1742,29 +1826,52 @@ export function buildFilterGraph(comp: Pick<Composition, "elements" | "count_ite
       );
     } else if (el.type === "text") {
       flushAss();
-      const name = `t${textFiles.size}.txt`;
-      textFiles.set(name, el.text);
       const scriptFile = route?.kind === "drawtext" && route.script ? fonts.scripts?.[route.script]?.[el.font] : undefined;
-      chain.push(
-        f("drawtext", {
-          fontfile: scriptFile ?? fonts[el.font],
-          textfile: join(textDir, name),
-          expansion: "none",
-          fontsize: el.size,
-          fontcolor: ffColor(el.color),
-          x: el.cx !== undefined ? `${el.cx}-text_w/2` : el.rx !== undefined ? `${el.rx}-text_w` : el.x,
-          y: el.slide ? `${el.y}+${slide}*${ease.offset}` : el.y,
-          y_align: "font",
-          alpha: fade > 0 ? ease.alpha : undefined,
-          ...(el.box ? { box: 1, boxcolor: el.box.color, boxborderw: el.box.border } : {}),
-        }),
-      );
+      const draw = (text: string, x: string | number, enable?: string) => {
+        const name = `t${textFiles.size}.txt`;
+        textFiles.set(name, text);
+        chain.push(
+          f("drawtext", {
+            fontfile: scriptFile ?? fonts[el.font],
+            textfile: join(textDir, name),
+            expansion: "none",
+            fontsize: el.size,
+            fontcolor: ffColor(el.color),
+            x,
+            y: el.slide ? `${el.y}+${slide}*${ease.offset}` : el.y,
+            y_align: "font",
+            alpha: fade > 0 ? ease.alpha : undefined,
+            ...(el.box ? { box: 1, boxcolor: el.box.color, boxborderw: el.box.border } : {}),
+            enable,
+          }),
+        );
+      };
+      const x = el.cx !== undefined ? `${el.cx}-text_w/2` : el.rx !== undefined ? `${el.rx}-text_w` : el.x;
+      if (el.count === undefined) draw(el.text, x);
+      else {
+        // Count-up (count-up.ts, the same values and slots as HyperFrames): each value only in its
+        // slot [start, start + len), then the final value; all share the element's entrance.
+        const cue = el.item === comp.count_item ? gm.cues?.find((cu) => cu.item === el.item) : undefined;
+        const timing = countUpTiming(countSpan, cue?.at_s);
+        const count = withEarlyFirstStep(countUpSteps(el.count, timing.at, timing.span), start);
+        for (const st of count.steps) {
+          const text = formatNumber(st.value);
+          draw(text, countX(el, text, el.text), `gte(t,${round3(st.start)})*lt(t,${round3(st.start + st.len)})`);
+        }
+        draw(el.text, x, `gte(t,${round3(count.done)})`);
+      }
     } else {
       flush();
       const idx = inputs.length + 1;
-      inputs.push(["-loop", "1", "-framerate", String(target.fps), "-t", durationS.toFixed(3), "-i", el.path]);
+      // An opening image (start < 0) is fed `early` s longer and fades from its first frame, then
+      // trimmed back to frame 0: the fade filter cannot start before the stream does.
+      const early = start < 0 && fade > 0 ? -start : 0;
+      inputs.push(["-loop", "1", "-framerate", String(target.fps), "-t", (durationS + early).toFixed(3), "-i", el.path]);
       const img = `[i${idx}]`;
-      const fadeF = fade > 0 ? `,${f("fade", { t: "in", st: start, d: fade, alpha: 1 })}` : "";
+      const fadeF =
+        fade > 0
+          ? `,${f("fade", { t: "in", st: Math.max(0, start), d: fade, alpha: 1 })}${early ? `,${f("trim", { start: early })},setpts=PTS-STARTPTS` : ""}`
+          : "";
       chains.push(`[${idx}:v]${f("scale", { w: el.w, h: el.h, flags: "bicubic" })},format=rgba${fadeF}${img}`);
       const out = `[b${label++}]`;
       chains.push(`${cur}${img}${f("overlay", { x: el.x, y: el.y, format: "auto", eof_action: "repeat" })}${out}`);
@@ -1862,12 +1969,17 @@ function assEvent(el: TextEl, fonts: AssTextFonts, scriptFont: AssFont | undefin
   const runs = route.kind === "ass" ? assFontRuns(el.text, route.script) : [{ latin: true, text: el.text }];
   const fontTag = (fnt: AssFont) => `\\fn${fnt.family}\\fs${Math.round(el.size * fnt.scale * 100) / 100}\\b${fnt.bold ? 1 : 0}`;
   const fadeMs = Math.round(t.fade * 1000);
+  // An opening entrance (start < 0) is already `done` of the way in at the event's start (0).
+  const doneMs = t.start < 0 ? Math.min(fadeMs, Math.round(-t.start * 1000)) : 0;
+  const p0 = fadeMs > 0 ? doneMs / fadeMs : 1;
   // libass hangs the baseline at the tallest run's win ascent below the top; drawtext (and the
   // layout) at the font's hhea ascender. Lift the line so the baselines agree.
   const winAsc = Math.max(...runs.map((run) => (run.latin ? latin : script).winAscent));
   const y = Math.round(el.y - (winAsc - script.ascent) * el.size);
-  const move = t.slide > 0 && fadeMs > 0 ? `\\move(${x},${y + t.slide},${x},${y},0,${fadeMs})` : `\\pos(${x},${y})`;
-  const head = `{\\an${an}${move}${fadeMs > 0 ? `\\fad(${fadeMs},0)` : ""}\\1c${assTagColour(el.color)}\\bord${el.box ? el.box.border : 0}${el.box ? assBoxTags(el.box.color) : ""}}`;
+  const restMs = fadeMs - doneMs;
+  const move = t.slide > 0 && restMs > 0 ? `\\move(${x},${Math.round(y + t.slide * (1 - p0))},${x},${y},0,${restMs})` : `\\pos(${x},${y})`;
+  const fadeTag = restMs <= 0 ? "" : doneMs > 0 ? `\\fade(${Math.round(255 * (1 - p0))},0,0,0,${restMs},${restMs},${restMs})` : `\\fad(${fadeMs},0)`;
+  const head = `{\\an${an}${move}${fadeTag}\\1c${assTagColour(el.color)}\\bord${el.box ? el.box.border : 0}${el.box ? assBoxTags(el.box.color) : ""}}`;
   const body = runs.map((run) => `{${fontTag(run.latin ? latin : script)}}${assLiteral(run.text)}`).join("");
   return `Dialogue: 0,${assTime(t.start)},${assTime(t.end)},${el.box ? "Box" : "Text"},,0,0,0,,${head}${body}`;
 }

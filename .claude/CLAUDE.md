@@ -16,6 +16,7 @@ Phases 0–2 are done: ingestion → ContentIR, then planning (templates in `tem
 
 ## Commands
 
+- `pnpm check` runs every check before a push (typecheck, tests, bundle + stale-bundle check, smoke, both plugin validations, golden frames; `--quick` = typecheck + tests); `pnpm hooks` makes it the pre-push hook (the user runs it: the sandbox can't write `.git/config`).
 - `pnpm install`, `pnpm typecheck` (`tsc -b`), `pnpm test` (vitest; on a busy machine run one package: `npx vitest run packages/mcp`).
 - `pnpm schemas`: regenerate `schemas/*.schema.json` from zod.
 - `pnpm bundle`: build the engine into `dist/mcp.mjs` (committed; the plugin runs it). If pnpm tries to reinstall first (offline/sandbox), run `npx tsc -b && cd packages/mcp && ../../node_modules/.bin/tsdown`. `pnpm smoke` spawns it, checks the tool list and runs `ingest` on local fixtures.

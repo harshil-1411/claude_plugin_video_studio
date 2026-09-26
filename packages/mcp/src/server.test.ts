@@ -113,6 +113,7 @@ describe("MCP server (in-memory)", () => {
       "adapt",
       "analyze",
       "brief_validate",
+      "compare",
       "demo",
       "diff",
       "doctor",

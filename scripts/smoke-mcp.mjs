@@ -18,6 +18,7 @@ const expected = [
   "adapt",
   "analyze",
   "brief_validate",
+  "compare",
   "demo",
   "diff",
   "doctor",

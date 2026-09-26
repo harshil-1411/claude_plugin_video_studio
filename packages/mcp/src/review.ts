@@ -5,12 +5,15 @@ import { projectPaths } from "@video-studio/core";
 import { escapeFilterOption, escapeFilterPath, escapeFiltergraph, runFfmpeg } from "@video-studio/media";
 import { findFontsDir } from "@video-studio/renderer";
 import { type Quality, resolveRender } from "./golden.js";
+import { type LintFinding, type LintSeverity, lintProject } from "./lint.js";
 
 /**
  * review: images of a finished render for Claude to look at before handing it over. A contact
  * sheet (each scene's opening, middle and closing frame), a strip (every frame of a stretch, for
  * motion, transitions and word cues) or crops (full-resolution detail of one region). Each tile is
- * labelled with its scene and time. Read-only apart from qa/review/.
+ * labelled with its scene and time. Tiles of scenes with lint findings get a coloured border (red:
+ * error, amber: warning) and strip tiles show the word cues spoken on them, so Claude knows where
+ * to look first. Read-only apart from qa/review/ and the qa/lint.{json,md} the lint pass writes.
  */
 
 export type ReviewMode = "sheet" | "strip" | "crop";
@@ -38,6 +41,28 @@ export interface ReviewTile {
   time_sec: number;
   scene_id?: string;
   label: string;
+  /** Lint finding ids for this tile's scene (deduplicated, errors first); the tile has a border. */
+  flags?: string[];
+  /** The worst severity among `flags`: red border for error, amber for warning. */
+  severity?: LintSeverity;
+  /** Word cues spoken nearest this frame (strip mode), also drawn on the tile. */
+  cues?: string[];
+}
+
+/** One scene with lint findings, for the result's `flagged` list. */
+export interface ReviewFlag {
+  scene_id: string;
+  severity: LintSeverity;
+  findings: Array<{ id: string; severity: LintSeverity; message: string }>;
+}
+
+/** A word cue as the render state records it (pipeline RenderState.cues; at_ms is scene-local). */
+export interface ReviewCue {
+  scene_id: string;
+  word: string;
+  item: number;
+  at_ms?: number;
+  status: string;
 }
 
 export interface ReviewResult {
@@ -53,6 +78,10 @@ export interface ReviewResult {
   tile_width: number;
   /** Tiles in reading order (left to right, top to bottom). */
   tiles: ReviewTile[];
+  /** Scenes in the image with lint findings, errors first: look at these tiles first. */
+  flagged: ReviewFlag[];
+  /** The lint pass behind the flags (absent when lint could not run; see notes). */
+  lint?: { status: "pass" | "warn" | "fail"; errors: number; warnings: number; report_md: string };
   notes: string[];
 }
 
@@ -65,6 +94,81 @@ interface Span {
   id: string;
   start: number;
   end: number;
+}
+
+const BORDER_COLOR: Record<LintSeverity, string> = { error: "0xE5484D", warning: "0xF5A524" };
+
+/**
+ * Group scene-level lint findings (plus the render's unplaced word cues, when lint did not already
+ * report them) by scene, errors first within a scene and across scenes; `order` sorts ties.
+ */
+export function flagScenes(findings: readonly LintFinding[], cues: readonly ReviewCue[] = [], order: readonly string[] = []): ReviewFlag[] {
+  const all = findings.filter((f) => f.scene_id).map((f) => ({ scene_id: f.scene_id!, id: f.id, severity: f.severity, message: f.message }));
+  for (const c of cues) {
+    if (c.status === "placed") continue;
+    if (all.some((f) => f.scene_id === c.scene_id && f.id === "cue_unmatched" && f.message.includes(`"${c.word}"`))) continue;
+    all.push({ scene_id: c.scene_id, id: "cue_unmatched", severity: "warning", message: `cue "${c.word}" (item ${c.item}) was ${c.status === "late" ? "spoken after the scene ends" : "not found in the spoken words"}` });
+  }
+  const byScene = new Map<string, ReviewFlag>();
+  for (const f of all) {
+    const flag = byScene.get(f.scene_id) ?? { scene_id: f.scene_id, severity: "warning" as LintSeverity, findings: [] };
+    flag.findings.push({ id: f.id, severity: f.severity, message: f.message });
+    if (f.severity === "error") flag.severity = "error";
+    byScene.set(f.scene_id, flag);
+  }
+  const rank = (s: LintSeverity) => (s === "error" ? 0 : 1);
+  const pos = (id: string) => (order.includes(id) ? order.indexOf(id) : order.length);
+  const out = [...byScene.values()];
+  for (const f of out) f.findings.sort((a, b) => rank(a.severity) - rank(b.severity));
+  return out.sort((a, b) => rank(a.severity) - rank(b.severity) || pos(a.scene_id) - pos(b.scene_id));
+}
+
+/** Mark tiles with their scene's flags (finding ids deduplicated, errors first). */
+export function applyFlags(tiles: ReviewTile[], flags: readonly ReviewFlag[]): void {
+  for (const t of tiles) {
+    const f = t.scene_id ? flags.find((x) => x.scene_id === t.scene_id) : undefined;
+    if (!f) continue;
+    t.flags = [...new Set(f.findings.map((x) => x.id))];
+    t.severity = f.severity;
+  }
+}
+
+/**
+ * Attach each placed word cue to the tile nearest the moment its word is spoken (scene start +
+ * at_ms), skipping cues outside the tiles' span (by more than a frame).
+ */
+export function applyCues(tiles: ReviewTile[], cues: readonly ReviewCue[], spans: ReadonlyArray<{ id: string; start: number }>, frame: number): void {
+  if (!tiles.length) return;
+  const first = tiles[0]!.time_sec;
+  const last = tiles[tiles.length - 1]!.time_sec;
+  for (const c of cues) {
+    if (c.status !== "placed" || c.at_ms === undefined) continue;
+    const span = spans.find((s) => s.id === c.scene_id);
+    if (!span) continue;
+    const at = span.start + c.at_ms / 1000;
+    if (at < first - frame || at > last + frame) continue;
+    let best = tiles[0]!;
+    for (const t of tiles) if (Math.abs(t.time_sec - at) < Math.abs(best.time_sec - at)) best = t;
+    best.cues = [...(best.cues ?? []), c.word];
+  }
+}
+
+/** The tile's video filter tail: a border when flagged, its label, and a second line for cues. */
+export function tileDecor(tile: Pick<ReviewTile, "label" | "severity" | "cues">, width: number, font: string | undefined): string {
+  const labelSize = Math.max(11, Math.round(width / 14));
+  const border = Math.max(3, Math.round(width / 40));
+  const parts: string[] = [];
+  if (tile.severity) parts.push(`drawbox=x=0:y=0:w=iw:h=ih:color=${BORDER_COLOR[tile.severity]}:t=${border}`);
+  if (font) {
+    const text = (t: string) => escapeFiltergraph(escapeFilterOption(t));
+    const inset = tile.severity ? border + 2 : 4;
+    const common = `fontfile=${escapeFilterPath(font)}:fontsize=${labelSize}:boxborderw=${Math.round(labelSize / 3)}`;
+    parts.push(`drawtext=${common}:text=${text(tile.label)}:fontcolor=white:box=1:boxcolor=black@0.6:x=${inset}:y=${inset}`);
+    if (tile.cues?.length) {
+      parts.push(`drawtext=${common}:text=${text(`cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`)}:fontcolor=black:box=1:boxcolor=0xFFD60A@0.9:x=${inset}:y=h-th-${inset + Math.round(labelSize / 3)}`);
+    }
+  }
+  return parts.length ? `,${parts.join(",")}` : "";
 }
 
 export async function reviewRender(projectDir: string, opts: ReviewOptions = {}): Promise<ReviewResult> {
@@ -151,19 +255,38 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
   await mkdir(work, { recursive: true });
   const fontsDir = findFontsDir();
   const font = fontsDir ? join(fontsDir, "Inter", "Inter-Bold.ttf") : undefined;
-  const labelSize = Math.max(11, Math.round(width / 14));
+  const haveFont = Boolean(font && existsSync(font));
 
   const out: ReviewTile[] = tiles.map((x, i) => {
     const scene_id = sceneAt(x.time);
     const label = [scene_id, x.tag, `${round3(x.time).toFixed(2)}s`].filter(Boolean).join(" ");
     return { index: i, time_sec: round3(x.time), ...(scene_id ? { scene_id } : {}), label };
   });
+
+  // Lint the same render and flag the tiles of scenes with findings. Lint problems never break review.
+  const cues = (r.state as { cues?: ReviewCue[] } | undefined)?.cues ?? [];
+  let findings: LintFinding[] = [];
+  let lint: ReviewResult["lint"];
+  if (!r.quality) {
+    notes.push("lint skipped: cannot tell this render's quality, so tiles are not flagged");
+  } else {
+    try {
+      const l = await lintProject(r.root, { quality: r.quality });
+      findings = l.findings;
+      lint = { status: l.status, errors: l.counts.errors, warnings: l.counts.warnings, report_md: relative(r.root, l.report_md) };
+      const general = findings.filter((f) => !f.scene_id).length;
+      if (general) notes.push(`${general} lint finding(s) not tied to a scene (targets, captions, cover, post copy): see ${lint.report_md}`);
+    } catch (err) {
+      notes.push(`lint failed, so tiles are only flagged for unplaced cues: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  const inImage = new Set(out.map((x) => x.scene_id).filter(Boolean));
+  const flagged = flagScenes(findings, mode === "strip" ? [] : cues, spans.map((s) => s.id)).filter((f) => inImage.has(f.scene_id));
+  applyFlags(out, flagged);
+  if (mode === "strip") applyCues(out, cues, spans, frame);
   try {
     for (const [i, tile] of out.entries()) {
-      const draw =
-        font && existsSync(font)
-          ? `,drawtext=fontfile=${escapeFilterPath(font)}:text=${escapeFiltergraph(escapeFilterOption(tile.label))}:fontsize=${labelSize}:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=${Math.round(labelSize / 3)}:x=4:y=4`
-          : "";
+      const draw = tileDecor(tile, width, haveFont ? font : undefined);
       // Input-side seek is accurate when re-encoding and much faster than decoding from the start.
       // A seek onto the reel's final frame can come back empty: step back a frame at a time.
       const png = join(work, `${String(i + 1).padStart(4, "0")}.png`);
@@ -177,7 +300,8 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
       }
       if (!existsSync(png)) throw new Error(`no frame at ${tile.time_sec}s in ${r.reel}`);
     }
-    if (!font || !existsSync(font)) notes.push("bundled fonts not found: tiles are unlabelled; use the tiles list for times");
+    for (const tile of out) if (tile.cues) tile.label += ` cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`;
+    if (!haveFont) notes.push("bundled fonts not found: tiles are unlabelled; use the tiles list for times");
     const name = `${mode}-${r.quality ?? "render"}${opts.scene ? `-${opts.scene}` : ""}.jpg`;
     const image = join(outDir, name);
     await runFfmpeg(
@@ -194,6 +318,8 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
       rows,
       tile_width: width,
       tiles: out,
+      flagged,
+      ...(lint ? { lint } : {}),
       notes,
     };
   } finally {
@@ -204,6 +330,16 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
 export function formatReview(r: ReviewResult): string {
   const lines = [
     `review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${r.cols}×${r.rows} → ${r.image}`.replace(/ {2}/g, " "),
+    ...(r.flagged.length
+      ? [
+          `flagged (bordered tiles; look here first): ${r.flagged.map((f) => `${f.scene_id}: ${[...new Map(f.findings.map((x) => [x.id, x.severity])).entries()].map(([id, sev]) => `${id} (${sev})`).join(", ")}`).join("; ")}`,
+        ]
+      : r.lint
+        ? [`no scene-level lint findings (lint ${r.lint.status})`]
+        : []),
+    ...(r.tiles.some((t) => t.cues)
+      ? [`word cues: ${r.tiles.flatMap((t) => (t.cues ?? []).map((w) => `"${w}" at ${t.time_sec.toFixed(2)}s (tile ${t.index + 1})`)).join(", ")}; check the cued item is appearing on that tile`]
+      : []),
     "Read the image and check: text fits and is readable, nothing sits under captions or app UI, graphics land when their words are spoken, crops keep faces and subjects, transitions are clean.",
     ...r.notes.map((n) => `note: ${n}`),
   ];

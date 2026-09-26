@@ -1,0 +1,4 @@
+#!/bin/sh
+# Runs every check before a push (there is no CI). Enable once with: pnpm hooks
+# Skip in an emergency with: git push --no-verify
+exec node scripts/check.mjs --push

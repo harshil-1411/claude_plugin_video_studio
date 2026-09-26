@@ -39,8 +39,9 @@ export const FOOTAGE_RENDERER_ID = "ffmpeg-footage";
  * 0.2.0: crops baked-in letterbox bars (media.content_box) before the fit.
  * 0.2.1: `scene.motion` moves the fitted picture; on stills it replaces the Ken Burns.
  * 0.2.2: word cues (`req.cues`) time the overlay's reveal items.
+ * 0.3.0: overlays open half-in (entrance.ts) and stat values count up, as in the FFmpeg renderer 0.5.0.
  */
-export const FOOTAGE_RENDERER_VERSION = "0.2.2";
+export const FOOTAGE_RENDERER_VERSION = "0.3.0";
 
 /** Deterministic kinds drawn over footage. Others are ignored with a warning. */
 export const FOOTAGE_OVERLAY_KINDS = ["lower_third", "kinetic_text", "typography", "quote", "stat"] as const satisfies readonly DeterministicKind[];

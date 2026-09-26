@@ -148,6 +148,12 @@ points). Call `brief_validate {project_dir}` and fix every error before going on
      (`references/visual-strategy.md`, "Word cues"): the stat's number,
      each timeline step, the second half of a comparison appear as they
      are said. 1–4 cues per scene, on words in its voiceover.
+   - **Brand rules** (brand.yaml, when present): avoid everything in
+     `visual.forbidden` (e.g. "zoom transitions", "kinetic text": lint
+     `brand_forbidden` checks transitions, motion, kinds and
+     visual_requirements). With `visual.logo_placement` at a corner, the logo
+     is drawn in that corner on every scene but the end card: keep headlines
+     and labels clear of it (lint `logo_overlap`).
    - With `voice.mode: "none"`: every `voiceover` stays `""`, words go on
      screen within each scene's `word_budget`, numbers still need
      `claim_refs` (`references/script-writing.md`, "No voiceover").

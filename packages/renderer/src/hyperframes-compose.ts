@@ -1,7 +1,9 @@
 import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type DeterministicKind, type SceneMotion, type TextBox, type TextRole, cueItems, propsText } from "@video-studio/schema";
+import { type CountUp, countUpSpan, countUpSteps, countUpTiming, COUNT_UP_ENTRANCE_LEAD_S, withEarlyFirstStep } from "./count-up.js";
 import { countUpWindow, cueItemStarts } from "./cue-timing.js";
+import { openingStart, sameTime } from "./entrance.js";
 import { sceneMotionParams } from "./ffmpeg-renderer.js";
 import { codeLabel, escapeHtml, highlightLines, languageFamily } from "./hyperframes-highlight.js";
 import { type Script, baseDirection, dominantScript, htmlLang, languageScript, scriptsIn } from "./script.js";
@@ -188,6 +190,13 @@ const ENTRANCES = new Set(["fade", "fade-up", "scale-in", "pop", "pop-center", "
  */
 let activeMotion: MotionTokens | undefined;
 
+/**
+ * Scene opening of the composition being built (set per build like activeMotion): entrances that
+ * start at `at`, the scene's earliest default entrance start, start before frame 0
+ * (`openingStart`, see entrance.ts), unless a word cue placed them (`cued`, filled by cueStarts).
+ */
+let activeOpening: { at: number; cued: number[] } | undefined;
+
 /** Entrance timing: `n` staggered items, all finished by ~60% of the scene. */
 function stagger(n: number, dur: number, first = 0.1): { at: (i: number) => number; len: number; step: number } {
   if (activeMotion) {
@@ -207,9 +216,36 @@ function entranceLen(effect: string, len: number): number {
   return activeMotion && ENTRANCES.has(effect) ? Math.max(0.05, activeMotion.enter_ms / 1000) : len;
 }
 
+/**
+ * Where an entrance at `at` actually starts: an entrance of the scene's first default reveal
+ * starts before frame 0 (entrance.ts); every other start is unchanged.
+ */
+function openAt(effect: string, at: number, len: number): number {
+  const o = activeOpening;
+  const same = (a: number, b: number) => sameTime(Number(fmtSec(a)), Number(fmtSec(b)));
+  if (!o || !ENTRANCES.has(effect) || !same(at, o.at) || o.cued.some((c) => same(c, at))) return at;
+  return Math.min(at, openingStart(entranceLen(effect, len)));
+}
+
+/** Earliest entrance start (`--t`) in built scene content: the scene's first reveal. */
+function firstEntrance(html: string): number | undefined {
+  let first: number | undefined;
+  for (const m of html.matchAll(/[" ]vs-a vs-([a-z-]+)" style="--t:(-?[\d.]+)s/g)) {
+    if (ENTRANCES.has(m[1]!)) first = Math.min(first ?? Infinity, Number(m[2]));
+  }
+  return first;
+}
+
+/** Record a start a word cue placed (it is never pulled into the opening). */
+function markCued(at: number): number {
+  activeOpening?.cued.push(at);
+  return at;
+}
+
 /** Attributes for an animated element. Only computed numbers reach the style attribute. */
 function anim(effect: string, at: number, len: number, cls = "", style = ""): string {
   if (activeMotion && ENTRANCES.has(effect)) len = Math.max(0.05, activeMotion.enter_ms / 1000);
+  at = openAt(effect, at, len);
   const c = `${cls ? `${cls} ` : ""}vs-a vs-${effect}`;
   return `class="${c}" style="--t:${fmtSec(at)}s;--d:${fmtSec(len)}s${style ? `;${style}` : ""}"`;
 }
@@ -313,7 +349,8 @@ function cueStarts(ctx: KindCtx, shown: readonly number[], defaults: readonly nu
     return defaults[k < 0 ? defaults.length - 1 : k] ?? 0;
   });
   const out = cueItemStarts(full, ctx.cues, step);
-  return shown.map((i) => out[i]!);
+  const cued = new Set(ctx.cues.map((c) => c.item));
+  return shown.map((i) => (cued.has(i) ? markCued(out[i]!) : out[i]!));
 }
 
 /** Spoken time (scene-local s) of the first cue on `item`, if any. */
@@ -508,7 +545,7 @@ function renderChart(ctx: KindCtx): string {
     // A cued value (the only item) lands on its word: its entrance ends there, like a count-up;
     // the label keeps its offset after the value.
     const cue = cueAt(ctx, 0);
-    const valueAt = cue === undefined ? 0.1 : countUpWindow(cue, entranceLen("scale-in", 0.6)).start;
+    const valueAt = cue === undefined ? 0.1 : markCued(countUpWindow(cue, entranceLen("scale-in", 0.6)).start);
     const labelAt = cue === undefined ? 0.45 : valueAt + 0.35;
     return [
       `<div class="vs-stack vs-stat">`,
@@ -1029,18 +1066,9 @@ function renderQuote(ctx: KindCtx): string {
     .join("\n");
 }
 
-/** Count-up frames for a numeric value: each shows only inside its own time window. */
-function countUp(value: number, at: number, span: number, frames = 8): { frames: string; done: number } {
-  const decimals = Number.isInteger(value) ? 0 : Math.min(2, (String(value).split(".")[1] ?? "").length);
-  const scale = 10 ** decimals;
-  const dt = span / frames;
-  const out: string[] = [];
-  for (let k = 0; k < frames; k++) {
-    const f = 1 - (1 - k / frames) ** 3;
-    const v = Math.round(value * f * scale) / scale;
-    out.push(`<span ${anim("flash", at + k * dt, dt, "vs-count-frame")}>${esc(fmtNumber(v))}</span>`);
-  }
-  return { frames: out.join(""), done: at + span };
+/** Count-up frames for a numeric value (count-up.ts): each shows only inside its own time window. */
+function countUpFrames(count: CountUp): string {
+  return count.steps.map((s) => `<span ${anim("flash", s.start, s.len, "vs-count-frame")}>${esc(fmtNumber(s.value))}</span>`).join("");
 }
 
 function renderStat(ctx: KindCtx): string {
@@ -1064,17 +1092,18 @@ function renderStat(ctx: KindCtx): string {
   if (context && con) rec(ctx, "label", context, { y: ys[lab ? 2 : 1], w: safe.w, h: con.h }, con.fit, mutedHex(ctx));
   // Numbers count up to their value (discrete frames, a pure function of time); text values pop in.
   // A cued number's count-up finishes on its word (the entrance keeps its lead on the count).
-  const span = Math.max(0.4, Math.min(1.2, stage.dur * 0.35));
   const counts = numeric !== undefined && numeric !== 0;
   const valueCue = cueAt(ctx, 0);
-  const win = counts && valueCue !== undefined ? countUpWindow(valueCue, span) : undefined;
-  const count = counts ? countUp(numeric!, win ? win.start : 0.1, win ? win.end - win.start : span) : undefined;
-  const digits = count
-    ? `<span class="vs-count"><span ${anim("fade", count.done, 0.001)}>${esc(value)}</span>${count.frames}</span>`
-    : `<span>${esc(value)}</span>`;
+  const timing = counts ? countUpTiming(countUpSpan(stage.dur), valueCue) : undefined;
+  let count = timing ? countUpSteps(numeric!, timing.at, timing.span) : undefined;
   // Items: the value, then the label (the context keeps its offset from the label).
   const [cuedValueAt, labelAt] = cueStarts(ctx, [0, 1], [0.05, count ? Math.min(count.done, stage.dur * 0.5) : 0.45], 0.4) as [number, number];
-  const valueAt = win ? Math.max(0, win.start - 0.05) : cuedValueAt;
+  const valueAt = timing && valueCue !== undefined ? markCued(Math.max(0, timing.at - COUNT_UP_ENTRANCE_LEAD_S)) : cuedValueAt;
+  // An opening value shows its first count frame from its (early) entrance on.
+  if (count) count = withEarlyFirstStep(count, openAt("scale-in", valueAt, 0.5));
+  const digits = count
+    ? `<span class="vs-count"><span ${anim("fade", count.done, 0.001)}>${esc(value)}</span>${countUpFrames(count)}</span>`
+    : `<span>${esc(value)}</span>`;
   return [
     `<div class="vs-stack vs-stat" style="gap:${px(gap)}">`,
     `<div ${anim("scale-in", valueAt, 0.5, `vs-stat-value`, `min-height:${px(valueH)};font-size:${px(vfit.fs)}`)}>${digits}${unit ? `<span class="vs-stat-unit">${esc(unit)}</span>` : ""}</div>`,
@@ -1874,25 +1903,34 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
   let content: string;
   const cues = (opts.cues ?? req.cues)?.length ? (opts.cues ?? req.cues) : undefined;
   const cueCss: string[] = [];
+  const kindCtx = (): KindCtx => ({
+    stage,
+    props: det.props ?? {},
+    warnings,
+    asset: addAsset,
+    resolveAsset,
+    logo,
+    main,
+    colors,
+    boxes,
+    head,
+    ...(cues ? { cues } : {}),
+    cueCount: cues ? cueItems(det.kind, det.props ?? {}).length : 0,
+    css: cueCss,
+  });
   activeMotion = t.motion;
   try {
-    content = render({
-      stage,
-      props: det.props ?? {},
-      warnings,
-      asset: addAsset,
-      resolveAsset,
-      logo,
-      main,
-      colors,
-      boxes,
-      head,
-      ...(cues ? { cues } : {}),
-      cueCount: cues ? cueItems(det.kind, det.props ?? {}).length : 0,
-      css: cueCss,
-    });
+    // The opening (entrance.ts) is the earliest entrance of the default, cue-less timing: measure
+    // it with a throwaway build, then build for real.
+    const warned = warnings.length;
+    const plain = render({ ...kindCtx(), warnings: [], asset: (_abs, name) => name, boxes: [], cues: undefined, cueCount: 0, css: [] });
+    warnings.length = warned;
+    const first = firstEntrance(plain);
+    activeOpening = first === undefined ? undefined : { at: first, cued: [] };
+    content = render(kindCtx());
   } finally {
     activeMotion = undefined;
+    activeOpening = undefined;
   }
   // Exit: the scene content fades out over the style's exit_ms at the end of the clip.
   const exitS = t.motion ? Math.min(exitFadeMs(t.motion) / 1000, dur * 0.2) : 0;

@@ -34,9 +34,9 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 
 Since the loop (2026-09-26): scene transitions, natural macOS voices with `voice.rate_wpm`, `tighten`, camera moves (`scene.motion`), lint timing and story checks (`caption_too_brief`, `caption_sync`, `caption_gap`, `cut_off_beat`, `onscreen_too_brief`, `story_structure`), `skills/plan/references/storytelling.md`, and the narrated hero video. Details are in "Loop state" below.
 
-- **Checks (all green at the latest commit):** 836 tests pass, 5 skipped (env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1` need outside the sandbox; `VS_TEST_GOLDEN=1` runs anywhere and passes), smoke, both `plugin validate --strict`.
-- **MCP tools (27):** adapt, analyze, brief_validate, demo, diff, doctor, export, ingest, job_status, lint, localize, project_init, qa_run, render_submit, review, schema_get, shorts, spec_scaffold, spec_validate, storyboard_render, template_get, template_list, test, tighten, transcribe, variants, verify.
-- **Skills (20):** adapt, analyze, create, demo, diff, doctor, export, ingest, lint, localize, plan, qa, render, review, shorts, test, tighten, validate, variants, verify.
+- **Checks (all green at the latest commit, `pnpm check`):** 873 tests pass, 5 skipped (env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1` need outside the sandbox; `VS_TEST_GOLDEN=1` runs anywhere and passes), smoke, both `plugin validate --strict`.
+- **MCP tools (28):** adapt, analyze, brief_validate, compare, demo, diff, doctor, export, ingest, job_status, lint, localize, project_init, qa_run, render_submit, review, schema_get, shorts, spec_scaffold, spec_validate, storyboard_render, template_get, template_list, test, tighten, transcribe, variants, verify.
+- **Skills (21):** adapt, analyze, compare, create, demo, diff, doctor, export, ingest, lint, localize, plan, qa, render, review, shorts, test, tighten, validate, variants, verify.
 - **Agents:** source-researcher, creative-director.
 
 ## What Phase 4 has built so far
@@ -166,6 +166,16 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
   - **Polish:** scene video transitions; natural voices (Premium/Enhanced picked automatically, `voice.rate_wpm`, default 160, doctor `system_voice`); the narrated hero video (`examples/readme-hero`); local `.html` ingest.
   - **New:** HyperFrames 0.8.78, and `tighten` (pauses, fillers and retakes → a new `<asset>-tight`).
   - **Hero video re-rendered (2026-09-26):** the narrated `docs/media/hero.mp4` captions "LLM" as one word; the voice spells it out through brand `language.terminology`.
+  - **Improvements 1–9 (2026-09-26):**
+    1. **Exact voice timings:** `voice-align.ts` runs local whisper on estimated tracks (system TTS). Matched words take whisper's times; the others are interpolated between them. The result is cached in `<plugin data>/cache/align`. Opt out with `voice.align: false`. It runs only when whisper.cpp and the model are installed (the model is never downloaded implicitly). Checked on JFK with an even-spread estimate: "ask not" moved from 2.5 s to 3.3 s, the real pause.
+    2. **ffmpeg count-up:** shared `count-up.ts` gives the same 8 steps as HyperFrames, with a fixed unit. `spacedUnit` spaces word units ("12 packages") and keeps symbols attached ("40%").
+    3. **No empty scene openings:** `entrance.ts` starts the first reveal early, at −min(entrance/2, 0.2 s), so frame 0 is about half in. Cued items are never pulled early. Versions: ffmpeg 0.5.0, footage 0.3.0, `LAYOUT_VERSION` 10. Goldens were re-recorded after checking by eye.
+    4. **Brand rules:** `visual.logo_placement` at a corner overlays the logo at assembly (`overlayLogo`; content-zone corner, above the caption band, `max_fraction` default 0.12) on every scene but end cards. `none` drops the logo everywhere. Lint adds `logo_overlap` and `brand_forbidden` (text match on transition, motion, kind and visual_requirements).
+    5. **Render lock:** `renders/.render.lock` (`render-lock.ts`) allows one render per project across processes. A lock is stale when its pid is dead on the same host, or after 6 h.
+    6. **`pnpm check`:** `scripts/check.mjs` runs everything and stops at the first failure. `--quick` runs only typecheck and tests. `--push` (used by `.githooks/pre-push`) also fails on a stale committed bundle. `pnpm hooks` enables the hook; the user runs it, since the sandbox can't write `.git/config`.
+    7. **Silent previews:** silence and loudness are reported as "not measured" instead of warnings (`QA_VERSION` 3).
+    8. **`compare` tool and skill:** `qa/compare/index.html` is a self-contained page with side-by-side, stacked and wipe views, synced playback and frame stepping.
+    9. **`review` flags:** tiles of scenes with lint findings get red or amber borders, and the result has a `flagged` list. Strips label the tile where each cue's word is spoken.
   - **From JohnHeibel/ClaudeAnimationBase (2026-09-26, ideas only):**
     - The `review` tool and skill (`packages/mcp/src/review.ts`) write `qa/review/<mode>-<quality>[-<scene>].jpg`: `sheet` (each scene's in/mid/out), `strip` (every frame of a span, up to 48) or `crop` (a region as fractions of the frame). Tiles are labelled with the bundled Inter. The render skill now reviews before presenting (new step 4), and the create skill reviews before QA.
     - The storytelling reference gained a "Time the reads" section, and plan step 6.4 lists each scene's reads.
@@ -295,11 +305,11 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
 
 1. **TikTok contract not re-verified.** Re-check `platform-specs/tiktok.yaml` against developers.tiktok.com and bump `contract_version`/`verified`.
 2. ~~Deprecated caption helpers~~: already removed.
-3. **Brand v2 fields not used yet:** `logo_placement` and `forbidden` (no lint check yet). `motion` and `weights` are used (`packages/renderer/src/tokens.ts`).
+3. ~~Brand v2 fields not used yet~~: all used now (`logo_placement` overlay, `forbidden` lint, `motion`/`weights` in tokens).
 4. **HyperFrames 404.** HyperFrames logs a non-blocking 404 for one resource, probably a favicon or font lookup. Re-check now that fonts are embedded.
-5. **QA noise in silent mode.** Silent-voice renders report `silence`/`loudness` warnings in `qa/report.md`; they are labelled "expected" only in `job_status`.
-6. **No render lock.** There is no cross-process lock, so two Claude sessions could render at the same time.
-7. **Scenes open empty.** Scenes fade in from an empty first frame (Phase 5 motion work).
+5. ~~QA noise in silent mode~~: silent-voice renders report silence and loudness as not measured (`QA_VERSION` 3).
+6. ~~No render lock~~: `renders/.render.lock` (see `render-lock.ts`).
+7. ~~Scenes open empty~~: the first reveal is half in at frame 0 (`entrance.ts`).
 8. **Spec vs. actual timing.** The render plan lengthens scenes to fit the voiceover and records `timing_adjustments`; the spec is left unchanged by design.
 9. **Lockfile:** refreshed by the user on 2026-09-25 (`0958554`); 2 harmless orphan `@secretlint/node` entries remain.
 10. **Warnings.** Node prints an `ExperimentalWarning` for `node:sqlite`. It is harmless.

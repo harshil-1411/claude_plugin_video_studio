@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TextBox } from "@video-studio/schema";
 import { describe, expect, it } from "vitest";
-import { type LintFinding, checkCues, checkCutaways, contrastRatio, lintProject } from "./lint.js";
+import { type LintFinding, checkCues, checkCutaways, checkForbidden, checkLogo, contrastRatio, lintProject } from "./lint.js";
 
 const FIXTURE = join(import.meta.dirname, "__fixtures__", "lint", "tiktok-low-captions");
 
@@ -460,5 +460,35 @@ describe("cutaway rhythm", () => {
     expect(out.map((f) => f.scene_id)).toEqual(["s1", "s3"]);
     expect(out[0]!.message).toMatch(/inside the hook's first second.*lasts 2s/);
     expect(out[1]!.message).toMatch(/lasts 12s.*only 1s of the speaker/);
+  });
+});
+
+describe("brand logo and forbidden treatments", () => {
+  it("warns when text sits under the corner logo (captions excluded)", () => {
+    const out: LintFinding[] = [];
+    const box = (role: string, x: number, y: number) => ({ role, text: "t", rect: { x, y, w: 200, h: 80 }, font_px: 40, truncated: false }) as never;
+    checkLogo(
+      { logo: { path: "assets/logo.png", box: { x: 900, y: 60, w: 120, h: 60 }, scenes: ["s01", "s02"] } },
+      [
+        { scene_id: "s01", box: box("headline", 850, 80) },
+        { scene_id: "s01", box: box("caption", 850, 80) },
+        { scene_id: "s02", box: box("body", 100, 800) },
+        { scene_id: "s03", box: box("headline", 850, 80) },
+      ],
+      out,
+    );
+    expect(out.map((f) => `${f.id}:${f.scene_id}`)).toEqual(["logo_overlap:s01"]);
+    expect(out[0]!.message).toMatch(/overlaps the headline text box/);
+  });
+
+  it("flags scenes that use a forbidden treatment", () => {
+    const out: LintFinding[] = [];
+    const scenes = [
+      { id: "s01", transition: "zoom", motion: { pattern: "push_in" }, deterministic: { kind: "kinetic_text", props: {} }, visual_requirements: { style_notes: "soft drop shadows on cards" } },
+      { id: "s02", transition: "cut", visual_requirements: {} },
+    ] as unknown as VideoSpec["scenes"];
+    checkForbidden({ scenes } as VideoSpec, { visual: { forbidden: ["drop shadow", "zoom transitions", "Kinetic text", "gradients"] } } as never, out);
+    expect(out.map((f) => f.message.match(/uses "(.+?)"/)![1])).toEqual(["drop shadow", "zoom transitions", "Kinetic text"]);
+    expect(out.every((f) => f.scene_id === "s01")).toBe(true);
   });
 });

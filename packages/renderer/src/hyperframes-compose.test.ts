@@ -1,6 +1,7 @@
 import { runInNewContext } from "node:vm";
 import { DETERMINISTIC_PROPS_EXAMPLES, type DeterministicKind, type MotionPattern, type Scene, cueItems, kineticUnits } from "@video-studio/schema";
 import { CUE_LEAD_S } from "./cue-timing.js";
+import { openingStart } from "./entrance.js";
 import { layoutZones } from "@video-studio/platforms";
 import { describe, expect, it } from "vitest";
 import { buildComposition, cameraMarkup, compositionIdFor, fmtNumber, HYPERFRAMES_KINDS, kineticChunks, layerNodes, sanitizeFontChain } from "./hyperframes-compose.js";
@@ -406,7 +407,7 @@ describe("buildComposition: Phase 5 kinds", () => {
     expect(word.match(/class="vs-kin-chunk /g)).toHaveLength(4);
     expect(word).toContain('<span class="vs-em">Video</span>');
     expect(word).toContain('<span class="vs-em">out</span>.');
-    const times = [...word.matchAll(/vs-kin" style="--t:([\d.]+)s/g)].map((m) => Number(m[1]));
+    const times = [...word.matchAll(/vs-kin" style="--t:(-?[\d.]+)s/g)].map((m) => Number(m[1]));
     expect(times).toEqual([...times].sort((a, b) => a - b));
     expect(new Set(times).size).toBe(4);
     const phrase = buildComposition(req("kinetic_text", { text: "Docs in. Video out.", rhythm: "phrase" })).html;
@@ -494,10 +495,13 @@ describe("buildComposition: style tokens", () => {
     expect(html).toMatch(/\.vs-typography, [^{]*\.vs-headline[^{]*\{ font-weight: 800; \}/);
     expect(html).toContain("#vs-root { font-weight: 500; }");
     expect(html).toContain("animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1)");
-    const starts = [...html.matchAll(/vs-fade-up" style="--t:([\d.]+)s;--d:([\d.]+)s/g)].map((m) => [Number(m[1]), Number(m[2])]);
+    const starts = [...html.matchAll(/vs-fade-up" style="--t:(-?[\d.]+)s;--d:([\d.]+)s/g)].map((m) => [Number(m[1]), Number(m[2])]);
     expect(starts).toHaveLength(3);
     expect(starts.map(([, d]) => d)).toEqual([0.35, 0.35, 0.35]);
-    expect(Math.round((starts[1]![0]! - starts[0]![0]!) * 1000)).toBe(70);
+    expect(Math.round((starts[2]![0]! - starts[1]![0]!) * 1000)).toBe(70);
+    // The first line opens the scene: it starts half its entrance before frame 0.
+    expect(starts[0]![0]).toBe(openingStart(0.35));
+    expect(starts[0]![0]).toBe(-0.175);
     expect(html).toContain(">ONE</span>");
   });
 
@@ -676,7 +680,7 @@ describe("buildComposition: scene motion", () => {
 describe("buildComposition: word cues", () => {
   /** `--t` (s) of each element whose class attribute starts with `cls`, in document order. */
   const times = (html: string, cls: string): number[] =>
-    [...html.matchAll(new RegExp(`class="${cls}[^"]*" style="--t:([\\d.]+)s`, "g"))].map((m) => Number(m[1]));
+    [...html.matchAll(new RegExp(`class="${cls}[^"]*" style="--t:(-?[\\d.]+)s`, "g"))].map((m) => Number(m[1]));
   const cued = (kind: DeterministicKind, props: Record<string, unknown>, cues: ResolvedCue[], over: Partial<SceneRenderRequest> = {}) =>
     buildComposition(req(kind, props, { cues, ...over }, 6)).html;
   const lead = (at: number) => Math.round((at - CUE_LEAD_S) * 1000) / 1000;
@@ -694,14 +698,15 @@ describe("buildComposition: word cues", () => {
   it("typography: the cued line enters CUE_LEAD_S before its word, later lines follow in order", () => {
     const html = cued("typography", { lines: ["One", "Two", "Three"] }, [{ item: 1, at_s: 2 }]);
     const t = times(html, "vs-a vs-fade-up");
-    expect(t[0]).toBe(0.1);
+    // The uncued first line opens the scene (entrance.ts); the cued one keeps its cue time.
+    expect(t[0]).toBe(openingStart(0.6));
     expect(t[1]).toBe(lead(2));
     expect(t[2]).toBeGreaterThan(t[1]!);
   });
 
   it("typography: item indexes count props.lines, including lines the renderer skips", () => {
     const html = cued("typography", { lines: ["One", " ", "Three"] }, [{ item: 2, at_s: 2 }]);
-    expect(times(html, "vs-a vs-fade-up")).toEqual([0.1, lead(2)]);
+    expect(times(html, "vs-a vs-fade-up")).toEqual([openingStart(0.6), lead(2)]);
   });
 
   it("timeline: cued event dot and text land on the word; uncued earlier events keep the stagger", () => {
@@ -721,7 +726,7 @@ describe("buildComposition: word cues", () => {
   it("comparison: right card and verdict follow their cues; an uncued verdict waits for the right card", () => {
     const props = { left: { label: "A", text: "a" }, right: { label: "B", text: "b" }, verdict: "B wins" };
     const html = cued("comparison", props, [{ item: 1, at_s: 2 }]);
-    expect(times(html, "vs-card vs-left")).toEqual([0.15]);
+    expect(times(html, "vs-card vs-left")).toEqual([openingStart(0.5)]);
     expect(times(html, "vs-card vs-right")).toEqual([lead(2)]);
     expect(times(html, "vs-verdict")[0]).toBe(Math.round((lead(2) + 0.25) * 1000) / 1000);
     expect(times(cued("comparison", props, [{ item: 2, at_s: 4 }]), "vs-verdict")).toEqual([lead(4)]);
@@ -754,7 +759,10 @@ describe("buildComposition: word cues", () => {
     expect(times(html, "vs-stat-label")[0]!).toBeGreaterThanOrEqual(2 - CUE_LEAD_S);
     const label = cued("stat", { value: 1234, label: "users" }, [{ item: 1, at_s: 3 }]);
     expect(times(label, "vs-stat-label")).toEqual([lead(3)]);
-    expect(times(label, "vs-count-frame")[0]).toBe(0.1);
+    // The uncued value opens the scene: its first count frame shows from its early entrance.
+    expect(times(label, "vs-stat-value")).toEqual([openingStart(0.5)]);
+    expect(times(label, "vs-count-frame")[0]).toBe(openingStart(0.5));
+    expect(times(label, "vs-count-frame")[1]).toBe(0.25);
   });
 
   it("kinetic_text: chunks are exactly kineticUnits and the cued unit lands on its word", () => {

@@ -886,3 +886,44 @@ describe("sound-event cues (pure)", () => {
     expect(isSoundCue({ word: "hello", scene_id: "s01" })).toBe(false);
   });
 });
+
+describe("brand logo placement", () => {
+  /** The RGB of one pixel of the reel at `atS`. */
+  async function pixel(video: string, atS: number, x: number, y: number): Promise<[number, number, number]> {
+    const out = join(tmp, `px-${Date.now()}-${Math.random().toString(36).slice(2)}.rgb`);
+    await runFfmpeg(["-y", "-ss", atS.toFixed(3), "-i", video, "-frames:v", "1", "-an", "-vf", `format=rgb24,crop=1:1:${x}:${y}`, "-f", "rawvideo", "-pix_fmt", "rgb24", out]);
+    const b = await readFile(out);
+    return [b[0]!, b[1]!, b[2]!];
+  }
+
+  it(
+    "draws the logo in the chosen corner on every scene but the end card, and lint stays quiet",
+    async () => {
+      const s: VideoSpec = structuredClone(spec);
+      s.scenes[2] = { ...s.scenes[2]!, deterministic: { kind: "end_card", props: { title: "Thanks" } } };
+      const dir = await makeProject("brand-logo", s);
+      await mkdir(join(dir, "assets"), { recursive: true });
+      await runFfmpeg(["-y", "-f", "lavfi", "-i", "color=c=0xFF0000:s=200x100", "-frames:v", "1", join(dir, "assets", "logo.png")]);
+      await writeFile(
+        join(dir, "brand.yaml"),
+        "version: 2\nbrand:\n  name: Test\nvisual:\n  fonts: { heading: Inter, body: Inter }\n  palette: { primary: '#22AA55' }\n  logo: assets/logo.png\n  logo_placement: { position: top_right, max_fraction: 0.2 }\n",
+      );
+      const r = await renderProject(dir, opts());
+      const state = JSON.parse(await readFile(join(dir, "renders", "preview", "render-state.json"), "utf8"));
+      expect(state.logo).toMatchObject({ path: "assets/logo.png", scenes: ["s01", "s02"] });
+      const { x, y, w, h } = state.logo.box;
+      expect(w).toBe(36); // 20% of 180 px
+      expect(x + w).toBeLessThanOrEqual(180);
+      const cx = x + Math.floor(w / 2);
+      const cy = y + Math.floor(h / 2);
+      const [red, green] = await pixel(r.dist.reel, 0.5, cx, cy);
+      expect(red).toBeGreaterThan(200);
+      expect(green).toBeLessThan(60);
+      // The end card draws the logo itself (centred), not in the corner.
+      const [red3] = await pixel(r.dist.reel, 2.5, cx, cy);
+      expect(red3).toBeLessThan(150);
+      expect(r.warnings.filter((m) => m.startsWith("brand:"))).toEqual([]);
+    },
+    T,
+  );
+});

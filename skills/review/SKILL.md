@@ -15,7 +15,11 @@ an image of labelled frames (scene id, `in`/`mid`/`out`, time) to
 ## 1. Contact sheet first
 
 `mcp__plugin_video-studio_engine__review {project_dir}` (the latest render;
-`quality` to choose). Check each scene:
+`quality` to choose). Review runs lint on the same render first: tiles of
+scenes with findings get a red (error) or amber (warning) border, and the
+result's `flagged` list names each scene's findings (e.g. `s03:
+text_overflow (error)`). **Look at the flagged tiles first** and confirm
+each finding by eye; then check every scene:
 
 - **Text:** fits its box, readable at phone size, nothing cut off, no stray
   characters (e.g. a number glued to its unit).
@@ -31,8 +35,10 @@ an image of labelled frames (scene id, `in`/`mid`/`out`, time) to
 
 - `mode: "strip", scene: "<id>"`: every frame of that scene. Use it for
   motion (`push_in`, `punch`, `reveal`), transitions, count-ups, and word
-  cues: a cued item should appear as its word is spoken (compare with the
-  word times in `renders/<quality>/captions/captions.json`). A long span is
+  cues: a cued item should appear as its word is spoken. The strip labels
+  the tile nearest each placed cue with `cue "<word>"` (also in the tile's
+  `cues`); check the item is appearing on that tile. Unplaced cues show up
+  as `cue_unmatched` flags. A long span is
   sampled evenly up to 48 frames; narrow it with `from_sec`/`to_sec` for
   every frame.
 - `mode: "crop", crop: {x, y, w, h}` (fractions of the frame) with `times`:
@@ -46,4 +52,5 @@ terms (shorter `on_screen_text`, a different `motion`, `footage.focus`, a
 cue on a later word). When the user asked you to fix things (or you are in
 the render or create flow), edit the spec, re-render (only changed scenes
 re-render) and review again. Don't claim a render looks right without
-having Read the image.
+having Read the image. To let the user watch two versions (preview and
+final, or before and after a fix) in sync, suggest the `compare` skill.

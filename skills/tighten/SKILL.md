@@ -24,3 +24,7 @@ allowed-tools: mcp__plugin_video-studio_engine__tighten mcp__plugin_video-studio
 5. Next: `shorts` or a talking-head / silent-vlog spec on `<asset>-tight`.
    Suggest watching the tightened clip once: word-timing cuts are precise to
    whisper's timestamps, and a rare cut can clip the edge of a word.
+   For a video, the `compare` skill builds a before/after page for that:
+   `a: {file: <the original's project-relative path>}` against
+   `b: {file: <the path tighten returned, source/assets/<asset>-tight.mp4>}`,
+   played in sync, so the user can hear each cut against the original.

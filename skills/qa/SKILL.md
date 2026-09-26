@@ -14,7 +14,8 @@ allowed-tools: mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_
    `quality: "final"` or `"preview"` to pick a render; default is the latest).
 3. Report the status (`pass`, `warn`, `fail`) and each finding as
    `id: detail`, with its fix. Context:
-   - `silence` / `loudness` warnings are expected when the voice was silent.
+   - With the silent voice (or `voice.mode: none` and no music), silence and
+     loudness are reported as not measured, never as warnings.
    - `frozen_frames` is expected for static motion-graphic scenes.
    - `duration`, `resolution`, `aspect`, `black_frames` or `audio_stream`
      failures mean the reel is not ready: suggest re-rendering (cached work is

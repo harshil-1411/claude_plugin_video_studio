@@ -13,7 +13,10 @@
     "typecheck": "tsc -b",
     "schemas": "pnpm --filter @video-studio/schema run emit",
     "bundle": "pnpm --filter @video-studio/mcp run bundle",
-    "smoke": "node scripts/smoke-mcp.mjs"
+    "smoke": "node scripts/smoke-mcp.mjs",
+    "check": "node scripts/check.mjs",
+    "check:quick": "node scripts/check.mjs --quick",
+    "hooks": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",

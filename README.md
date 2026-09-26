@@ -121,11 +121,11 @@ flowchart LR
 | **Inputs** | Markdown, text, PDF, DOCX, PPTX, web pages, local repos, video and audio files, folders of clips |
 | **Templates (18)** | explain · educational · listicle · faceless-listicle · product-launch · devtool-launch · product-demo · product-ui · case-study · before-after · carousel-story · animated-explainer · text-over-music · talking-head · aesthetic-broll · silent-vlog · oddly-satisfying · ambient-slice-of-life |
 | **Scene kinds (15)** | typography · code · chart · stat · diagram · timeline · comparison · split_screen · quote · kinetic_text · lower_third · map · screenshot · cta · end_card, plus real footage with text overlays |
-| **Voice** | macOS `say` (automatically picks an installed Premium/Enhanced voice) or espeak-ng, ElevenLabs (optional key), no voice (text over music), or the speech already in your footage; pace set with `voice.rate_wpm` (default 160) |
+| **Voice** | macOS `say` (automatically picks an installed Premium/Enhanced voice; with local whisper installed its word timings are aligned to the audio, so captions and cues land exactly) or espeak-ng, ElevenLabs (optional key), no voice (text over music), or the speech already in your footage; pace set with `voice.rate_wpm` (default 160) |
 | **Audio** | 4 bundled CC0 music beds (ducked under speech), beat-synced cuts, native clip sound, crossfades, sound effects, −14 LUFS with true-peak headroom |
 | **Footage** | Crop, contain or blurred-pad fits, trim and speed, text overlays, automatic removal of baked-in letterbox bars, and `redact` regions to blur inboxes, names or dashboards in screen recordings; cutaways from a talking head to a graphic while the speaker keeps talking |
 | **Captions** | 3–7 word phrases on plates, placed clear of each platform's UI, with keyword emphasis and sound-event cues like `[music]` |
-| **Looks** | Style packs (minimal, editorial, technical, energetic) and brand kits (colours, fonts, weights, motion, banned phrases, pronunciation overrides such as `LLM` → "L L M" that keep captions as written); scene transitions (crossfade, fade to black, slide, zoom, whip) that keep narration in sync; per-scene camera moves (push in, pull out, punch, reveal, drift, hold); word cues that land each list item, step or number on the word that says it |
+| **Looks** | Style packs (minimal, editorial, technical, energetic) and brand kits (colours, fonts, weights, motion, a corner logo, forbidden treatments, banned phrases, pronunciation overrides such as `LLM` → "L L M" that keep captions as written); scene transitions (crossfade, fade to black, slide, zoom, whip) that keep narration in sync; per-scene camera moves (push in, pull out, punch, reveal, drift, hold); word cues that land each list item, step or number on the word that says it |
 | **Languages** | `localize` translation sheets; bundled Noto fonts for Japanese, Devanagari and Arabic; CJK line breaking; right-to-left text |
 | **Trust** | `verify` claim coverage, `video.lock`, golden-frame `test`, `diff`, provenance, optional C2PA content credentials (`export sign`) |
 
@@ -146,7 +146,7 @@ flowchart LR
 | `/video-studio:plan` · `validate` | Brief, grounded spec and storyboard, built on a story arc (hook, open loop, escalation, payoff, CTA); explains every validation issue |
 | `/video-studio:render` · `qa` · `export` | Local render (preview, then final), technical QA, per-platform packages (`sign` for C2PA) |
 | `/video-studio:lint` · `verify` | Platform contract checks with a fix loop (UI zones, caption readability and sync, cuts on the beat, story arc); claim coverage against the sources |
-| `/video-studio:review` | Contact sheets, frame strips and crops of a render, so Claude looks at the video before handing it over |
+| `/video-studio:review` · `compare` | Contact sheets, frame strips and crops of a render (lint findings bordered), so Claude looks at the video before handing it over; a before/after page that plays two versions in sync (side by side, stacked or wipe) |
 | `/video-studio:test` · `diff` | Golden-frame regression tests; spec, lock and frame diffs between renders |
 | `/video-studio:variants` · `adapt` | Hook × cover A/B sets with an experiment manifest; new aspect, length or platform |
 | `/video-studio:localize` | Language versions from a translation sheet, re-timed for the language |
@@ -177,9 +177,11 @@ pnpm bundle           # build dist/mcp.mjs (single-file ESM, committed)
 pnpm smoke            # start dist/mcp.mjs over stdio and check its tools
 claude plugin validate --strict .claude-plugin/plugin.json   # plugin + skills
 claude plugin validate --strict .                            # marketplace
+pnpm check            # all of the above plus golden frames, stopping at the first failure
+pnpm hooks            # once: run pnpm check before every git push
 ```
 
-After changing anything under `packages/`, rerun `pnpm bundle` and commit `dist/mcp.mjs`.
+After changing anything under `packages/`, rerun `pnpm bundle` and commit `dist/mcp.mjs` (`pnpm check` fails if the committed bundle is stale).
 
 | Package | Role |
 |---|---|

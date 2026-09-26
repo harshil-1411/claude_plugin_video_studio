@@ -5,6 +5,7 @@ import {
   type AudioSlot,
   type CaptionPlacement,
   type CaptionWord,
+  type LogoOverlay,
   type OneShot,
   type QaReport,
   type SceneAudioSlot,
@@ -79,6 +80,8 @@ import { COVER_VERSION, renderCover } from "./cover.js";
 import { type ResolvedMusic, resolveMusic } from "./music.js";
 import { type FontRequest, type LockFont, LOCK_FILE, buildLock, listFiles, lockAssets, lockFonts, serializeLock } from "./lock.js";
 import { hyperframesOptions } from "./hyperframes.js";
+import { acquireRenderLock } from "./render-lock.js";
+import { alignVoiceTracks } from "./voice-align.js";
 import { type LintResult, lintProject } from "./lint.js";
 import { TARGET_PACKAGE_VERSION, type TargetDist, packageTargets } from "./targets.js";
 import { type ValidationIssue, projectSpecPaths, validateSpecFile } from "./spec-validate.js";
@@ -88,7 +91,7 @@ type Env = Record<string, string | undefined>;
 /** Engine version recorded in manifests. Keep in sync with SERVER_VERSION. */
 export const ENGINE_VERSION = "0.1.0";
 /** Bump when technical QA's checks change, so cached QA results are re-run. 2: background-aware black frames, intended silence. */
-export const QA_VERSION = 2;
+export const QA_VERSION = 3;
 /** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). 4: the caption plate is its own ASS layer (no dark bars around highlighted words). 5: loudness true peak −1.5 dBTP (headroom for the AAC encode). */
 export const ASSEMBLY_VERSION = 5;
 /** Scene transition length when neither the scene nor the style sets one (ms). */
@@ -284,6 +287,8 @@ interface RenderState {
   sfx?: Array<{ file: string; sha256: string; scenes: string[]; license?: AudioLicense }>;
   /** Beats detected in the music bed when beat_sync is on. */
   beat_sync?: { bpm: number | null; beats: number; moved_cuts: number; /** Beat times on the video timeline (ms, first 1000), for lint's cut_off_beat. */ beat_times_ms?: number[] };
+  /** Brand logo drawn over the scenes (brand visual.logo_placement at a corner), for lint and review. */
+  logo?: { path: string; box: { x: number; y: number; w: number; h: number }; scenes: string[] };
   /** Word cues as resolved for this render (scene-local ms), for lint's cue checks. */
   cues?: Array<{ scene_id: string; word: string; item: number; at_ms?: number; status: "placed" | "unmatched" | "late" }>;
   /** The music bed mixed in, with its rights. */
@@ -401,6 +406,16 @@ export function defaultRenderers(env: Env, quality: Quality, encodePreset?: stri
  * re-run only redoes what changed. The spec is never modified.
  */
 export async function renderProject(projectDir: string, o: RenderProjectOptions = {}): Promise<RenderProjectResult> {
+  // One render per project at a time, across processes (sessions, the MCP server, the dev CLI).
+  const release = await acquireRenderLock(join(projectPaths(projectDir).renders, ".render.lock"), o.quality ?? "preview");
+  try {
+    return await renderProjectLocked(projectDir, o);
+  } finally {
+    await release();
+  }
+}
+
+async function renderProjectLocked(projectDir: string, o: RenderProjectOptions): Promise<RenderProjectResult> {
   const env = o.env ?? process.env;
   const now = o.now ?? (() => new Date());
   const started_at = now().toISOString();
@@ -424,6 +439,8 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   const style: Style | undefined = spec.style ? await getStyle(findStylesDir(env), spec.style) : undefined;
   // The spec language picks script fonts (Noto JP/Devanagari/Arabic) ahead of the Latin chain.
   const tokens: VisualTokens = resolveTokens(brand, {}, style, { language: spec.language });
+  // brand logo_placement "none": no logo anywhere, not even on the end card.
+  if (brand?.visual?.logo_placement?.position === "none") delete tokens.logo_path;
   const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
   const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
   // Caption styling: the style's, overridden field by field by the brand's.
@@ -477,6 +494,19 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     }
     voiceReason = `${sel.reason}; but ${sel.backend.id} failed at synthesis (${errMsg(e).slice(0, 300)}); falling back to silent (no audio)`;
     voice = await synthesizeSpec(spec, { projectDir: root, backend: "silent", brand: brand ?? null, env, cacheDir: voiceCacheDir, backends, ...(signal ? { signal } : {}) });
+  }
+  // c1. exact word timings: whisper listens to estimated tracks (system TTS) when it is installed.
+  if (narrated && spec.voice.align !== false && voice.tracks.some((t) => t.timing_source === "estimated" && t.audio_path)) {
+    progress({ stage: "voice", message: "aligning word timings to the audio" });
+    const al = await alignVoiceTracks(voice.tracks, { root, env, cacheDir: join(resolveDataDir(env).cache, "align"), ...(signal ? { signal } : {}) });
+    warnings.push(...al.warnings);
+    if (al.aligned.length) {
+      voice = { ...voice, tracks: al.tracks };
+      await writeJsonAtomic(join(root, voice.tracks_path), al.tracks);
+      voiceReason += `; word timings aligned to the audio with whisper (${al.aligned.length} scene(s))`;
+    } else if (al.skipped) {
+      voiceReason += `; word timings estimated (${al.skipped}; with it, captions and cues land exactly)`;
+    }
   }
   const trackById = new Map(voice.tracks.map((t) => [t.scene_id, t]));
   const hasAudio = voice.tracks.some((t) => t.audio_path);
@@ -728,6 +758,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
   );
   const burn = burnIn && !!captionFiles?.ass;
   const assSha = captionFiles?.ass ? sha256Hex(await readFile(captionFiles.ass)) : null;
+  const logo = await planLogo(root, brand, tokens, zones, target, planScenes, bounds, frameMs, warnings);
   const assemblyKey = sha256Hex(
     canonicalJson({
       v: ASSEMBLY_VERSION,
@@ -739,6 +770,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
       music: music ? { sha: music.sha256, bed: music.bed, speech: musicSpeech, ...(musicMute.length ? { mute: musicMute } : {}) } : null,
       ...(useSceneAudio ? { scene_audio: sceneAudioOn ? sceneAudio!.key : null } : {}),
       burn,
+      ...(logo ? { logo: { sha: logo.sha256, x: logo.x, y: logo.y, w: logo.w, h: logo.h, ranges: logo.ranges_ms } } : {}),
       ass: burn ? assSha : null,
       captions: burn ? assOpts : null,
       fonts: burn ? fonts.present : null,
@@ -762,6 +794,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
         fit: "pad",
         padColor: tokens.color_background,
         segments: segments.map(({ path, duration_ms, transition_in }) => ({ path, duration_ms, ...(transition_in ? { transition_in } : {}) })),
+        ...(logo ? { logo } : {}),
         ...(audio ? { audio } : {}),
         ...(sceneAudioOn ? { sceneAudio: { slots: sceneAudio!.slots, sfx: sceneAudio!.sfx } } : {}),
         // −1.5 dBTP leaves headroom for the AAC encode, so the delivered file stays under the −1 dBTP QA limit.
@@ -905,6 +938,7 @@ export async function renderProject(projectDir: string, o: RenderProjectOptions 
     ...(sceneAudio?.sfxState.length ? { sfx: sceneAudio.sfxState } : {}),
     ...(beatSync ? { beat_sync: beatSync } : {}),
     ...(cueLog.length ? { cues: cueLog } : {}),
+    ...(logo ? { logo: { path: logo.rel, box: { x: logo.x, y: logo.y, w: logo.w, h: logo.h }, scenes: logo.scenes } } : {}),
     background: tokens.color_background,
     ...(music ? { music: { ref: music.ref, sha256: music.sha256, ...(music.title ? { title: music.title } : {}), ...(music.license ? { license: music.license } : {}) } } : {}),
     ...(brandFile ? { brand_path: brandRel(root, brandFile.path) } : {}),
@@ -1370,12 +1404,15 @@ const QA_MAP = { ok: "pass", warn: "warn", fail: "fail" } as const;
 
 async function runQaOn(root: string, state: RenderState, reelSha?: string): Promise<QaOutcome> {
   const reel = join(root, state.reel);
+  const noSound = !state.voice.has_audio && !state.music && !state.scene_audio;
   const report: QaReport = await technicalQa(reel, {
     width: state.target.width,
     height: state.target.height,
     duration_s: state.duration_ms / 1000,
     require_audio: true,
-    intended_silence: state.voice_mode === "none" && !state.music && !state.scene_audio,
+    // Silent on purpose (voice.mode none), or a preview rendered with the silent voice backend:
+    // silence and loudness are not findings then, just not measured.
+    ...(noSound ? { intended_silence: true, silence_reason: state.voice_mode === "none" ? "silent on purpose (no narration, no music)" : "rendered with the silent voice (no narration audio)" } : {}),
     ...(state.background ? { background: state.background } : {}),
   });
   // Relative path in the report so the project folder stays portable.
@@ -1384,11 +1421,6 @@ async function runQaOn(root: string, state: RenderState, reelSha?: string): Prom
   const findings: QaFinding[] = report.checks
     .filter((c) => c.status !== "ok")
     .map((c) => ({ id: c.id, status: c.status as "warn" | "fail", detail: c.detail, ...(c.fix ? { fix: c.fix } : {}) }));
-  if (!state.voice.has_audio && !state.music && !state.scene_audio) {
-    for (const f of findings) {
-      if (f.id === "silence" || f.id === "loudness") f.detail += " (expected: rendered with the silent voice backend)";
-    }
-  }
   const status = QA_MAP[report.status];
   state.qa = {
     version: QA_VERSION,
@@ -1876,4 +1908,75 @@ async function loadSpecLoose(root: string): Promise<{ spec: VideoSpec }> {
   const parsed = parseYamlOrJson(VideoSpec, await readFile(specPath, "utf8"));
   if (!parsed.ok) throw new Error(`project/video-spec.json is no longer valid: ${parsed.errors.map((e) => e.message).join("; ")}`);
   return { spec: parsed.data };
+}
+
+/** Default logo width as a share of the frame width (brand logo_placement.max_fraction overrides). */
+export const LOGO_DEFAULT_FRACTION = 0.12;
+
+/**
+ * The brand logo overlay: brand `visual.logo_placement` at a corner puts `visual.logo` in that
+ * corner of the content zone (above the caption band for bottom corners) on every scene except end
+ * cards, which draw the logo themselves. `end_card_only` (the default) and `none` add no overlay.
+ */
+async function planLogo(
+  root: string,
+  brand: Brand | undefined,
+  tokens: VisualTokens,
+  zones: ReturnType<typeof layoutZones>,
+  target: RenderTarget,
+  scenes: readonly Scene[],
+  bounds: readonly number[],
+  frameMs: (f: number) => number,
+  warnings: string[],
+): Promise<(LogoOverlay & { sha256: string; rel: string; scenes: string[] }) | undefined> {
+  const placement = brand?.visual?.logo_placement;
+  const pos = placement?.position;
+  if (!pos || pos === "end_card_only" || pos === "none") return undefined;
+  if (!tokens.logo_path) {
+    warnings.push(`brand: logo_placement "${pos}" but brand visual.logo is not set; no logo drawn`);
+    return undefined;
+  }
+  let abs: string;
+  try {
+    abs = await resolveInsideProject(projectPaths(root), tokens.logo_path);
+  } catch {
+    warnings.push(`brand: logo "${tokens.logo_path}" is outside the project; no logo drawn`);
+    return undefined;
+  }
+  if (!(await exists(abs))) {
+    warnings.push(`brand: logo file ${tokens.logo_path} is missing; no logo drawn`);
+    return undefined;
+  }
+  const probe = await ffprobe(abs).catch(() => undefined);
+  if (!probe?.width || !probe.height) {
+    warnings.push(`brand: could not read the logo image ${tokens.logo_path}; no logo drawn`);
+    return undefined;
+  }
+  const c = zones.content;
+  const margin = Math.round(Math.min(target.width, target.height) * 0.03);
+  let w = Math.round(Math.min((placement?.max_fraction ?? LOGO_DEFAULT_FRACTION) * target.width, c.w * 0.3));
+  let h = Math.round((w * probe.height) / probe.width);
+  const maxH = Math.round(c.h * 0.12);
+  if (h > maxH) {
+    w = Math.round((w * maxH) / h);
+    h = maxH;
+  }
+  w -= w % 2;
+  h -= h % 2;
+  const left = pos.endsWith("left");
+  const x = left ? c.x + margin : c.x + c.w - margin - w;
+  const bottomEdge = Math.min(c.y + c.h, zones.caption.y);
+  const y = pos.startsWith("top") ? c.y + margin : bottomEdge - margin - h;
+  const shown: string[] = [];
+  const ranges: Array<[number, number]> = [];
+  scenes.forEach((s, i) => {
+    if (s.deterministic?.kind === "end_card") return;
+    shown.push(s.id);
+    const a = Math.round(frameMs(bounds[i]!));
+    const b = Math.round(frameMs(bounds[i + 1]!));
+    const last = ranges[ranges.length - 1];
+    if (last && last[1] === a) last[1] = b;
+    else ranges.push([a, b]);
+  });
+  return { path: abs, rel: toPosix(relative(root, abs)), sha256: await hashFile(abs), x, y, w, h, ranges_ms: ranges, scenes: shown };
 }

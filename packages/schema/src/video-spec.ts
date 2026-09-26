@@ -223,6 +223,12 @@ export const VoiceSettings = z.strictObject({
   provider_preference: z.array(Id).optional().describe("Preferred TTS providers in order; the router may override on policy."),
   voice_id: z.string().optional(),
   style: z.string().optional(),
+  align: z
+    .boolean()
+    .optional()
+    .describe(
+      "Re-time estimated word timings (system TTS) from the audio with local whisper when whisper.cpp and its model are installed, so captions and word cues land exactly (default true).",
+    ),
 });
 
 export const CaptionSettings = z.strictObject({

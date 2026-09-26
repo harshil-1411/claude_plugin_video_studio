@@ -91,8 +91,8 @@ TTS is unavailable, or ffmpeg because HyperFrames is not installed).
 
 Before showing the preview, look at it: the render skill's step 4 (the
 `review` contact sheet, plus strips or crops where something looks off).
-Fix clear problems first, then walk through the QA findings (expected ones: silence/loudness with a silent
-voice, frozen frames on static scenes). Offer fixes: scene edits (back to
+Fix clear problems first, then walk through the QA findings (frozen frames on static scenes are
+expected; with a silent voice, loudness is not measured). Offer fixes: scene edits (back to
 the plan rules and step 4), a different voice, or `timing_adjustments`
 folded into the spec. Re-render the preview after changes; cached scenes are
 reused.
