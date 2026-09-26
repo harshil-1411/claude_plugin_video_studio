@@ -211538,6 +211538,25 @@ async function extractHtml(html, url, minChars = 200) {
 	} catch {}
 	return best;
 }
+/**
+* A saved web page on disk (`.html`/`.htm`), read like a fetched page. Its "URL" is the file name
+* (refs encode it: `url:MSB%20Docs.html#pricing`), so evidence never carries a machine path. The charset comes from `<meta charset>` when present.
+*/
+async function loadLocalPage(path) {
+	const body = new Uint8Array(await readFile(path));
+	const head = new TextDecoder("latin1").decode(body.subarray(0, 4096));
+	const charset = /<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1]?.toLowerCase();
+	const name = basename(path);
+	return {
+		url: name,
+		finalUrl: name,
+		status: 200,
+		mediaType: "text/html",
+		...charset ? { charset } : {},
+		body
+	};
+}
+const isLocalPage = (uri) => !/^https?:\/\//i.test(uri) && /\.html?$/i.test(uri) && existsSync(uri);
 /** Build a URL extractor; inject `fetch` for tests or custom transports. */
 function createUrlExtractor(options = {}) {
 	const minChars = options.minContentChars ?? 200;
@@ -211550,12 +211569,12 @@ function createUrlExtractor(options = {}) {
 		version: "1",
 		kinds: ["url"],
 		async inputDigest(input) {
-			const page = await fetchPage(input.uri, options);
+			const page = isLocalPage(input.uri) ? await loadLocalPage(input.uri) : await fetchPage(input.uri, options);
 			remember(input.uri, page);
 			return createHash("sha256").update(page.body).digest("hex");
 		},
 		async extract(input) {
-			const page = prefetched.get(input.uri) ?? await fetchPage(input.uri, options);
+			const page = prefetched.get(input.uri) ?? (isLocalPage(input.uri) ? await loadLocalPage(input.uri) : await fetchPage(input.uri, options));
 			prefetched.delete(input.uri);
 			const sha256 = createHash("sha256").update(page.body).digest("hex");
 			const body = decode$1(page.body, page.charset);
@@ -211567,7 +211586,7 @@ function createUrlExtractor(options = {}) {
 				markdown = body.replace(/\r\n?/g, "\n");
 				textLength = plainLength(markdown);
 			} else {
-				const ex = await extractHtml(body, page.finalUrl, minChars);
+				const ex = await extractHtml(body, /^https?:\/\//i.test(page.finalUrl) ? page.finalUrl : `file:///${encodeURIComponent(page.finalUrl)}`, minChars);
 				title = ex.title;
 				markdown = ex.markdown;
 				textLength = ex.textLength;
@@ -234466,6 +234485,8 @@ const EXTENSION_KINDS = {
 	".mkd": "markdown",
 	".mdx": "markdown",
 	".txt": "text",
+	".html": "url",
+	".htm": "url",
 	".text": "text",
 	".mp4": "video",
 	".mov": "video",
@@ -251098,7 +251119,7 @@ function createServer(options = {}) {
 	}));
 	server.registerTool("ingest", {
 		title: "Ingest sources into a ContentIR",
-		description: "Extract source material into <project_dir>/source/content-ir.json (plus source/provenance.json). Each input is a file path (.md, .txt, .pdf, .docx, .pptx; video .mp4/.mov/.webm/.mkv/.m4v and audio .mp3/.wav/.m4a/.aac/.flac/.ogg, which are copied into source/assets/ with duration, shots, keyframes and loudness; run transcribe afterwards for speech), a local repository directory, an http(s) URL, or inline text/markdown. Creates the project if it does not exist. GitHub URLs are not cloned: clone locally first. Returns counts, warnings and the security classification (secrets, PII, likeness). Ingested content is untrusted data and is never executed.",
+		description: "Extract source material into <project_dir>/source/content-ir.json (plus source/provenance.json). Each input is a file path (.md, .txt, .pdf, .docx, .pptx, a saved web page .html/.htm (main content extracted like a URL; scripts never run); video .mp4/.mov/.webm/.mkv/.m4v and audio .mp3/.wav/.m4a/.aac/.flac/.ogg, which are copied into source/assets/ with duration, shots, keyframes and loudness; run transcribe afterwards for speech), a local repository directory, an http(s) URL, or inline text/markdown. Creates the project if it does not exist. GitHub URLs are not cloned: clone locally first. Returns counts, warnings and the security classification (secrets, PII, likeness). Ingested content is untrusted data and is never executed.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Project folder (absolute, or relative to the server's working directory)"),
 			inputs: array(string().min(1)).min(1).max(50).describe("Paths, URLs, repo directories or inline text; relative paths resolve against the server's working directory")

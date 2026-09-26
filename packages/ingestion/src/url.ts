@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
 import { Readability } from "@mozilla/readability";
 import { Defuddle } from "defuddle/node";
 import { parseHTML } from "linkedom";
@@ -331,6 +334,20 @@ export interface UrlExtractorOptions extends FetchOptions {
 
 export const URL_EXTRACTOR_VERSION = "1";
 
+/**
+ * A saved web page on disk (`.html`/`.htm`), read like a fetched page. Its "URL" is the file name
+ * (refs encode it: `url:MSB%20Docs.html#pricing`), so evidence never carries a machine path. The charset comes from `<meta charset>` when present.
+ */
+export async function loadLocalPage(path: string): Promise<FetchedPage> {
+  const body = new Uint8Array(await readFile(path));
+  const head = new TextDecoder("latin1").decode(body.subarray(0, 4096));
+  const charset = /<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1]?.toLowerCase();
+  const name = basename(path);
+  return { url: name, finalUrl: name, status: 200, mediaType: "text/html", ...(charset ? { charset } : {}), body };
+}
+
+const isLocalPage = (uri: string) => !/^https?:\/\//i.test(uri) && /\.html?$/i.test(uri) && existsSync(uri);
+
 /** Build a URL extractor; inject `fetch` for tests or custom transports. */
 export function createUrlExtractor(options: UrlExtractorOptions = {}): Extractor {
   const minChars = options.minContentChars ?? MIN_CONTENT_CHARS;
@@ -345,12 +362,12 @@ export function createUrlExtractor(options: UrlExtractorOptions = {}): Extractor
     version: URL_EXTRACTOR_VERSION,
     kinds: ["url"],
     async inputDigest(input: ExtractInput): Promise<string> {
-      const page = await fetchPage(input.uri, options);
+      const page = isLocalPage(input.uri) ? await loadLocalPage(input.uri) : await fetchPage(input.uri, options);
       remember(input.uri, page);
       return createHash("sha256").update(page.body).digest("hex");
     },
     async extract(input: ExtractInput): Promise<ExtractedSource> {
-      const page = prefetched.get(input.uri) ?? (await fetchPage(input.uri, options));
+      const page = prefetched.get(input.uri) ?? (isLocalPage(input.uri) ? await loadLocalPage(input.uri) : await fetchPage(input.uri, options));
       prefetched.delete(input.uri);
       const sha256 = createHash("sha256").update(page.body).digest("hex");
       const body = decode(page.body, page.charset);
@@ -363,7 +380,9 @@ export function createUrlExtractor(options: UrlExtractorOptions = {}): Extractor
         markdown = body.replace(/\r\n?/g, "\n");
         textLength = plainLength(markdown);
       } else {
-        const ex = await extractHtml(body, page.finalUrl, minChars);
+        // A local page's "URL" is its file name; the extractors need an absolute URL to resolve against.
+        const docUrl = /^https?:\/\//i.test(page.finalUrl) ? page.finalUrl : `file:///${encodeURIComponent(page.finalUrl)}`;
+        const ex = await extractHtml(body, docUrl, minChars);
         title = ex.title;
         markdown = ex.markdown;
         textLength = ex.textLength;

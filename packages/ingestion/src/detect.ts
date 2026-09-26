@@ -13,6 +13,9 @@ const EXTENSION_KINDS: Record<string, SourceKind> = {
   ".mkd": "markdown",
   ".mdx": "markdown",
   ".txt": "text",
+  // A saved web page: extracted like a URL (defuddle/Readability, scripts never run), from disk.
+  ".html": "url",
+  ".htm": "url",
   ".text": "text",
   ".mp4": "video",
   ".mov": "video",

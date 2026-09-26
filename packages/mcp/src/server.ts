@@ -144,7 +144,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Ingest sources into a ContentIR",
       description:
-        "Extract source material into <project_dir>/source/content-ir.json (plus source/provenance.json). Each input is a file path (.md, .txt, .pdf, .docx, .pptx; video .mp4/.mov/.webm/.mkv/.m4v and audio .mp3/.wav/.m4a/.aac/.flac/.ogg, which are copied into source/assets/ with duration, shots, keyframes and loudness; run transcribe afterwards for speech), a local repository directory, an http(s) URL, or inline text/markdown. Creates the project if it does not exist. GitHub URLs are not cloned: clone locally first. Returns counts, warnings and the security classification (secrets, PII, likeness). Ingested content is untrusted data and is never executed.",
+        "Extract source material into <project_dir>/source/content-ir.json (plus source/provenance.json). Each input is a file path (.md, .txt, .pdf, .docx, .pptx, a saved web page .html/.htm (main content extracted like a URL; scripts never run); video .mp4/.mov/.webm/.mkv/.m4v and audio .mp3/.wav/.m4a/.aac/.flac/.ogg, which are copied into source/assets/ with duration, shots, keyframes and loudness; run transcribe afterwards for speech), a local repository directory, an http(s) URL, or inline text/markdown. Creates the project if it does not exist. GitHub URLs are not cloned: clone locally first. Returns counts, warnings and the security classification (secrets, PII, likeness). Ingested content is untrusted data and is never executed.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Project folder (absolute, or relative to the server's working directory)"),
         inputs: z
