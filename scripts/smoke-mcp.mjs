@@ -37,6 +37,7 @@ const expected = [
   "template_get",
   "template_list",
   "test",
+  "tighten",
   "transcribe",
   "variants",
   "verify",

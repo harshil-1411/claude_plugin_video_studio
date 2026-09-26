@@ -132,6 +132,7 @@ describe("MCP server (in-memory)", () => {
       "template_get",
       "template_list",
       "test",
+      "tighten",
       "transcribe",
       "variants",
       "verify",

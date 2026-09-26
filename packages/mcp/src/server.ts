@@ -15,6 +15,7 @@ import { makeShortProjects } from "./shorts.js";
 import { transcribeAsset } from "./transcribe.js";
 import { formatDemo, recordDemo } from "./demo.js";
 import { formatLocalize, localizeProject } from "./localize.js";
+import { formatTighten, tightenAsset } from "./tighten.js";
 import { diffProjects, formatDiff } from "./diff.js";
 import { formatGolden, testProject } from "./golden.js";
 import { formatLint, lintProject } from "./lint.js";
@@ -720,6 +721,33 @@ export function createServer(options: ServerOptions = {}): McpServer {
       });
       return jsonResult(formatLocalize(r), r as unknown as Record<string, unknown>);
     }),
+  );
+
+  server.registerTool(
+    "tighten",
+    {
+      title: "Tighten talking-head footage",
+      description:
+        "Clean up a transcribed video/audio asset of <project_dir> from its word timings: shorten pauses longer than max_pause_ms (default 700) to keep_pause_ms (default 300), cut filler words (um, uh, erm, er, ah, hmm, mm) and drop false starts / retakes (a sentence the speaker restarts with the same opening words, or 'let me start again'). Default is a dry run returning the edit list (each cut with time, reason and words; also qa/tighten-<asset>.json) for review. With apply: true it writes a NEW asset <asset>-tight (the original is never changed) with 15 ms audio fades at every join, the transcript re-timed and fresh evidence refs, ready for shorts or footage scenes. Run transcribe first.",
+      inputSchema: {
+        project_dir: z.string().min(1),
+        asset: z.string().min(1).describe("Transcribed video or audio asset id"),
+        silences: z.boolean().optional().describe("Shorten long pauses (default true)"),
+        fillers: z.boolean().optional().describe("Cut filler words (default true)"),
+        retakes: z.boolean().optional().describe("Drop false starts and explicit retakes (default true)"),
+        max_pause_ms: z.int().min(200).max(5000).optional(),
+        keep_pause_ms: z.int().min(0).max(2000).optional(),
+        apply: z.boolean().optional().describe("Write the tightened asset (default: dry run)"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(
+      async (args: { project_dir: string; asset: string; silences?: boolean; fillers?: boolean; retakes?: boolean; max_pause_ms?: number; keep_pause_ms?: number; apply?: boolean }) => {
+        const { project_dir, asset, ...opts } = args;
+        const r = await tightenAsset(resolveInputPath(project_dir, cwd()), asset, opts);
+        return jsonResult(formatTighten(r), r as unknown as Record<string, unknown>);
+      },
+    ),
   );
 
   return server;

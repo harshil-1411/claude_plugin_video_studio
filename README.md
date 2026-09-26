@@ -149,6 +149,7 @@ flowchart LR
 | `/video-studio:variants` · `adapt` | Hook × cover A/B sets with an experiment manifest; new aspect, length or platform |
 | `/video-studio:localize` | Language versions from a translation sheet, re-timed for the language |
 | `/video-studio:ingest` · `shorts` · `analyze` | Media ingest and local transcription; standalone clips from a long talk; a reference video's format |
+| `/video-studio:tighten` | Cleans up talking-head footage: shortens pauses, cuts filler words and drops retakes (dry run first, new asset on apply) |
 | `/video-studio:demo` | Records a scripted walk through **your** running app (inputs are blurred) |
 | `/video-studio:doctor` | Checks ffmpeg, fonts, Chrome, whisper, HyperFrames and keys |
 

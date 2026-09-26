@@ -39,6 +39,9 @@ Show the user the candidates, best first. For each one, give its time range,
 length, score, the hook in quotes and one line on why it scored well. Ask
 which ones to make; default to all.
 
+Tip: for a rambling recording, run the `tighten` skill first (pauses, fillers,
+retakes) and find shorts in the tightened asset: the clips come out snappier.
+
 ## 3. Make one project per chosen clip
 
 Call `shorts {project_dir, asset, min_sec?, max_sec?, make_projects: true,

@@ -245966,6 +245966,268 @@ function formatLocalize(r) {
 		...r.notes.map((n) => `note: ${n}`)
 	].join("\n");
 }
+//#endregion
+//#region src/tighten.ts
+/**
+* tighten: transcript-driven cleanup of talking-head footage. Long pauses are shortened, filler
+* words (um, uh, …) are cut, and false starts / retakes are dropped (a sentence whose opening
+* words are said again right after, or an explicit "let me start again"). A dry run returns the
+* edit list for review; `apply` writes a tightened copy as a NEW asset (the original is never
+* changed) with its transcript re-timed and its own evidence refs, ready for shorts or a
+* talking-head spec. Conservative by design: when in doubt, keep.
+*/
+const FILLERS = /* @__PURE__ */ new Set([
+	"um",
+	"umm",
+	"uh",
+	"uhh",
+	"uhm",
+	"erm",
+	"er",
+	"ah",
+	"hmm",
+	"mm",
+	"mhm"
+]);
+/** Explicit retake phrases: the sentence containing one is dropped. */
+const RETAKE_MARKERS = /\b(?:let me (?:start|try|say|do) (?:that |this |it )?(?:again|over)|let me rephrase|scratch that|start (?:that )?over|one more time|sorry,? (?:let me|i mean))\b/i;
+/** Audio fade at every join, so cuts do not click. */
+const JOIN_FADE_MS = 15;
+/** Kept segments shorter than this are dropped (they would flash). */
+const MIN_KEEP_MS = 120;
+const norm = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, "");
+/** Pure: the cuts and kept ranges for a transcript over a media file of `durationMs`. */
+function planTighten(words, durationMs, opts = {}) {
+	const maxPause = opts.max_pause_ms ?? 700;
+	const keepPause = Math.min(opts.keep_pause_ms ?? 300, maxPause);
+	const cuts = [];
+	const dropped = /* @__PURE__ */ new Set();
+	if (opts.retakes !== false) {
+		const sentences = groupSentences(words);
+		sentences.forEach((s, i) => {
+			const content = (a, b) => words.slice(a, b + 1).map((w) => norm(w.word)).filter((w) => w && !FILLERS.has(w));
+			const own = content(s.first, s.last);
+			const next = sentences[i + 1];
+			const nextWords = next ? content(next.first, next.last) : [];
+			const n = Math.min(3, own.length);
+			if (next !== void 0 && n >= 2 && own.slice(0, n).join(" ") === nextWords.slice(0, n).join(" ") || RETAKE_MARKERS.test(s.text)) {
+				for (let k = s.first; k <= s.last; k++) dropped.add(k);
+				cuts.push({
+					start_ms: s.start_ms,
+					end_ms: s.end_ms,
+					reason: "retake",
+					text: s.text
+				});
+			}
+		});
+	}
+	if (opts.fillers !== false) words.forEach((w, i) => {
+		if (!dropped.has(i) && FILLERS.has(norm(w.word))) {
+			dropped.add(i);
+			cuts.push({
+				start_ms: w.start_ms,
+				end_ms: w.end_ms,
+				reason: "filler",
+				text: w.word
+			});
+		}
+	});
+	if (opts.silences !== false) {
+		const bounds = [
+			{ end_ms: 0 },
+			...words.filter((_, i) => !dropped.has(i)),
+			{ start_ms: durationMs }
+		];
+		for (let i = 0; i + 1 < bounds.length; i++) {
+			const a = bounds[i].end_ms ?? 0;
+			const b = bounds[i + 1].start_ms ?? durationMs;
+			const allowed = i === 0 || i + 1 === bounds.length - 1 ? keepPause / 2 : maxPause;
+			if (b - a > allowed + 1) {
+				const start = i === 0 ? a : a + keepPause / 2;
+				const end = i + 1 === bounds.length - 1 ? b : b - keepPause / 2;
+				if (end - start > 30) cuts.push({
+					start_ms: Math.round(start),
+					end_ms: Math.round(end),
+					reason: "silence"
+				});
+			}
+		}
+	}
+	const sorted = [...cuts].sort((x, y) => x.start_ms - y.start_ms);
+	const merged = [];
+	for (const c of sorted) {
+		const last = merged[merged.length - 1];
+		if (last && c.start_ms <= last.end_ms) last.end_ms = Math.max(last.end_ms, c.end_ms);
+		else merged.push({
+			start_ms: Math.max(0, c.start_ms),
+			end_ms: Math.min(durationMs, c.end_ms)
+		});
+	}
+	const keep = [];
+	let t = 0;
+	for (const m of merged) {
+		if (m.start_ms - t >= MIN_KEEP_MS) keep.push({
+			start_ms: t,
+			end_ms: m.start_ms
+		});
+		t = Math.max(t, m.end_ms);
+	}
+	if (durationMs - t >= MIN_KEEP_MS) keep.push({
+		start_ms: t,
+		end_ms: durationMs
+	});
+	return {
+		cuts: sorted,
+		keep,
+		source_ms: durationMs,
+		result_ms: keep.reduce((s, k) => s + (k.end_ms - k.start_ms), 0)
+	};
+}
+/** Pure: words that survive the plan, moved onto the tightened timeline. */
+function retimeWords(words, keep) {
+	const out = [];
+	let offset = 0;
+	for (const k of keep) {
+		for (const w of words) if (w.start_ms >= k.start_ms && w.end_ms <= k.end_ms) out.push({
+			...w,
+			start_ms: w.start_ms - k.start_ms + offset,
+			end_ms: w.end_ms - k.start_ms + offset
+		});
+		offset += k.end_ms - k.start_ms;
+	}
+	return out;
+}
+async function tightenAsset(projectDir, assetId, opts = {}) {
+	const { path: irPath, ir } = await loadContentIr$1(projectDir);
+	const asset = findMediaAsset(ir, assetId);
+	const words = await loadTranscriptWords(projectDir, asset);
+	const src = join(projectDir, asset.path);
+	const plan = planTighten(words, Math.round((asset.media?.duration_sec ?? (await ffprobe(src)).duration_s) * 1e3), opts);
+	const counts = {
+		silence: 0,
+		filler: 0,
+		retake: 0
+	};
+	for (const c of plan.cuts) counts[c.reason]++;
+	const edlRel = `qa/tighten-${asset.id}.json`;
+	await mkdir(join(projectDir, "qa"), { recursive: true });
+	await writeJsonAtomic(join(projectDir, edlRel), {
+		asset: asset.id,
+		...plan,
+		counts
+	});
+	const result = {
+		asset: asset.id,
+		dry_run: !opts.apply,
+		plan,
+		counts,
+		removed_ms: plan.source_ms - plan.result_ms,
+		edl_path: edlRel
+	};
+	if (!opts.apply) return result;
+	if (plan.keep.length === 0) throw new Error("nothing would be left after tightening; loosen the options (e.g. silences: false)");
+	const newId = `${asset.id}-tight`;
+	const isVideo = asset.kind === "video" && asset.media?.has_video !== false;
+	const ext = isVideo ? ".mp4" : ".m4a";
+	const rel = `source/assets/${newId}${ext}`;
+	const out = join(projectDir, rel);
+	await mkdir(join(projectDir, "source", "assets"), { recursive: true });
+	const s = (ms) => (ms / 1e3).toFixed(3);
+	const fade = JOIN_FADE_MS / 1e3;
+	const chains = [];
+	plan.keep.forEach((k, i) => {
+		const d = (k.end_ms - k.start_ms) / 1e3;
+		if (isVideo) chains.push(`[0:v]trim=start=${s(k.start_ms)}:end=${s(k.end_ms)},setpts=PTS-STARTPTS[v${i}]`);
+		chains.push(`[0:a]atrim=start=${s(k.start_ms)}:end=${s(k.end_ms)},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=${fade},afade=t=out:st=${Math.max(0, d - fade).toFixed(3)}:d=${fade}[a${i}]`);
+	});
+	const inputs = plan.keep.map((_, i) => isVideo ? `[v${i}][a${i}]` : `[a${i}]`).join("");
+	chains.push(`${inputs}concat=n=${plan.keep.length}:v=${isVideo ? 1 : 0}:a=1${isVideo ? "[vo][ao]" : "[ao]"}`);
+	const codec = isVideo ? [
+		"-map",
+		"[vo]",
+		"-map",
+		"[ao]",
+		"-c:v",
+		"libx264",
+		"-preset",
+		"veryfast",
+		"-crf",
+		"18",
+		"-pix_fmt",
+		"yuv420p"
+	] : ["-map", "[ao]"];
+	await runFfmpeg([
+		"-y",
+		"-i",
+		src,
+		"-filter_complex",
+		chains.join(";"),
+		...codec,
+		"-c:a",
+		"aac",
+		"-b:a",
+		"192k",
+		"-movflags",
+		"+faststart",
+		out
+	]);
+	const probe = await ffprobe(out);
+	const sha256 = await hashFile(out);
+	const newWords = retimeWords(words, plan.keep);
+	const tPath = `source/transcripts/${newId}.json`;
+	await mkdir(join(projectDir, "source", "transcripts"), { recursive: true });
+	await writeFile(join(projectDir, tPath), `${JSON.stringify(newWords)}\n`);
+	const origSource = ir.sources.find((x) => x.sha256 === asset.sha256);
+	const next = structuredClone(ir);
+	next.sources = next.sources.filter((x) => x.id !== `${newId}-src`);
+	next.sources.push({
+		id: `${newId}-src`,
+		kind: isVideo ? "video" : "audio",
+		uri: `${origSource?.uri ?? asset.path} (tightened)`,
+		sha256,
+		title: `${origSource?.title ?? basename(asset.path)} (tightened)`
+	});
+	const newAsset = {
+		id: newId,
+		kind: asset.kind,
+		path: rel,
+		sha256,
+		source_ref: `${isVideo ? "video" : "audio"}:${newId}${ext}`,
+		media: {
+			duration_sec: probe.duration_s,
+			...probe.width ? { width: probe.width } : {},
+			...probe.height ? { height: probe.height } : {},
+			...probe.fps ? { fps: probe.fps } : {},
+			has_video: probe.has_video,
+			has_audio: probe.has_audio,
+			...asset.media?.content_box ? { content_box: asset.media.content_box } : {}
+		}
+	};
+	next.assets = [...next.assets.filter((a) => a.id !== newId), newAsset];
+	next.classification = {
+		...next.classification,
+		notes: [...next.classification.notes.filter((n) => !n.startsWith(`${newId}:`)), `${newId}: ${asset.id} with ${plan.cuts.length} cut(s) (${counts.silence} pauses, ${counts.filler} fillers, ${counts.retake} retakes), see ${edlRel}`]
+	};
+	const t = asset.media?.transcript;
+	await writeJsonAtomic(irPath, applyTranscript(ContentIR.parse(next), newId, newWords, {
+		path: tPath,
+		source: t?.source ?? "whisper",
+		...t?.model ? { model: t.model } : {},
+		...t?.language ? { language: t.language } : {}
+	}).ir);
+	return {
+		...result,
+		new_asset: newId,
+		path: rel
+	};
+}
+function formatTighten(r) {
+	const sec = (ms) => `${(ms / 1e3).toFixed(1)}s`;
+	const lines = [`${r.dry_run ? "dry run" : "applied"}: ${r.asset} ${sec(r.plan.source_ms)} → ${sec(r.plan.result_ms)} (−${sec(r.removed_ms)}): ${r.counts.silence} pause(s) shortened, ${r.counts.filler} filler(s), ${r.counts.retake} retake(s); edit list ${r.edl_path}`, ...r.plan.cuts.filter((c) => c.reason !== "silence").map((c) => `- ${c.reason} ${sec(c.start_ms)}–${sec(c.end_ms)}: "${c.text ?? ""}"`)];
+	if (r.new_asset) lines.push(`new asset ${r.new_asset} → ${r.path} (transcript re-timed; use it in shorts or footage scenes)`);
+	else lines.push("review the cuts above, then call tighten again with apply: true");
+	return lines.join("\n");
+}
 /**
 * A frame passes when its SSIM against the golden is at least this. Tolerant of encoder and
 * ffmpeg version noise (typically > 0.99) while catching layout, text and colour changes.
@@ -251665,6 +251927,30 @@ function createServer(options = {}) {
 			...args.out_dir ? { out_dir: resolveInputPath(args.out_dir, cwd()) } : {}
 		});
 		return jsonResult(formatLocalize(r), r);
+	}));
+	server.registerTool("tighten", {
+		title: "Tighten talking-head footage",
+		description: "Clean up a transcribed video/audio asset of <project_dir> from its word timings: shorten pauses longer than max_pause_ms (default 700) to keep_pause_ms (default 300), cut filler words (um, uh, erm, er, ah, hmm, mm) and drop false starts / retakes (a sentence the speaker restarts with the same opening words, or 'let me start again'). Default is a dry run returning the edit list (each cut with time, reason and words; also qa/tighten-<asset>.json) for review. With apply: true it writes a NEW asset <asset>-tight (the original is never changed) with 15 ms audio fades at every join, the transcript re-timed and fresh evidence refs, ready for shorts or footage scenes. Run transcribe first.",
+		inputSchema: {
+			project_dir: string().min(1),
+			asset: string().min(1).describe("Transcribed video or audio asset id"),
+			silences: boolean().optional().describe("Shorten long pauses (default true)"),
+			fillers: boolean().optional().describe("Cut filler words (default true)"),
+			retakes: boolean().optional().describe("Drop false starts and explicit retakes (default true)"),
+			max_pause_ms: int().min(200).max(5e3).optional(),
+			keep_pause_ms: int().min(0).max(2e3).optional(),
+			apply: boolean().optional().describe("Write the tightened asset (default: dry run)")
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async (args) => {
+		const { project_dir, asset, ...opts } = args;
+		const r = await tightenAsset(resolveInputPath(project_dir, cwd()), asset, opts);
+		return jsonResult(formatTighten(r), r);
 	}));
 	return server;
 }
