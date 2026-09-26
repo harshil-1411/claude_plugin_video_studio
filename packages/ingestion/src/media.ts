@@ -2,7 +2,7 @@ import { copyFile, mkdtemp, readFile, rename, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ensureDir, hashFile } from "@video-studio/core";
-import { type ProbeResult, ffprobe, measureLoudness, runFfmpeg } from "@video-studio/media";
+import { type ContentBox, type ProbeResult, detectLetterbox, ffprobe, measureLoudness, runFfmpeg } from "@video-studio/media";
 import type { MediaInfo, Shot } from "@video-studio/schema";
 import { writeProjectAsset } from "./office-common.js";
 import { displayPath, fileRef } from "./refs.js";
@@ -103,7 +103,7 @@ function describe(kind: "video" | "audio", p: ProbeResult, shots: number, loudne
 }
 
 export const mediaExtractor: Extractor = {
-  version: "media-1",
+  version: "media-2",
   kinds: ["video", "audio"],
   async extract(input: ExtractInput): Promise<ExtractedSource> {
     const st = await stat(input.uri);
@@ -148,6 +148,16 @@ export const mediaExtractor: Extractor = {
       }
     }
 
+    // Baked-in black bars (strict: dark scenes are left alone); the footage renderer crops them off.
+    let contentBox: ContentBox | null = null;
+    if (probe.has_video && probe.width && probe.height) {
+      try {
+        contentBox = await detectLetterbox(input.uri, { duration_sec: probe.duration_s, width: probe.width, height: probe.height });
+      } catch {
+        contentBox = null;
+      }
+    }
+
     let loudness: number | undefined;
     if (probe.has_audio) {
       try {
@@ -168,6 +178,7 @@ export const mediaExtractor: Extractor = {
       has_audio: probe.has_audio,
       ...(shots.length ? { shots } : {}),
       ...(loudness !== undefined ? { loudness_lufs: Math.round(loudness * 10) / 10 } : {}),
+      ...(contentBox ? { content_box: contentBox } : {}),
     };
 
     const assets: ExtractedAsset[] = [];

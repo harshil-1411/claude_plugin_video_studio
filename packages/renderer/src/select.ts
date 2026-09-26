@@ -157,7 +157,7 @@ export function sceneCacheKey(
   renderer: Pick<SceneRenderer, "id" | "version">,
   placeholder = false,
   zones?: LayoutZones,
-  footage?: { sha256: string; duration_sec?: number },
+  footage?: { sha256: string; duration_sec?: number; content_box?: { x: number; y: number; w: number; h: number } },
 ): string {
   return sha256Hex(
     canonicalJson({
@@ -245,7 +245,7 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
       r = sel.renderer;
       selReason = sel.reason;
     }
-    const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? { sha256: footage.sha256, duration_sec: footage.media.duration_sec } : undefined);
+    const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? { sha256: footage.sha256, duration_sec: footage.media.duration_sec, ...(footage.media.content_box ? { content_box: footage.media.content_box } : {}) } : undefined);
     const out = join(dir, `${orig.id}.mp4`);
     const sidecarPath = join(dir, `${orig.id}.json`);
     const base = { scene_id: orig.id, renderer: r.id, renderer_version: r.version, cache_key: key, ...(placeholder ? { placeholder: true, reason: pendingReason } : {}) };

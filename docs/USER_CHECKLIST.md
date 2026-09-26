@@ -78,7 +78,7 @@ The skill asks before downloading the whisper model (about 148 MB); say yes.
 - `shorts/<id>/` projects that validate
 - one rendered short with captions that match the speech
 
-## 6. A folder of your own clips (10 min)
+## 6. A folder of your own clips — ✅ done 2026-09-26 (8 CC0/PD Wikimedia clips → beat-synced aesthetic b-roll: 9 cuts on 120 bpm beats, −13.8 LUFS, QA pass)
 
 ```
 /video-studio:create ~/path/to/clips-folder as an aesthetic b-roll reel with the upbeat music, beat-synced

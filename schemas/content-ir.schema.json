@@ -25,6 +25,39 @@
             "description": "For video and audio assets.",
             "additionalProperties": false,
             "properties": {
+              "content_box": {
+                "description": "The real picture inside baked-in black bars (letterbox/pillarbox), in source pixels; the footage renderer crops to it.",
+                "additionalProperties": false,
+                "properties": {
+                  "h": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "type": "integer"
+                  },
+                  "w": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "type": "integer"
+                  },
+                  "x": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "y": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "type": "object"
+              },
               "duration_sec": {
                 "minimum": 0,
                 "type": "number"

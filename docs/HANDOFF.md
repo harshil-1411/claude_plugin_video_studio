@@ -256,6 +256,7 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
    - ~~No footage redaction~~ → `footage.redact: [{x, y, w, h, from_sec?, to_sec?, mode: blur|box, label?}]`, in source-frame fractions and asset seconds, applied before the fit (heavy gblur or a solid box).
    - ~~Short projects copy the whole recording~~ → each `shorts/<id>/` gets only its span ± 1 s (re-encoded), with its own ContentIR, the transcript shifted, and footage times relative to the clip.
    - ~~True peak 0.1 dB over~~ → loudnorm now aims at −1.5 dBTP (`ASSEMBLY_VERSION` 5).
+   - **Letterboxed footage** (from the b-roll run): ingest records `media.content_box` from a *strict* detector, and the footage renderer (0.2.0) crops to it before the fit. The detector requires near-black borders (luma ≤ 16), agreement across 5 samples, and symmetric bars. The run's "barred" wave clip was really a dark window frame, and a naive `cropdetect` would also have cropped a night-sky fireworks clip. Both are correctly left alone.
 
 1. **TikTok contract not re-verified.** Re-check `platform-specs/tiktok.yaml` against developers.tiktok.com and bump `contract_version`/`verified`.
 2. ~~Deprecated caption helpers~~: already removed.

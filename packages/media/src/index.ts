@@ -6,3 +6,4 @@ export * from "./qa.js";
 export * from "./frames.js";
 export * from "./asr.js";
 export * from "./beats.js";
+export * from "./letterbox.js";

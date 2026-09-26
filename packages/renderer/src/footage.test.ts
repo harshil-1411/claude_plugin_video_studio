@@ -212,6 +212,28 @@ describe("redaction", () => {
   );
 });
 
+describe("letterboxed sources", () => {
+  it(
+    "crops baked-in bars (media.content_box) before cover, so no black rows remain",
+    async () => {
+      const lb = join(tmp, "letterboxed.mp4");
+      await runFfmpeg(["-y", "-f", "lavfi", "-i", "color=c=white:s=320x130:r=15:d=2", "-vf", "pad=320:180:0:25:black", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", lb]);
+      const media: MediaInfo = { duration_sec: 2, width: 320, height: 180, fps: 15, has_video: true, has_audio: false };
+      expect(planFootage({ asset: "a", in_sec: 0 }, { ...media, content_box: { x: 0, y: 25, w: 320, h: 130 } }, lb, target, 1, "#000000").chains.join(";")).toContain("crop=320:130:0:25");
+      const topRowLuma = async (video: string) => {
+        const png = join(tmp, `${video.split("/").pop()}-top.png`);
+        await runFfmpeg(["-y", "-ss", "0.5", "-i", video, "-frames:v", "1", "-vf", "crop=iw:4:0:0", png]);
+        return (await lumas(png))[0]!;
+      };
+      const plain = await render("lb-plain", scene({ asset: "a", in_sec: 0, fit: "contain" }), lb, media);
+      const fixed = await render("lb-fixed", scene({ asset: "a", in_sec: 0, fit: "cover" }), lb, { ...media, content_box: { x: 0, y: 25, w: 320, h: 130 } });
+      expect(await topRowLuma(fixed.out)).toBeGreaterThan(200); // picture (white), not a bar
+      expect(plain.probe.width).toBe(fixed.probe.width);
+    },
+    60_000,
+  );
+});
+
 describe("renderScenes with footage", () => {
   it("cache key changes with the asset hash and the footage params", () => {
     const sc = scene({ asset: "v", in_sec: 0 });

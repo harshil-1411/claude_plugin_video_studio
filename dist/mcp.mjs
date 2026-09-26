@@ -231588,6 +231588,92 @@ function snapCuts(cutsMs, beatsMs, toleranceMs, minSceneMs = 500) {
 	});
 	return out;
 }
+/** Parse the last `crop=w:h:x:y` cropdetect printed. */
+function parseCropdetect(stderr) {
+	const all = [...stderr.matchAll(/crop=(\d+):(\d+):(\d+):(\d+)/g)];
+	const m = all[all.length - 1];
+	return m ? {
+		w: Number(m[1]),
+		h: Number(m[2]),
+		x: Number(m[3]),
+		y: Number(m[4])
+	} : null;
+}
+/**
+* Decide from per-sample detections: a content box when all samples agree (within `tol` px), the
+* box is centred (bars symmetric within tolerance), trims ≥ 2% of the width or height, and keeps
+* ≥ 30% of both; else null.
+*/
+function decideLetterbox(samples, width, height) {
+	if (samples.length === 0 || samples.some((s) => !s)) return null;
+	const boxes = samples;
+	const tol = Math.max(4, Math.round(Math.min(width, height) * .006));
+	const first = boxes[0];
+	if (!boxes.every((b) => Math.abs(b.x - first.x) <= tol && Math.abs(b.y - first.y) <= tol && Math.abs(b.w - first.w) <= tol && Math.abs(b.h - first.h) <= tol)) return null;
+	const x = Math.max(0, Math.min(...boxes.map((b) => b.x)));
+	const y = Math.max(0, Math.min(...boxes.map((b) => b.y)));
+	const x2 = Math.min(width, Math.max(...boxes.map((b) => b.x + b.w)));
+	const y2 = Math.min(height, Math.max(...boxes.map((b) => b.y + b.h)));
+	const box = {
+		x,
+		y,
+		w: x2 - x,
+		h: y2 - y
+	};
+	const [left, right, top, bottom] = [
+		box.x,
+		width - box.x - box.w,
+		box.y,
+		height - box.y - box.h
+	];
+	const trimsW = left + right >= width * .02;
+	const trimsH = top + bottom >= height * .02;
+	if (!trimsW && !trimsH) return null;
+	const symTolW = Math.max(8, width * .02);
+	const symTolH = Math.max(8, height * .02);
+	if (trimsW && Math.abs(left - right) > symTolW) return null;
+	if (trimsH && Math.abs(top - bottom) > symTolH) return null;
+	if (box.w < width * .3 || box.h < height * .3) return null;
+	return {
+		x: box.x,
+		y: box.y,
+		w: box.w - box.w % 2,
+		h: box.h - box.h % 2
+	};
+}
+/** Sample the clip and return its real picture area, or null when it has no baked-in bars. */
+async function detectLetterbox(path, info, opts = {}) {
+	if (!(info.duration_sec > 0 && info.width > 0 && info.height > 0)) return null;
+	const samples = [];
+	for (let i = 0; i < 5; i++) {
+		const at = info.duration_sec * (i + .5) / 5;
+		const len = Math.min(.5, info.duration_sec / 10);
+		try {
+			const r = await runFfmpeg([
+				"-ss",
+				at.toFixed(3),
+				"-t",
+				len.toFixed(3),
+				"-i",
+				path,
+				"-map",
+				"0:v:0",
+				"-vf",
+				`cropdetect=limit=16:round=2:reset=0`,
+				"-f",
+				"null",
+				"-"
+			], {
+				...opts,
+				keepStderr: true
+			});
+			samples.push(parseCropdetect(r.stderr));
+		} catch {
+			samples.push(null);
+		}
+	}
+	return decideLetterbox(samples, info.width, info.height);
+}
 //#endregion
 //#region ../ingestion/dist/media.js
 /**
@@ -231680,7 +231766,7 @@ function describe(kind, p, shots, loudness) {
 	return `${parts.join(", ")}. No transcript yet: run transcribe to add what is said as evidence.`;
 }
 const mediaExtractor = {
-	version: "media-1",
+	version: "media-2",
 	kinds: ["video", "audio"],
 	async extract(input) {
 		const st = await stat(input.uri);
@@ -231742,6 +231828,16 @@ const mediaExtractor = {
 				});
 			}
 		}
+		let contentBox = null;
+		if (probe.has_video && probe.width && probe.height) try {
+			contentBox = await detectLetterbox(input.uri, {
+				duration_sec: probe.duration_s,
+				width: probe.width,
+				height: probe.height
+			});
+		} catch {
+			contentBox = null;
+		}
 		let loudness;
 		if (probe.has_audio) {
 			try {
@@ -231761,7 +231857,8 @@ const mediaExtractor = {
 			has_video: probe.has_video,
 			has_audio: probe.has_audio,
 			...shots.length ? { shots } : {},
-			...loudness !== void 0 ? { loudness_lufs: Math.round(loudness * 10) / 10 } : {}
+			...loudness !== void 0 ? { loudness_lufs: Math.round(loudness * 10) / 10 } : {},
+			...contentBox ? { content_box: contentBox } : {}
 		};
 		const assets = [];
 		if (input.projectDir) {
@@ -231976,7 +232073,13 @@ const MediaInfo = strictObject({
 	has_audio: boolean(),
 	shots: array(Shot).optional().describe("Shot boundaries from scene detection."),
 	transcript: Transcript.optional(),
-	loudness_lufs: number().optional()
+	loudness_lufs: number().optional(),
+	content_box: strictObject({
+		x: int().nonnegative(),
+		y: int().nonnegative(),
+		w: int().positive(),
+		h: int().positive()
+	}).optional().describe("The real picture inside baked-in black bars (letterbox/pillarbox), in source pixels; the footage renderer crops to it.")
 }).describe("Probe results for a video or audio asset.");
 const IrAsset = strictObject({
 	id: Id,
@@ -239114,7 +239217,8 @@ function createFfmpegRenderer(opts = {}) {
 * the clip's own sound separately.
 */
 const FOOTAGE_RENDERER_ID = "ffmpeg-footage";
-const FOOTAGE_RENDERER_VERSION = "0.1.0";
+/** 0.2.0: crops baked-in letterbox bars (media.content_box) before the fit. */
+const FOOTAGE_RENDERER_VERSION = "0.2.0";
 /** Deterministic kinds drawn over footage. Others are ignored with a warning. */
 const FOOTAGE_OVERLAY_KINDS = [
 	"lower_third",
@@ -239171,6 +239275,10 @@ function redactChains(regions, inSec, speed, inLabel, outLabel) {
 	});
 	return chains;
 }
+/** Crop to the real picture inside baked-in bars (source pixels), or pass through. */
+function contentCrop(box) {
+	return box ? `crop=${box.w}:${box.h}:${box.x}:${box.y}` : "null";
+}
 /** Filter chains fitting `inLabel` into W×H as `outLabel`. */
 function fitChains(fit, W, H, focus, bg, inLabel, outLabel, tag) {
 	const cover = `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bicubic,crop=${W}:${H}:(iw-${W})*${n3(focus.x)}:(ih-${H})*${n3(focus.y)}`;
@@ -239214,7 +239322,8 @@ function planFootage(clip, media, path, target, durationSec, background) {
 			input: ["-i", path],
 			chains: [
 				...redactChains(clip.redact ?? [], 0, 1, "[0:v]", "[red]"),
-				...fitChains(fit, W2, H2, focus, background, "[red]", "[kb]", "k"),
+				`[red]${contentCrop(media.content_box)}[cc]`,
+				...fitChains(fit, W2, H2, focus, background, "[cc]", "[kb]", "k"),
 				`[kb]zoompan=z='${z}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=${frames}:s=${W}x${H}:fps=${fps},setsar=1,${tail.join(",")}[fg]`
 			],
 			frames,
@@ -239244,7 +239353,8 @@ function planFootage(clip, media, path, target, durationSec, background) {
 		],
 		chains: [
 			`[0:v]setpts=PTS-STARTPTS${speed !== 1 ? `,setpts=PTS/${speed}` : ""},fps=${fps}[src0]`,
-			...redactChains(clip.redact ?? [], clip.in_sec, speed, "[src0]", "[src]"),
+			...redactChains(clip.redact ?? [], clip.in_sec, speed, "[src0]", "[src1]"),
+			`[src1]${contentCrop(media.content_box)}[src]`,
 			...fitChains(fit, W, H, focus, background, "[src]", "[fit]", "b"),
 			`[fit]${[...fillFilter, ...tail].join(",")}[fg]`
 		],
@@ -239580,7 +239690,8 @@ async function renderScenes(spec, o) {
 		}
 		const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? {
 			sha256: footage.sha256,
-			duration_sec: footage.media.duration_sec
+			duration_sec: footage.media.duration_sec,
+			...footage.media.content_box ? { content_box: footage.media.content_box } : {}
 		} : void 0);
 		const out = join(dir, `${orig.id}.mp4`);
 		const sidecarPath = join(dir, `${orig.id}.json`);

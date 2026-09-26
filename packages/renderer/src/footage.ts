@@ -19,7 +19,8 @@ import type { Availability, RenderTarget, SceneRenderRequest, SceneRenderResult,
  */
 
 export const FOOTAGE_RENDERER_ID = "ffmpeg-footage";
-export const FOOTAGE_RENDERER_VERSION = "0.1.0";
+/** 0.2.0: crops baked-in letterbox bars (media.content_box) before the fit. */
+export const FOOTAGE_RENDERER_VERSION = "0.2.0";
 
 /** Deterministic kinds drawn over footage. Others are ignored with a warning. */
 export const FOOTAGE_OVERLAY_KINDS = ["lower_third", "kinetic_text", "typography", "quote", "stat"] as const satisfies readonly DeterministicKind[];
@@ -94,6 +95,11 @@ export function redactChains(regions: readonly RedactRegion[], inSec: number, sp
   return chains;
 }
 
+/** Crop to the real picture inside baked-in bars (source pixels), or pass through. */
+export function contentCrop(box: MediaInfo["content_box"]): string {
+  return box ? `crop=${box.w}:${box.h}:${box.x}:${box.y}` : "null";
+}
+
 /** Filter chains fitting `inLabel` into W×H as `outLabel`. */
 function fitChains(fit: NonNullable<FootageClip["fit"]>, W: number, H: number, focus: { x: number; y: number }, bg: string, inLabel: string, outLabel: string, tag: string): string[] {
   const cover = `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bicubic,crop=${W}:${H}:(iw-${W})*${n3(focus.x)}:(ih-${H})*${n3(focus.y)}`;
@@ -115,7 +121,7 @@ function fitChains(fit: NonNullable<FootageClip["fit"]>, W: number, H: number, f
  * Pure plan of the footage part of the graph (exported for tests): input args and the chains that
  * end in `[fg]` with exactly `frames` frames at the target size and fps.
  */
-export function planFootage(clip: FootageClip, media: Pick<MediaInfo, "duration_sec">, path: string, target: RenderTarget, durationSec: number, background: string): FootagePlan {
+export function planFootage(clip: FootageClip, media: Pick<MediaInfo, "duration_sec" | "content_box">, path: string, target: RenderTarget, durationSec: number, background: string): FootagePlan {
   const { width: W, height: H, fps } = target;
   const frames = frameCount(durationSec, fps);
   const D = frames / fps;
@@ -134,7 +140,8 @@ export function planFootage(clip: FootageClip, media: Pick<MediaInfo, "duration_
       input: ["-i", path],
       chains: [
         ...redactChains(clip.redact ?? [], 0, 1, "[0:v]", "[red]"),
-        ...fitChains(fit, W2, H2, focus, background, "[red]", "[kb]", "k"),
+        `[red]${contentCrop(media.content_box)}[cc]`,
+        ...fitChains(fit, W2, H2, focus, background, "[cc]", "[kb]", "k"),
         `[kb]zoompan=z='${z}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=${frames}:s=${W}x${H}:fps=${fps},setsar=1,${tail.join(",")}[fg]`,
       ],
       frames,
@@ -164,7 +171,9 @@ export function planFootage(clip: FootageClip, media: Pick<MediaInfo, "duration_
     chains: [
       `[0:v]setpts=PTS-STARTPTS${speed !== 1 ? `,setpts=PTS/${speed}` : ""},fps=${fps}[src0]`,
       // Redaction before the fit, in source coordinates, so it stays on the content whatever the crop.
-      ...redactChains(clip.redact ?? [], clip.in_sec, speed, "[src0]", "[src]"),
+      ...redactChains(clip.redact ?? [], clip.in_sec, speed, "[src0]", "[src1]"),
+      // Then drop baked-in black bars, so cover fills the frame with picture, not bars.
+      `[src1]${contentCrop(media.content_box)}[src]`,
       ...fitChains(fit, W, H, focus, background, "[src]", "[fit]", "b"),
       `[fit]${[...fillFilter, ...tail].join(",")}[fg]`,
     ],

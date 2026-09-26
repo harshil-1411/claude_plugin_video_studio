@@ -100,6 +100,10 @@ export const MediaInfo = z
     shots: z.array(Shot).optional().describe("Shot boundaries from scene detection."),
     transcript: Transcript.optional(),
     loudness_lufs: z.number().optional(),
+    content_box: z
+      .strictObject({ x: z.int().nonnegative(), y: z.int().nonnegative(), w: z.int().positive(), h: z.int().positive() })
+      .optional()
+      .describe("The real picture inside baked-in black bars (letterbox/pillarbox), in source pixels; the footage renderer crops to it."),
   })
   .describe("Probe results for a video or audio asset.");
 
