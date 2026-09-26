@@ -12,5 +12,7 @@ examples/*/assets/voice/
 examples/*/dist/
 examples/*/qa/
 
-# The user's own video projects (kept local)
+# The user's own video projects: generated media, reproducible from their specs, kept local.
+# Keep new projects outside the plugin repo, or name them video-studio-<name>/ here.
 msb-docs-ebmr-explainer/
+video-studio-*/
