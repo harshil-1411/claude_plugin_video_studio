@@ -14,7 +14,7 @@ Read this together with `.claude/CLAUDE.md` (architecture rules and commands) an
 
 Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and the user's top-8 features; see below and `CHANGELOG.md`).
 
-1. **The user's checklist** (`docs/USER_CHECKLIST.md`). These can't be tested in the sandbox:
+1. ✅ **The user's 0.2.0 checklist passed on 2026-09-27** on the user's Mac: `pnpm hooks` (pre-push hook active), the approval dialog (MCP elicitation), a real YouTube ingest with yt-dlp, tinydiarize speaker turns on a real interview, HyperFrames count-up and openings, and ElevenLabs prices. The remaining older items are optional (C2PA certificate, TikTok re-check, CI). The items checked were:
    - `pnpm hooks`
    - the approval dialog (MCP elicitation)
    - a real YouTube ingest with `yt-dlp`
