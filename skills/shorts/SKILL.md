@@ -3,7 +3,7 @@ name: shorts
 description: Find the best standalone short clips (20-60 s by default) in a long recording such as a founder interview, podcast or talk, then write a talking-head VideoSpec for each chosen clip that plays the original footage and sound. Use when the user runs /video-studio:shorts, or asks to cut a long video into shorts, reels or clips.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+), a system ffmpeg, and whisper.cpp or a caption file for the transcript.
-allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__transcribe mcp__plugin_video-studio_engine__shorts mcp__plugin_video-studio_engine__schema_get mcp__plugin_video-studio_engine__spec_validate Read Write mcp__plugin_video-studio_engine__source_summary
+allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__transcribe mcp__plugin_video-studio_engine__shorts mcp__plugin_video-studio_engine__schema_get mcp__plugin_video-studio_engine__spec_validate Read Write mcp__plugin_video-studio_engine__source_summary mcp__plugin_video-studio_engine__footage_look mcp__plugin_video-studio_engine__footage_notes mcp__plugin_video-studio_engine__footage_focus
 ---
 
 # Long recording → short clips
@@ -44,6 +44,15 @@ It writes `qa/shorts.json`. Each candidate has `start_sec`, `end_sec`,
 `score`, `hook` (its first sentence), `transcript`, `reasons`, and
 `evidence_refs[<id>]` (the transcript refs it covers).
 
+Before recommending one, look at its picture: `footage_look {project_dir,
+asset, from_sec, to_sec}` returns one contact sheet (a frame per shot, labelled
+`t=… shot N`) plus the transcript of that span; Read the image. Drop or flag
+spans where the speaker is off camera, the frame is black or frozen, or private
+screens show. Save what each shot shows with `footage_notes` (subject, action,
+on_screen_text, `broll`, `quality`) so later steps and sessions reuse it;
+`footage_notes {project_dir, asset}` reads them back. Notes are your
+observations, never evidence or claim refs.
+
 Show the user the candidates, best first. For each one, give its time range,
 length, score, the hook in quotes and one line on why it scored well. Ask
 which ones to make; default to all.
@@ -67,9 +76,13 @@ written:
 - `footage.fit: "cover"`
 
 Then refine each `shorts/<id>/project/video-spec.json`:
-- For horizontal footage in a vertical frame, add `footage.focus` on the
-  speaker, or use `fit: "blur_pad"` if the user wants the whole frame.
-- **Screen shares and meetings:** look at the keyframes (Read the images) for
+- For horizontal footage in a vertical frame, call `footage_focus
+  {project_dir, asset, in_sec, out_sec}` per scene and paste the returned
+  `focus_track` into `footage` (keeps a moving speaker in the crop). If it
+  reports `unavailable`, mark `focus_track` by eye from `footage_look`
+  frames. After rendering, check the crop with `review` strips. Use
+  `fit: "blur_pad"` if the user wants the whole frame.
+- **Screen shares and meetings:** look at the span with `footage_look` for
   private material (inboxes, customer names, dashboards, chat panels). Hide it
   with `footage.redact: [{x, y, w, h, mode: "blur", label}]` (fractions of the
   source frame; add `from_sec`/`to_sec` in asset seconds if it only shows for a

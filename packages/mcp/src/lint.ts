@@ -17,7 +17,7 @@ import {
   voiceMode,
   MIN_CUE_GAP_MS,
 } from "@video-studio/schema";
-import { type Script, dominantScript, languageScript, scriptsIn } from "@video-studio/renderer";
+import { REFRAME, type Script, dominantScript, fittedFrame, languageScript, scriptsIn, subjectEdgeHits } from "@video-studio/renderer";
 import { projectSpecPaths } from "./spec-validate.js";
 
 /**
@@ -1089,6 +1089,40 @@ export function checkCutaways(spec: VideoSpec, out: LintFinding[]): void {
   });
 }
 
+/** The ContentIR asset fields subject_near_edge needs. */
+interface IrMediaView {
+  assets?: Array<{ id: string; media?: { width?: number; height?: number; content_box?: { x: number; y: number; w: number; h: number } } }>;
+}
+
+/**
+ * Reframed footage (`fit: cover` with a focus_track): the subject centre should not sit within
+ * REFRAME.edge_margin of the crop edge at any keyframe, computed with the renderer's own smoothed
+ * crop (reframe.ts). A static `focus` is a crop offset, not a subject position, so it is not checked.
+ */
+export function checkSubjectNearEdge(spec: VideoSpec, ir: IrMediaView | undefined, W: number, H: number, out: LintFinding[]): void {
+  for (const s of spec.scenes) {
+    const f = s.footage;
+    if (!f?.focus_track?.length || (f.fit ?? "cover") !== "cover" || f.cutaway) continue;
+    const media = ir?.assets?.find((a) => a.id === f.asset)?.media;
+    const frame = media ? fittedFrame(media) : undefined;
+    if (!media || !frame) continue;
+    const speed = f.speed ?? 1;
+    const span = (f.out_sec ?? f.in_sec + s.duration_sec * speed) - f.in_sec;
+    const hits = subjectEdgeHits(f.focus_track, frame, { width: W, height: H }, { speed, spanSec: span, media });
+    if (!hits.length) continue;
+    const worst = hits.reduce((a, b) => (Math.abs(b.pos - 0.5) > Math.abs(a.pos - 0.5) ? b : a));
+    const where = (pos: number, edge: string) => (pos < 0 || pos > 1 ? `is outside the crop (${edge})` : `sits ${Math.round(Math.min(pos, 1 - pos) * 100)}% from the crop's ${edge} edge`);
+    const side = worst.axis === "x" ? (worst.pos < 0.5 ? "left" : "right") : worst.pos < 0.5 ? "top" : "bottom";
+    out.push({
+      id: "subject_near_edge",
+      severity: "warning",
+      scene_id: s.id,
+      message: `${s.id}: the reframed subject ${where(worst.pos, side)} at t ${worst.t}s (${hits.length} keyframe(s) within ${Math.round(REFRAME.edge_margin * 100)}%); the crop cannot follow further (source edge) or pans too slowly`,
+      fix: "check the keyframe positions (footage_focus, or review crops); if the subject really is at the source edge, use fit blur_pad or contain for that span, split the scene, or choose another span",
+    });
+  }
+}
+
 /** Caption and beat timing against the render: needs render-state.json (and its captions / voice files). */
 async function checkTiming(root: string, spec: VideoSpec, state: RenderStateView | undefined, brand: Brand | undefined, out: LintFinding[]): Promise<void> {
   if (!state) return;
@@ -1218,6 +1252,7 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   await checkTiming(paths.root, spec, state, brand, findings);
   checkStory(spec, findings);
   checkCutaways(spec, findings);
+  checkSubjectNearEdge(spec, await readOptionalJson<IrMediaView>(join(paths.root, "source", "content-ir.json")), master.width, master.height, findings);
   checkLogo(state, boxes, findings);
   checkForbidden(spec, brand, findings);
   checkPostCopy(spec, contracts, findings);

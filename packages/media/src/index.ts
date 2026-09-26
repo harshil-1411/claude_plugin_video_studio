@@ -7,3 +7,4 @@ export * from "./frames.js";
 export * from "./asr.js";
 export * from "./beats.js";
 export * from "./letterbox.js";
+export * from "./subject-detect.js";

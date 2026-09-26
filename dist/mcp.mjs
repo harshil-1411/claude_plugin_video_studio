@@ -10650,7 +10650,7 @@ function blackThreshold(background) {
 		nearBlack: l < .02
 	};
 }
-const r3 = (n) => Math.round(n * 1e3) / 1e3;
+const r3$2 = (n) => Math.round(n * 1e3) / 1e3;
 function ranges(stderr, startRe, endRe, totalS) {
 	const events = [];
 	for (const m of stderr.matchAll(startRe)) events.push({
@@ -10669,16 +10669,16 @@ function ranges(stderr, startRe, endRe, totalS) {
 	for (const e of events) if (e.kind === "s") open = e.t;
 	else if (open !== null) {
 		out.push({
-			start_s: r3(open),
-			end_s: r3(e.t),
-			duration_s: r3(e.t - open)
+			start_s: r3$2(open),
+			end_s: r3$2(e.t),
+			duration_s: r3$2(e.t - open)
 		});
 		open = null;
 	}
 	if (open !== null && totalS > open) out.push({
-		start_s: r3(open),
-		end_s: r3(totalS),
-		duration_s: r3(totalS - open)
+		start_s: r3$2(open),
+		end_s: r3$2(totalS),
+		duration_s: r3$2(totalS - open)
 	});
 	return out;
 }
@@ -10686,9 +10686,9 @@ function ranges(stderr, startRe, endRe, totalS) {
 function parseDetections(stderr, totalS) {
 	const black = [];
 	for (const m of stderr.matchAll(/black_start:\s*(-?[\d.]+)\s+black_end:\s*(-?[\d.]+)\s+black_duration:\s*(-?[\d.]+)/g)) black.push({
-		start_s: r3(Number(m[1])),
-		end_s: r3(Number(m[2])),
-		duration_s: r3(Number(m[3]))
+		start_s: r3$2(Number(m[1])),
+		end_s: r3$2(Number(m[2])),
+		duration_s: r3$2(Number(m[3]))
 	});
 	return {
 		black,
@@ -10935,7 +10935,7 @@ async function extractFrame(video, atSec, out, opts = {}) {
 }
 /** SSIM (0–1, 1 = identical) of two same-size images. */
 async function frameSsim(a, b, opts = {}) {
-	const [sa, sb] = await Promise.all([pngSize(a), pngSize(b)]);
+	const [sa, sb] = await Promise.all([pngSize$1(a), pngSize$1(b)]);
 	if (sa && sb && (sa.width !== sb.width || sa.height !== sb.height)) throw new Error(`frameSsim: size mismatch ${sa.width}x${sa.height} vs ${sb.width}x${sb.height}`);
 	const { stderr } = await runFfmpeg([
 		"-i",
@@ -10985,7 +10985,7 @@ async function frameDiffImage(a, b, out, opts = {}) {
 	});
 }
 /** Width and height from a PNG's IHDR chunk; undefined when the file is not a PNG. */
-async function pngSize(path) {
+async function pngSize$1(path) {
 	const fh = await open(path, "r");
 	try {
 		const buf = Buffer.alloc(24);
@@ -11547,6 +11547,336 @@ async function detectLetterbox(path, info, opts = {}) {
 		}
 	}
 	return decideLetterbox(samples, info.width, info.height);
+}
+//#endregion
+//#region ../media/dist/subject-detect.js
+/** Frames per osascript call (each call loads Vision once, ~1 s). */
+const BATCH = 24;
+/** The JXA detector: argv = absolute image paths; prints a JSON array of FrameDetections. */
+const VISION_JXA = `ObjC.import("Foundation");
+ObjC.import("Vision");
+function box(o) {
+  var b = o.boundingBox;
+  return { x: b.origin.x, y: 1 - b.origin.y - b.size.height, w: b.size.width, h: b.size.height, c: o.confidence };
+}
+function run(argv) {
+  var out = [];
+  for (var k = 0; k < argv.length; k++) {
+    var path = argv[k];
+    var rec = { path: path, ok: false, faces: [], salient: [] };
+    try {
+      var url = $.NSURL.fileURLWithPath(path);
+      var handler = $.VNImageRequestHandler.alloc.initWithURLOptions(url, $({}));
+      var face = $.VNDetectFaceRectanglesRequest.alloc.init;
+      var sal = $.VNGenerateAttentionBasedSaliencyImageRequest.alloc.init;
+      face.usesCPUOnly = true;
+      sal.usesCPUOnly = true;
+      // The error out-parameter is passed but never read: dereferencing it crashes osascript.
+      rec.ok = !!handler.performRequestsError($([face, sal]), Ref());
+      var fr = face.results;
+      for (var i = 0; i < (fr ? fr.count : 0); i++) rec.faces.push(box(fr.objectAtIndex(i)));
+      var sr = sal.results;
+      if (sr && sr.count > 0) {
+        var objs = sr.objectAtIndex(0).salientObjects;
+        for (var j = 0; j < (objs ? objs.count : 0); j++) rec.salient.push(box(objs.objectAtIndex(j)));
+      }
+    } catch (e) {
+      rec.ok = false;
+    }
+    out.push(rec);
+  }
+  return JSON.stringify(out);
+}
+`;
+const OSASCRIPT = "/usr/bin/osascript";
+/** Whether Vision detection can run here (darwin with osascript), with the reason when not. */
+function visionAvailability(opts = {}) {
+	const platform = opts.platform ?? process.platform;
+	if (platform !== "darwin") return {
+		ok: false,
+		reason: `subject detection uses macOS Vision; this is ${platform}`
+	};
+	const bin = opts.osascript ?? OSASCRIPT;
+	if (!existsSync(bin)) return {
+		ok: false,
+		reason: `osascript not found at ${bin}`
+	};
+	return { ok: true };
+}
+const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+const toBox = (b) => ({
+	x: num(b.x),
+	y: num(b.y),
+	w: num(b.w),
+	h: num(b.h),
+	c: num(b.c)
+});
+/** Parse the JXA output (tolerates junk around the JSON; never throws). */
+function parseVisionOutput(stdout, paths) {
+	const start = stdout.indexOf("[");
+	const end = stdout.lastIndexOf("]");
+	let raw;
+	try {
+		raw = start >= 0 && end > start ? JSON.parse(stdout.slice(start, end + 1)) : void 0;
+	} catch {
+		raw = void 0;
+	}
+	const arr = Array.isArray(raw) ? raw : [];
+	return paths.map((path, i) => {
+		const r = arr[i];
+		return {
+			path,
+			ok: !!r?.ok,
+			faces: Array.isArray(r?.faces) ? r.faces.map(toBox) : [],
+			salient: Array.isArray(r?.salient) ? r.salient.map(toBox) : []
+		};
+	});
+}
+/**
+* Faces and salient objects per image (macOS Vision). Never throws for "nothing found"; a missing
+* platform or a crashed/timed-out osascript gives `available: false` with the reason. Aborts with
+* `signal` (the error propagates).
+*/
+async function detectSubjects(frames, opts = {}) {
+	const avail = visionAvailability(opts);
+	if (!avail.ok) return {
+		available: false,
+		reason: avail.reason,
+		frames: []
+	};
+	if (frames.length === 0) return {
+		available: true,
+		frames: []
+	};
+	const paths = frames.map((f) => isAbsolute(f) ? f : resolve(f));
+	const dir = await mkdtemp(join(tmpdir(), "vs-vision-"));
+	const script = join(dir, "detect.js");
+	try {
+		await writeFile(script, VISION_JXA, "utf8");
+		const out = [];
+		for (let i = 0; i < paths.length; i += BATCH) {
+			const batch = paths.slice(i, i + BATCH);
+			try {
+				const { stdout } = await runProcess(opts.osascript ?? OSASCRIPT, [
+					"-l",
+					"JavaScript",
+					script,
+					...batch
+				], {
+					captureStdout: true,
+					timeoutMs: opts.timeoutMs ?? 2e4 + 3e3 * batch.length,
+					...opts.signal ? { signal: opts.signal } : {}
+				});
+				out.push(...parseVisionOutput(stdout, batch));
+			} catch (err) {
+				if (opts.signal?.aborted) throw err;
+				return {
+					available: false,
+					reason: `macOS Vision did not run (${(err instanceof Error ? err.message.split("\n").slice(-2).join(" ") : String(err)).slice(0, 300)})`,
+					frames: out
+				};
+			}
+		}
+		return {
+			available: true,
+			frames: out
+		};
+	} finally {
+		await rm(dir, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+/**
+* The primary subject of one frame: the largest, most confident face, favouring one near the
+* previous subject (so the crop does not jump between two people); else the most prominent
+* salient object near the previous position. Face centres are nudged down a quarter of the face
+* height so head and shoulders stay in frame.
+*/
+function pickPrimary(det, prev) {
+	const score = (b, cx, cy) => {
+		const size = b.w * b.h * Math.max(.05, b.c || .5);
+		if (!prev) return size;
+		return size / (1 + 6 * Math.hypot(cx - prev.x, cy - prev.y));
+	};
+	const best = (boxes, dy) => {
+		let top = null;
+		for (const b of boxes) {
+			if (b.w <= 0 || b.h <= 0) continue;
+			const cx = b.x + b.w / 2;
+			const cy = Math.min(1, b.y + b.h / 2 + dy * b.h);
+			const s = score(b, cx, cy);
+			if (!top || s > top.s) top = {
+				x: cx,
+				y: cy,
+				s
+			};
+		}
+		return top;
+	};
+	const face = best(det.faces, .25);
+	if (face) return {
+		x: clamp01(face.x),
+		y: clamp01(face.y),
+		source: "face"
+	};
+	const sal = best(det.salient, 0);
+	if (sal) return {
+		x: clamp01(sal.x),
+		y: clamp01(sal.y),
+		source: "salient"
+	};
+	return null;
+}
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+const r3$1 = (v) => Math.round(v * 1e3) / 1e3;
+/**
+* Per-frame picks → keyframes: misses carry the previous subject forward (leading misses take the
+* first detection), a 1-2-1 average removes jitter, and runs that stay inside the dead zone keep
+* only their ends. Times are rounded to ms and strictly increase.
+*/
+function picksToTrack(times, picks) {
+	const firstHit = picks.find((p) => p);
+	if (!firstHit) return [];
+	let last = {
+		x: firstHit.x,
+		y: firstHit.y
+	};
+	const filled = times.map((t, i) => {
+		const p = picks[i];
+		if (p) last = {
+			x: p.x,
+			y: p.y
+		};
+		return {
+			t,
+			x: last.x,
+			y: last.y
+		};
+	});
+	const n = filled.length;
+	const avg = filled.map((p, i) => {
+		if (i === 0 || i === n - 1) return p;
+		const a = filled[i - 1];
+		const b = filled[i + 1];
+		return {
+			t: p.t,
+			x: (a.x + 2 * p.x + b.x) / 4,
+			y: (a.y + 2 * p.y + b.y) / 4
+		};
+	});
+	const held = {
+		x: avg[0].x,
+		y: avg[0].y
+	};
+	const dz = avg.map((p) => {
+		if (Math.abs(p.x - held.x) >= .02) held.x = p.x;
+		if (Math.abs(p.y - held.y) >= .02) held.y = p.y;
+		return {
+			t: p.t,
+			x: held.x,
+			y: held.y
+		};
+	});
+	const same = (a, b) => !!a && a.x === b.x && a.y === b.y;
+	const keys = dz.filter((p, i) => !(same(dz[i - 1], p) && same(dz[i + 1], p))).map((k) => ({
+		t: r3$1(k.t),
+		x: r3$1(k.x),
+		y: r3$1(k.y)
+	}));
+	return keys.filter((k, i) => i === 0 || k.t > keys[i - 1].t).slice(0, 200);
+}
+/**
+* Sample `from..to` of a video (ffmpeg, small frames), detect subjects per frame and turn the
+* primary subject's path into focus_track keyframes (t relative to `from`, source-frame
+* fractions). Unavailable detection returns method "unavailable" and no keys.
+*/
+async function suggestFocusTrack(video, opts) {
+	const span = opts.to - opts.from;
+	if (!(span > 0)) throw new Error(`suggestFocusTrack: empty range ${opts.from}..${opts.to}`);
+	const detector = opts.detector ?? ((frames, o) => detectSubjects(frames, o.signal ? { signal: o.signal } : {}));
+	const notes = [];
+	let fps = opts.fps ?? 2;
+	if (span * fps > 180) {
+		fps = 180 / span;
+		notes.push(`sampled ${r3$1(fps)} frames/s so at most 180 frames are checked`);
+	}
+	const dir = await mkdtemp(join(tmpdir(), "vs-focus-"));
+	try {
+		await runFfmpeg([
+			"-y",
+			"-ss",
+			opts.from.toFixed(3),
+			"-t",
+			span.toFixed(3),
+			"-i",
+			video,
+			"-vf",
+			`fps=${fps},scale=${Math.round(opts.width ?? 640)}:-2:flags=bicubic`,
+			"-an",
+			"-sn",
+			"-dn",
+			join(dir, "f%04d.png")
+		], {
+			...opts.tools ? { tools: opts.tools } : {},
+			...opts.signal ? { signal: opts.signal } : {},
+			timeoutMs: 3e5
+		});
+		const files = (await readdir(dir)).filter((f) => /^f\d+\.png$/.test(f)).sort();
+		const frames = files.map((f) => join(dir, f));
+		const times = files.map((_, k) => Math.min(span, k / fps));
+		const det = await detector(frames, opts.signal ? { signal: opts.signal } : {});
+		if (!det.available) return {
+			method: "unavailable",
+			keys: [],
+			frames_checked: 0,
+			detections: {
+				faces: 0,
+				salient: 0,
+				missed: 0
+			},
+			notes: [...notes, det.reason]
+		};
+		const byPath = new Map(det.frames.map((d) => [d.path, d]));
+		const picks = [];
+		let prev = null;
+		const counts = {
+			faces: 0,
+			salient: 0,
+			missed: 0
+		};
+		for (const f of frames) {
+			const d = byPath.get(f);
+			const p = d ? pickPrimary(d, prev) : null;
+			if (p) {
+				counts[p.source === "face" ? "faces" : "salient"]++;
+				prev = {
+					x: p.x,
+					y: p.y
+				};
+			} else counts.missed++;
+			picks.push(p);
+		}
+		const keys = picksToTrack(times, picks);
+		if (!keys.length) notes.push("no face or salient subject was found in any sampled frame");
+		else {
+			if (counts.missed) notes.push(`${counts.missed} frame(s) without a subject kept the previous position`);
+			if (!counts.faces) notes.push("no faces found; the track follows the most salient object");
+		}
+		return {
+			method: "vision",
+			keys,
+			frames_checked: frames.length,
+			detections: counts,
+			notes
+		};
+	} finally {
+		await rm(dir, {
+			recursive: true,
+			force: true
+		});
+	}
 }
 //#endregion
 //#region ../renderer/dist/script.js
@@ -12661,6 +12991,22 @@ const Transcript = strictObject({
 	speakers: boolean().optional().describe("true when speaker turns were detected (tinydiarize); words then carry speaker labels S1, S2, …"),
 	words: int().nonnegative()
 }).describe("Timed transcript of the asset's speech.");
+const FootageNote = strictObject({
+	from_sec: number().nonnegative(),
+	to_sec: number().positive(),
+	subject: string().max(500).optional().describe("Who or what is in the shot."),
+	action: string().max(500).optional().describe("What happens in it."),
+	on_screen_text: string().max(500).optional().describe("Text visible in the frame (slides, signs, UI)."),
+	broll: boolean().optional().describe("true: usable as b-roll / a cutaway (no talking face, no lip sync needed)."),
+	quality: _enum([
+		"good",
+		"ok",
+		"poor"
+	]).optional().describe("Picture quality: focus, exposure, shake."),
+	tags: array(string().min(1).max(40)).max(20).optional(),
+	asset_sha256: Sha256.describe("Hash of the asset file the note was written for; a note whose hash differs from the asset's is stale."),
+	updated_at: IsoDateTime
+}).describe("Claude's own observation of a stretch of footage (footage_notes). Not source evidence: never cited as a claim or evidence ref.");
 const MediaInfo = strictObject({
 	duration_sec: number().nonnegative(),
 	width: int().positive().optional(),
@@ -12681,7 +13027,8 @@ const MediaInfo = strictObject({
 		y: int().nonnegative(),
 		w: int().positive(),
 		h: int().positive()
-	}).optional().describe("The real picture inside baked-in black bars (letterbox/pillarbox), in source pixels; the footage renderer crops to it.")
+	}).optional().describe("The real picture inside baked-in black bars (letterbox/pillarbox), in source pixels; the footage renderer crops to it."),
+	notes: array(FootageNote).optional().describe("Per-shot notes Claude wrote after looking at the footage (footage_look → footage_notes): subject, action, on-screen text, b-roll use, quality. Observations, not evidence.")
 }).describe("Probe results for a video or audio asset.");
 const IrAsset = strictObject({
 	id: Id,
@@ -13068,6 +13415,11 @@ const RedactRegion = strictObject({
 	mode: _enum(["blur", "box"]).optional().describe("blur (default, heavy) or an opaque box."),
 	label: string().optional().describe("What is hidden, for the render record, e.g. 'customer inbox'.")
 }).describe("A region of the footage to make unreadable (private data, faces, inboxes).");
+const FocusKeyframe = strictObject({
+	t: number().min(0).describe("Seconds from the clip's in_sec, in SOURCE time (before speed)."),
+	x: number().min(0).max(1).describe("Subject centre, as a fraction of the source frame width (0 left, 1 right)."),
+	y: number().min(0).max(1).describe("Subject centre, as a fraction of the source frame height (0 top, 1 bottom).")
+}).describe("Where the subject's centre is at one moment of a footage clip.");
 const FootageClip = strictObject({
 	asset: Id.describe("ContentIR asset id of a video (or image) the user supplied or recorded."),
 	in_sec: number().nonnegative().describe("Start inside the asset."),
@@ -13080,7 +13432,8 @@ const FootageClip = strictObject({
 	focus: strictObject({
 		x: number().min(0).max(1),
 		y: number().min(0).max(1)
-	}).optional().describe("Crop centre for cover (0–1)."),
+	}).optional().describe("Static crop OFFSET for cover (0–1): 0 = keep the left/top edge, 0.5 = centre, 1 = right/bottom edge. Ignored when focus_track is set."),
+	focus_track: array(FocusKeyframe).min(1).max(200).optional().describe("Subject-aware reframing for fit: cover. Keyframes of where the SUBJECT'S CENTRE is in the source frame (not a crop offset); the crop follows it smoothly and never leaves the picture. t strictly increasing. Get one from footage_focus, or mark it by eye."),
 	speed: number().min(.25).max(4).optional().describe("Playback rate (1 = normal)."),
 	loop: boolean().optional().describe("Loop a clip shorter than the scene (default: hold the last frame)."),
 	redact: array(RedactRegion).max(12).optional().describe("Regions blurred or boxed in the source frame before it is fitted."),
@@ -13674,6 +14027,32 @@ function validateVideoSpecSemantics(spec, ir) {
 					fix: "set to_sec > from_sec, or omit both to redact the whole clip"
 				});
 			});
+			if (f.focus_track) {
+				const p = `${at}.footage.focus_track`;
+				if ((f.fit ?? "cover") !== "cover") warnings.push({
+					path: p,
+					message: `${sid}: focus_track only steers a cover crop; fit "${f.fit}" shows the whole frame, so it is ignored`,
+					fix: "set fit: cover, or remove focus_track"
+				});
+				if (f.focus) warnings.push({
+					path: `${at}.footage.focus`,
+					message: `${sid}: focus is ignored when focus_track is set`,
+					fix: "remove focus (the track decides the crop)"
+				});
+				const bad = f.focus_track.findIndex((k, j) => j > 0 && k.t <= f.focus_track[j - 1].t);
+				if (bad > 0) errors.push({
+					path: `${p}.${bad}`,
+					message: `${sid}: focus_track times must strictly increase (t ${f.focus_track[bad].t} after ${f.focus_track[bad - 1].t})`,
+					fix: "sort the keyframes by t and drop duplicates"
+				});
+				const span = (f.out_sec ?? f.in_sec + scene.duration_sec * (f.speed ?? 1)) - f.in_sec;
+				const late = f.focus_track.findIndex((k) => k.t > span + .5);
+				if (late >= 0) warnings.push({
+					path: `${p}.${late}`,
+					message: `${sid}: focus_track keyframe at t ${f.focus_track[late].t}s is past the clip's ${Math.round(span * 100) / 100}s span (t counts from in_sec)`,
+					fix: "make t relative to in_sec, not the asset start"
+				});
+			}
 			if (f.out_sec !== void 0 && f.out_sec <= f.in_sec) errors.push({
 				path: `${at}.footage.out_sec`,
 				message: `${sid}: footage out_sec ${f.out_sec} is not after in_sec ${f.in_sec}`,
@@ -25630,11 +26009,207 @@ function createFfmpegRenderer(opts = {}) {
 	};
 }
 //#endregion
+//#region ../renderer/dist/reframe.js
+/** Smoothing and size limits (design rules). */
+const REFRAME = {
+	/** Moves smaller than this (fraction of the frame) are ignored. */
+	dead_zone: .02,
+	/** Fastest pan, in frame fractions per second of play time. */
+	max_speed: .3,
+	/** Keyframes kept in the ffmpeg expression (more are downsampled, first and last kept). */
+	max_keys: 48,
+	/** subject_near_edge: the subject centre within this share of the crop's edge. */
+	edge_margin: .08
+};
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const n4 = (n) => String(Math.round(n * 1e4) / 1e4);
+/** Size of the source (w×h) once scaled to cover W×H, before the crop (ffmpeg force_original_aspect_ratio=increase). */
+function coverSize(srcW, srcH, W, H) {
+	const s = Math.max(W / srcW, H / srcH);
+	return {
+		iw: Math.max(W, Math.round(srcW * s)),
+		ih: Math.max(H, Math.round(srcH * s))
+	};
+}
+/** The frame the fit sees: the source, or its content_box when bars are cropped first. */
+function fittedFrame(media) {
+	if (media.content_box) return {
+		w: media.content_box.w,
+		h: media.content_box.h
+	};
+	return media.width && media.height ? {
+		w: media.width,
+		h: media.height
+	} : void 0;
+}
+/**
+* Source-frame keyframes → play-time points in the fitted frame. Keyframes past the clip's source
+* span are dropped (one is kept past the end so the move into the last frame stays right).
+*/
+function toPlayPoints(track, opts = {}) {
+	const speed = opts.speed ?? 1;
+	const box = opts.media?.content_box;
+	const sw = opts.media?.width;
+	const sh = opts.media?.height;
+	const toBox = (v, full, off, len) => full ? clamp((v * full - off) / len, 0, 1) : v;
+	const pts = [];
+	for (const k of track) {
+		if (opts.spanSec !== void 0 && pts.length && pts[pts.length - 1].t * speed >= opts.spanSec) break;
+		pts.push({
+			t: k.t / speed,
+			x: box ? toBox(k.x, sw, box.x, box.w) : k.x,
+			y: box ? toBox(k.y, sh, box.y, box.h) : k.y
+		});
+	}
+	return pts;
+}
+/** Moving average (1-2-1, ends kept), dead zone, max pan speed, then downsampling to `max_keys`. */
+function smoothFocus(points, opts = {}) {
+	const dz = opts.dead_zone ?? REFRAME.dead_zone;
+	const vmax = opts.max_speed ?? REFRAME.max_speed;
+	const maxKeys = Math.max(2, opts.max_keys ?? REFRAME.max_keys);
+	const n = points.length;
+	if (n === 0) return [];
+	const avg = points.map((p, i) => {
+		if (i === 0 || i === n - 1) return { ...p };
+		const a = points[i - 1];
+		const b = points[i + 1];
+		return {
+			t: p.t,
+			x: (a.x + 2 * p.x + b.x) / 4,
+			y: (a.y + 2 * p.y + b.y) / 4
+		};
+	});
+	const held = {
+		x: avg[0].x,
+		y: avg[0].y
+	};
+	const dzd = avg.map((p) => {
+		if (Math.abs(p.x - held.x) >= dz) held.x = p.x;
+		if (Math.abs(p.y - held.y) >= dz) held.y = p.y;
+		return {
+			t: p.t,
+			x: held.x,
+			y: held.y
+		};
+	});
+	const out = [dzd[0]];
+	for (let i = 1; i < dzd.length; i++) {
+		const prev = out[i - 1];
+		const p = dzd[i];
+		const step = vmax * Math.max(0, p.t - prev.t);
+		out.push({
+			t: p.t,
+			x: prev.x + clamp(p.x - prev.x, -step, step),
+			y: prev.y + clamp(p.y - prev.y, -step, step)
+		});
+	}
+	const lean = out.filter((p, i) => {
+		const a = out[i - 1];
+		const b = out[i + 1];
+		return !(a && b && a.x === p.x && a.y === p.y && b.x === p.x && b.y === p.y);
+	});
+	if (lean.length <= maxKeys) return lean;
+	const picked = [];
+	for (let i = 0; i < maxKeys; i++) picked.push(lean[Math.round(i * (lean.length - 1) / (maxKeys - 1))]);
+	return picked;
+}
+const smoothstep = (u) => u * u * (3 - 2 * u);
+/** The subject centre at play time `t` (smoothstep between keyframes, held before the first and after the last). */
+function focusAt(points, t) {
+	const first = points[0];
+	if (!first) return {
+		x: .5,
+		y: .5
+	};
+	if (t < first.t) return {
+		x: first.x,
+		y: first.y
+	};
+	for (let i = 0; i < points.length - 1; i++) {
+		const a = points[i];
+		const b = points[i + 1];
+		if (t >= a.t && t < b.t) {
+			const s = smoothstep((t - a.t) / (b.t - a.t));
+			return {
+				x: a.x + (b.x - a.x) * s,
+				y: a.y + (b.y - a.y) * s
+			};
+		}
+	}
+	const last = points[points.length - 1];
+	return {
+		x: last.x,
+		y: last.y
+	};
+}
+/** Crop offset in pixels (top-left) for a subject centre, on a cover-scaled iw×ih frame cropped to W×H. */
+function coverCropAt(center, iw, ih, W, H) {
+	return {
+		x: clamp(center.x * iw - W / 2, 0, Math.max(0, iw - W)),
+		y: clamp(center.y * ih - H / 2, 0, Math.max(0, ih - H))
+	};
+}
+/** ffmpeg expression (in `t`) for one axis of the subject centre, mirroring focusAt. */
+function focusExpr(points, axis) {
+	const v = points.map((p) => p[axis]);
+	if (v.length === 0) return "0.5";
+	if (v.every((x) => x === v[0])) return n4(v[0]);
+	const terms = [`if(lt(t,${n4(points[0].t)}),${n4(v[0])},0)`];
+	for (let i = 0; i < points.length - 1; i++) {
+		const a = points[i];
+		const b = points[i + 1];
+		const d = v[i + 1] - v[i];
+		const u = `((t-${n4(a.t)})*${n4(1 / (b.t - a.t))})`;
+		terms.push(d === 0 ? `if(gte(t,${n4(a.t)})*lt(t,${n4(b.t)}),${n4(v[i])},0)` : `if(gte(t,${n4(a.t)})*lt(t,${n4(b.t)}),${n4(v[i])}+${n4(d)}*${u}*${u}*(3-2*${u}),0)`);
+	}
+	const last = points[points.length - 1];
+	terms.push(`if(gte(t,${n4(last.t)}),${n4(v[v.length - 1])},0)`);
+	return terms.join("+");
+}
+/** The cover scale + time-varying crop that keeps the subject centred (single-quoted for a filtergraph). */
+function coverTrackFilter(points, W, H) {
+	return `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bicubic,crop=${W}:${H}:'${`clip((${focusExpr(points, "x")})*iw-${W / 2},0,iw-${W})`}':'${`clip((${focusExpr(points, "y")})*ih-${H / 2},0,ih-${H})`}'`;
+}
+/** Keyframes as the renderer uses them: play time, fitted frame, smoothed. */
+function prepareFocusTrack(track, opts = {}) {
+	return smoothFocus(toPlayPoints(track, opts));
+}
+/**
+* Keyframes where the subject centre falls within `margin` of the crop's edge (or outside it),
+* using the renderer's smoothed crop. Only axes that are actually cropped are checked.
+*/
+function subjectEdgeHits(track, frame, target, opts = {}) {
+	const margin = opts.margin ?? REFRAME.edge_margin;
+	const { width: W, height: H } = target;
+	const { iw, ih } = coverSize(frame.w, frame.h, W, H);
+	const raw = toPlayPoints(track, opts);
+	const smooth = smoothFocus(raw);
+	const hits = [];
+	raw.forEach((p, i) => {
+		const crop = coverCropAt(focusAt(smooth, p.t), iw, ih, W, H);
+		const px = (p.x * iw - crop.x) / W;
+		const py = (p.y * ih - crop.y) / H;
+		const t = track[i].t;
+		if (iw > W + 1 && (px < margin || px > 1 - margin)) hits.push({
+			t,
+			axis: "x",
+			pos: px
+		});
+		if (ih > H + 1 && (py < margin || py > 1 - margin)) hits.push({
+			t,
+			axis: "y",
+			pos: py
+		});
+	});
+	return hits;
+}
+//#endregion
 //#region ../renderer/dist/footage.js
 /**
 * Footage renderer: turns a span of a real video (or a still) into an exact-length, silent clip
 * at the target size and fps. The span is trimmed (`in_sec..out_sec`), re-timed (`speed`), fitted
-* (`cover` crops around `focus`, `contain` letterboxes on the background colour, `blur_pad` puts a
+* (`cover` crops at the `focus` offset, or follows the subject along `focus_track`, `contain` letterboxes on the background colour, `blur_pad` puts a
 * blurred, dimmed copy behind), and a clip shorter than the scene holds its last frame or loops.
 * Stills get a gentle Ken Burns push-in. `scene.motion` moves the fitted picture (after the fit,
 * before any text is drawn, so titles stay put and text boxes are the rest pose lint checks);
@@ -25649,8 +26224,9 @@ const FOOTAGE_RENDERER_ID = "ffmpeg-footage";
 * 0.2.1: `scene.motion` moves the fitted picture; on stills it replaces the Ken Burns.
 * 0.2.2: word cues (`req.cues`) time the overlay's reveal items.
 * 0.3.0: overlays open half-in (entrance.ts) and stat values count up, as in the FFmpeg renderer 0.5.0.
+* 0.4.0: `focus_track` (fit cover) moves the crop over time to keep the subject centred (reframe.ts).
 */
-const FOOTAGE_RENDERER_VERSION = "0.3.0";
+const FOOTAGE_RENDERER_VERSION = "0.4.0";
 /** Deterministic kinds drawn over footage. Others are ignored with a warning. */
 const FOOTAGE_OVERLAY_KINDS = [
 	"lower_third",
@@ -25711,9 +26287,12 @@ function redactChains(regions, inSec, speed, inLabel, outLabel) {
 function contentCrop(box) {
 	return box ? `crop=${box.w}:${box.h}:${box.x}:${box.y}` : "null";
 }
-/** Filter chains fitting `inLabel` into W×H as `outLabel`. */
-function fitChains(fit, W, H, focus, bg, inLabel, outLabel, tag) {
-	const cover = `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bicubic,crop=${W}:${H}:(iw-${W})*${n3(focus.x)}:(ih-${H})*${n3(focus.y)}`;
+/**
+* Filter chains fitting `inLabel` into W×H as `outLabel`. With `track` (play-time subject points)
+* cover crops follow the subject instead of the static `focus` offset.
+*/
+function fitChains(fit, W, H, focus, bg, inLabel, outLabel, tag, track) {
+	const cover = track?.length ? coverTrackFilter(track, W, H) : `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bicubic,crop=${W}:${H}:(iw-${W})*${n3(focus.x)}:(ih-${H})*${n3(focus.y)}`;
 	const contain = `scale=${W}:${H}:force_original_aspect_ratio=decrease:flags=bicubic`;
 	if (fit === "cover") return [`${inLabel}${cover},setsar=1${outLabel}`];
 	if (fit === "contain") return [`${inLabel}${contain},pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${ffColor(bg)},setsar=1${outLabel}`];
@@ -25746,6 +26325,8 @@ function planFootage(clip, media, path, target, durationSec, background, camera 
 		"setpts=PTS-STARTPTS"
 	];
 	const motion = camera.motion;
+	const tracked = fit === "cover" && !!clip.focus_track?.length;
+	if (clip.focus_track?.length && !tracked) warnings.push(`footage: focus_track only steers fit cover; ignored for fit ${fit}`);
 	if (isStillPath(path)) {
 		const W2 = even$1(W * 2);
 		const H2 = even$1(H * 2);
@@ -25757,7 +26338,7 @@ function planFootage(clip, media, path, target, durationSec, background, camera 
 			chains: [
 				...redactChains(clip.redact ?? [], 0, 1, "[0:v]", "[red]"),
 				`[red]${contentCrop(media.content_box)}[cc]`,
-				...fitChains(fit, W2, H2, focus, background, "[cc]", "[kb]", "k"),
+				...fitChains(fit, W2, H2, focus, background, "[cc]", "[kb]", "k", tracked ? prepareFocusTrack(clip.focus_track.slice(0, 1), { media }) : void 0),
 				`[kb]${move},setsar=1,${tail.join(",")}${reveal ? "[mv]" : "[fg]"}`,
 				...reveal ? revealChains(target, D, sceneMotionParams(motion, D).sec, background, camera.easing, "[mv]", "[fg]") : []
 			],
@@ -25791,7 +26372,11 @@ function planFootage(clip, media, path, target, durationSec, background, camera 
 			`[0:v]setpts=PTS-STARTPTS${speed !== 1 ? `,setpts=PTS/${speed}` : ""},fps=${fps}[src0]`,
 			...redactChains(clip.redact ?? [], clip.in_sec, speed, "[src0]", "[src1]"),
 			`[src1]${contentCrop(media.content_box)}[src]`,
-			...fitChains(fit, W, H, focus, background, "[src]", "[fit]", "b"),
+			...fitChains(fit, W, H, focus, background, "[src]", "[fit]", "b", tracked ? prepareFocusTrack(clip.focus_track, {
+				speed,
+				spanSec: span,
+				media
+			}) : void 0),
 			...moveChains.length ? [`[fit]${[...fillFilter, ...tail].join(",")}[mv]`, ...moveChains] : [`[fit]${[...fillFilter, ...tail].join(",")}[fg]`]
 		],
 		frames,
@@ -31984,6 +32569,41 @@ function checkCutaways(spec, out) {
 		});
 	});
 }
+/**
+* Reframed footage (`fit: cover` with a focus_track): the subject centre should not sit within
+* REFRAME.edge_margin of the crop edge at any keyframe, computed with the renderer's own smoothed
+* crop (reframe.ts). A static `focus` is a crop offset, not a subject position, so it is not checked.
+*/
+function checkSubjectNearEdge(spec, ir, W, H, out) {
+	for (const s of spec.scenes) {
+		const f = s.footage;
+		if (!f?.focus_track?.length || (f.fit ?? "cover") !== "cover" || f.cutaway) continue;
+		const media = ir?.assets?.find((a) => a.id === f.asset)?.media;
+		const frame = media ? fittedFrame(media) : void 0;
+		if (!media || !frame) continue;
+		const speed = f.speed ?? 1;
+		const span = (f.out_sec ?? f.in_sec + s.duration_sec * speed) - f.in_sec;
+		const hits = subjectEdgeHits(f.focus_track, frame, {
+			width: W,
+			height: H
+		}, {
+			speed,
+			spanSec: span,
+			media
+		});
+		if (!hits.length) continue;
+		const worst = hits.reduce((a, b) => Math.abs(b.pos - .5) > Math.abs(a.pos - .5) ? b : a);
+		const where = (pos, edge) => pos < 0 || pos > 1 ? `is outside the crop (${edge})` : `sits ${Math.round(Math.min(pos, 1 - pos) * 100)}% from the crop's ${edge} edge`;
+		const side = worst.axis === "x" ? worst.pos < .5 ? "left" : "right" : worst.pos < .5 ? "top" : "bottom";
+		out.push({
+			id: "subject_near_edge",
+			severity: "warning",
+			scene_id: s.id,
+			message: `${s.id}: the reframed subject ${where(worst.pos, side)} at t ${worst.t}s (${hits.length} keyframe(s) within ${Math.round(REFRAME.edge_margin * 100)}%); the crop cannot follow further (source edge) or pans too slowly`,
+			fix: "check the keyframe positions (footage_focus, or review crops); if the subject really is at the source edge, use fit blur_pad or contain for that span, split the scene, or choose another span"
+		});
+	}
+}
 /** Caption and beat timing against the render: needs render-state.json (and its captions / voice files). */
 async function checkTiming(root, spec, state, brand, out) {
 	if (!state) return;
@@ -32098,6 +32718,7 @@ async function lintProject(projectDir, opts = {}) {
 	await checkTiming(paths.root, spec, state, brand, findings);
 	checkStory(spec, findings);
 	checkCutaways(spec, findings);
+	checkSubjectNearEdge(spec, await readOptionalJson$1(join(paths.root, "source", "content-ir.json")), master.width, master.height, findings);
 	checkLogo(state, boxes, findings);
 	checkForbidden(spec, brand, findings);
 	checkPostCopy(spec, contracts, findings);
@@ -235205,6 +235826,11 @@ function mergeContentIR(existing, parts, opts = {}) {
 				...asset.media,
 				transcript
 			};
+			const notes = ids[k].old?.media?.notes?.filter((n) => n.asset_sha256 === asset.sha256);
+			if (notes?.length && asset.media) asset.media = {
+				...asset.media,
+				notes
+			};
 			ir.assets.push(asset);
 		});
 		for (const w of part.warnings) ir.warnings.push({
@@ -253820,6 +254446,1130 @@ function formatGrammar(g) {
 	if (g.notes.length) lines.push("", ...g.notes.map((n) => `- ${n}`));
 	return lines.join("\n");
 }
+/**
+* A frame passes when its SSIM against the golden is at least this. Tolerant of encoder and
+* ffmpeg version noise (typically > 0.99) while catching layout, text and colour changes.
+*/
+const GOLDEN_SSIM_THRESHOLD = .97;
+const GOLDEN_DIR = "golden";
+const GOLDEN_FILE = "golden.json";
+const GOLDEN_VERSION = 1;
+async function readOptionalJson(path) {
+	if (!existsSync(path)) return void 0;
+	try {
+		return await readJson(path);
+	} catch {
+		return;
+	}
+}
+const round3$1 = (n) => Math.round(n * 1e3) / 1e3;
+const rel$1 = (root, p) => relative(root, p).split("\\").join("/");
+/** Time of the middle of frame `i` at `fps`, so seeks never land on a frame boundary. */
+const frameCentre = (i, fps) => round3$1((i + .5) / fps);
+/**
+* Deterministic sample times: the first frame, each scene's midpoint, and the last frame, each
+* snapped to a frame centre; times within a frame of each other are merged. Without scenes, the
+* reel is sampled at 25%, 50% and 75%.
+*/
+function sampleTimes(r) {
+	const fps = r.fps > 0 ? r.fps : 30;
+	const frames = Math.max(1, Math.floor(r.duration_ms / 1e3 * fps));
+	const snap = (sec) => frameCentre(Math.min(frames - 1, Math.max(0, Math.floor(sec * fps))), fps);
+	const out = [{
+		label: "first",
+		at_sec: frameCentre(0, fps)
+	}];
+	if (r.scenes && r.scenes.length > 0) {
+		let start = 0;
+		for (const s of r.scenes) {
+			out.push({
+				label: s.scene_id,
+				scene_id: s.scene_id,
+				at_sec: snap((start + s.duration_ms / 2) / 1e3)
+			});
+			start += s.duration_ms;
+		}
+	} else for (const f of [
+		.25,
+		.5,
+		.75
+	]) out.push({
+		label: `p${Math.round(f * 100)}`,
+		at_sec: snap(r.duration_ms / 1e3 * f)
+	});
+	out.push({
+		label: "last",
+		at_sec: frameCentre(Math.max(0, frames - 2), fps)
+	});
+	const merged = [];
+	for (const s of out) {
+		if (merged.some((m) => Math.abs(m.at_sec - s.at_sec) < 1 / fps / 2)) continue;
+		merged.push(s);
+	}
+	return merged;
+}
+/** File name of the n-th sample, e.g. `02-s02.png`. */
+function sampleFileName(i, s) {
+	return `${String(i).padStart(2, "0")}-${s.label.replace(/[^A-Za-z0-9_-]/g, "_")}.png`;
+}
+/**
+* Locate a render: `quality` (else renders/latest.json, else dist/render-manifest.json's quality,
+* else whichever renders/<q>/render-state.json exists). The reel is the state's reel, else
+* renders/<q>/reel.mp4, else dist/reel.mp4 when dist holds that quality (or says nothing).
+*/
+async function resolveRender(projectDir, quality) {
+	const paths = projectPaths(projectDir);
+	const root = paths.root;
+	const distQuality = (await readOptionalJson(join(paths.dist, "render-manifest.json")))?.settings?.quality;
+	let q = quality ?? (await readOptionalJson(join(paths.renders, "latest.json")))?.quality ?? distQuality;
+	if (!q) q = ["final", "preview"].find((c) => existsSync(join(paths.renders, c, "render-state.json")));
+	const state = q ? await readOptionalJson(join(paths.renders, q, "render-state.json")) : void 0;
+	const candidates = [];
+	if (state?.reel) candidates.push([join(root, state.reel), `renders/${q}`]);
+	if (q) candidates.push([join(paths.renders, q, "reel.mp4"), `renders/${q}`]);
+	if (!distQuality || distQuality === q) candidates.push([join(paths.dist, "reel.mp4"), "dist"]);
+	const found = candidates.find(([p]) => existsSync(p));
+	if (!found) throw new Error(q ? `no ${q} reel found in ${root} (looked for ${candidates.map(([p]) => rel$1(root, p)).join(", ") || "nothing"}); render it first (render_submit${quality ? ` with quality "${quality}"` : ""})` : `no render found in ${root}; render it first (render_submit)`);
+	const [reel, source] = found;
+	const probe = !state?.target || !state.duration_ms ? await ffprobe(reel) : void 0;
+	return {
+		root,
+		...q ? { quality: q } : {},
+		...state ? { state } : {},
+		reel,
+		duration_ms: state?.duration_ms ?? Math.round((probe?.duration_s ?? 0) * 1e3),
+		width: state?.target?.width ?? probe?.width ?? 0,
+		height: state?.target?.height ?? probe?.height ?? 0,
+		fps: state?.target?.fps ?? probe?.fps ?? 30,
+		source
+	};
+}
+/** Sample times for a resolved render (scene midpoints when the render state has scenes). */
+function renderSamples(r) {
+	return sampleTimes({
+		duration_ms: r.duration_ms,
+		fps: r.fps,
+		...r.state?.scenes ? { scenes: r.state.scenes } : {}
+	});
+}
+async function clearPngs(dir) {
+	if (!existsSync(dir)) return;
+	for (const f of await readdir(dir)) if (f.endsWith(".png")) await rm(join(dir, f), { force: true });
+}
+/**
+* Golden-frame test of the `quality` render (default: the latest). With `update`, records the
+* current frames as goldens. Writes qa/test.json and qa/test.md; failing frames get the current
+* frame and a golden | current | difference image under qa/test-frames/.
+*/
+async function testProject(projectDir, opts = {}) {
+	const paths = projectPaths(projectDir);
+	const root = paths.root;
+	const r = await resolveRender(root, opts.quality);
+	if (!r.quality) throw new Error(`cannot tell which quality the render in ${root} is; pass quality`);
+	const quality = r.quality;
+	const goldenDir = join(root, GOLDEN_DIR, quality);
+	const goldenPath = join(goldenDir, GOLDEN_FILE);
+	const framesDir = join(paths.qa, "test-frames");
+	const samples = renderSamples(r);
+	const reelSha = await hashFile(r.reel);
+	await rm(framesDir, {
+		recursive: true,
+		force: true
+	});
+	const base = {
+		quality,
+		golden_dir: rel$1(root, goldenDir)
+	};
+	const finish = async (res) => {
+		const out = {
+			...res,
+			report_json: "qa/test.json",
+			report_md: "qa/test.md"
+		};
+		await writeJsonAtomic(join(paths.qa, "test.json"), out);
+		await writeFileAtomic(join(paths.qa, "test.md"), goldenMarkdown(out));
+		return out;
+	};
+	if (opts.update) {
+		await mkdir(goldenDir, { recursive: true });
+		await clearPngs(goldenDir);
+		const frames = [];
+		for (const [i, s] of samples.entries()) {
+			const file = sampleFileName(i, s);
+			await extractFrame(r.reel, s.at_sec, join(goldenDir, file), { width: 160 });
+			frames.push({
+				...s,
+				file
+			});
+		}
+		await writeJsonAtomic(goldenPath, {
+			version: GOLDEN_VERSION,
+			quality,
+			width: 160,
+			threshold: GOLDEN_SSIM_THRESHOLD,
+			reel_sha256: reelSha,
+			...r.state?.spec_sha256 ? { spec_sha256: r.state.spec_sha256 } : {},
+			target: {
+				width: r.width,
+				height: r.height,
+				fps: r.fps
+			},
+			duration_ms: r.duration_ms,
+			frames
+		});
+		return finish({
+			...base,
+			status: "updated",
+			threshold: GOLDEN_SSIM_THRESHOLD,
+			reel_identical: true,
+			frames: frames.map((f) => ({
+				label: f.label,
+				...f.scene_id ? { scene_id: f.scene_id } : {},
+				at_sec: f.at_sec,
+				golden: rel$1(root, join(goldenDir, f.file)),
+				pass: true
+			})),
+			message: `recorded ${frames.length} golden frame(s) from ${rel$1(root, r.reel)}`
+		});
+	}
+	const golden = await readOptionalJson(goldenPath);
+	if (!golden) return finish({
+		...base,
+		status: "missing",
+		threshold: GOLDEN_SSIM_THRESHOLD,
+		frames: [],
+		message: `no golden frames in ${rel$1(root, goldenDir)}/`,
+		fix: `check the ${quality} render by eye (look at ${rel$1(root, r.reel)} or a few frames), then run test with update: true to record it as the golden`
+	});
+	const threshold = golden.threshold ?? .97;
+	const reelIdentical = golden.reel_sha256 === reelSha;
+	const goldenFrames = (golden.frames ?? []).map((f) => ({
+		label: f.label,
+		...f.scene_id ? { scene_id: f.scene_id } : {},
+		at_sec: f.at_sec,
+		golden: rel$1(root, join(goldenDir, f.file)),
+		pass: false
+	}));
+	const updateFix = `if the change is intended, check the ${quality} render by eye and run test with update: true to re-record the goldens; otherwise find what changed (diff against a known-good render)`;
+	if (golden.target && (golden.target.width !== r.width || golden.target.height !== r.height || golden.target.fps !== r.fps)) return finish({
+		...base,
+		status: "fail",
+		threshold,
+		reel_identical: false,
+		frames: goldenFrames,
+		message: `render size changed: golden ${golden.target.width}x${golden.target.height}@${golden.target.fps} vs current ${r.width}x${r.height}@${r.fps}`,
+		fix: updateFix
+	});
+	if (samples.length !== golden.frames.length || samples.some((s, i) => s.label !== golden.frames[i].label || Math.abs(s.at_sec - golden.frames[i].at_sec) > 5e-4)) return finish({
+		...base,
+		status: "fail",
+		threshold,
+		reel_identical: false,
+		frames: goldenFrames,
+		message: `sampled frames changed (scenes or durations differ): golden ${golden.frames.map((f) => `${f.label}@${f.at_sec}s`).join(", ")}; current ${samples.map((s) => `${s.label}@${s.at_sec}s`).join(", ")}`,
+		fix: updateFix
+	});
+	const frames = [];
+	for (const [i, s] of samples.entries()) {
+		const gf = golden.frames[i];
+		const goldenPng = join(goldenDir, gf.file);
+		const entry = {
+			...s,
+			golden: rel$1(root, goldenPng),
+			pass: false
+		};
+		if (!existsSync(goldenPng)) {
+			frames.push(entry);
+			continue;
+		}
+		await mkdir(framesDir, { recursive: true });
+		const actual = join(framesDir, gf.file.replace(/\.png$/, ".actual.png"));
+		await extractFrame(r.reel, s.at_sec, actual, { width: golden.width ?? 160 });
+		const [ga, aa] = await Promise.all([pngSize$1(goldenPng), pngSize$1(actual)]);
+		if (ga && aa && (ga.width !== aa.width || ga.height !== aa.height)) entry.actual = rel$1(root, actual);
+		else {
+			entry.ssim = round4(await frameSsim(goldenPng, actual));
+			entry.pass = entry.ssim >= threshold;
+			if (entry.pass) await rm(actual, { force: true });
+			else {
+				const diff = join(framesDir, gf.file.replace(/\.png$/, ".diff.png"));
+				await frameDiffImage(goldenPng, actual, diff);
+				entry.actual = rel$1(root, actual);
+				entry.diff = rel$1(root, diff);
+			}
+		}
+		frames.push(entry);
+	}
+	const failed = frames.filter((f) => !f.pass);
+	if (!failed.length) await rm(framesDir, {
+		recursive: true,
+		force: true
+	});
+	return finish({
+		...base,
+		status: failed.length ? "fail" : "pass",
+		threshold,
+		reel_identical: reelIdentical,
+		frames,
+		...failed.length ? {
+			message: `${failed.length} of ${frames.length} frame(s) differ from the golden (${failed.map((f) => f.ssim === void 0 ? `${f.label}: missing or wrong size` : `${f.label}: SSIM ${f.ssim}`).join(", ")}); compare images in qa/test-frames/`,
+			fix: updateFix
+		} : {}
+	});
+}
+const round4 = (n) => Math.round(n * 1e4) / 1e4;
+function goldenMarkdown(r) {
+	const lines = [
+		"# Golden-frame test",
+		"",
+		`- Status: **${r.status}**`,
+		`- Quality: ${r.quality ?? "?"}`,
+		`- Goldens: \`${r.golden_dir}/\``,
+		`- Threshold: SSIM >= ${r.threshold}`
+	];
+	if (r.reel_identical !== void 0) lines.push(`- Reel byte-identical to the golden's: ${r.reel_identical ? "yes" : "no"}`);
+	if (r.message) lines.push("", r.message);
+	if (r.fix) lines.push("", `Fix: ${r.fix}`);
+	if (r.frames.length) {
+		lines.push("", "| Frame | Time (s) | SSIM | Result | Images |", "|---|---|---|---|---|");
+		for (const f of r.frames) {
+			const imgs = [
+				`golden: \`${f.golden}\``,
+				...f.actual ? [`current: \`${f.actual}\``] : [],
+				...f.diff ? [`diff: \`${f.diff}\``] : []
+			].join("<br>");
+			lines.push(`| ${f.label} | ${f.at_sec} | ${f.ssim ?? "-"} | ${r.status === "updated" ? "recorded" : f.pass ? "pass" : "FAIL"} | ${imgs} |`);
+		}
+	}
+	return `${lines.join("\n")}\n`;
+}
+function formatGolden(r) {
+	const lines = [`test ${r.status}${r.quality ? ` (${r.quality})` : ""}: ${r.frames.length} frame(s), threshold SSIM ${r.threshold}; report ${r.report_md}`];
+	if (r.message) lines.push(r.message);
+	if (r.status === "fail") for (const f of r.frames.filter((x) => !x.pass)) lines.push(`- ${f.label} @ ${f.at_sec}s: ${f.ssim === void 0 ? "not compared" : `SSIM ${f.ssim}`}${f.diff ? ` (see ${f.diff})` : ""}`);
+	if (r.fix) lines.push(`fix: ${r.fix}`);
+	return lines.join("\n");
+}
+/** Longest image side in px: Claude's vision input downscales anything larger, making labels unreadable. */
+const REVIEW_MAX_IMAGE_PX = 1568;
+const PAD = 4;
+const MARGIN = 4;
+const DEFAULT_WIDTH = {
+	sheet: 240,
+	strip: 180,
+	crop: 540
+};
+const DEFAULT_COLS = {
+	sheet: 6,
+	strip: 8,
+	crop: 2
+};
+const BORDER_COLOR = {
+	error: "0xE5484D",
+	warning: "0xF5A524"
+};
+/**
+* Group scene-level lint findings (plus the render's unplaced word cues, when lint did not already
+* report them) by scene, errors first within a scene and across scenes; `order` sorts ties.
+*/
+function flagScenes(findings, cues = [], order = []) {
+	const all = findings.filter((f) => f.scene_id).map((f) => ({
+		scene_id: f.scene_id,
+		id: f.id,
+		severity: f.severity,
+		message: f.message
+	}));
+	for (const c of cues) {
+		if (c.status === "placed") continue;
+		if (all.some((f) => f.scene_id === c.scene_id && f.id === "cue_unmatched" && f.message.includes(`"${c.word}"`))) continue;
+		all.push({
+			scene_id: c.scene_id,
+			id: "cue_unmatched",
+			severity: "warning",
+			message: `cue "${c.word}" (item ${c.item}) was ${c.status === "late" ? "spoken after the scene ends" : "not found in the spoken words"}`
+		});
+	}
+	const byScene = /* @__PURE__ */ new Map();
+	for (const f of all) {
+		const flag = byScene.get(f.scene_id) ?? {
+			scene_id: f.scene_id,
+			severity: "warning",
+			findings: []
+		};
+		flag.findings.push({
+			id: f.id,
+			severity: f.severity,
+			message: f.message
+		});
+		if (f.severity === "error") flag.severity = "error";
+		byScene.set(f.scene_id, flag);
+	}
+	const rank = (s) => s === "error" ? 0 : 1;
+	const pos = (id) => order.includes(id) ? order.indexOf(id) : order.length;
+	const out = [...byScene.values()];
+	for (const f of out) f.findings.sort((a, b) => rank(a.severity) - rank(b.severity));
+	return out.sort((a, b) => rank(a.severity) - rank(b.severity) || pos(a.scene_id) - pos(b.scene_id));
+}
+/** Mark tiles with their scene's flags (finding ids deduplicated, errors first). */
+function applyFlags(tiles, flags) {
+	for (const t of tiles) {
+		const f = t.scene_id ? flags.find((x) => x.scene_id === t.scene_id) : void 0;
+		if (!f) continue;
+		t.flags = [...new Set(f.findings.map((x) => x.id))];
+		t.severity = f.severity;
+	}
+}
+/**
+* Attach each placed word cue to the tile nearest the moment its word is spoken (scene start +
+* at_ms), skipping cues outside the tiles' span (by more than a frame).
+*/
+function applyCues(tiles, cues, spans, frame) {
+	if (!tiles.length) return;
+	const first = tiles[0].time_sec;
+	const last = tiles[tiles.length - 1].time_sec;
+	for (const c of cues) {
+		if (c.status !== "placed" || c.at_ms === void 0) continue;
+		const span = spans.find((s) => s.id === c.scene_id);
+		if (!span) continue;
+		const at = span.start + c.at_ms / 1e3;
+		if (at < first - frame || at > last + frame) continue;
+		let best = tiles[0];
+		for (const t of tiles) if (Math.abs(t.time_sec - at) < Math.abs(best.time_sec - at)) best = t;
+		best.cues = [...best.cues ?? [], c.word];
+	}
+}
+/** The tile's video filter tail: a border when flagged, its label, and a second line for cues. */
+function tileDecor(tile, width, font) {
+	const labelSize = Math.max(11, Math.round(width / 14));
+	const border = Math.max(3, Math.round(width / 40));
+	const parts = [];
+	if (tile.severity) parts.push(`drawbox=x=0:y=0:w=iw:h=ih:color=${BORDER_COLOR[tile.severity]}:t=${border}`);
+	if (font) {
+		const text = (t) => escapeFiltergraph(escapeFilterOption(t));
+		const inset = tile.severity ? border + 2 : 4;
+		const common = `fontfile=${escapeFilterPath(font)}:fontsize=${labelSize}:boxborderw=${Math.round(labelSize / 3)}`;
+		parts.push(`drawtext=${common}:expansion=none:text=${text(tile.label)}:fontcolor=white:box=1:boxcolor=black@0.6:x=${inset}:y=${inset}`);
+		if (tile.cues?.length) parts.push(`drawtext=${common}:expansion=none:text=${text(`cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`)}:fontcolor=black:box=1:boxcolor=0xFFD60A@0.9:x=${inset}:y=h-th-${inset + Math.round(labelSize / 3)}`);
+	}
+	return parts.length ? `,${parts.join(",")}` : "";
+}
+/** The bundled label font (Inter Bold), or undefined when the plugin's fonts/ are not found. */
+function reviewFont() {
+	const fontsDir = findFontsDir();
+	const font = fontsDir ? join(fontsDir, "Inter", "Inter-Bold.ttf") : void 0;
+	return font && existsSync(font) ? font : void 0;
+}
+/** Tile the numbered frames `<dir>/0001.png, 0002.png, …` (all the same size) into one cols×rows JPEG. */
+async function tileSheet(dir, cols, rows, image) {
+	await runFfmpeg([
+		"-y",
+		"-framerate",
+		"1",
+		"-i",
+		join(dir, "%04d.png"),
+		"-vf",
+		`tile=${cols}x${rows}:padding=${PAD}:margin=${MARGIN}:color=0x808080`,
+		"-frames:v",
+		"1",
+		"-q:v",
+		"3",
+		image
+	], { timeoutMs: 6e4 });
+}
+async function reviewRender(projectDir, opts = {}) {
+	const mode = opts.mode ?? "sheet";
+	const r = await resolveRender(projectDir, opts.quality);
+	const fps = r.fps;
+	const frame = 1 / fps;
+	const dur = r.duration_ms / 1e3;
+	const lastT = Math.max(0, dur - frame);
+	const notes = [];
+	let t = 0;
+	const spans = (r.state?.scenes ?? []).map((s) => {
+		const span = {
+			id: s.scene_id,
+			start: t,
+			end: t + s.duration_ms / 1e3
+		};
+		t = span.end;
+		return span;
+	});
+	const sceneAt = (x) => spans.find((s) => x >= s.start && x < s.end)?.id ?? spans[spans.length - 1]?.id;
+	let only;
+	if (opts.scene) {
+		only = spans.find((s) => s.id === opts.scene);
+		if (!only) throw new Error(`no scene "${opts.scene}" in this render (scenes: ${spans.map((s) => s.id).join(", ") || "unknown: no render state"})`);
+	}
+	const clamp = (x) => Math.min(lastT, Math.max(0, x));
+	const round3 = (x) => Math.round(x * 1e3) / 1e3;
+	let tiles;
+	if (opts.times?.length) tiles = opts.times.map((x) => ({ time: clamp(x) }));
+	else if (mode === "strip") {
+		const a = clamp(opts.from_sec ?? only?.start ?? 0);
+		const b = clamp(opts.to_sec ?? (only ? only.end - 1e-6 : a + 2));
+		if (b < a) throw new Error(`strip: to_sec ${b} is before from_sec ${a}`);
+		const fa = Math.ceil(a * fps - 1e-6);
+		const n = Math.max(fa, Math.floor(b * fps + 1e-6)) - fa + 1;
+		const take = Math.min(n, 48);
+		if (take < n) notes.push(`${n} frames in ${round3(a)}–${round3(b)}s; showing ${take} evenly spaced (narrow the span for every frame)`);
+		tiles = Array.from({ length: take }, (_, i) => ({ time: (fa + (take === 1 ? 0 : Math.round(i * (n - 1) / (take - 1)))) / fps }));
+	} else {
+		const list = only ? [only] : spans;
+		if (!list.length) {
+			tiles = [
+				.25,
+				.5,
+				.75
+			].map((f) => ({ time: clamp(dur * f) }));
+			notes.push("no render state with scene timings: sampled 25%, 50% and 75%");
+		} else {
+			const per = list.length * 3 <= 90 ? 3 : list.length * 2 <= 90 ? 2 : 1;
+			if (per < 3) notes.push(`${list.length} scenes: ${per === 2 ? "middle and closing" : "middle"} frame of each (use scene for all three)`);
+			tiles = list.flatMap((s) => {
+				const len = s.end - s.start;
+				const all = [
+					{
+						time: clamp(s.start + Math.min(.3, len * .2)),
+						tag: "in"
+					},
+					{
+						time: clamp(s.start + len / 2),
+						tag: "mid"
+					},
+					{
+						time: clamp(s.end - Math.max(frame, Math.min(.45, len * .15))),
+						tag: "out"
+					}
+				];
+				return per === 3 ? all : per === 2 ? all.slice(1) : [all[1]];
+			});
+		}
+	}
+	const maxTiles = mode === "sheet" && !opts.times?.length && !only && spans.length > 0 ? 90 : 48;
+	if (tiles.length > maxTiles) {
+		notes.push(`${tiles.length} tiles requested; showing the first ${maxTiles} (review one scene at a time with scene)`);
+		tiles = tiles.slice(0, maxTiles);
+	}
+	let crop = "";
+	if (mode === "crop") {
+		const c = opts.crop;
+		if (!c) throw new Error("crop mode needs crop {x, y, w, h} as fractions of the frame (e.g. {x: 0.1, y: 0.6, w: 0.8, h: 0.3})");
+		if (c.x < 0 || c.y < 0 || c.w <= 0 || c.h <= 0 || c.x + c.w > 1.0001 || c.y + c.h > 1.0001) throw new Error("crop must lie inside the frame: 0 ≤ x, y and x + w, y + h ≤ 1");
+		const px = (f, full) => Math.max(0, Math.round(f * full));
+		crop = `crop=${Math.max(2, px(c.w, r.width))}:${Math.max(2, px(c.h, r.height))}:${px(c.x, r.width)}:${px(c.y, r.height)},`;
+		if (!opts.times?.length) {
+			if (!only) tiles = spans.length ? spans.map((s) => ({
+				time: clamp((s.start + s.end) / 2),
+				tag: "mid"
+			})) : [{ time: clamp(dur / 2) }];
+			else tiles = [{
+				time: clamp((only.start + only.end) / 2),
+				tag: "mid"
+			}];
+		}
+	}
+	const aspect = mode === "crop" && opts.crop ? opts.crop.h * r.height / Math.max(1e-6, opts.crop.w * r.width) : r.height / r.width;
+	const layout = planSheets(tiles.length, {
+		width: Math.max(64, Math.round(opts.width ?? DEFAULT_WIDTH[mode])),
+		aspect,
+		cols: opts.cols ?? DEFAULT_COLS[mode],
+		group: mode === "sheet" && !opts.times?.length && tiles.length % 3 === 0 && tiles.every((x, i) => x.tag === [
+			"in",
+			"mid",
+			"out"
+		][i % 3]) ? 3 : 1
+	});
+	const width = layout.width;
+	notes.push(...layout.notes);
+	const outDir = join(projectPaths(r.root).root, "qa", "review");
+	const work = join(outDir, ".work");
+	await rm(work, {
+		recursive: true,
+		force: true
+	});
+	await mkdir(work, { recursive: true });
+	const font = reviewFont();
+	const haveFont = Boolean(font);
+	const out = tiles.map((x, i) => {
+		const scene_id = sceneAt(x.time);
+		const label = [
+			scene_id,
+			x.tag,
+			`${round3(x.time).toFixed(2)}s`
+		].filter(Boolean).join(" ");
+		return {
+			index: i,
+			time_sec: round3(x.time),
+			...scene_id ? { scene_id } : {},
+			label
+		};
+	});
+	const cues = r.state?.cues ?? [];
+	let findings = [];
+	let lint;
+	if (!r.quality) notes.push("lint skipped: cannot tell this render's quality, so tiles are not flagged");
+	else try {
+		const l = await lintProject(r.root, { quality: r.quality });
+		findings = l.findings;
+		lint = {
+			status: l.status,
+			errors: l.counts.errors,
+			warnings: l.counts.warnings,
+			report_md: relative(r.root, l.report_md)
+		};
+		const general = findings.filter((f) => !f.scene_id).length;
+		if (general) notes.push(`${general} lint finding(s) not tied to a scene (targets, captions, cover, post copy): see ${lint.report_md}`);
+	} catch (err) {
+		notes.push(`lint failed, so tiles are only flagged for unplaced cues: ${err instanceof Error ? err.message : String(err)}`);
+	}
+	const inImage = new Set(out.map((x) => x.scene_id).filter(Boolean));
+	const flagged = flagScenes(findings, mode === "strip" ? [] : cues, spans.map((s) => s.id)).filter((f) => inImage.has(f.scene_id));
+	applyFlags(out, flagged);
+	if (mode === "strip") applyCues(out, cues, spans, frame);
+	const pageOf = (i) => layout.pages.findIndex(([a, b]) => i >= a && i <= b);
+	try {
+		for (const [i, tile] of out.entries()) {
+			const draw = tileDecor(tile, width, haveFont ? font : void 0);
+			const p = pageOf(i);
+			await mkdir(join(work, `p${p}`), { recursive: true });
+			const png = join(work, `p${p}`, `${String(i - layout.pages[p][0] + 1).padStart(4, "0")}.png`);
+			for (let back = 0; back < 4 && !existsSync(png); back++) {
+				const at = Math.max(0, tile.time_sec - back * frame);
+				await runFfmpeg([
+					"-y",
+					"-ss",
+					at.toFixed(3),
+					"-i",
+					r.reel,
+					"-frames:v",
+					"1",
+					"-vf",
+					`${crop}scale=${width}:-2:flags=bicubic${draw}`,
+					png
+				], { timeoutMs: 6e4 });
+				if (back > 0 && existsSync(png)) {
+					tile.time_sec = round3(at);
+					tile.label = tile.label.replace(/[\d.]+s$/, `${tile.time_sec.toFixed(2)}s`);
+				}
+			}
+			if (!existsSync(png)) throw new Error(`no frame at ${tile.time_sec}s in ${r.reel}`);
+		}
+		for (const tile of out) if (tile.cues) tile.label += ` cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`;
+		if (!haveFont) notes.push("bundled fonts not found: tiles are unlabelled; use the tiles list for times");
+		const base = `${mode}-${r.quality ?? "render"}${opts.scene ? `-${opts.scene}` : ""}`;
+		const stale = (f) => f === `${base}.jpg` || f.startsWith(`${base}-p`) && /^\d+\.jpg$/.test(f.slice(base.length + 2));
+		for (const f of await readdir(outDir)) if (stale(f)) await rm(join(outDir, f), { force: true });
+		const pages = [];
+		for (const [p, [a, b]] of layout.pages.entries()) {
+			const n = b - a + 1;
+			const cols = Math.min(layout.cols, n);
+			const rows = Math.ceil(n / cols);
+			const image = join(outDir, layout.pages.length === 1 ? `${base}.jpg` : `${base}-p${p + 1}.jpg`);
+			await tileSheet(join(work, `p${p}`), cols, rows, image);
+			const scenes = [...new Set(out.slice(a, b + 1).map((x) => x.scene_id).filter((x) => Boolean(x)))];
+			const flaggedHere = flagged.filter((f) => scenes.includes(f.scene_id)).map((f) => f.scene_id);
+			pages.push({
+				image,
+				image_rel: relative(r.root, image),
+				cols,
+				rows,
+				tiles: [a, b],
+				scenes,
+				...flaggedHere.length ? { flagged: flaggedHere } : {}
+			});
+		}
+		return {
+			...r.quality ? { quality: r.quality } : {},
+			source: r.source,
+			mode,
+			image: pages[0].image,
+			image_rel: pages[0].image_rel,
+			images: pages.map((p) => p.image),
+			images_rel: pages.map((p) => p.image_rel),
+			pages,
+			cols: pages[0].cols,
+			rows: pages[0].rows,
+			tile_width: width,
+			tiles: out,
+			flagged,
+			...lint ? { lint } : {},
+			notes
+		};
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+function formatReview(r) {
+	const pages = r.pages ?? [];
+	return [
+		(pages.length > 1 ? `review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${pages.length} images (each ≤ ${REVIEW_MAX_IMAGE_PX} px; Read every one, flagged first):` : `review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${r.cols}×${r.rows} → ${r.image}`).replace(/ {2}/g, " "),
+		...pages.length > 1 ? pages.map((p, i) => `  ${i + 1}. ${p.image} (${p.cols}×${p.rows}, tiles ${p.tiles[0] + 1}-${p.tiles[1] + 1}${p.scenes.length ? `, ${p.scenes[0]}${p.scenes.length > 1 ? `–${p.scenes[p.scenes.length - 1]}` : ""}` : ""}${p.flagged?.length ? `; flagged ${p.flagged.join(", ")}` : ""})`) : [],
+		...r.flagged.length ? [`flagged (bordered tiles; look here first): ${r.flagged.map((f) => `${f.scene_id}: ${[...new Map(f.findings.map((x) => [x.id, x.severity])).entries()].map(([id, sev]) => `${id} (${sev})`).join(", ")}`).join("; ")}`] : r.lint ? [`no scene-level lint findings (lint ${r.lint.status})`] : [],
+		...r.tiles.some((t) => t.cues) ? [`word cues: ${r.tiles.flatMap((t) => (t.cues ?? []).map((w) => `"${w}" at ${t.time_sec.toFixed(2)}s (tile ${t.index + 1})`)).join(", ")}; check the cued item is appearing on that tile`] : [],
+		`Read the image${pages.length > 1 ? "s" : ""} and check: text fits and is readable, nothing sits under captions or app UI, graphics land when their words are spoken, crops keep faces and subjects, transitions are clean.`,
+		...r.notes.map((n) => `note: ${n}`)
+	].join("\n");
+}
+/**
+* Lay `n` tiles out over as few images as possible with every image ≤ maxPx on both sides, so
+* nothing is downscaled before Claude sees it. Columns shrink before tiles do; tiles shrink only
+* when a single tile would not fit. Groups (a scene's three frames) stay on one row and one image.
+*/
+function planSheets(n, o) {
+	const maxPx = o.maxPx ?? 1568;
+	const maxPer = Math.max(1, o.maxPerImage ?? 48);
+	const group = Math.max(1, o.group ?? 1);
+	const notes = [];
+	const even = (x) => Math.max(2, 2 * Math.round(x / 2));
+	let width = Math.max(2, Math.round(o.width));
+	const inner = maxPx - 8;
+	if (width > inner) width = inner - inner % 2;
+	let height = even(width * o.aspect);
+	if (height > inner) {
+		width = Math.max(2, Math.floor(inner / o.aspect) - Math.floor(inner / o.aspect) % 2);
+		height = even(width * o.aspect);
+	}
+	if (width !== Math.round(o.width)) notes.push(`tile width reduced to ${width}px so each image stays within ${maxPx}px`);
+	const colsFit = Math.max(1, Math.floor((inner + PAD) / (width + PAD)));
+	let cols = Math.max(1, Math.min(Math.round(o.cols), colsFit, Math.max(1, n)));
+	if (cols < Math.min(Math.round(o.cols), n)) notes.push(`${cols} columns (not ${o.cols}) so each image stays within ${maxPx}px wide`);
+	if (group > 1 && cols >= group) cols -= cols % group;
+	const rowsFit = Math.max(1, Math.floor((inner + PAD) / (height + PAD)));
+	const perImage = Math.max(1, Math.floor(Math.min(cols * rowsFit, maxPer) / cols) * cols);
+	const pages = [];
+	for (let a = 0; a < n; a += perImage) pages.push([a, Math.min(n, a + perImage) - 1]);
+	if (!pages.length) pages.push([0, -1]);
+	if (pages.length > 1) notes.push(`${n} tiles split over ${pages.length} images of up to ${perImage} (${cols}×${Math.ceil(perImage / cols)}) so labels stay readable`);
+	return {
+		width,
+		height,
+		cols,
+		rowsPerImage: Math.ceil(perImage / cols),
+		pages,
+		notes
+	};
+}
+/** Most transcript characters returned; longer windows are cut at a sentence (narrow the range). */
+const LOOK_MAX_TRANSCRIPT_CHARS = 4e3;
+const THUMB_W = 16;
+const THUMB_H = 9;
+var FootageError = class extends Error {
+	constructor(message, fix) {
+		super(fix ? `${message}\nFix: ${fix}` : message);
+		this.name = "FootageError";
+	}
+};
+const r3 = (x) => Math.round(x * 1e3) / 1e3;
+const fmt$1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
+async function loadIr(root) {
+	try {
+		return await loadContentIr$2(root);
+	} catch (err) {
+		if (err instanceof TranscribeError) throw new FootageError(err.message.replace(/\nFix: .*/s, ""), "ingest the video file first");
+		throw err;
+	}
+}
+function videoAsset(ir, id) {
+	let asset;
+	try {
+		asset = findMediaAsset(ir, id);
+	} catch (err) {
+		throw new FootageError(err instanceof Error ? err.message.replace(/^"/, "asset \"") : String(err));
+	}
+	if (asset.kind !== "video" || !asset.media?.has_video) {
+		const videos = ir.assets.filter((a) => a.kind === "video" && a.media?.has_video).map((a) => a.id);
+		throw new FootageError(`asset ${asset.id} is audio-only: there is no picture to look at`, videos.length ? `use a video asset (${videos.join(", ")}), or read its transcript` : "read its transcript instead (transcribe, then source_section)");
+	}
+	if (!asset.media) throw new FootageError(`asset ${asset.id} has no probe data`, "re-ingest the video file");
+	return asset;
+}
+/** Width and height from a PNG's IHDR chunk. */
+function pngSize(buf) {
+	if (buf.length < 24 || buf.readUInt32BE(12) !== 1229472850) throw new Error("not a PNG");
+	return {
+		width: buf.readUInt32BE(16),
+		height: buf.readUInt32BE(20)
+	};
+}
+/** Mean absolute difference of two equal-length grayscale buffers (0–255). */
+function thumbDiff(a, b) {
+	if (a.length !== b.length || a.length === 0) return 255;
+	let sum = 0;
+	for (let i = 0; i < a.length; i++) sum += Math.abs(a[i] - b[i]);
+	return sum / a.length;
+}
+/**
+* Frames to sample in [from, to]: a little after each shot's start (past dissolves), plus a middle
+* frame for shots of at least {@link LOOK_LONG_SHOT_SEC}; at most `limit`, opening frames first,
+* evenly spread when there are more shots than that.
+*/
+function pickFrames(shots, from, to, duration, limit, fps = 25) {
+	const last = Math.max(0, duration - 1 / fps);
+	const firsts = [];
+	const mids = [];
+	shots.forEach((s, i) => {
+		const a = Math.max(s.start_sec, from);
+		const b = Math.min(s.end_sec, to);
+		if (b <= a) return;
+		const len = b - a;
+		const base = {
+			shot: i + 1,
+			start: s.start_sec,
+			end: s.end_sec
+		};
+		firsts.push({
+			...base,
+			time: r3(Math.min(last, a + Math.min(.3, len * .2))),
+			first: true
+		});
+		if (len >= 5) mids.push({
+			...base,
+			time: r3(Math.min(last, a + len / 2)),
+			first: false
+		});
+	});
+	const picked = firsts.length > limit ? spreadIndices(firsts.length, limit).map((i) => firsts[i]) : [...firsts];
+	const room = limit - picked.length;
+	if (room > 0 && mids.length) picked.push(...mids.length > room ? spreadIndices(mids.length, room).map((i) => mids[i]) : mids);
+	return picked.sort((x, y) => x.time - y.time);
+}
+/** Sentences of the transcript overlapping [from, to], capped at {@link LOOK_MAX_TRANSCRIPT_CHARS}. */
+async function transcriptWindow(root, asset, from, to) {
+	if (!asset.media?.transcript) return void 0;
+	const all = groupSentences((await loadTranscriptWords(root, asset)).filter((w) => w.start_ms < to * 1e3 && w.end_ms > from * 1e3)).map((s) => ({
+		start_sec: r3(s.start_ms / 1e3),
+		end_sec: r3(s.end_ms / 1e3),
+		...s.speaker !== void 0 ? { speaker: s.speaker } : {},
+		text: s.text
+	}));
+	const out = [];
+	let chars = 0;
+	for (const s of all) {
+		if (out.length && chars + s.text.length > 4e3) break;
+		out.push(s.text.length > 4e3 ? {
+			...s,
+			text: `${s.text.slice(0, LOOK_MAX_TRANSCRIPT_CHARS)}…`
+		} : s);
+		chars += s.text.length;
+	}
+	return {
+		sentences: out,
+		...out.length < all.length ? { truncated: {
+			shown_sentences: out.length,
+			total_sentences: all.length
+		} } : {}
+	};
+}
+/** Notes still valid for the asset's current bytes, and how many are stale. */
+function currentNotes(asset) {
+	const all = asset.media?.notes ?? [];
+	const fresh = all.filter((n) => n.asset_sha256 === asset.sha256);
+	return {
+		fresh,
+		stale: all.length - fresh.length
+	};
+}
+async function footageLook(projectDir, assetId, opts = {}) {
+	const root = resolve(projectDir);
+	const { ir } = await loadIr(root);
+	const asset = videoAsset(ir, assetId);
+	const media = asset.media;
+	const notes = [];
+	let file;
+	try {
+		file = await resolveInsideProject(projectPaths(root), asset.path);
+	} catch {
+		throw new FootageError(`asset ${asset.id} path ${asset.path} is outside the project`, "re-ingest the video file");
+	}
+	if (!existsSync(file)) throw new FootageError(`asset file not found: ${asset.path}`, "re-ingest the video file (it was moved or deleted)");
+	const duration = media.duration_sec;
+	const from = opts.from_sec ?? 0;
+	let to = opts.to_sec ?? duration;
+	if (!(from >= 0)) throw new FootageError(`from_sec must be ≥ 0 (got ${from})`);
+	if (from >= duration) throw new FootageError(`from_sec ${from} is past the end of ${asset.id} (duration ${duration} s)`, `pass a range inside 0–${duration} s`);
+	if (!(to > from)) throw new FootageError(`to_sec ${to} must be after from_sec ${from}`);
+	if (to > duration + .05) notes.push(`to_sec ${to} is past the end; clamped to the duration ${duration} s`);
+	to = Math.min(to, duration);
+	const max = Math.min(48, Math.max(1, Math.round(opts.max_frames ?? 12)));
+	const shots = media.shots?.length ? media.shots : [{
+		start_sec: 0,
+		end_sec: duration
+	}];
+	if (!media.shots?.length) notes.push("no shot boundaries recorded for this asset: treated as one shot");
+	const shotsInRange = shots.filter((s) => s.end_sec > from && s.start_sec < to).length;
+	const candidates = pickFrames(shots, from, to, duration, Math.min(max * 2, 96), media.fps ?? 25);
+	const outDir = join(root, "qa", "footage");
+	const work = join(outDir, `.work-${process.pid}-${Date.now()}`);
+	await mkdir(work, { recursive: true });
+	const font = reviewFont();
+	if (!font) notes.push("bundled fonts not found: tiles are unlabelled; use the tiles list for times");
+	try {
+		let tileW = (media.height ?? 0) > (media.width ?? 1) ? 2 * Math.round(512 * (media.width ?? 9) / (media.height ?? 16) / 2) : 512;
+		const kept = [];
+		const duplicates = [];
+		let size;
+		for (const [i, c] of candidates.entries()) {
+			if (kept.length >= max) break;
+			const png = join(work, `f${i}.png`);
+			const gray = join(work, `f${i}.gray`);
+			const label = `t=${fmt$1(c.time)}s shot ${c.shot}`;
+			const scale = size ? `scale=${size.width}:${size.height}` : `scale='if(gte(iw,ih),512,-2)':'if(gte(iw,ih),-2,512)'`;
+			await runFfmpeg([
+				"-y",
+				"-ss",
+				c.time.toFixed(3),
+				"-i",
+				file,
+				"-filter_complex",
+				`[0:v:0]split=2[a][b];[a]${scale}:flags=bicubic${tileDecor({ label }, tileW, font)}[big];[b]scale=${THUMB_W}:${THUMB_H},format=gray[small]`,
+				"-map",
+				"[small]",
+				"-frames:v",
+				"1",
+				"-f",
+				"rawvideo",
+				"-pix_fmt",
+				"gray",
+				gray,
+				"-map",
+				"[big]",
+				"-frames:v",
+				"1",
+				png
+			], { timeoutMs: 6e4 });
+			if (!existsSync(png) || !existsSync(gray)) {
+				notes.push(`no frame decoded at ${fmt$1(c.time)} s (shot ${c.shot}); skipped`);
+				continue;
+			}
+			if (!size) {
+				size = pngSize(await readFile(png));
+				tileW = size.width;
+			}
+			const thumb = new Uint8Array(await readFile(gray));
+			const same = kept.findIndex((k) => thumbDiff(k.thumb, thumb) < 4);
+			if (same >= 0) {
+				duplicates.push({
+					time_sec: c.time,
+					shot: c.shot,
+					same_as_tile: same
+				});
+				continue;
+			}
+			kept.push({
+				...c,
+				png,
+				thumb
+			});
+		}
+		if (!kept.length || !size) throw new FootageError(`no frames could be decoded from ${asset.path} in ${fmt$1(from)}–${fmt$1(to)} s`);
+		const skipped = candidates.length - kept.length - duplicates.length;
+		if (kept.length >= max && skipped > 0) notes.push(`${kept.length} frames shown (max_frames ${max}); ${shotsInRange} shots in range: narrow the range or raise max_frames to see more`);
+		if (duplicates.length) notes.push(`${duplicates.length} frame(s) left out as near-identical to an earlier tile (see duplicates)`);
+		const layout = planSheets(kept.length, {
+			width: size.width,
+			aspect: size.height / size.width,
+			cols: Math.ceil(Math.sqrt(kept.length))
+		});
+		notes.push(...layout.notes);
+		const base = `${asset.id.replace(/[^A-Za-z0-9_.-]/g, "_")}-${fmt$1(from)}-${fmt$1(to)}`;
+		for (const f of await readdir(outDir)) if (f === `${base}.jpg` || f.startsWith(`${base}-p`) && /^\d+\.jpg$/.test(f.slice(base.length + 2))) await rm(join(outDir, f), { force: true });
+		const images = [];
+		const pages = [];
+		for (const [p, [a, b]] of layout.pages.entries()) {
+			const dir = join(work, `p${p}`);
+			await mkdir(dir, { recursive: true });
+			for (let k = a; k <= b; k++) await copyFile(kept[k].png, join(dir, `${String(k - a + 1).padStart(4, "0")}.png`));
+			const n = b - a + 1;
+			const cols = Math.min(layout.cols, n);
+			const rows = Math.ceil(n / cols);
+			const image = join(outDir, layout.pages.length === 1 ? `${base}.jpg` : `${base}-p${p + 1}.jpg`);
+			await tileSheet(dir, cols, rows, image);
+			images.push(image);
+			pages.push({
+				image_rel: relative(root, image),
+				cols,
+				rows,
+				tiles: [a, b]
+			});
+		}
+		const tiles = kept.map((k, index) => ({
+			index,
+			time_sec: k.time,
+			shot: k.shot,
+			shot_start_sec: k.start,
+			shot_end_sec: k.end,
+			label: `t=${fmt$1(k.time)}s shot ${k.shot}`
+		}));
+		const tw = await transcriptWindow(root, asset, from, to);
+		if (!tw) notes.push(media.subtitles?.length ? "no transcript yet: import its subtitles with transcribe captions_file" : "no transcript yet: run transcribe to see what is said");
+		else if (tw.truncated) notes.push(`transcript cut to ${tw.truncated.shown_sentences} of ${tw.truncated.total_sentences} sentences (${LOOK_MAX_TRANSCRIPT_CHARS} chars): narrow the range for the rest`);
+		const { fresh, stale } = currentNotes(asset);
+		const inRange = fresh.filter((n) => n.to_sec > from && n.from_sec < to);
+		if (stale) notes.push(`${stale} stored footage note(s) are stale (the file changed since): write them again with footage_notes`);
+		return {
+			asset: asset.id,
+			from_sec: r3(from),
+			to_sec: r3(to),
+			duration_sec: duration,
+			images,
+			images_rel: images.map((i) => relative(root, i)),
+			pages,
+			tile_px: size,
+			tiles,
+			duplicates,
+			shots_in_range: shotsInRange,
+			...tw ? { transcript: tw.sentences } : {},
+			...tw?.truncated ? { transcript_truncated: tw.truncated } : {},
+			...inRange.length ? { shot_notes: inRange } : {},
+			notes
+		};
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+function formatFootageLook(r) {
+	return [
+		r.images.length > 1 ? `footage ${r.asset} ${fmt$1(r.from_sec)}–${fmt$1(r.to_sec)} s: ${r.tiles.length} frame(s) from ${r.shots_in_range} shot(s) in ${r.images.length} images; Read every one:\n${r.images.map((i, k) => `  ${k + 1}. ${i}`).join("\n")}` : `footage ${r.asset} ${fmt$1(r.from_sec)}–${fmt$1(r.to_sec)} s: ${r.tiles.length} frame(s) from ${r.shots_in_range} shot(s) → ${r.images[0]}; Read it`,
+		r.transcript ? `transcript: ${r.transcript.length} sentence(s) in range` : "",
+		"Then record what each shot shows (subject, action, on-screen text, b-roll use, quality) with footage_notes so you need not look again.",
+		...r.notes.map((n) => `note: ${n}`)
+	].filter(Boolean).join("\n");
+}
+/** Two ranges are "the same" when both ends agree within this many seconds. */
+const SAME_RANGE_SEC = .05;
+/**
+* Read (no `notes`) or merge Claude's footage notes into the asset's `media.notes`. A note for
+* the same range (both ends within 50 ms) replaces the old one; others are added. Stale notes (a
+* different file hash) are reported on read and dropped on write. Evidence and claims are never touched.
+*/
+async function footageNotes(projectDir, assetId, input, now = () => /* @__PURE__ */ new Date()) {
+	const { path, ir } = await loadIr(resolve(projectDir));
+	const asset = videoAsset(ir, assetId);
+	const { fresh, stale } = currentNotes(asset);
+	if (!input) return {
+		asset: asset.id,
+		mode: "read",
+		notes: fresh,
+		...stale ? { stale } : {}
+	};
+	if (!input.length) throw new FootageError("notes is empty", "omit notes to read the stored ones, or pass at least one note");
+	const duration = asset.media.duration_sec;
+	const at = now().toISOString();
+	const merged = [...fresh];
+	let added = 0;
+	let replaced = 0;
+	for (const [i, n] of input.entries()) {
+		if (!(n.from_sec >= 0) || !(n.to_sec > n.from_sec)) throw new FootageError(`notes[${i}]: needs 0 ≤ from_sec < to_sec (got ${n.from_sec}–${n.to_sec})`);
+		if (n.to_sec > duration + SAME_RANGE_SEC) throw new FootageError(`notes[${i}]: to_sec ${n.to_sec} is past the end of ${asset.id} (duration ${duration} s)`);
+		const clean = (s) => s === void 0 ? void 0 : s.trim() || void 0;
+		const tags = n.tags?.map((t) => t.trim()).filter(Boolean);
+		const note = {
+			from_sec: r3(n.from_sec),
+			to_sec: r3(Math.min(n.to_sec, duration)),
+			...clean(n.subject) ? { subject: clean(n.subject) } : {},
+			...clean(n.action) ? { action: clean(n.action) } : {},
+			...clean(n.on_screen_text) ? { on_screen_text: clean(n.on_screen_text) } : {},
+			...n.broll !== void 0 ? { broll: n.broll } : {},
+			...n.quality ? { quality: n.quality } : {},
+			...tags?.length ? { tags: [...new Set(tags)] } : {},
+			asset_sha256: asset.sha256,
+			updated_at: at
+		};
+		const k = merged.findIndex((m) => Math.abs(m.from_sec - note.from_sec) <= SAME_RANGE_SEC && Math.abs(m.to_sec - note.to_sec) <= SAME_RANGE_SEC);
+		if (k >= 0) {
+			merged[k] = note;
+			replaced++;
+		} else {
+			merged.push(note);
+			added++;
+		}
+	}
+	merged.sort((a, b) => a.from_sec - b.from_sec || a.to_sec - b.to_sec);
+	const next = structuredClone(ir);
+	const target = next.assets.find((a) => a.id === asset.id);
+	target.media = {
+		...target.media,
+		notes: merged
+	};
+	const parsed = ContentIR.safeParse(next);
+	if (!parsed.success) throw new FootageError(`notes are invalid: ${formatIssues$1(parsed.error).map((x) => `${x.path}: ${x.message}`).join("; ")}`);
+	await writeJsonAtomic(path, parsed.data);
+	return {
+		asset: asset.id,
+		mode: "write",
+		notes: merged,
+		added,
+		replaced,
+		...stale ? { stale } : {}
+	};
+}
+function formatFootageNotes(r) {
+	const stale = r.stale ? `; ${r.stale} stale note(s) for an earlier version of the file ${r.mode === "write" ? "dropped" : "(write them again)"}` : "";
+	if (r.mode === "read") return `footage notes for ${r.asset}: ${r.notes.length}${stale}`;
+	return `footage notes for ${r.asset}: ${r.added ?? 0} added, ${r.replaced ?? 0} replaced, ${r.notes.length} stored${stale}`;
+}
+const BY_EYE = "mark it by eye instead: look at frames of the span (footage_look, or review crops of a render), note where the subject's centre is at each change (x, y as fractions of the source frame, t in seconds from in_sec) and write footage.focus_track by hand; then check with review strips";
+async function footageFocus(projectDir, opts) {
+	const root = resolve(projectDir);
+	const { ir } = await loadContentIr$2(root);
+	const asset = findMediaAsset(ir, opts.asset);
+	const media = asset.media;
+	if (asset.kind !== "video" || !media?.has_video) throw new TranscribeError(`asset ${asset.id} has no video to reframe`, "pass a video asset id");
+	let file;
+	try {
+		file = await resolveInsideProject(projectPaths(root), asset.path);
+	} catch {
+		throw new TranscribeError(`asset ${asset.id} path ${asset.path} is outside the project`, "re-ingest the video file");
+	}
+	if (!existsSync(file)) throw new TranscribeError(`asset file not found: ${asset.path}`, "re-ingest the video file (it was moved or deleted)");
+	const notes = [];
+	const duration = media.duration_sec;
+	const from = opts.in_sec;
+	if (!(from >= 0) || from >= duration) throw new TranscribeError(`in_sec ${from} is outside ${asset.id} (0–${duration} s)`);
+	let to = Math.min(opts.out_sec ?? from + 30, duration);
+	if (!(to > from)) throw new TranscribeError(`out_sec ${opts.out_sec} must be after in_sec ${from}`);
+	if (to - from > 600) {
+		to = from + 600;
+		notes.push(`analysed the first 600 s only; call again for the rest`);
+	}
+	const fps = Math.min(8, Math.max(.2, opts.fps ?? 2));
+	if (media.width && media.height && media.height >= media.width) notes.push("the source is already portrait or square: a 9:16 cover crop barely moves sideways, so a track matters little");
+	const r = await suggestFocusTrack(file, {
+		from,
+		to,
+		fps,
+		...opts.signal ? { signal: opts.signal } : {},
+		...opts.detector ? { detector: opts.detector } : {}
+	});
+	notes.push(...r.notes);
+	if (r.method === "unavailable") notes.push(`automatic detection is unavailable; ${BY_EYE}`);
+	else if (!r.keys.length) notes.push(`nothing to follow was found; ${BY_EYE}`);
+	else notes.push("paste focus_track into the scene's footage (fit \"cover\", same in_sec), render, and check the crop with review strips; lint warns (subject_near_edge) when the subject gets close to the crop edge");
+	return {
+		asset: asset.id,
+		in_sec: from,
+		out_sec: Math.round(to * 1e3) / 1e3,
+		focus_track: r.keys,
+		method: r.method,
+		frames_checked: r.frames_checked,
+		detections: r.detections,
+		notes
+	};
+}
+/** Compact text for the tool result. */
+function formatFootageFocus(r) {
+	return [
+		r.method === "unavailable" ? `footage_focus ${r.asset} ${r.in_sec}–${r.out_sec}s: detection unavailable` : `footage_focus ${r.asset} ${r.in_sec}–${r.out_sec}s: ${r.focus_track.length} keyframe(s) from ${r.frames_checked} frame(s) (faces ${r.detections.faces}, salient ${r.detections.salient}, missed ${r.detections.missed})`,
+		...r.notes.map((n) => `- ${n}`),
+		...r.focus_track.length ? [`focus_track: ${JSON.stringify(r.focus_track)}`] : []
+	].join("\n");
+}
 /** Blur applied to masked elements (CSS). */
 const MASK_CSS_BLUR = "blur(8px)";
 /**
@@ -254985,310 +256735,6 @@ function formatTighten(r) {
 	else lines.push("review the cuts above, then call tighten again with apply: true");
 	return lines.join("\n");
 }
-/**
-* A frame passes when its SSIM against the golden is at least this. Tolerant of encoder and
-* ffmpeg version noise (typically > 0.99) while catching layout, text and colour changes.
-*/
-const GOLDEN_SSIM_THRESHOLD = .97;
-const GOLDEN_DIR = "golden";
-const GOLDEN_FILE = "golden.json";
-const GOLDEN_VERSION = 1;
-async function readOptionalJson(path) {
-	if (!existsSync(path)) return void 0;
-	try {
-		return await readJson(path);
-	} catch {
-		return;
-	}
-}
-const round3$1 = (n) => Math.round(n * 1e3) / 1e3;
-const rel$1 = (root, p) => relative(root, p).split("\\").join("/");
-/** Time of the middle of frame `i` at `fps`, so seeks never land on a frame boundary. */
-const frameCentre = (i, fps) => round3$1((i + .5) / fps);
-/**
-* Deterministic sample times: the first frame, each scene's midpoint, and the last frame, each
-* snapped to a frame centre; times within a frame of each other are merged. Without scenes, the
-* reel is sampled at 25%, 50% and 75%.
-*/
-function sampleTimes(r) {
-	const fps = r.fps > 0 ? r.fps : 30;
-	const frames = Math.max(1, Math.floor(r.duration_ms / 1e3 * fps));
-	const snap = (sec) => frameCentre(Math.min(frames - 1, Math.max(0, Math.floor(sec * fps))), fps);
-	const out = [{
-		label: "first",
-		at_sec: frameCentre(0, fps)
-	}];
-	if (r.scenes && r.scenes.length > 0) {
-		let start = 0;
-		for (const s of r.scenes) {
-			out.push({
-				label: s.scene_id,
-				scene_id: s.scene_id,
-				at_sec: snap((start + s.duration_ms / 2) / 1e3)
-			});
-			start += s.duration_ms;
-		}
-	} else for (const f of [
-		.25,
-		.5,
-		.75
-	]) out.push({
-		label: `p${Math.round(f * 100)}`,
-		at_sec: snap(r.duration_ms / 1e3 * f)
-	});
-	out.push({
-		label: "last",
-		at_sec: frameCentre(Math.max(0, frames - 2), fps)
-	});
-	const merged = [];
-	for (const s of out) {
-		if (merged.some((m) => Math.abs(m.at_sec - s.at_sec) < 1 / fps / 2)) continue;
-		merged.push(s);
-	}
-	return merged;
-}
-/** File name of the n-th sample, e.g. `02-s02.png`. */
-function sampleFileName(i, s) {
-	return `${String(i).padStart(2, "0")}-${s.label.replace(/[^A-Za-z0-9_-]/g, "_")}.png`;
-}
-/**
-* Locate a render: `quality` (else renders/latest.json, else dist/render-manifest.json's quality,
-* else whichever renders/<q>/render-state.json exists). The reel is the state's reel, else
-* renders/<q>/reel.mp4, else dist/reel.mp4 when dist holds that quality (or says nothing).
-*/
-async function resolveRender(projectDir, quality) {
-	const paths = projectPaths(projectDir);
-	const root = paths.root;
-	const distQuality = (await readOptionalJson(join(paths.dist, "render-manifest.json")))?.settings?.quality;
-	let q = quality ?? (await readOptionalJson(join(paths.renders, "latest.json")))?.quality ?? distQuality;
-	if (!q) q = ["final", "preview"].find((c) => existsSync(join(paths.renders, c, "render-state.json")));
-	const state = q ? await readOptionalJson(join(paths.renders, q, "render-state.json")) : void 0;
-	const candidates = [];
-	if (state?.reel) candidates.push([join(root, state.reel), `renders/${q}`]);
-	if (q) candidates.push([join(paths.renders, q, "reel.mp4"), `renders/${q}`]);
-	if (!distQuality || distQuality === q) candidates.push([join(paths.dist, "reel.mp4"), "dist"]);
-	const found = candidates.find(([p]) => existsSync(p));
-	if (!found) throw new Error(q ? `no ${q} reel found in ${root} (looked for ${candidates.map(([p]) => rel$1(root, p)).join(", ") || "nothing"}); render it first (render_submit${quality ? ` with quality "${quality}"` : ""})` : `no render found in ${root}; render it first (render_submit)`);
-	const [reel, source] = found;
-	const probe = !state?.target || !state.duration_ms ? await ffprobe(reel) : void 0;
-	return {
-		root,
-		...q ? { quality: q } : {},
-		...state ? { state } : {},
-		reel,
-		duration_ms: state?.duration_ms ?? Math.round((probe?.duration_s ?? 0) * 1e3),
-		width: state?.target?.width ?? probe?.width ?? 0,
-		height: state?.target?.height ?? probe?.height ?? 0,
-		fps: state?.target?.fps ?? probe?.fps ?? 30,
-		source
-	};
-}
-/** Sample times for a resolved render (scene midpoints when the render state has scenes). */
-function renderSamples(r) {
-	return sampleTimes({
-		duration_ms: r.duration_ms,
-		fps: r.fps,
-		...r.state?.scenes ? { scenes: r.state.scenes } : {}
-	});
-}
-async function clearPngs(dir) {
-	if (!existsSync(dir)) return;
-	for (const f of await readdir(dir)) if (f.endsWith(".png")) await rm(join(dir, f), { force: true });
-}
-/**
-* Golden-frame test of the `quality` render (default: the latest). With `update`, records the
-* current frames as goldens. Writes qa/test.json and qa/test.md; failing frames get the current
-* frame and a golden | current | difference image under qa/test-frames/.
-*/
-async function testProject(projectDir, opts = {}) {
-	const paths = projectPaths(projectDir);
-	const root = paths.root;
-	const r = await resolveRender(root, opts.quality);
-	if (!r.quality) throw new Error(`cannot tell which quality the render in ${root} is; pass quality`);
-	const quality = r.quality;
-	const goldenDir = join(root, GOLDEN_DIR, quality);
-	const goldenPath = join(goldenDir, GOLDEN_FILE);
-	const framesDir = join(paths.qa, "test-frames");
-	const samples = renderSamples(r);
-	const reelSha = await hashFile(r.reel);
-	await rm(framesDir, {
-		recursive: true,
-		force: true
-	});
-	const base = {
-		quality,
-		golden_dir: rel$1(root, goldenDir)
-	};
-	const finish = async (res) => {
-		const out = {
-			...res,
-			report_json: "qa/test.json",
-			report_md: "qa/test.md"
-		};
-		await writeJsonAtomic(join(paths.qa, "test.json"), out);
-		await writeFileAtomic(join(paths.qa, "test.md"), goldenMarkdown(out));
-		return out;
-	};
-	if (opts.update) {
-		await mkdir(goldenDir, { recursive: true });
-		await clearPngs(goldenDir);
-		const frames = [];
-		for (const [i, s] of samples.entries()) {
-			const file = sampleFileName(i, s);
-			await extractFrame(r.reel, s.at_sec, join(goldenDir, file), { width: 160 });
-			frames.push({
-				...s,
-				file
-			});
-		}
-		await writeJsonAtomic(goldenPath, {
-			version: GOLDEN_VERSION,
-			quality,
-			width: 160,
-			threshold: GOLDEN_SSIM_THRESHOLD,
-			reel_sha256: reelSha,
-			...r.state?.spec_sha256 ? { spec_sha256: r.state.spec_sha256 } : {},
-			target: {
-				width: r.width,
-				height: r.height,
-				fps: r.fps
-			},
-			duration_ms: r.duration_ms,
-			frames
-		});
-		return finish({
-			...base,
-			status: "updated",
-			threshold: GOLDEN_SSIM_THRESHOLD,
-			reel_identical: true,
-			frames: frames.map((f) => ({
-				label: f.label,
-				...f.scene_id ? { scene_id: f.scene_id } : {},
-				at_sec: f.at_sec,
-				golden: rel$1(root, join(goldenDir, f.file)),
-				pass: true
-			})),
-			message: `recorded ${frames.length} golden frame(s) from ${rel$1(root, r.reel)}`
-		});
-	}
-	const golden = await readOptionalJson(goldenPath);
-	if (!golden) return finish({
-		...base,
-		status: "missing",
-		threshold: GOLDEN_SSIM_THRESHOLD,
-		frames: [],
-		message: `no golden frames in ${rel$1(root, goldenDir)}/`,
-		fix: `check the ${quality} render by eye (look at ${rel$1(root, r.reel)} or a few frames), then run test with update: true to record it as the golden`
-	});
-	const threshold = golden.threshold ?? .97;
-	const reelIdentical = golden.reel_sha256 === reelSha;
-	const goldenFrames = (golden.frames ?? []).map((f) => ({
-		label: f.label,
-		...f.scene_id ? { scene_id: f.scene_id } : {},
-		at_sec: f.at_sec,
-		golden: rel$1(root, join(goldenDir, f.file)),
-		pass: false
-	}));
-	const updateFix = `if the change is intended, check the ${quality} render by eye and run test with update: true to re-record the goldens; otherwise find what changed (diff against a known-good render)`;
-	if (golden.target && (golden.target.width !== r.width || golden.target.height !== r.height || golden.target.fps !== r.fps)) return finish({
-		...base,
-		status: "fail",
-		threshold,
-		reel_identical: false,
-		frames: goldenFrames,
-		message: `render size changed: golden ${golden.target.width}x${golden.target.height}@${golden.target.fps} vs current ${r.width}x${r.height}@${r.fps}`,
-		fix: updateFix
-	});
-	if (samples.length !== golden.frames.length || samples.some((s, i) => s.label !== golden.frames[i].label || Math.abs(s.at_sec - golden.frames[i].at_sec) > 5e-4)) return finish({
-		...base,
-		status: "fail",
-		threshold,
-		reel_identical: false,
-		frames: goldenFrames,
-		message: `sampled frames changed (scenes or durations differ): golden ${golden.frames.map((f) => `${f.label}@${f.at_sec}s`).join(", ")}; current ${samples.map((s) => `${s.label}@${s.at_sec}s`).join(", ")}`,
-		fix: updateFix
-	});
-	const frames = [];
-	for (const [i, s] of samples.entries()) {
-		const gf = golden.frames[i];
-		const goldenPng = join(goldenDir, gf.file);
-		const entry = {
-			...s,
-			golden: rel$1(root, goldenPng),
-			pass: false
-		};
-		if (!existsSync(goldenPng)) {
-			frames.push(entry);
-			continue;
-		}
-		await mkdir(framesDir, { recursive: true });
-		const actual = join(framesDir, gf.file.replace(/\.png$/, ".actual.png"));
-		await extractFrame(r.reel, s.at_sec, actual, { width: golden.width ?? 160 });
-		const [ga, aa] = await Promise.all([pngSize(goldenPng), pngSize(actual)]);
-		if (ga && aa && (ga.width !== aa.width || ga.height !== aa.height)) entry.actual = rel$1(root, actual);
-		else {
-			entry.ssim = round4(await frameSsim(goldenPng, actual));
-			entry.pass = entry.ssim >= threshold;
-			if (entry.pass) await rm(actual, { force: true });
-			else {
-				const diff = join(framesDir, gf.file.replace(/\.png$/, ".diff.png"));
-				await frameDiffImage(goldenPng, actual, diff);
-				entry.actual = rel$1(root, actual);
-				entry.diff = rel$1(root, diff);
-			}
-		}
-		frames.push(entry);
-	}
-	const failed = frames.filter((f) => !f.pass);
-	if (!failed.length) await rm(framesDir, {
-		recursive: true,
-		force: true
-	});
-	return finish({
-		...base,
-		status: failed.length ? "fail" : "pass",
-		threshold,
-		reel_identical: reelIdentical,
-		frames,
-		...failed.length ? {
-			message: `${failed.length} of ${frames.length} frame(s) differ from the golden (${failed.map((f) => f.ssim === void 0 ? `${f.label}: missing or wrong size` : `${f.label}: SSIM ${f.ssim}`).join(", ")}); compare images in qa/test-frames/`,
-			fix: updateFix
-		} : {}
-	});
-}
-const round4 = (n) => Math.round(n * 1e4) / 1e4;
-function goldenMarkdown(r) {
-	const lines = [
-		"# Golden-frame test",
-		"",
-		`- Status: **${r.status}**`,
-		`- Quality: ${r.quality ?? "?"}`,
-		`- Goldens: \`${r.golden_dir}/\``,
-		`- Threshold: SSIM >= ${r.threshold}`
-	];
-	if (r.reel_identical !== void 0) lines.push(`- Reel byte-identical to the golden's: ${r.reel_identical ? "yes" : "no"}`);
-	if (r.message) lines.push("", r.message);
-	if (r.fix) lines.push("", `Fix: ${r.fix}`);
-	if (r.frames.length) {
-		lines.push("", "| Frame | Time (s) | SSIM | Result | Images |", "|---|---|---|---|---|");
-		for (const f of r.frames) {
-			const imgs = [
-				`golden: \`${f.golden}\``,
-				...f.actual ? [`current: \`${f.actual}\``] : [],
-				...f.diff ? [`diff: \`${f.diff}\``] : []
-			].join("<br>");
-			lines.push(`| ${f.label} | ${f.at_sec} | ${f.ssim ?? "-"} | ${r.status === "updated" ? "recorded" : f.pass ? "pass" : "FAIL"} | ${imgs} |`);
-		}
-	}
-	return `${lines.join("\n")}\n`;
-}
-function formatGolden(r) {
-	const lines = [`test ${r.status}${r.quality ? ` (${r.quality})` : ""}: ${r.frames.length} frame(s), threshold SSIM ${r.threshold}; report ${r.report_md}`];
-	if (r.message) lines.push(r.message);
-	if (r.status === "fail") for (const f of r.frames.filter((x) => !x.pass)) lines.push(`- ${f.label} @ ${f.at_sec}s: ${f.ssim === void 0 ? "not compared" : `SSIM ${f.ssim}`}${f.diff ? ` (see ${f.diff})` : ""}`);
-	if (r.fix) lines.push(`fix: ${r.fix}`);
-	return lines.join("\n");
-}
 /** A frame pair below this SSIM is flagged (same threshold as the golden-frame test). */
 const DIFF_SSIM_THRESHOLD = GOLDEN_SSIM_THRESHOLD;
 /** Long values in the spec diff are cut to this many characters. */
@@ -255591,399 +257037,6 @@ function formatDiff(r) {
 	for (const c of r.spec.changes.slice(0, 10)) lines.push(`  - ${c.kind} ${c.path || "(root)"}${c.before !== void 0 ? `: ${c.before}` : ""}${c.after !== void 0 ? ` → ${c.after}` : ""}`);
 	if (r.spec.changes.length > 10) lines.push(`  - …${r.spec.changes.length - 10} more in ${r.report_md}`);
 	return lines.join("\n");
-}
-/** Longest image side in px: Claude's vision input downscales anything larger, making labels unreadable. */
-const REVIEW_MAX_IMAGE_PX = 1568;
-const PAD = 4;
-const MARGIN = 4;
-const DEFAULT_WIDTH = {
-	sheet: 240,
-	strip: 180,
-	crop: 540
-};
-const DEFAULT_COLS = {
-	sheet: 6,
-	strip: 8,
-	crop: 2
-};
-const BORDER_COLOR = {
-	error: "0xE5484D",
-	warning: "0xF5A524"
-};
-/**
-* Group scene-level lint findings (plus the render's unplaced word cues, when lint did not already
-* report them) by scene, errors first within a scene and across scenes; `order` sorts ties.
-*/
-function flagScenes(findings, cues = [], order = []) {
-	const all = findings.filter((f) => f.scene_id).map((f) => ({
-		scene_id: f.scene_id,
-		id: f.id,
-		severity: f.severity,
-		message: f.message
-	}));
-	for (const c of cues) {
-		if (c.status === "placed") continue;
-		if (all.some((f) => f.scene_id === c.scene_id && f.id === "cue_unmatched" && f.message.includes(`"${c.word}"`))) continue;
-		all.push({
-			scene_id: c.scene_id,
-			id: "cue_unmatched",
-			severity: "warning",
-			message: `cue "${c.word}" (item ${c.item}) was ${c.status === "late" ? "spoken after the scene ends" : "not found in the spoken words"}`
-		});
-	}
-	const byScene = /* @__PURE__ */ new Map();
-	for (const f of all) {
-		const flag = byScene.get(f.scene_id) ?? {
-			scene_id: f.scene_id,
-			severity: "warning",
-			findings: []
-		};
-		flag.findings.push({
-			id: f.id,
-			severity: f.severity,
-			message: f.message
-		});
-		if (f.severity === "error") flag.severity = "error";
-		byScene.set(f.scene_id, flag);
-	}
-	const rank = (s) => s === "error" ? 0 : 1;
-	const pos = (id) => order.includes(id) ? order.indexOf(id) : order.length;
-	const out = [...byScene.values()];
-	for (const f of out) f.findings.sort((a, b) => rank(a.severity) - rank(b.severity));
-	return out.sort((a, b) => rank(a.severity) - rank(b.severity) || pos(a.scene_id) - pos(b.scene_id));
-}
-/** Mark tiles with their scene's flags (finding ids deduplicated, errors first). */
-function applyFlags(tiles, flags) {
-	for (const t of tiles) {
-		const f = t.scene_id ? flags.find((x) => x.scene_id === t.scene_id) : void 0;
-		if (!f) continue;
-		t.flags = [...new Set(f.findings.map((x) => x.id))];
-		t.severity = f.severity;
-	}
-}
-/**
-* Attach each placed word cue to the tile nearest the moment its word is spoken (scene start +
-* at_ms), skipping cues outside the tiles' span (by more than a frame).
-*/
-function applyCues(tiles, cues, spans, frame) {
-	if (!tiles.length) return;
-	const first = tiles[0].time_sec;
-	const last = tiles[tiles.length - 1].time_sec;
-	for (const c of cues) {
-		if (c.status !== "placed" || c.at_ms === void 0) continue;
-		const span = spans.find((s) => s.id === c.scene_id);
-		if (!span) continue;
-		const at = span.start + c.at_ms / 1e3;
-		if (at < first - frame || at > last + frame) continue;
-		let best = tiles[0];
-		for (const t of tiles) if (Math.abs(t.time_sec - at) < Math.abs(best.time_sec - at)) best = t;
-		best.cues = [...best.cues ?? [], c.word];
-	}
-}
-/** The tile's video filter tail: a border when flagged, its label, and a second line for cues. */
-function tileDecor(tile, width, font) {
-	const labelSize = Math.max(11, Math.round(width / 14));
-	const border = Math.max(3, Math.round(width / 40));
-	const parts = [];
-	if (tile.severity) parts.push(`drawbox=x=0:y=0:w=iw:h=ih:color=${BORDER_COLOR[tile.severity]}:t=${border}`);
-	if (font) {
-		const text = (t) => escapeFiltergraph(escapeFilterOption(t));
-		const inset = tile.severity ? border + 2 : 4;
-		const common = `fontfile=${escapeFilterPath(font)}:fontsize=${labelSize}:boxborderw=${Math.round(labelSize / 3)}`;
-		parts.push(`drawtext=${common}:expansion=none:text=${text(tile.label)}:fontcolor=white:box=1:boxcolor=black@0.6:x=${inset}:y=${inset}`);
-		if (tile.cues?.length) parts.push(`drawtext=${common}:expansion=none:text=${text(`cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`)}:fontcolor=black:box=1:boxcolor=0xFFD60A@0.9:x=${inset}:y=h-th-${inset + Math.round(labelSize / 3)}`);
-	}
-	return parts.length ? `,${parts.join(",")}` : "";
-}
-async function reviewRender(projectDir, opts = {}) {
-	const mode = opts.mode ?? "sheet";
-	const r = await resolveRender(projectDir, opts.quality);
-	const fps = r.fps;
-	const frame = 1 / fps;
-	const dur = r.duration_ms / 1e3;
-	const lastT = Math.max(0, dur - frame);
-	const notes = [];
-	let t = 0;
-	const spans = (r.state?.scenes ?? []).map((s) => {
-		const span = {
-			id: s.scene_id,
-			start: t,
-			end: t + s.duration_ms / 1e3
-		};
-		t = span.end;
-		return span;
-	});
-	const sceneAt = (x) => spans.find((s) => x >= s.start && x < s.end)?.id ?? spans[spans.length - 1]?.id;
-	let only;
-	if (opts.scene) {
-		only = spans.find((s) => s.id === opts.scene);
-		if (!only) throw new Error(`no scene "${opts.scene}" in this render (scenes: ${spans.map((s) => s.id).join(", ") || "unknown: no render state"})`);
-	}
-	const clamp = (x) => Math.min(lastT, Math.max(0, x));
-	const round3 = (x) => Math.round(x * 1e3) / 1e3;
-	let tiles;
-	if (opts.times?.length) tiles = opts.times.map((x) => ({ time: clamp(x) }));
-	else if (mode === "strip") {
-		const a = clamp(opts.from_sec ?? only?.start ?? 0);
-		const b = clamp(opts.to_sec ?? (only ? only.end - 1e-6 : a + 2));
-		if (b < a) throw new Error(`strip: to_sec ${b} is before from_sec ${a}`);
-		const fa = Math.ceil(a * fps - 1e-6);
-		const n = Math.max(fa, Math.floor(b * fps + 1e-6)) - fa + 1;
-		const take = Math.min(n, 48);
-		if (take < n) notes.push(`${n} frames in ${round3(a)}–${round3(b)}s; showing ${take} evenly spaced (narrow the span for every frame)`);
-		tiles = Array.from({ length: take }, (_, i) => ({ time: (fa + (take === 1 ? 0 : Math.round(i * (n - 1) / (take - 1)))) / fps }));
-	} else {
-		const list = only ? [only] : spans;
-		if (!list.length) {
-			tiles = [
-				.25,
-				.5,
-				.75
-			].map((f) => ({ time: clamp(dur * f) }));
-			notes.push("no render state with scene timings: sampled 25%, 50% and 75%");
-		} else {
-			const per = list.length * 3 <= 90 ? 3 : list.length * 2 <= 90 ? 2 : 1;
-			if (per < 3) notes.push(`${list.length} scenes: ${per === 2 ? "middle and closing" : "middle"} frame of each (use scene for all three)`);
-			tiles = list.flatMap((s) => {
-				const len = s.end - s.start;
-				const all = [
-					{
-						time: clamp(s.start + Math.min(.3, len * .2)),
-						tag: "in"
-					},
-					{
-						time: clamp(s.start + len / 2),
-						tag: "mid"
-					},
-					{
-						time: clamp(s.end - Math.max(frame, Math.min(.45, len * .15))),
-						tag: "out"
-					}
-				];
-				return per === 3 ? all : per === 2 ? all.slice(1) : [all[1]];
-			});
-		}
-	}
-	const maxTiles = mode === "sheet" && !opts.times?.length && !only && spans.length > 0 ? 90 : 48;
-	if (tiles.length > maxTiles) {
-		notes.push(`${tiles.length} tiles requested; showing the first ${maxTiles} (review one scene at a time with scene)`);
-		tiles = tiles.slice(0, maxTiles);
-	}
-	let crop = "";
-	if (mode === "crop") {
-		const c = opts.crop;
-		if (!c) throw new Error("crop mode needs crop {x, y, w, h} as fractions of the frame (e.g. {x: 0.1, y: 0.6, w: 0.8, h: 0.3})");
-		if (c.x < 0 || c.y < 0 || c.w <= 0 || c.h <= 0 || c.x + c.w > 1.0001 || c.y + c.h > 1.0001) throw new Error("crop must lie inside the frame: 0 ≤ x, y and x + w, y + h ≤ 1");
-		const px = (f, full) => Math.max(0, Math.round(f * full));
-		crop = `crop=${Math.max(2, px(c.w, r.width))}:${Math.max(2, px(c.h, r.height))}:${px(c.x, r.width)}:${px(c.y, r.height)},`;
-		if (!opts.times?.length) {
-			if (!only) tiles = spans.length ? spans.map((s) => ({
-				time: clamp((s.start + s.end) / 2),
-				tag: "mid"
-			})) : [{ time: clamp(dur / 2) }];
-			else tiles = [{
-				time: clamp((only.start + only.end) / 2),
-				tag: "mid"
-			}];
-		}
-	}
-	const aspect = mode === "crop" && opts.crop ? opts.crop.h * r.height / Math.max(1e-6, opts.crop.w * r.width) : r.height / r.width;
-	const layout = planSheets(tiles.length, {
-		width: Math.max(64, Math.round(opts.width ?? DEFAULT_WIDTH[mode])),
-		aspect,
-		cols: opts.cols ?? DEFAULT_COLS[mode],
-		group: mode === "sheet" && !opts.times?.length && tiles.length % 3 === 0 && tiles.every((x, i) => x.tag === [
-			"in",
-			"mid",
-			"out"
-		][i % 3]) ? 3 : 1
-	});
-	const width = layout.width;
-	notes.push(...layout.notes);
-	const outDir = join(projectPaths(r.root).root, "qa", "review");
-	const work = join(outDir, ".work");
-	await rm(work, {
-		recursive: true,
-		force: true
-	});
-	await mkdir(work, { recursive: true });
-	const fontsDir = findFontsDir();
-	const font = fontsDir ? join(fontsDir, "Inter", "Inter-Bold.ttf") : void 0;
-	const haveFont = Boolean(font && existsSync(font));
-	const out = tiles.map((x, i) => {
-		const scene_id = sceneAt(x.time);
-		const label = [
-			scene_id,
-			x.tag,
-			`${round3(x.time).toFixed(2)}s`
-		].filter(Boolean).join(" ");
-		return {
-			index: i,
-			time_sec: round3(x.time),
-			...scene_id ? { scene_id } : {},
-			label
-		};
-	});
-	const cues = r.state?.cues ?? [];
-	let findings = [];
-	let lint;
-	if (!r.quality) notes.push("lint skipped: cannot tell this render's quality, so tiles are not flagged");
-	else try {
-		const l = await lintProject(r.root, { quality: r.quality });
-		findings = l.findings;
-		lint = {
-			status: l.status,
-			errors: l.counts.errors,
-			warnings: l.counts.warnings,
-			report_md: relative(r.root, l.report_md)
-		};
-		const general = findings.filter((f) => !f.scene_id).length;
-		if (general) notes.push(`${general} lint finding(s) not tied to a scene (targets, captions, cover, post copy): see ${lint.report_md}`);
-	} catch (err) {
-		notes.push(`lint failed, so tiles are only flagged for unplaced cues: ${err instanceof Error ? err.message : String(err)}`);
-	}
-	const inImage = new Set(out.map((x) => x.scene_id).filter(Boolean));
-	const flagged = flagScenes(findings, mode === "strip" ? [] : cues, spans.map((s) => s.id)).filter((f) => inImage.has(f.scene_id));
-	applyFlags(out, flagged);
-	if (mode === "strip") applyCues(out, cues, spans, frame);
-	const pageOf = (i) => layout.pages.findIndex(([a, b]) => i >= a && i <= b);
-	try {
-		for (const [i, tile] of out.entries()) {
-			const draw = tileDecor(tile, width, haveFont ? font : void 0);
-			const p = pageOf(i);
-			await mkdir(join(work, `p${p}`), { recursive: true });
-			const png = join(work, `p${p}`, `${String(i - layout.pages[p][0] + 1).padStart(4, "0")}.png`);
-			for (let back = 0; back < 4 && !existsSync(png); back++) {
-				const at = Math.max(0, tile.time_sec - back * frame);
-				await runFfmpeg([
-					"-y",
-					"-ss",
-					at.toFixed(3),
-					"-i",
-					r.reel,
-					"-frames:v",
-					"1",
-					"-vf",
-					`${crop}scale=${width}:-2:flags=bicubic${draw}`,
-					png
-				], { timeoutMs: 6e4 });
-				if (back > 0 && existsSync(png)) {
-					tile.time_sec = round3(at);
-					tile.label = tile.label.replace(/[\d.]+s$/, `${tile.time_sec.toFixed(2)}s`);
-				}
-			}
-			if (!existsSync(png)) throw new Error(`no frame at ${tile.time_sec}s in ${r.reel}`);
-		}
-		for (const tile of out) if (tile.cues) tile.label += ` cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`;
-		if (!haveFont) notes.push("bundled fonts not found: tiles are unlabelled; use the tiles list for times");
-		const base = `${mode}-${r.quality ?? "render"}${opts.scene ? `-${opts.scene}` : ""}`;
-		const stale = (f) => f === `${base}.jpg` || f.startsWith(`${base}-p`) && /^\d+\.jpg$/.test(f.slice(base.length + 2));
-		for (const f of await readdir(outDir)) if (stale(f)) await rm(join(outDir, f), { force: true });
-		const pages = [];
-		for (const [p, [a, b]] of layout.pages.entries()) {
-			const n = b - a + 1;
-			const cols = Math.min(layout.cols, n);
-			const rows = Math.ceil(n / cols);
-			const image = join(outDir, layout.pages.length === 1 ? `${base}.jpg` : `${base}-p${p + 1}.jpg`);
-			await runFfmpeg([
-				"-y",
-				"-framerate",
-				"1",
-				"-i",
-				join(work, `p${p}`, "%04d.png"),
-				"-vf",
-				`tile=${cols}x${rows}:padding=${PAD}:margin=${MARGIN}:color=0x808080`,
-				"-frames:v",
-				"1",
-				"-q:v",
-				"3",
-				image
-			], { timeoutMs: 6e4 });
-			const scenes = [...new Set(out.slice(a, b + 1).map((x) => x.scene_id).filter((x) => Boolean(x)))];
-			const flaggedHere = flagged.filter((f) => scenes.includes(f.scene_id)).map((f) => f.scene_id);
-			pages.push({
-				image,
-				image_rel: relative(r.root, image),
-				cols,
-				rows,
-				tiles: [a, b],
-				scenes,
-				...flaggedHere.length ? { flagged: flaggedHere } : {}
-			});
-		}
-		return {
-			...r.quality ? { quality: r.quality } : {},
-			source: r.source,
-			mode,
-			image: pages[0].image,
-			image_rel: pages[0].image_rel,
-			images: pages.map((p) => p.image),
-			images_rel: pages.map((p) => p.image_rel),
-			pages,
-			cols: pages[0].cols,
-			rows: pages[0].rows,
-			tile_width: width,
-			tiles: out,
-			flagged,
-			...lint ? { lint } : {},
-			notes
-		};
-	} finally {
-		await rm(work, {
-			recursive: true,
-			force: true
-		});
-	}
-}
-function formatReview(r) {
-	const pages = r.pages ?? [];
-	return [
-		(pages.length > 1 ? `review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${pages.length} images (each ≤ ${REVIEW_MAX_IMAGE_PX} px; Read every one, flagged first):` : `review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${r.cols}×${r.rows} → ${r.image}`).replace(/ {2}/g, " "),
-		...pages.length > 1 ? pages.map((p, i) => `  ${i + 1}. ${p.image} (${p.cols}×${p.rows}, tiles ${p.tiles[0] + 1}-${p.tiles[1] + 1}${p.scenes.length ? `, ${p.scenes[0]}${p.scenes.length > 1 ? `–${p.scenes[p.scenes.length - 1]}` : ""}` : ""}${p.flagged?.length ? `; flagged ${p.flagged.join(", ")}` : ""})`) : [],
-		...r.flagged.length ? [`flagged (bordered tiles; look here first): ${r.flagged.map((f) => `${f.scene_id}: ${[...new Map(f.findings.map((x) => [x.id, x.severity])).entries()].map(([id, sev]) => `${id} (${sev})`).join(", ")}`).join("; ")}`] : r.lint ? [`no scene-level lint findings (lint ${r.lint.status})`] : [],
-		...r.tiles.some((t) => t.cues) ? [`word cues: ${r.tiles.flatMap((t) => (t.cues ?? []).map((w) => `"${w}" at ${t.time_sec.toFixed(2)}s (tile ${t.index + 1})`)).join(", ")}; check the cued item is appearing on that tile`] : [],
-		`Read the image${pages.length > 1 ? "s" : ""} and check: text fits and is readable, nothing sits under captions or app UI, graphics land when their words are spoken, crops keep faces and subjects, transitions are clean.`,
-		...r.notes.map((n) => `note: ${n}`)
-	].join("\n");
-}
-/**
-* Lay `n` tiles out over as few images as possible with every image ≤ maxPx on both sides, so
-* nothing is downscaled before Claude sees it. Columns shrink before tiles do; tiles shrink only
-* when a single tile would not fit. Groups (a scene's three frames) stay on one row and one image.
-*/
-function planSheets(n, o) {
-	const maxPx = o.maxPx ?? 1568;
-	const maxPer = Math.max(1, o.maxPerImage ?? 48);
-	const group = Math.max(1, o.group ?? 1);
-	const notes = [];
-	const even = (x) => Math.max(2, 2 * Math.round(x / 2));
-	let width = Math.max(2, Math.round(o.width));
-	const inner = maxPx - 8;
-	if (width > inner) width = inner - inner % 2;
-	let height = even(width * o.aspect);
-	if (height > inner) {
-		width = Math.max(2, Math.floor(inner / o.aspect) - Math.floor(inner / o.aspect) % 2);
-		height = even(width * o.aspect);
-	}
-	if (width !== Math.round(o.width)) notes.push(`tile width reduced to ${width}px so each image stays within ${maxPx}px`);
-	const colsFit = Math.max(1, Math.floor((inner + PAD) / (width + PAD)));
-	let cols = Math.max(1, Math.min(Math.round(o.cols), colsFit, Math.max(1, n)));
-	if (cols < Math.min(Math.round(o.cols), n)) notes.push(`${cols} columns (not ${o.cols}) so each image stays within ${maxPx}px wide`);
-	if (group > 1 && cols >= group) cols -= cols % group;
-	const rowsFit = Math.max(1, Math.floor((inner + PAD) / (height + PAD)));
-	const perImage = Math.max(1, Math.floor(Math.min(cols * rowsFit, maxPer) / cols) * cols);
-	const pages = [];
-	for (let a = 0; a < n; a += perImage) pages.push([a, Math.min(n, a + perImage) - 1]);
-	if (!pages.length) pages.push([0, -1]);
-	if (pages.length > 1) notes.push(`${n} tiles split over ${pages.length} images of up to ${perImage} (${cols}×${Math.ceil(perImage / cols)}) so labels stay readable`);
-	return {
-		width,
-		height,
-		cols,
-		rowsPerImage: Math.ceil(perImage / cols),
-		pages,
-		notes
-	};
 }
 //#endregion
 //#region src/compare.ts
@@ -258554,6 +259607,95 @@ function createServer(options = {}) {
 		return jsonResult(`${formatShorts(r)}\nprojects:\n${lines.join("\n")}`, {
 			...r,
 			projects
+		});
+	}));
+	server.registerTool("footage_look", {
+		title: "Look at a video asset's footage",
+		description: "See what a stretch of an ingested video asset of <project_dir> shows before choosing spans, cutaways or b-roll: frames at its detected shot boundaries in from_sec–to_sec (a little after each cut, plus a middle frame for shots ≥ 5 s; near-identical frames dropped), drawn as ONE labelled contact sheet (tiles 512 px, label `t=12.4s shot 3`; split into pages ≤ 1568 px when needed) at qa/footage/<asset>-<from>-<to>.jpg, plus the transcript of the same range (sentences with times and speaker labels; capped at 4000 chars). Read the image(s), then record what each shot shows with footage_notes. Returns {images, tiles[{index, time_sec, shot, shot_start_sec, shot_end_sec, label}], duplicates, transcript?, shot_notes? (notes already stored for the range), notes}. Video assets only. Local ffmpeg only.",
+		inputSchema: {
+			project_dir: string().min(1),
+			asset: string().min(1).describe("ContentIR video asset id (see ingest output)"),
+			from_sec: number().nonnegative().optional().describe("Start of the range (default 0)"),
+			to_sec: number().positive().optional().describe("End of the range (default: the end of the video)"),
+			max_frames: int().min(1).max(48).optional().describe(`Most frames on the sheet (default 12, max 48)`)
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async (args) => {
+		const { project_dir, asset, ...opts } = args;
+		const root = resolveInputPath(project_dir, cwd());
+		const r = await footageLook(root, asset, opts);
+		return jsonResult(formatFootageLook(r), r, {
+			relativeTo: root,
+			maxArrayFor: {
+				tiles: 48,
+				transcript: 200
+			},
+			omit: ["images_rel"]
+		});
+	}));
+	const footageNote = object$2({
+		from_sec: number().nonnegative(),
+		to_sec: number().positive(),
+		subject: string().max(500).optional().describe("Who or what is in the shot"),
+		action: string().max(500).optional().describe("What happens"),
+		on_screen_text: string().max(500).optional().describe("Text visible in the frame"),
+		broll: boolean().optional().describe("Usable as b-roll / a cutaway"),
+		quality: _enum([
+			"good",
+			"ok",
+			"poor"
+		]).optional().describe("Picture quality: focus, exposure, shake"),
+		tags: array(string().min(1).max(40)).max(20).optional()
+	}).strict();
+	server.registerTool("footage_focus", {
+		title: "Suggest a reframing track for footage",
+		description: "Subject-aware reframing for landscape footage in a vertical (or any cover-cropped) frame: samples a span of an ingested video asset of <project_dir> (in_sec–out_sec, default 30 s, max 600 s; fps samples per second, default 2) and finds the speaker's face (or the most salient object) per frame with macOS Vision, then returns a smoothed footage.focus_track: keyframes {t (seconds from in_sec), x, y (subject centre, fractions of the source frame)} to paste into the scene's footage with fit \"cover\" and the same in_sec. The renderer eases the crop between keyframes and never leaves the picture; lint subject_near_edge flags a subject the crop cannot centre. method \"unavailable\" (not macOS, or Vision failed): no track, mark focus_track by eye from footage_look frames instead. Returns {asset, in_sec, out_sec, focus_track, method, frames_checked, detections{faces, salient, missed}, notes}. Read-only; local ffmpeg and macOS Vision only, no downloads.",
+		inputSchema: {
+			project_dir: string().min(1),
+			asset: string().min(1).describe("ContentIR video asset id"),
+			in_sec: number().nonnegative().describe("Start of the span (the scene's footage.in_sec)"),
+			out_sec: number().positive().optional().describe("End of the span (default in_sec + 30 s, clamped to the video)"),
+			fps: number().min(.2).max(8).optional().describe("Frames checked per second (default 2)")
+		},
+		annotations: {
+			readOnlyHint: true,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async (args) => {
+		const { project_dir, ...opts } = args;
+		const root = resolveInputPath(project_dir, cwd());
+		const r = await footageFocus(root, opts);
+		return jsonResult(formatFootageFocus(r), r, {
+			relativeTo: root,
+			maxArrayFor: { focus_track: 200 }
+		});
+	}));
+	server.registerTool("footage_notes", {
+		title: "Remember what a video's shots show",
+		description: "Store (or, without notes, read) your own per-shot notes for a video asset of <project_dir> after footage_look: [{from_sec, to_sec, subject?, action?, on_screen_text?, broll?, quality? good|ok|poor, tags?}]. Saved on the asset in source/content-ir.json (media.notes) with the file's sha256, so later sessions reuse them instead of looking again; a note for the same range replaces the old one, others are added; notes for an earlier version of the file are reported stale and dropped. Notes are your observations, NOT source evidence: never cite them as claims or evidence refs. Re-ingesting the same file keeps them. Returns {notes, added, replaced, stale?}.",
+		inputSchema: {
+			project_dir: string().min(1),
+			asset: string().min(1).describe("ContentIR video asset id"),
+			notes: array(footageNote).min(1).max(200).optional().describe("Notes to store; omit to read the stored notes")
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async (args) => {
+		const r = await footageNotes(resolveInputPath(args.project_dir, cwd()), args.asset, args.notes);
+		return jsonResult(formatFootageNotes(r), r, {
+			maxArrayFor: { notes: 200 },
+			omit: ["asset_sha256", "updated_at"]
 		});
 	}));
 	server.registerTool("analyze", {

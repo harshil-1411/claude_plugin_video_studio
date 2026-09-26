@@ -119,6 +119,18 @@ scene a `deterministic` graphic, usually with `cues` on the speaker's words.
   personal, emotional or opinion lines, and for the hook's first second.
 - One idea per cutaway, 3–10 s, then give the face back for at least 2 s
   (lint `cutaway_rhythm`). Two cutaway scenes in a row count as one.
+- Look before you choose spans, cutaways or b-roll: `footage_look {asset,
+  from_sec, to_sec}` shows a frame per shot plus the transcript of the range.
+  Record each shot with `footage_notes` (`broll: true` for usable cutaway
+  footage, `quality`, `on_screen_text`) and check the stored notes first
+  (`footage_notes {asset}`) instead of looking again. Notes are observations,
+  not evidence: never cite them as `claim_refs`.
+- Landscape footage in a vertical reel: a static `focus` (a crop offset)
+  loses a speaker who moves. Call `footage_focus {asset, in_sec, out_sec}`
+  and paste its `focus_track` (subject centre per time, t from `in_sec`)
+  into the scene's `footage` with `fit: "cover"`. Without macOS Vision,
+  mark it by eye from `footage_look` frames. Check the crop with `review`
+  strips; lint `subject_near_edge` flags a subject the crop can't centre.
 - Native cues match the transcript's spelling: whisper writes numbers as
   it heard them ("forty" or "40"), so check the transcript first.
 

@@ -443,7 +443,7 @@
                 "type": "string"
               },
               "focus": {
-                "description": "Crop centre for cover (0–1).",
+                "description": "Static crop OFFSET for cover (0–1): 0 = keep the left/top edge, 0.5 = centre, 1 = right/bottom edge. Ignored when focus_track is set.",
                 "additionalProperties": false,
                 "properties": {
                   "x": {
@@ -462,6 +462,41 @@
                   "y"
                 ],
                 "type": "object"
+              },
+              "focus_track": {
+                "description": "Subject-aware reframing for fit: cover. Keyframes of where the SUBJECT'S CENTRE is in the source frame (not a crop offset); the crop follows it smoothly and never leaves the picture. t strictly increasing. Get one from footage_focus, or mark it by eye.",
+                "items": {
+                  "description": "Where the subject's centre is at one moment of a footage clip.",
+                  "additionalProperties": false,
+                  "properties": {
+                    "t": {
+                      "description": "Seconds from the clip's in_sec, in SOURCE time (before speed).",
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "x": {
+                      "description": "Subject centre, as a fraction of the source frame width (0 left, 1 right).",
+                      "maximum": 1,
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "y": {
+                      "description": "Subject centre, as a fraction of the source frame height (0 top, 1 bottom).",
+                      "maximum": 1,
+                      "minimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "t",
+                    "x",
+                    "y"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 200,
+                "minItems": 1,
+                "type": "array"
               },
               "in_sec": {
                 "description": "Start inside the asset.",

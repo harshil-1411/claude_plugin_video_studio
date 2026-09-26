@@ -434,9 +434,12 @@ export function mergeContentIR(existing: ContentIRT, parts: readonly ExtractedSo
     });
     part.assets.forEach((a, k) => {
       const asset = toIrAsset(a, ids[k]!.id, remap, localIds);
-      // Same bytes → the transcript recorded on the old asset still applies.
+      // Same bytes → the transcript and footage notes recorded on the old asset still apply
+      // (a re-cut file keeps its id but loses both: they describe the old picture and sound).
       const transcript = ids[k]!.old?.media?.transcript;
       if (transcript && asset.media) asset.media = { ...asset.media, transcript };
+      const notes = ids[k]!.old?.media?.notes?.filter((n) => n.asset_sha256 === asset.sha256);
+      if (notes?.length && asset.media) asset.media = { ...asset.media, notes };
       ir.assets.push(asset);
     });
 

@@ -107,6 +107,21 @@ export const Transcript = z
   })
   .describe("Timed transcript of the asset's speech.");
 
+export const FootageNote = z
+  .strictObject({
+    from_sec: z.number().nonnegative(),
+    to_sec: z.number().positive(),
+    subject: z.string().max(500).optional().describe("Who or what is in the shot."),
+    action: z.string().max(500).optional().describe("What happens in it."),
+    on_screen_text: z.string().max(500).optional().describe("Text visible in the frame (slides, signs, UI)."),
+    broll: z.boolean().optional().describe("true: usable as b-roll / a cutaway (no talking face, no lip sync needed)."),
+    quality: z.enum(["good", "ok", "poor"]).optional().describe("Picture quality: focus, exposure, shake."),
+    tags: z.array(z.string().min(1).max(40)).max(20).optional(),
+    asset_sha256: Sha256.describe("Hash of the asset file the note was written for; a note whose hash differs from the asset's is stale."),
+    updated_at: IsoDateTime,
+  })
+  .describe("Claude's own observation of a stretch of footage (footage_notes). Not source evidence: never cited as a claim or evidence ref.");
+
 export const MediaInfo = z
   .strictObject({
     duration_sec: z.number().nonnegative(),
@@ -132,6 +147,10 @@ export const MediaInfo = z
       .strictObject({ x: z.int().nonnegative(), y: z.int().nonnegative(), w: z.int().positive(), h: z.int().positive() })
       .optional()
       .describe("The real picture inside baked-in black bars (letterbox/pillarbox), in source pixels; the footage renderer crops to it."),
+    notes: z
+      .array(FootageNote)
+      .optional()
+      .describe("Per-shot notes Claude wrote after looking at the footage (footage_look → footage_notes): subject, action, on-screen text, b-roll use, quality. Observations, not evidence."),
   })
   .describe("Probe results for a video or audio asset.");
 
@@ -191,6 +210,7 @@ export type IrAsset = z.infer<typeof IrAsset>;
 export type Shot = z.infer<typeof Shot>;
 export type Transcript = z.infer<typeof Transcript>;
 export type MediaInfo = z.infer<typeof MediaInfo>;
+export type FootageNote = z.infer<typeof FootageNote>;
 export type Classification = z.infer<typeof Classification>;
 export type IrWarning = z.infer<typeof IrWarning>;
 export type ContentIR = z.infer<typeof ContentIR>;

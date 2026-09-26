@@ -428,6 +428,37 @@ describe("Phase 6: footage scenes and native voice", () => {
     expect(r.warnings.map((w) => w.path)).toContain("scenes.1.audio.mode"); // v1 has no audio track
   });
 
+  it("focus_track: subject keyframes, sorted, only for fit cover", () => {
+    const s = clone(loadSpec());
+    const sc = s.scenes[1]!;
+    sc.visual_strategy = "user_asset";
+    delete sc.deterministic;
+    const track = [
+      { t: 0, x: 0.3, y: 0.5 },
+      { t: 1, x: 0.6, y: 0.45 },
+    ];
+    sc.footage = { asset: "v1", in_sec: 0, focus_track: track };
+    expect(VideoSpec.safeParse(s).success).toBe(true);
+    const at = (r: ReturnType<typeof validateVideoSpecSemantics>, k: "errors" | "warnings") => r[k].map((e) => e.path).filter((p) => p.includes("focus"));
+    expect(at(validateVideoSpecSemantics(s), "errors")).toEqual([]);
+    expect(at(validateVideoSpecSemantics(s), "warnings")).toEqual([]);
+    // Out of range and empty are schema errors.
+    sc.footage = { asset: "v1", in_sec: 0, focus_track: [{ t: 0, x: 1.2, y: 0.5 }] };
+    expect(VideoSpec.safeParse(s).success).toBe(false);
+    sc.footage = { asset: "v1", in_sec: 0, focus_track: [] };
+    expect(VideoSpec.safeParse(s).success).toBe(false);
+    sc.footage = { asset: "v1", in_sec: 0, focus_track: Array.from({ length: 201 }, (_, i) => ({ t: i, x: 0.5, y: 0.5 })) };
+    expect(VideoSpec.safeParse(s).success).toBe(false);
+    // Unsorted: a semantic error; another fit, or a static focus next to it: warnings.
+    sc.footage = { asset: "v1", in_sec: 0, focus_track: [track[1]!, track[0]!] };
+    expect(at(validateVideoSpecSemantics(s), "errors")).toEqual(["scenes.1.footage.focus_track.1"]);
+    sc.footage = { asset: "v1", in_sec: 0, fit: "contain", focus: { x: 0.5, y: 0.5 }, focus_track: track };
+    expect(at(validateVideoSpecSemantics(s), "warnings")).toEqual(["scenes.1.footage.focus_track", "scenes.1.footage.focus"]);
+    // A keyframe far past the clip (t counts from in_sec).
+    sc.footage = { asset: "v1", in_sec: 10, out_sec: 12, focus_track: [{ t: 10, x: 0.5, y: 0.5 }] };
+    expect(at(validateVideoSpecSemantics(s), "warnings")).toEqual(["scenes.1.footage.focus_track.0"]);
+  });
+
   it("voice.mode native forbids synthesized voiceover", () => {
     const s = clone(loadSpec());
     s.voice.mode = "native";

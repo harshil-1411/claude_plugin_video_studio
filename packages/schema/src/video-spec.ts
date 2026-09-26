@@ -118,13 +118,32 @@ export const RedactRegion = z
   })
   .describe("A region of the footage to make unreadable (private data, faces, inboxes).");
 
+export const FocusKeyframe = z
+  .strictObject({
+    t: z.number().min(0).describe("Seconds from the clip's in_sec, in SOURCE time (before speed)."),
+    x: z.number().min(0).max(1).describe("Subject centre, as a fraction of the source frame width (0 left, 1 right)."),
+    y: z.number().min(0).max(1).describe("Subject centre, as a fraction of the source frame height (0 top, 1 bottom)."),
+  })
+  .describe("Where the subject's centre is at one moment of a footage clip.");
+
 export const FootageClip = z
   .strictObject({
     asset: Id.describe("ContentIR asset id of a video (or image) the user supplied or recorded."),
     in_sec: z.number().nonnegative().describe("Start inside the asset."),
     out_sec: z.number().positive().optional().describe("End inside the asset; default in_sec + scene duration."),
     fit: z.enum(["cover", "contain", "blur_pad"]).optional().describe("How the clip fills the frame: crop (default), letterbox, or a blurred copy behind it."),
-    focus: z.strictObject({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).optional().describe("Crop centre for cover (0–1)."),
+    focus: z
+      .strictObject({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) })
+      .optional()
+      .describe("Static crop OFFSET for cover (0–1): 0 = keep the left/top edge, 0.5 = centre, 1 = right/bottom edge. Ignored when focus_track is set."),
+    focus_track: z
+      .array(FocusKeyframe)
+      .min(1)
+      .max(200)
+      .optional()
+      .describe(
+        "Subject-aware reframing for fit: cover. Keyframes of where the SUBJECT'S CENTRE is in the source frame (not a crop offset); the crop follows it smoothly and never leaves the picture. t strictly increasing. Get one from footage_focus, or mark it by eye.",
+      ),
     speed: z.number().min(0.25).max(4).optional().describe("Playback rate (1 = normal)."),
     loop: z.boolean().optional().describe("Loop a clip shorter than the scene (default: hold the last frame)."),
     redact: z.array(RedactRegion).max(12).optional().describe("Regions blurred or boxed in the source frame before it is fitted."),
@@ -349,6 +368,7 @@ export type AudioLicense = z.infer<typeof AudioLicense>;
 export type MusicBed = z.infer<typeof MusicBed>;
 export type FootageClip = z.infer<typeof FootageClip>;
 export type RedactRegion = z.infer<typeof RedactRegion>;
+export type FocusKeyframe = z.infer<typeof FocusKeyframe>;
 export type SceneAudio = z.infer<typeof SceneAudio>;
 export type SoundEffect = z.infer<typeof SoundEffect>;
 export type MotionPattern = z.infer<typeof MotionPattern>;
@@ -756,6 +776,22 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
           errors.push({ path: p, message: `${sid}: redact to_sec ${r.to_sec} is not after from_sec ${r.from_sec}`, fix: "set to_sec > from_sec, or omit both to redact the whole clip" });
         }
       });
+      if (f.focus_track) {
+        const p = `${at}.footage.focus_track`;
+        if ((f.fit ?? "cover") !== "cover") {
+          warnings.push({ path: p, message: `${sid}: focus_track only steers a cover crop; fit "${f.fit}" shows the whole frame, so it is ignored`, fix: "set fit: cover, or remove focus_track" });
+        }
+        if (f.focus) warnings.push({ path: `${at}.footage.focus`, message: `${sid}: focus is ignored when focus_track is set`, fix: "remove focus (the track decides the crop)" });
+        const bad = f.focus_track.findIndex((k, j) => j > 0 && k.t <= f.focus_track![j - 1]!.t);
+        if (bad > 0) {
+          errors.push({ path: `${p}.${bad}`, message: `${sid}: focus_track times must strictly increase (t ${f.focus_track[bad]!.t} after ${f.focus_track[bad - 1]!.t})`, fix: "sort the keyframes by t and drop duplicates" });
+        }
+        const span = (f.out_sec ?? f.in_sec + scene.duration_sec * (f.speed ?? 1)) - f.in_sec;
+        const late = f.focus_track.findIndex((k) => k.t > span + 0.5);
+        if (late >= 0) {
+          warnings.push({ path: `${p}.${late}`, message: `${sid}: focus_track keyframe at t ${f.focus_track[late]!.t}s is past the clip's ${Math.round(span * 100) / 100}s span (t counts from in_sec)`, fix: "make t relative to in_sec, not the asset start" });
+        }
+      }
       if (f.out_sec !== undefined && f.out_sec <= f.in_sec) {
         errors.push({ path: `${at}.footage.out_sec`, message: `${sid}: footage out_sec ${f.out_sec} is not after in_sec ${f.in_sec}`, fix: "set out_sec > in_sec, or omit it to use the scene's duration" });
       }

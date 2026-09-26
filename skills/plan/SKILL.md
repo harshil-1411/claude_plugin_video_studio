@@ -3,7 +3,7 @@ name: plan
 description: Turn ingested sources into a video plan without generating anything - infers audience, goal, platform and duration (showing assumptions), proposes and scores hooks, writes project/creative-brief.yaml and a grounded project/video-spec.json, validates both and renders a readable storyboard. Use when the user runs /video-studio:plan, asks for a script, storyboard, hook ideas or a video plan from a document, URL, repo or notes, or before rendering.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+).
-allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__source_summary mcp__plugin_video-studio_engine__source_section mcp__plugin_video-studio_engine__template_list mcp__plugin_video-studio_engine__template_get mcp__plugin_video-studio_engine__spec_scaffold mcp__plugin_video-studio_engine__brief_validate mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__storyboard_render mcp__plugin_video-studio_engine__schema_get Read Write Edit Agent
+allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__source_summary mcp__plugin_video-studio_engine__source_section mcp__plugin_video-studio_engine__template_list mcp__plugin_video-studio_engine__template_get mcp__plugin_video-studio_engine__spec_scaffold mcp__plugin_video-studio_engine__brief_validate mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__storyboard_render mcp__plugin_video-studio_engine__schema_get mcp__plugin_video-studio_engine__footage_look mcp__plugin_video-studio_engine__footage_notes Read Write Edit Agent
 ---
 
 # Plan a video (story director)

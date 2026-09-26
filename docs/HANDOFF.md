@@ -64,8 +64,13 @@ Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixe
     - `ingestion/src/video-url.ts`: YouTube, Vimeo and Loom go through the user's `yt-dlp` (runtime-resolved; safety flags; `--` before the URL; env allowlist). Direct media links use the SSRF-guarded, pinned download (2 GB cap).
     - Subtitles are downloaded and, in the `ingest` tool, applied as the transcript (no whisper).
     - Doctor has a `yt_dlp` check. Tested with a fake yt-dlp and a local HTTP server; a real YouTube test is on the checklist.
+  - Step 9 (see footage, reframing):
+    - `footage_look` returns a labelled, deduped shot sheet plus the transcript window. `footage_notes` stores per-shot notes (`media.notes`, keyed to the asset sha256, preserved on re-ingest, never evidence).
+    - `footage.focus_track` holds subject-centre keyframes. The renderer smooths them and uses a clamped smoothstep crop (`renderer/src/reframe.ts`, footage renderer 0.4.0).
+    - macOS Vision detector (`media/src/subject-detect.ts`, JXA with `usesCPUOnly`); the `footage_focus` tool suggests tracks. Lint check: `subject_near_edge`.
+    - Real end-to-end: a face moving right in a 1280×720 clip was found in 8/8 frames, and the track followed x 0.20 → 0.75.
 - **Next:**
-  - Step 9: `footage_look`/`footage_notes`, then reframing (`footage.focus_track`, macOS Vision helper — JXA works in the sandbox with `usesCPUOnly = true`, prototype face + saliency detection verified on a PD portrait).
+  - Step 10: an automatic review loop in the render and create skills; footage QA (exposure, SNR, rotation, HDR + tonemap); render speed (parallel scenes, no `-threads 1`, logo merged into the burn-in encode).
 
 ## Where things stand
 

@@ -12,6 +12,8 @@ import { SCHEMA_NAMES, findSchemasDir, resolveInputPath } from "./paths.js";
 import { type AdaptOptions, adaptProject, formatAdapt } from "./adapt.js";
 import { analyzeVideo, findShorts, formatGrammar, formatShorts } from "./analyze.js";
 import { makeShortProjects } from "./shorts.js";
+import { type FootageNoteInput, LOOK_MAX_FRAMES, footageLook, footageNotes, formatFootageLook, formatFootageNotes } from "./footage-look.js";
+import { FOCUS_MAX_FPS, footageFocus, formatFootageFocus } from "./footage-focus.js";
 import { WHISPER_MODELS, WHISPER_MODEL_NAMES, type WhisperModelName, findMediaAsset, loadContentIr, planWhisperModel, transcribeAsset } from "./transcribe.js";
 import { formatDemo, loadDemoScript, recordDemo } from "./demo.js";
 import { type ConsentOutcome, demoConsentRequest, modelDownloadConsentRequest, obtainConsent, paidVoiceConsentRequest } from "./consent.js";
@@ -915,6 +917,82 @@ export function createServer(options: ServerOptions = {}): McpServer {
         return jsonResult(`${formatShorts(r)}\nprojects:\n${lines.join("\n")}`, { ...r, projects } as unknown as Record<string, unknown>);
       },
     ),
+  );
+
+  server.registerTool(
+    "footage_look",
+    {
+      title: "Look at a video asset's footage",
+      description:
+        "See what a stretch of an ingested video asset of <project_dir> shows before choosing spans, cutaways or b-roll: frames at its detected shot boundaries in from_sec–to_sec (a little after each cut, plus a middle frame for shots ≥ 5 s; near-identical frames dropped), drawn as ONE labelled contact sheet (tiles 512 px, label `t=12.4s shot 3`; split into pages ≤ 1568 px when needed) at qa/footage/<asset>-<from>-<to>.jpg, plus the transcript of the same range (sentences with times and speaker labels; capped at 4000 chars). Read the image(s), then record what each shot shows with footage_notes. Returns {images, tiles[{index, time_sec, shot, shot_start_sec, shot_end_sec, label}], duplicates, transcript?, shot_notes? (notes already stored for the range), notes}. Video assets only. Local ffmpeg only.",
+      inputSchema: {
+        project_dir: z.string().min(1),
+        asset: z.string().min(1).describe("ContentIR video asset id (see ingest output)"),
+        from_sec: z.number().nonnegative().optional().describe("Start of the range (default 0)"),
+        to_sec: z.number().positive().optional().describe("End of the range (default: the end of the video)"),
+        max_frames: z.int().min(1).max(LOOK_MAX_FRAMES).optional().describe(`Most frames on the sheet (default 12, max ${LOOK_MAX_FRAMES})`),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async (args: { project_dir: string; asset: string; from_sec?: number; to_sec?: number; max_frames?: number }) => {
+      const { project_dir, asset, ...opts } = args;
+      const root = resolveInputPath(project_dir, cwd());
+      const r = await footageLook(root, asset, opts);
+      return jsonResult(formatFootageLook(r), r as unknown as Record<string, unknown>, { relativeTo: root, maxArrayFor: { tiles: LOOK_MAX_FRAMES, transcript: 200 }, omit: ["images_rel"] });
+    }),
+  );
+
+  const footageNote = z
+    .object({
+      from_sec: z.number().nonnegative(),
+      to_sec: z.number().positive(),
+      subject: z.string().max(500).optional().describe("Who or what is in the shot"),
+      action: z.string().max(500).optional().describe("What happens"),
+      on_screen_text: z.string().max(500).optional().describe("Text visible in the frame"),
+      broll: z.boolean().optional().describe("Usable as b-roll / a cutaway"),
+      quality: z.enum(["good", "ok", "poor"]).optional().describe("Picture quality: focus, exposure, shake"),
+      tags: z.array(z.string().min(1).max(40)).max(20).optional(),
+    })
+    .strict();
+  server.registerTool(
+    "footage_focus",
+    {
+      title: "Suggest a reframing track for footage",
+      description:
+        "Subject-aware reframing for landscape footage in a vertical (or any cover-cropped) frame: samples a span of an ingested video asset of <project_dir> (in_sec–out_sec, default 30 s, max 600 s; fps samples per second, default 2) and finds the speaker's face (or the most salient object) per frame with macOS Vision, then returns a smoothed footage.focus_track: keyframes {t (seconds from in_sec), x, y (subject centre, fractions of the source frame)} to paste into the scene's footage with fit \"cover\" and the same in_sec. The renderer eases the crop between keyframes and never leaves the picture; lint subject_near_edge flags a subject the crop cannot centre. method \"unavailable\" (not macOS, or Vision failed): no track, mark focus_track by eye from footage_look frames instead. Returns {asset, in_sec, out_sec, focus_track, method, frames_checked, detections{faces, salient, missed}, notes}. Read-only; local ffmpeg and macOS Vision only, no downloads.",
+      inputSchema: {
+        project_dir: z.string().min(1),
+        asset: z.string().min(1).describe("ContentIR video asset id"),
+        in_sec: z.number().nonnegative().describe("Start of the span (the scene's footage.in_sec)"),
+        out_sec: z.number().positive().optional().describe("End of the span (default in_sec + 30 s, clamped to the video)"),
+        fps: z.number().min(0.2).max(FOCUS_MAX_FPS).optional().describe("Frames checked per second (default 2)"),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async (args: { project_dir: string; asset: string; in_sec: number; out_sec?: number; fps?: number }) => {
+      const { project_dir, ...opts } = args;
+      const root = resolveInputPath(project_dir, cwd());
+      const r = await footageFocus(root, opts);
+      return jsonResult(formatFootageFocus(r), r as unknown as Record<string, unknown>, { relativeTo: root, maxArrayFor: { focus_track: 200 } });
+    }),
+  );
+  server.registerTool(
+    "footage_notes",
+    {
+      title: "Remember what a video's shots show",
+      description:
+        "Store (or, without notes, read) your own per-shot notes for a video asset of <project_dir> after footage_look: [{from_sec, to_sec, subject?, action?, on_screen_text?, broll?, quality? good|ok|poor, tags?}]. Saved on the asset in source/content-ir.json (media.notes) with the file's sha256, so later sessions reuse them instead of looking again; a note for the same range replaces the old one, others are added; notes for an earlier version of the file are reported stale and dropped. Notes are your observations, NOT source evidence: never cite them as claims or evidence refs. Re-ingesting the same file keeps them. Returns {notes, added, replaced, stale?}.",
+      inputSchema: {
+        project_dir: z.string().min(1),
+        asset: z.string().min(1).describe("ContentIR video asset id"),
+        notes: z.array(footageNote).min(1).max(200).optional().describe("Notes to store; omit to read the stored notes"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async (args: { project_dir: string; asset: string; notes?: FootageNoteInput[] }) => {
+      const r = await footageNotes(resolveInputPath(args.project_dir, cwd()), args.asset, args.notes);
+      return jsonResult(formatFootageNotes(r), r as unknown as Record<string, unknown>, { maxArrayFor: { notes: 200 }, omit: ["asset_sha256", "updated_at"] });
+    }),
   );
 
   server.registerTool(

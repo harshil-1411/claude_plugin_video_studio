@@ -197,6 +197,21 @@ export function tileDecor(tile: Pick<ReviewTile, "label" | "severity" | "cues">,
   return parts.length ? `,${parts.join(",")}` : "";
 }
 
+/** The bundled label font (Inter Bold), or undefined when the plugin's fonts/ are not found. */
+export function reviewFont(): string | undefined {
+  const fontsDir = findFontsDir();
+  const font = fontsDir ? join(fontsDir, "Inter", "Inter-Bold.ttf") : undefined;
+  return font && existsSync(font) ? font : undefined;
+}
+
+/** Tile the numbered frames `<dir>/0001.png, 0002.png, …` (all the same size) into one cols×rows JPEG. */
+export async function tileSheet(dir: string, cols: number, rows: number, image: string): Promise<void> {
+  await runFfmpeg(
+    ["-y", "-framerate", "1", "-i", join(dir, "%04d.png"), "-vf", `tile=${cols}x${rows}:padding=${PAD}:margin=${MARGIN}:color=0x808080`, "-frames:v", "1", "-q:v", "3", image],
+    { timeoutMs: 60_000 },
+  );
+}
+
 export async function reviewRender(projectDir: string, opts: ReviewOptions = {}): Promise<ReviewResult> {
   const mode = opts.mode ?? "sheet";
   const r = await resolveRender(projectDir, opts.quality);
@@ -294,9 +309,8 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
   const work = join(outDir, ".work");
   await rm(work, { recursive: true, force: true });
   await mkdir(work, { recursive: true });
-  const fontsDir = findFontsDir();
-  const font = fontsDir ? join(fontsDir, "Inter", "Inter-Bold.ttf") : undefined;
-  const haveFont = Boolean(font && existsSync(font));
+  const font = reviewFont();
+  const haveFont = Boolean(font);
 
   const out: ReviewTile[] = tiles.map((x, i) => {
     const scene_id = sceneAt(x.time);
@@ -356,10 +370,7 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
       const cols = Math.min(layout.cols, n);
       const rows = Math.ceil(n / cols);
       const image = join(outDir, layout.pages.length === 1 ? `${base}.jpg` : `${base}-p${p + 1}.jpg`);
-      await runFfmpeg(
-        ["-y", "-framerate", "1", "-i", join(work, `p${p}`, "%04d.png"), "-vf", `tile=${cols}x${rows}:padding=${PAD}:margin=${MARGIN}:color=0x808080`, "-frames:v", "1", "-q:v", "3", image],
-        { timeoutMs: 60_000 },
-      );
+      await tileSheet(join(work, `p${p}`), cols, rows, image);
       const scenes = [...new Set(out.slice(a, b + 1).map((x) => x.scene_id).filter((x): x is string => Boolean(x)))];
       const flaggedHere = flagged.filter((f) => scenes.includes(f.scene_id)).map((f) => f.scene_id);
       pages.push({ image, image_rel: relative(r.root, image), cols, rows, tiles: [a, b], scenes, ...(flaggedHere.length ? { flagged: flaggedHere } : {}) });

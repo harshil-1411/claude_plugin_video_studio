@@ -41,8 +41,9 @@ rules:
   - "voice.mode is native: every scene's voiceover stays empty; captions come from the video's transcript (transcribe the asset first)."
   - "Each scene is a footage span {asset, in_sec, out_sec} chosen from the transcript: start and end on sentence boundaries, never mid-word."
   - "Scene audio is native (the speaker's voice); keep speed 1 so speech sounds natural. Short crossfades (100–200 ms) between spans hide the jump."
-  - "fit cover with focus on the face (focus.y about 0.35 for a centred speaker); blur_pad for landscape recordings you must not crop."
+  - "fit cover; for landscape recordings in a vertical reel, add footage.focus_track from footage_focus (or marked by eye from footage_look frames) so a moving speaker stays in the crop, then check with review strips. blur_pad for landscape recordings you must not crop."
   - "On-screen text never repeats the captions word for word: a name card, one emphasised line, the CTA."
   - "Cut away when a line describes something to see (a number, a process, a comparison): keep the footage span for its sound and words, set footage.cutaway true and give the scene a deterministic graphic (stat, timeline, comparison...) with cues on the speaker's words. Never in the hook's first second or on personal or emotional lines; 3-10 s each, at least 2 s of face between (lint cutaway_rhythm)."
+  - "Look at the footage before choosing spans or cutaways: footage_look shows a frame per shot with the range's transcript; save what each shot shows with footage_notes (observations, never evidence) and reuse them."
   - "Only spans the speaker actually said: never re-order sentences so they change the meaning."
   - CTA must be an allowed brand CTA if a brand profile is present.

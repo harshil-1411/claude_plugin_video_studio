@@ -18,13 +18,14 @@ import {
   zoomPanExprs,
   zoomPanFilter,
 } from "./ffmpeg-renderer.js";
+import { type FocusPoint, coverTrackFilter, prepareFocusTrack } from "./reframe.js";
 import { type FontResolver, createFontResolver } from "./tokens.js";
 import type { Availability, MotionTokens, RenderTarget, SceneRenderRequest, SceneRenderResult, SceneRenderer } from "./types.js";
 
 /**
  * Footage renderer: turns a span of a real video (or a still) into an exact-length, silent clip
  * at the target size and fps. The span is trimmed (`in_sec..out_sec`), re-timed (`speed`), fitted
- * (`cover` crops around `focus`, `contain` letterboxes on the background colour, `blur_pad` puts a
+ * (`cover` crops at the `focus` offset, or follows the subject along `focus_track`, `contain` letterboxes on the background colour, `blur_pad` puts a
  * blurred, dimmed copy behind), and a clip shorter than the scene holds its last frame or loops.
  * Stills get a gentle Ken Burns push-in. `scene.motion` moves the fitted picture (after the fit,
  * before any text is drawn, so titles stay put and text boxes are the rest pose lint checks);
@@ -40,8 +41,9 @@ export const FOOTAGE_RENDERER_ID = "ffmpeg-footage";
  * 0.2.1: `scene.motion` moves the fitted picture; on stills it replaces the Ken Burns.
  * 0.2.2: word cues (`req.cues`) time the overlay's reveal items.
  * 0.3.0: overlays open half-in (entrance.ts) and stat values count up, as in the FFmpeg renderer 0.5.0.
+ * 0.4.0: `focus_track` (fit cover) moves the crop over time to keep the subject centred (reframe.ts).
  */
-export const FOOTAGE_RENDERER_VERSION = "0.3.0";
+export const FOOTAGE_RENDERER_VERSION = "0.4.0";
 
 /** Deterministic kinds drawn over footage. Others are ignored with a warning. */
 export const FOOTAGE_OVERLAY_KINDS = ["lower_third", "kinetic_text", "typography", "quote", "stat"] as const satisfies readonly DeterministicKind[];
@@ -127,9 +129,22 @@ export function contentCrop(box: MediaInfo["content_box"]): string {
   return box ? `crop=${box.w}:${box.h}:${box.x}:${box.y}` : "null";
 }
 
-/** Filter chains fitting `inLabel` into W×H as `outLabel`. */
-function fitChains(fit: NonNullable<FootageClip["fit"]>, W: number, H: number, focus: { x: number; y: number }, bg: string, inLabel: string, outLabel: string, tag: string): string[] {
-  const cover = `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bicubic,crop=${W}:${H}:(iw-${W})*${n3(focus.x)}:(ih-${H})*${n3(focus.y)}`;
+/**
+ * Filter chains fitting `inLabel` into W×H as `outLabel`. With `track` (play-time subject points)
+ * cover crops follow the subject instead of the static `focus` offset.
+ */
+function fitChains(
+  fit: NonNullable<FootageClip["fit"]>,
+  W: number,
+  H: number,
+  focus: { x: number; y: number },
+  bg: string,
+  inLabel: string,
+  outLabel: string,
+  tag: string,
+  track?: readonly FocusPoint[],
+): string[] {
+  const cover = track?.length ? coverTrackFilter(track, W, H) : `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bicubic,crop=${W}:${H}:(iw-${W})*${n3(focus.x)}:(ih-${H})*${n3(focus.y)}`;
   const contain = `scale=${W}:${H}:force_original_aspect_ratio=decrease:flags=bicubic`;
   if (fit === "cover") return [`${inLabel}${cover},setsar=1${outLabel}`];
   if (fit === "contain") return [`${inLabel}${contain},pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${ffColor(bg)},setsar=1${outLabel}`];
@@ -150,7 +165,7 @@ function fitChains(fit: NonNullable<FootageClip["fit"]>, W: number, H: number, f
  */
 export function planFootage(
   clip: FootageClip,
-  media: Pick<MediaInfo, "duration_sec" | "content_box">,
+  media: Pick<MediaInfo, "duration_sec" | "content_box" | "width" | "height">,
   path: string,
   target: RenderTarget,
   durationSec: number,
@@ -165,6 +180,8 @@ export function planFootage(
   const warnings: string[] = [];
   const tail = [`format=yuv420p`, `trim=end_frame=${frames}`, "setpts=PTS-STARTPTS"];
   const motion = camera.motion;
+  const tracked = fit === "cover" && !!clip.focus_track?.length;
+  if (clip.focus_track?.length && !tracked) warnings.push(`footage: focus_track only steers fit cover; ignored for fit ${fit}`);
 
   if (isStillPath(path)) {
     // Fit at 2x so zoompan's integer steps stay sub-pixel on output, then push in towards the centre.
@@ -181,7 +198,8 @@ export function planFootage(
       chains: [
         ...redactChains(clip.redact ?? [], 0, 1, "[0:v]", "[red]"),
         `[red]${contentCrop(media.content_box)}[cc]`,
-        ...fitChains(fit, W2, H2, focus, background, "[cc]", "[kb]", "k"),
+        // A still has no time: the track's first keyframe places the subject.
+        ...fitChains(fit, W2, H2, focus, background, "[cc]", "[kb]", "k", tracked ? prepareFocusTrack(clip.focus_track!.slice(0, 1), { media }) : undefined),
         `[kb]${move},setsar=1,${tail.join(",")}${reveal ? "[mv]" : "[fg]"}`,
         ...(reveal ? revealChains(target, D, sceneMotionParams(motion, D).sec, background, camera.easing, "[mv]", "[fg]") : []),
       ],
@@ -217,7 +235,7 @@ export function planFootage(
       ...redactChains(clip.redact ?? [], clip.in_sec, speed, "[src0]", "[src1]"),
       // Then drop baked-in black bars, so cover fills the frame with picture, not bars.
       `[src1]${contentCrop(media.content_box)}[src]`,
-      ...fitChains(fit, W, H, focus, background, "[src]", "[fit]", "b"),
+      ...fitChains(fit, W, H, focus, background, "[src]", "[fit]", "b", tracked ? prepareFocusTrack(clip.focus_track!, { speed, spanSec: span, media }) : undefined),
       ...(moveChains.length ? [`[fit]${[...fillFilter, ...tail].join(",")}[mv]`, ...moveChains] : [`[fit]${[...fillFilter, ...tail].join(",")}[fg]`]),
     ],
     frames,
