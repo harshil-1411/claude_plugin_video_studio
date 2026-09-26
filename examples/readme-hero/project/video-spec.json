@@ -155,7 +155,7 @@
       "id": "s06",
       "duration_sec": 3,
       "purpose": "payoff",
-      "voiceover": "And it needs no L L M API key.",
+      "voiceover": "And it needs no LLM API key.",
       "visual_strategy": "motion_graphic",
       "deterministic": {
         "kind": "kinetic_text",

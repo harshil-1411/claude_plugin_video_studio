@@ -1,0 +1,8 @@
+version: 2
+brand:
+  name: video-studio
+language:
+  locale: en-US
+  terminology:
+    # Captions show "LLM"; the voice spells it out.
+    LLM: L L M

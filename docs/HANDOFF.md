@@ -161,7 +161,7 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
     - the first real reel: the MSB Docs eBMR page for Instagram (`/video-studio:create ~/Downloads/"MSB Docs eBMR.html" …`)
     - Phase 7 (ElevenLabs first)
     - Phase 9 (publishing)
-    - fix `examples/readme-hero` captions showing "L" / "L M": write "LLM" in the voiceover and put {"LLM": "L L M"} in brand `language.terminology`
+    - re-render the narrated hero (`examples/readme-hero`, command in its README): its captions now read "LLM" (brand `language.terminology` spells it out for the voice)
 - **Done:**
   - Step 0 (Phase 4 closed).
   - Phase 5 step 1 (`489dbbd`): schema for the new purposes and kinds, `audio.music`, `voice.mode` and `Style`.
