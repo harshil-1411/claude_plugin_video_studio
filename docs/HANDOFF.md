@@ -1,28 +1,42 @@
-# Handoff: video-studio (2026-09-25)
+# Handoff: video-studio (2026-09-26)
 
-**Git:** branch `master`, no remote. Latest commits:
-- `3ce0b90` Phase 4 step 2: platform contracts, zones, lint, captions, fonts, covers
-- `111aa77` Phase 4: shared interfaces for step 2 (layout zones, text boxes, caption position)
-- `72aa29c` Phase 4 step 1: master/targets/cover/publish, Brand v2, platform contracts
+**Git:** branch `main`, pushed to https://github.com/harshil-1411/claude_plugin_video_studio (the only branch; no CI, by the user's choice). Latest commits:
+- `187e302` README: storytelling in plan, pronunciation overrides; re-rendered narrated hero video
+- `f3119eb` readme-hero: caption LLM as one word, spell it out for the voice via brand terminology
+- `309f3f9` Motion vocabulary, caption/beat/story lint, storytelling guidance
+- `c746147` Schema: scene motion vocabulary
 
-The tree is clean except `vector-dbs-explainer/`, which is untracked on purpose: it is the Phase 3 exit-check output, kept as a sample.
+Untracked on purpose: `msb-docs-ebmr-explainer/` (the user's own reel project) and `t.sh` (the user's local helper script). Don't commit them unless asked.
 
-Read this together with `.claude/CLAUDE.md` (architecture rules and commands) and `docs/PLAN.md` (the roadmap, including M1–M9). This file covers only the current state and the next steps.
+Read this together with `.claude/CLAUDE.md` (architecture rules and commands) and `docs/PLAN.md` (the roadmap). The sections below the status table are the history of how each phase was built.
+
+## Start here: next steps (the user chooses)
+
+1. **The first real reel:** the MSB Docs eBMR page for Instagram, `/video-studio:create ~/Downloads/"MSB Docs eBMR.html" as an Instagram reel`, run by the user in their own terminal (the sandbox can't read `~/Downloads`). Real runs have found a bug every time, so fix whatever it surfaces. Local `.html` ingest was fixed for this.
+2. **The one open user-checklist item:** a HyperFrames render with `scene.motion` (`docs/USER_CHECKLIST.md`).
+3. **Phase 7**, paid providers, ElevenLabs first (needs the user's API key).
+4. **Phase 9**, publishing (needs platform developer accounts). Default targets are Instagram and YouTube Shorts: the user is in India, where TikTok is banned.
 
 ## Where things stand
 
-| Phase | State | Verified |
-|---|---|---|
-| 0 Foundation | Done: pnpm/TS monorepo, zod schemas → `schemas/*.json`, core (cache, SQLite ledger, job runner), MCP server bundled to `dist/mcp.mjs` | tests, `plugin validate --strict` |
-| 1 Ingestion | Done: text/markdown/URL/PDF/DOCX/PPTX/repo → ContentIR, secret scanning, 10 golden fixtures | golden snapshots |
-| 2 Planning | Done: 5 templates, `plan`/`create` skills, `brief_validate`, strict-grounding `spec_validate`, `storyboard_render` | `examples/readme-plan` end to end |
-| 3 Local render | Done: voice (`say`/silent/ElevenLabs), FFmpeg + HyperFrames renderers, captions, assembly, QA, `dist/` export, job tools | User's machine: `/video-studio:create "Explain vector DBs in 30s"` → `vector-dbs-explainer/dist/reel.mp4` |
-| 4 Platform compiler | **Done** (CI deferred by the user) | user exit run Parts 1–2 (real `say` voice, 3 packages, 0 errors); Parts 3–6 re-run in the sandbox on a copy |
+| Phase | State |
+|---|---|
+| 0 Foundation | Done: pnpm/TS monorepo, zod schemas → `schemas/*.json`, core (cache, SQLite ledger, jobs), MCP server bundled to `dist/mcp.mjs` |
+| 1 Ingestion | Done: text, markdown, URL, local `.html`, PDF, DOCX, PPTX, repo, video/audio, clip folders → ContentIR |
+| 2 Planning | Done: 18 templates, `plan`/`create`, brief and strict-grounding spec validation, storyboard |
+| 3 Local render | Done: `say`/silent voice, FFmpeg + HyperFrames (0.8.78) + footage renderers, captions, assembly, QA, export |
+| 4 Platform compiler | Done: per-platform `dist/<target>/`, `video.lock`, lint, verify/test/diff, covers (CI removed by the user) |
+| 5 Reel grammar | Done: 15 scene kinds, style packs, CC0 music beds, `voice.mode: none`, variants/adapt |
+| 6 Footage | Done: transcribe (whisper.cpp), analyze, shorts, beat sync, scene audio, demo capture, redaction, letterbox crop, tighten |
+| 7 Paid providers | **Not started** (needs keys) |
+| 8 Localization/launch (local) | Done: script fonts, `localize`, sound-event captions, C2PA, contributor docs, README hero video |
+| 9 Publishing | **Not started** (needs accounts) |
 
-- **Tests:** 494 pass, 3 skipped. The skipped ones are env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1` must run outside the sandbox; `VS_TEST_GOLDEN=1` runs anywhere.
-- **Smoke:** `node scripts/smoke-mcp.mjs` passes: 15 tools, ingest, templates, and a tiny render.
-- **MCP tools (18):** doctor, project_init, ingest, schema_get, template_list, template_get, spec_scaffold, brief_validate, spec_validate, storyboard_render, render_submit, job_status, qa_run, export, lint, **verify, test, diff**.
-- **Skills:** create, plan, ingest, validate, render, qa, export, doctor, lint, **verify, test, diff**.
+Since the loop (2026-09-26): scene transitions, natural macOS voices with `voice.rate_wpm`, `tighten`, camera moves (`scene.motion`), lint timing and story checks (`caption_too_brief`, `caption_sync`, `caption_gap`, `cut_off_beat`, `onscreen_too_brief`, `story_structure`), `skills/plan/references/storytelling.md`, and the narrated hero video. Details are in "Loop state" below.
+
+- **Checks (all green at `187e302`):** 784 tests pass, 5 skipped (env-gated: `VS_TEST_SAY=1` and `VS_TEST_RENDER=1` need outside the sandbox; `VS_TEST_GOLDEN=1` runs anywhere and passes), smoke, both `plugin validate --strict`.
+- **MCP tools (26):** adapt, analyze, brief_validate, demo, diff, doctor, export, ingest, job_status, lint, localize, project_init, qa_run, render_submit, schema_get, shorts, spec_scaffold, spec_validate, storyboard_render, template_get, template_list, test, tighten, transcribe, variants, verify.
+- **Skills (19):** adapt, analyze, create, demo, diff, doctor, export, ingest, lint, localize, plan, qa, render, shorts, test, tighten, validate, variants, verify.
 - **Agents:** source-researcher, creative-director.
 
 ## What Phase 4 has built so far
@@ -158,10 +172,7 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
     - `story_structure`: tension in the first 40% after the hook, and a payoff right before the CTA. All 18 templates were reworked to pass it at every length (a test in `plan.test.ts`).
     - `skills/plan/references/storytelling.md` covers the arc and the story move → purpose/motion/transition map. `punch`/`reveal` are entered on a `cut`, because blending transitions hide them.
     - A HyperFrames motion render is unverified in the sandbox (checklist).
-  - **Next** (the user chooses):
-    - the first real reel: the MSB Docs eBMR page for Instagram (`/video-studio:create ~/Downloads/"MSB Docs eBMR.html" …`)
-    - Phase 7 (ElevenLabs first)
-    - Phase 9 (publishing)
+  - **Next:** see "Start here" at the top.
 - **Done:**
   - Step 0 (Phase 4 closed).
   - Phase 5 step 1 (`489dbbd`): schema for the new purposes and kinds, `audio.music`, `voice.mode` and `Style`.
@@ -274,7 +285,7 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
 
 1. **TikTok contract not re-verified.** Re-check `platform-specs/tiktok.yaml` against developers.tiktok.com and bump `contract_version`/`verified`.
 2. ~~Deprecated caption helpers~~: already removed.
-3. **Brand v2 fields not used yet:** `motion` and `weights` (Phase 5 motion work), `logo_placement`, and `forbidden` (no lint check yet).
+3. **Brand v2 fields not used yet:** `logo_placement` and `forbidden` (no lint check yet). `motion` and `weights` are used (`packages/renderer/src/tokens.ts`).
 4. **HyperFrames 404.** HyperFrames logs a non-blocking 404 for one resource, probably a favicon or font lookup. Re-check now that fonts are embedded.
 5. **QA noise in silent mode.** Silent-voice renders report `silence`/`loudness` warnings in `qa/report.md`; they are labelled "expected" only in `job_status`.
 6. **No render lock.** There is no cross-process lock, so two Claude sessions could render at the same time.
