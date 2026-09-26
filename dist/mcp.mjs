@@ -181,7 +181,7 @@ function slugify$1(input) {
 	return input.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 const captureStackTrace = "captureStackTrace" in Error ? Error.captureStackTrace : (..._args) => {};
-function isObject$1(data) {
+function isObject$2(data) {
 	return typeof data === "object" && data !== null && !Array.isArray(data);
 }
 const allowsEval = /* @__PURE__*/ cached(() => {
@@ -195,12 +195,12 @@ const allowsEval = /* @__PURE__*/ cached(() => {
 	}
 });
 function isPlainObject$2(o) {
-	if (isObject$1(o) === false) return false;
+	if (isObject$2(o) === false) return false;
 	const ctor = o.constructor;
 	if (ctor === void 0) return true;
 	if (typeof ctor !== "function") return true;
 	const prot = ctor.prototype;
-	if (isObject$1(prot) === false) return false;
+	if (isObject$2(prot) === false) return false;
 	if (Object.prototype.hasOwnProperty.call(prot, "isPrototypeOf") === false) return false;
 	return true;
 }
@@ -2135,7 +2135,7 @@ const $ZodObject = /*@__PURE__*/ $constructor("$ZodObject", (inst, def) => {
 		}
 		return propValues;
 	});
-	const isObject = isObject$1;
+	const isObject = isObject$2;
 	const catchall = def.catchall;
 	let value;
 	const memo = globalConfig.memoizer;
@@ -2273,7 +2273,7 @@ const $ZodObjectJIT = /*@__PURE__*/ $constructor("$ZodObjectJIT", (inst, def) =>
 		return doc.compile();
 	};
 	let fastpass;
-	const isObject = isObject$1;
+	const isObject = isObject$2;
 	const jit = !globalConfig.jitless;
 	const fastEnabled = jit && allowsEval.value;
 	const catchall = def.catchall;
@@ -2392,7 +2392,7 @@ const $ZodDiscriminatedUnion = /*@__PURE__*/ $constructor("$ZodDiscriminatedUnio
 	const disc = cached(() => discriminatorMap(def));
 	inst._zod.parse = (payload, ctx) => {
 		const input = payload.value;
-		if (!isObject$1(input)) {
+		if (!isObject$2(input)) {
 			payload.issues.push({
 				code: "invalid_type",
 				expected: "object",
@@ -8491,7 +8491,7 @@ const TRANSITIONS = {
 	failed: [],
 	cancelled: []
 };
-function isTerminal$1(status) {
+function isTerminal$2(status) {
 	return TERMINAL_STATUSES.has(status);
 }
 function canTransition(from, to) {
@@ -8644,7 +8644,7 @@ var SqliteLedger = class {
 			const job = this.getJob(id);
 			if (!job) throw new JobNotFoundError(id);
 			const to = patch.status ?? job.status;
-			if (isTerminal$1(job.status) || !canTransition(job.status, to)) throw new IllegalTransitionError(id, job.status, to);
+			if (isTerminal$2(job.status) || !canTransition(job.status, to)) throw new IllegalTransitionError(id, job.status, to);
 			const sets = ["status = ?", "updated_at = ?"];
 			const values = [to, this.now().toISOString()];
 			if (patch.providerTaskId !== void 0) sets.push("provider_task_id = ?"), values.push(patch.providerTaskId);
@@ -14654,7 +14654,7 @@ const Region = _enum([
 	"sg",
 	"provider-default"
 ]);
-strictObject({
+const Policy = strictObject({
 	version: literal(1),
 	providers: strictObject({
 		allow: array(ProviderGlob).optional(),
@@ -14696,7 +14696,7 @@ strictObject({
 }).meta({
 	id: "Policy",
 	title: "Policy",
-	description: "policy.yaml: provider allow/deny globs, data-class routing, residency, retention, likeness consent, spend limits and grounding. Only the parts listed in docs/HANDOFF.md are enforced by the engine; the rest is advisory until the provider phase."
+	description: "policy.yaml (<project>/policy.yaml or <project>/project/policy.yaml, over an optional user default at ${CLAUDE_PLUGIN_DATA}/policy.yaml; objects merge, the project wins). Enforced by the engine today: providers.allow/deny for paid voice backends (ElevenLabs: voice auto uses a paid backend only when providers.allow matches it or the spec's voice.provider_preference or the render request names it; providers.deny always wins), and spend.project_limit_usd / scene_limit_usd (refuse paid voice above them, from a per-character estimate and project/spend.json) and spend.approval_above_usd (above it, or with no price estimate while any limit is set, the user must approve; recorded in project/consent.json). The effective policy is recorded in render-state and provenance. privacy, residency, retention, likeness and grounding are validated and recorded but advisory until the provider phase."
 });
 //#endregion
 //#region ../schema/dist/capabilities.js
@@ -22072,18 +22072,18 @@ function escapeHtml(s) {
 		"'": "&#39;"
 	})[c]);
 }
-const words = (s) => new Set(s.split(/\s+/).filter(Boolean));
+const words$1 = (s) => new Set(s.split(/\s+/).filter(Boolean));
 const DQ = String.raw`"(?:[^"\\\n]|\\.)*"?`;
 const SQ = String.raw`'(?:[^'\\\n]|\\.)*'?`;
 const BT = String.raw`\x60(?:[^\x60\\]|\\.)*\x60?`;
 const SLASH_COMMENTS = [String.raw`//[^\n]*`, String.raw`/\*[\s\S]*?(?:\*/|$)`];
 const HASH_COMMENT = String.raw`#[^\n]*`;
-const JS_KW = words(`
+const JS_KW = words$1(`
   abstract as async await break case catch class const continue debugger declare default delete do else enum export
   extends finally for from function get if implements import in instanceof interface let new of package private
   protected public readonly return satisfies set static super switch this throw try type typeof var void while with yield
 `);
-const C_LIKE_KW = words(`
+const C_LIKE_KW = words$1(`
   auto break case catch char class const continue default delete do double else enum extern final finally float for
   goto if implements import int interface long namespace new package private protected public return short signed
   sizeof static struct super switch template this throw throws try typedef union unsigned using var virtual void
@@ -22091,17 +22091,17 @@ const C_LIKE_KW = words(`
   let mut match loop where crate self Self async await move ref dyn unsafe val fun object when is override open data
   sealed companion lateinit internal suspend guard extension protocol init deinit var let
 `);
-const PY_KW = words(`
+const PY_KW = words$1(`
   and as assert async await break class continue def del elif else except finally for from global if import in is
   lambda nonlocal not or pass raise return try while with yield match case self
 `);
-const SH_KW = words(`if then else elif fi for while until do done case esac function in select return export local readonly unset`);
-const SQL_KW = words(`
+const SH_KW = words$1(`if then else elif fi for while until do done case esac function in select return export local readonly unset`);
+const SQL_KW = words$1(`
   select from where and or not insert into values update set delete create table index view drop alter add join inner
   left right outer full on group by order having limit offset as distinct union all exists in is like between case
   when then else end primary key foreign references default unique with returning asc desc
 `);
-const COMMON_LIT = words(`true false null undefined None True False nil NaN Infinity`);
+const COMMON_LIT = words$1(`true false null undefined None True False nil NaN Infinity`);
 const LANGS = {
 	js: {
 		comments: SLASH_COMMENTS,
@@ -22130,21 +22130,21 @@ const LANGS = {
 		comments: [String.raw`(?<![^\s])#[^\n]*`],
 		strings: [DQ, SQ],
 		keywords: SH_KW,
-		literals: words(""),
+		literals: words$1(""),
 		firstWordIsCommand: true
 	},
 	json: {
 		comments: [],
 		strings: [DQ],
-		keywords: words(""),
-		literals: words("true false null"),
+		keywords: words$1(""),
+		literals: words$1("true false null"),
 		keys: "json"
 	},
 	yaml: {
 		comments: [HASH_COMMENT],
 		strings: [DQ, SQ],
-		keywords: words(""),
-		literals: words("true false null yes no on off ~"),
+		keywords: words$1(""),
+		literals: words$1("true false null yes no on off ~"),
 		keys: "yaml"
 	},
 	c: {
@@ -22158,15 +22158,15 @@ const LANGS = {
 		comments: [String.raw`--[^\n]*`, String.raw`/\*[\s\S]*?(?:\*/|$)`],
 		strings: [SQ, DQ],
 		keywords: SQL_KW,
-		literals: words("null true false"),
+		literals: words$1("null true false"),
 		caseInsensitive: true,
 		calls: true
 	},
 	plain: {
 		comments: [],
 		strings: [DQ, SQ],
-		keywords: words(""),
-		literals: words("")
+		keywords: words$1(""),
+		literals: words$1("")
 	}
 };
 const ALIASES = {
@@ -29541,6 +29541,23 @@ function createSystemBackend(options = {}) {
 		listVoices
 	};
 }
+/**
+* Estimated ElevenLabs API price in USD per 1,000 characters, by model. Used only to check
+* policy.yaml spend limits before synthesis, so it errs high.
+* Source: elevenlabs.io/pricing/api (pay-as-you-go API rates, noted 2025; not re-verified from
+* this sandbox, and subscription plans bill characters differently). A model missing here has no
+* estimate: spend limits then require the user's explicit approval instead of an automatic check.
+*/
+const ELEVENLABS_PRICING = {
+	source: "https://elevenlabs.io/pricing/api",
+	noted: "2025 (unverified)",
+	usd_per_1k_chars: {
+		eleven_multilingual_v2: .1,
+		eleven_v3: .1,
+		eleven_turbo_v2_5: .05,
+		eleven_flash_v2_5: .05
+	}
+};
 /** Per-request character budget; well under every current model's limit (5k for eleven_v3). */
 const DEFAULT_CHUNK_CHARS = 2500;
 const WORDLIKE = /[\p{L}\p{N}]/u;
@@ -29776,6 +29793,8 @@ function createElevenLabsBackend(options = {}) {
 	};
 	return {
 		id: "elevenlabs",
+		paid: true,
+		usdPer1kChars: () => ELEVENLABS_PRICING.usd_per_1k_chars[modelId] ?? null,
 		available,
 		synthesize,
 		resolveVoice,
@@ -29802,15 +29821,25 @@ function defaultBackends() {
 		silent: createSilentBackend()
 	};
 }
+/** Backend ids that cost money when a backend does not say (`VoiceBackend.paid`). */
+const PAID_BACKEND_IDS = /* @__PURE__ */ new Set(["elevenlabs"]);
+function isPaidBackend(b) {
+	return b.paid ?? PAID_BACKEND_IDS.has(b.id);
+}
 /**
-* auto: elevenlabs if its key is set, else system TTS if available, else silent.
-* An explicit choice that is unavailable throws VoiceBackendUnavailableError.
+* auto: elevenlabs if its key is set (and, for a paid backend, the paid gate allows it), else
+* system TTS if available, else silent. An explicit choice that is unavailable, or a paid one the
+* gate refuses, throws VoiceBackendUnavailableError.
 */
-async function selectBackend(choice, env, backends = defaultBackends()) {
+async function selectBackend(choice, env, backends = defaultBackends(), opts = {}) {
 	if (choice !== "auto") {
 		const backend = backends[choice];
 		const a = await backend.available(env);
 		if (!a.ok) throw new VoiceBackendUnavailableError(choice, a.reason ?? "unavailable");
+		if (isPaidBackend(backend) && opts.paidGate) {
+			const refused = opts.paidGate(backend.id, true);
+			if (refused) throw new VoiceBackendUnavailableError(choice, refused);
+		}
 		return {
 			backend,
 			reason: `requested "${choice}"${a.reason ? ` (${a.reason})` : ""}`
@@ -29820,6 +29849,11 @@ async function selectBackend(choice, env, backends = defaultBackends()) {
 	for (const id of ["elevenlabs", "system"]) {
 		const a = await backends[id].available(env);
 		if (a.ok) {
+			const refused = isPaidBackend(backends[id]) && opts.paidGate ? opts.paidGate(backends[id].id, false) : null;
+			if (refused) {
+				skipped.push(refused);
+				continue;
+			}
 			const prefix = skipped.length ? `${skipped.join("; ")}; ` : "";
 			return {
 				backend: backends[id],
@@ -29834,6 +29868,60 @@ async function selectBackend(choice, env, backends = defaultBackends()) {
 	};
 }
 const toPosix$3 = (p) => p.split(sep).join("/");
+/** Cache key of one scene's synthesized narration (shared by synthesizeSpec and planSynthesis). */
+function voiceCacheKey(spec, voiceover, speech, backend, voice) {
+	return cacheKey({
+		kind: "voice",
+		inputDigest: sha256Hex(`${speech}\u0000${voiceover}`),
+		extractorVersion: "1",
+		options: {
+			backend: backend.id,
+			voice: voice ?? null,
+			text: speech,
+			...spec.voice.rate_wpm ? { rate_wpm: spec.voice.rate_wpm } : {},
+			...backend.cacheOptions?.() ?? {}
+		},
+		irSchemaVersion: 1
+	});
+}
+/**
+* What synthesizeSpec would do with `backend`, without synthesizing: characters per scene, which
+* scenes are cache hits, and the estimated cost of the rest. Used for spend limits and consent.
+*/
+async function planSynthesis(spec, options) {
+	const env = options.env ?? process.env;
+	const backend = options.backend;
+	const cacheRoot = options.cacheDir ?? join(resolveDataDir(env).cache, "voice");
+	const store = new ContentStore(join(cacheRoot, "cas"));
+	const scenes = [];
+	for (const scene of spec.scenes) {
+		const prepared = prepareSpeechText(scene.voiceover, options.brand);
+		if (prepared.captionWords.length === 0) continue;
+		const voice = await backend.resolveVoice?.(spec.voice.voice_id, env, spec.language);
+		const key = voiceCacheKey(spec, scene.voiceover, prepared.speech, backend, voice);
+		const cached = await readJson(join(cacheRoot, "index", `${key}.json`)).catch(() => void 0);
+		const hit = cached?.version === "1" && !!cached.audio_sha256 && await store.has(cached.audio_sha256);
+		scenes.push({
+			scene_id: scene.id,
+			chars: prepared.speech.length,
+			cached: hit,
+			cache_key: key
+		});
+	}
+	const chars_total = scenes.reduce((n, s) => n + s.chars, 0);
+	const chars_uncached = scenes.filter((s) => !s.cached).reduce((n, s) => n + s.chars, 0);
+	const rate = backend.usdPer1kChars?.() ?? null;
+	return {
+		backend: backend.id,
+		paid: isPaidBackend(backend),
+		scenes,
+		chars_total,
+		chars_uncached,
+		usd_per_1k_chars: rate,
+		estimated_usd: rate === null ? null : Math.round(chars_uncached / 1e3 * rate * 1e4) / 1e4,
+		uncached_digest: sha256Hex(scenes.filter((s) => !s.cached).map((s) => s.cache_key).join("\n"))
+	};
+}
 function detectOverrun(scene, track) {
 	if (!track.audio_path || track.duration_ms <= Math.round(scene.duration_sec * 1e3)) return void 0;
 	const audio = track.duration_ms / 1e3;
@@ -29896,19 +29984,7 @@ async function synthesizeSpec(spec, options) {
 				continue;
 			}
 			const voice = await backend.resolveVoice?.(spec.voice.voice_id, env, spec.language);
-			const key = cacheKey({
-				kind: "voice",
-				inputDigest: sha256Hex(`${prepared.speech}\u0000${scene.voiceover}`),
-				extractorVersion: "1",
-				options: {
-					backend: backend.id,
-					voice: voice ?? null,
-					text: prepared.speech,
-					...spec.voice.rate_wpm ? { rate_wpm: spec.voice.rate_wpm } : {},
-					...backend.cacheOptions?.() ?? {}
-				},
-				irSchemaVersion: 1
-			});
+			const key = voiceCacheKey(spec, scene.voiceover, prepared.speech, backend, voice);
 			const indexFile = join(indexDir, `${key}.json`);
 			const dest = join(voiceDir, `${scene.id}.wav`);
 			const relAudio = toPosix$3(relative(paths.root, dest));
@@ -32488,6 +32564,403 @@ function targetFor(spec, quality, hyperframes, override = {}) {
 function defaultRenderers(env, quality, encodePreset) {
 	const { resolution: _r, ...hf } = hyperframesOptions(env, { quality: quality === "preview" ? "draft" : "standard" });
 	return [createHyperframesRenderer(hf), createFfmpegRenderer({ encodePreset: encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") })];
+}
+//#endregion
+//#region src/consent.ts
+const CONSENT_FILE = "consent.json";
+function consentPath(projectDir) {
+	return join(projectPaths(projectDir).project, CONSENT_FILE);
+}
+async function readConsents(projectDir) {
+	const data = await readJson(consentPath(projectDir)).catch(() => void 0);
+	return Array.isArray(data) ? data.filter((r) => r && typeof r.action === "string" && typeof r.subject === "string") : [];
+}
+/** A recorded consent for `action` + `subject` (optionally only one given through a given channel). */
+async function findConsent(projectDir, action, subject, via) {
+	return (await readConsents(projectDir)).find((r) => r.action === action && r.subject === subject && (!via || r.via === via));
+}
+async function recordConsent(projectDir, rec) {
+	const full = {
+		action: rec.action,
+		subject: rec.subject,
+		granted_at: rec.granted_at ?? (/* @__PURE__ */ new Date()).toISOString(),
+		via: rec.via,
+		detail: rec.detail
+	};
+	const all = await readConsents(projectDir);
+	await writeJsonAtomic(consentPath(projectDir), [...all, full]);
+	return full;
+}
+/** True when the connected client declared the MCP elicitation capability. */
+function supportsElicitation(server) {
+	return !!server.server.getClientCapabilities()?.elicitation;
+}
+/**
+* Obtain consent for an action with external effects.
+*
+* - elicitation supported: re-use an elicitation grant for the same subject, else ask the user; a
+*   tool flag set by the model is not enough.
+* - no elicitation: the tool flag is required (the skill asks the user in chat first); recorded as
+*   `tool_flag`.
+*/
+async function obtainConsent(server, projectDir, req) {
+	if (supportsElicitation(server)) {
+		const prior = await findConsent(projectDir, req.action, req.subject, "elicitation");
+		if (prior) return {
+			granted: true,
+			via: "elicitation",
+			reused: true,
+			record: prior
+		};
+		let res;
+		try {
+			res = await server.server.elicitInput({
+				message: req.message,
+				requestedSchema: {
+					type: "object",
+					properties: { approve: {
+						type: "boolean",
+						title: req.approveTitle
+					} },
+					required: ["approve"]
+				}
+			});
+		} catch (e) {
+			return {
+				granted: false,
+				asked: false,
+				reason: `could not ask the user for approval (${e instanceof Error ? e.message : String(e)}); nothing was done`
+			};
+		}
+		if (res.action === "accept" && res.content?.approve === true) return {
+			granted: true,
+			via: "elicitation",
+			reused: false,
+			record: await recordConsent(projectDir, {
+				action: req.action,
+				subject: req.subject,
+				via: "elicitation",
+				detail: req.detail
+			})
+		};
+		return {
+			granted: false,
+			asked: true,
+			reason: `the user ${res.action === "accept" ? "did not approve" : res.action === "decline" ? "declined" : "cancelled the approval dialog"}; nothing was done. Do not retry unless the user asks for it`
+		};
+	}
+	if (req.flag === true) {
+		const prior = await findConsent(projectDir, req.action, req.subject, "tool_flag");
+		if (prior) return {
+			granted: true,
+			via: "tool_flag",
+			reused: true,
+			record: prior
+		};
+		return {
+			granted: true,
+			via: "tool_flag",
+			reused: false,
+			record: await recordConsent(projectDir, {
+				action: req.action,
+				subject: req.subject,
+				via: "tool_flag",
+				detail: req.detail
+			})
+		};
+	}
+	return {
+		granted: false,
+		asked: false,
+		reason: `this needs the user's approval and the client cannot show an approval dialog: ask the user (${req.message}) and call again with ${req.flagName}: true only if they agree`
+	};
+}
+function describeStep$1(s) {
+	switch (s.action) {
+		case "goto": return `open ${s.url}`;
+		case "click": return `click ${s.selector}`;
+		case "type": return `type ${s.text.length} character(s) into ${s.selector} (blurred)`;
+		case "hover": return `hover ${s.selector}`;
+		case "scroll": return `scroll ${s.y}px`;
+		case "zoom": return `zoom into ${s.selector}`;
+		case "wait": return `wait ${s.ms} ms`;
+	}
+}
+/** Demo capture: approve this exact script (URL + steps). */
+function demoConsentRequest(script, flag) {
+	const subject = `demo:${script.id}:${sha256Hex(canonicalJson(script))}`;
+	const steps = script.steps.map((s, i) => `${i + 1}. ${describeStep$1(s)}`);
+	const shown = steps.length > 12 ? [...steps.slice(0, 12), `… and ${steps.length - 12} more`] : steps;
+	return {
+		action: "demo_capture",
+		subject,
+		detail: `${script.url}, ${script.steps.length} step(s)`,
+		message: `Record a screen capture of ${script.url} with a headless Chrome, driving it with these ${script.steps.length} step(s):\n${shown.join("\n")}\nForm fields${script.mask_selectors?.length ? ` and ${script.mask_selectors.length} extra selector(s)` : ""} are blurred; any other text on screen is recorded. The video is saved in this project (source/assets/demo-${script.id}.mp4). Only approve if you started this app and the URL is yours.`,
+		approveTitle: "Approve recording this URL",
+		flag,
+		flagName: "confirm"
+	};
+}
+/** The whisper model download (plugin data dir, shared by all projects). */
+function modelDownloadConsentRequest(m, flag) {
+	return {
+		action: "model_download",
+		subject: `${m.file}@sha256:${m.sha256}`,
+		detail: `${m.url} → ${m.dest}`,
+		message: `Download the whisper speech-recognition model ${m.file} (about ${m.approx_mb} MB) from ${new URL(m.url).host} into ${m.dest} (the plugin's data folder, shared by all projects; checked against its published sha256)? It is used for local transcription only; no audio leaves this machine.`,
+		approveTitle: `Download ${m.file} (~${m.approx_mb} MB)`,
+		flag,
+		flagName: "download_model"
+	};
+}
+/** Paid voice above the approval threshold (or with no price estimate). */
+function paidVoiceConsentRequest(d, flag) {
+	const est = d.plan.estimated_usd;
+	const cost = est !== null ? `an estimated $${est.toFixed(2)} (at $${d.plan.usd_per_1k_chars}/1k characters; your plan's billing may differ)` : "an unknown amount (no price estimate for this model)";
+	const scenes = d.plan.scenes.filter((s) => !s.cached).length;
+	return {
+		action: "paid_voice",
+		subject: d.subject,
+		detail: `${d.backend}: ${d.plan.chars_uncached} chars, ${scenes} scene(s), est ${est === null ? "unknown" : `$${est}`}`,
+		message: `This render sends ${d.plan.chars_uncached} characters of narration (${scenes} scene(s)) to ${d.backend === "elevenlabs" ? "ElevenLabs" : d.backend}, a paid text-to-speech API, costing ${cost}. Estimated spend recorded for this project so far: $${d.spent_usd.toFixed(2)}. ${d.reason}. Approve this charge? (Decline to use the free system voice.)`,
+		approveTitle: "Approve the paid voice charge",
+		flag,
+		flagName: "approve_paid_voice"
+	};
+}
+//#endregion
+//#region src/policy.ts
+var PolicyError = class extends Error {
+	constructor(message) {
+		super(message);
+		this.name = "PolicyError";
+	}
+};
+const ENFORCED_POLICY_FIELDS = ["providers.allow/deny (paid voice backends)", "spend.project_limit_usd, spend.scene_limit_usd, spend.approval_above_usd (paid voice)"];
+function isObject$1(v) {
+	return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+/** Deep merge: objects key by key, `over` wins; arrays and scalars are replaced. */
+function mergePolicy(base, over) {
+	const out = { ...base };
+	for (const [k, v] of Object.entries(over)) out[k] = isObject$1(v) && isObject$1(out[k]) ? mergePolicy(out[k], v) : v;
+	return out;
+}
+async function readPolicyFile(path) {
+	const r = parseYamlOrJson(Policy, await readFile(path, "utf8"));
+	if (!r.ok) throw new PolicyError(`invalid policy file ${path}: ${r.errors.slice(0, 8).map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}. Fix it (schema_get policy; it needs version: 1) or remove it.`);
+	return r.data;
+}
+/** The user-level default policy file (whether or not it exists). */
+function userPolicyPath(env = process.env) {
+	return join(resolveDataDir(env).root, "policy.yaml");
+}
+/** Load the effective policy for a project (or only the user default without a project). Throws PolicyError on an invalid file. */
+async function loadPolicy(projectDir, env = process.env) {
+	const sources = [];
+	let merged = null;
+	let userPath;
+	try {
+		userPath = userPolicyPath(env);
+	} catch {
+		userPath = void 0;
+	}
+	if (userPath && existsSync(userPath)) {
+		merged = { ...await readPolicyFile(userPath) };
+		sources.push({
+			scope: "user",
+			path: userPath
+		});
+	}
+	if (projectDir) {
+		const root = projectPaths(projectDir).root;
+		const found = [join(root, "policy.yaml"), join(root, "project", "policy.yaml")].filter((p) => existsSync(p));
+		if (found.length > 1) throw new PolicyError(`two project policy files (${found.join(" and ")}); keep one`);
+		if (found[0]) {
+			const p = await readPolicyFile(found[0]);
+			merged = merged ? mergePolicy(merged, p) : { ...p };
+			sources.push({
+				scope: "project",
+				path: found[0]
+			});
+		}
+	}
+	if (!merged) return {
+		policy: null,
+		sources
+	};
+	const r = Policy.safeParse(merged);
+	if (!r.success) throw new PolicyError(`merged policy is invalid: ${r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+	return {
+		policy: r.data,
+		sources
+	};
+}
+/**
+* For render-state and provenance: paths are project-relative (the project policy) or
+* `${CLAUDE_PLUGIN_DATA}/policy.yaml` (the user default), never absolute paths of this machine.
+*/
+function summarizePolicy(lp, projectDir) {
+	const root = projectDir ? projectPaths(projectDir).root : void 0;
+	return {
+		sources: lp.sources.map((s) => ({
+			scope: s.scope,
+			path: s.scope === "user" ? "${CLAUDE_PLUGIN_DATA}/policy.yaml" : root ? relative(root, s.path).split(sep).join("/") : s.path
+		})),
+		effective: lp.policy,
+		enforced: [...ENFORCED_POLICY_FIELDS]
+	};
+}
+/** One line for doctor and tool output. */
+function describePolicy(lp) {
+	if (!lp.policy) return "no policy.yaml (defaults: paid providers are used only when requested explicitly; no spend limits)";
+	const p = lp.policy;
+	return `${[
+		p.providers?.allow ? `allow [${p.providers.allow.join(", ")}]` : "allow: none",
+		...p.providers?.deny?.length ? [`deny [${p.providers.deny.join(", ")}]`] : [],
+		...p.spend?.project_limit_usd !== void 0 ? [`project limit $${p.spend.project_limit_usd}`] : [],
+		...p.spend?.scene_limit_usd !== void 0 ? [`scene limit $${p.spend.scene_limit_usd}`] : [],
+		...p.spend?.approval_above_usd !== void 0 ? [`approval above $${p.spend.approval_above_usd}`] : []
+	].join("; ")} (from ${lp.sources.map((s) => `${s.scope} ${s.path}`).join(" + ")})`;
+}
+/** `*` matches any run of characters, `?` one; case-insensitive; the whole id must match. */
+function globMatch(glob, id) {
+	return new RegExp(`^${glob.replace(/[.+^${}()|[\]\\/]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`, "i").test(id);
+}
+function providerRule(policy, id) {
+	const deny = policy?.providers?.deny?.find((g) => globMatch(g, id));
+	if (deny) return {
+		allowed: false,
+		glob: deny
+	};
+	const allow = policy?.providers?.allow?.find((g) => globMatch(g, id));
+	if (allow) return {
+		allowed: true,
+		glob: allow
+	};
+	return { allowed: void 0 };
+}
+const DISPLAY = { elevenlabs: "ElevenLabs" };
+const display = (id) => DISPLAY[id] ?? id;
+const SPEND_FILE = "spend.json";
+async function readSpend(projectDir) {
+	const data = await readJson(join(projectPaths(projectDir).project, SPEND_FILE)).catch(() => void 0);
+	return Array.isArray(data?.entries) ? data.entries : [];
+}
+/** Append an estimated paid-provider charge to `<project>/project/spend.json`. */
+async function recordSpend(projectDir, entry) {
+	const entries = await readSpend(projectDir);
+	entries.push(entry);
+	await writeJsonAtomic(join(projectPaths(projectDir).project, SPEND_FILE), {
+		version: 1,
+		entries
+	});
+}
+function paidVoiceSubject(plan) {
+	return `${plan.backend}:${plan.uncached_digest}`;
+}
+/** Why a paid backend is not permitted by the provider rules, or null when it is. */
+function paidProviderRefusal(policy, id, explicit, spec) {
+	const rule = providerRule(policy, id);
+	if (rule.allowed === false) return `${display(id)} is denied by policy (providers.deny: ${rule.glob})`;
+	if (explicit || rule.allowed || spec.voice.provider_preference?.some((p) => p.toLowerCase() === id)) return null;
+	return `${display(id)} key present but not allowed by policy; add providers.allow: [${id}] to policy.yaml or set voice.provider_preference: [${id}] in the spec (or request voice: ${id})`;
+}
+const usd = (n) => `$${n.toFixed(n < 1 ? 4 : 2)}`;
+/** Spend limits for one planned paid synthesis. Pure, apart from the recorded consent passed in. */
+function decideSpend(policy, plan, spent_usd) {
+	const subject = paidVoiceSubject(plan);
+	const base = {
+		backend: plan.backend,
+		plan,
+		subject,
+		spent_usd
+	};
+	const spend = policy?.spend;
+	const name = display(plan.backend);
+	if (plan.chars_uncached === 0) return {
+		...base,
+		status: "allowed",
+		reason: `every ${name} scene is cached (no charge)`
+	};
+	const est = plan.estimated_usd;
+	const what = `${plan.chars_uncached} characters${est !== null ? ` (~${usd(est)} at ${usd(plan.usd_per_1k_chars)}/1k)` : " (no price estimate)"}`;
+	const limited = spend && (spend.project_limit_usd !== void 0 || spend.scene_limit_usd !== void 0 || spend.approval_above_usd !== void 0);
+	if (est !== null && spend?.project_limit_usd !== void 0 && spent_usd + est > spend.project_limit_usd) return {
+		...base,
+		status: "refused",
+		reason: `refusing ${name}: ${what} would bring this project's estimated spend to ${usd(spent_usd + est)}, above spend.project_limit_usd ${usd(spend.project_limit_usd)}`
+	};
+	if (est !== null && spend?.scene_limit_usd !== void 0 && plan.usd_per_1k_chars !== null) {
+		const over = plan.scenes.filter((s) => !s.cached && s.chars / 1e3 * plan.usd_per_1k_chars > spend.scene_limit_usd);
+		if (over.length) return {
+			...base,
+			status: "refused",
+			reason: `refusing ${name}: scene(s) ${over.map((s) => s.scene_id).join(", ")} exceed spend.scene_limit_usd ${usd(spend.scene_limit_usd)}`
+		};
+	}
+	if (est === null && limited) return {
+		...base,
+		status: "needs_consent",
+		reason: `${name} for ${what}: no price estimate to check the spend limits against, so the user must approve`
+	};
+	if (est !== null && spend?.approval_above_usd !== void 0 && est > spend.approval_above_usd) return {
+		...base,
+		status: "needs_consent",
+		reason: `${name} for ${what} is above spend.approval_above_usd ${usd(spend.approval_above_usd)}, so the user must approve`
+	};
+	return {
+		...base,
+		status: "allowed",
+		reason: `${name} for ${what} within policy`
+	};
+}
+/**
+* The paid-voice rules for one render. For each paid backend that is available and permitted by
+* providers.allow/deny (or named by the request or the spec), plan the synthesis, apply the spend
+* limits and look up a recorded consent. The returned gate refuses anything not allowed, so
+* `auto` falls through to the system voice and an explicit request fails with the reason.
+*/
+async function resolveVoicePolicy(o) {
+	const loaded = o.loaded ?? await loadPolicy(o.root, o.env);
+	const policy = loaded.policy;
+	const decisions = {};
+	const candidates = o.voiceChoice === "auto" ? ["elevenlabs"] : o.voiceChoice === "elevenlabs" ? ["elevenlabs"] : [];
+	for (const id of candidates) {
+		const backend = o.backends[id];
+		if (!isPaidBackend(backend)) continue;
+		if (!(await Promise.resolve(backend.available(o.env)).catch(() => ({ ok: false }))).ok) continue;
+		if (paidProviderRefusal(policy, backend.id, o.voiceChoice === id, o.spec)) continue;
+		const d = decideSpend(policy, await planSynthesis(o.spec, {
+			backend,
+			env: o.env,
+			brand: o.brand ?? null,
+			...o.cacheDir ? { cacheDir: o.cacheDir } : {}
+		}), (await readSpend(o.root)).reduce((n, e) => n + (e.estimated_usd ?? 0), 0));
+		if (d.status === "needs_consent") {
+			const c = await findConsent(o.root, "paid_voice", d.subject);
+			if (c) {
+				d.status = "allowed";
+				d.consented = true;
+				d.reason += `; approved by the user (${c.via}, ${c.granted_at})`;
+			}
+		}
+		decisions[backend.id] = d;
+	}
+	const gate = (id, explicit) => {
+		const refused = paidProviderRefusal(policy, id, explicit, o.spec);
+		if (refused) return refused;
+		const d = decisions[id];
+		if (!d) return null;
+		if (d.status === "refused") return `${d.reason} (policy.yaml)`;
+		if (d.status === "needs_consent") return `${d.reason}; no approval recorded (render_submit asks the user, or pass approve_paid_voice: true after they agree)`;
+		return null;
+	};
+	return {
+		loaded,
+		gate,
+		decisions
+	};
 }
 //#endregion
 //#region src/music.ts
@@ -234526,7 +234999,7 @@ async function downloadWhisperModel(dest, opts = {}) {
 		await rm(tmp, { force: true });
 	}
 }
-async function loadContentIr$1(projectDir) {
+async function loadContentIr$2(projectDir) {
 	const path = join(projectDir, "source", "content-ir.json");
 	if (!existsSync(path)) throw new TranscribeError(`no source/content-ir.json in ${projectDir}`, "ingest the video or audio file first");
 	const r = ContentIR.safeParse(JSON.parse(await readFile(path, "utf8")));
@@ -234655,7 +235128,7 @@ const MAX_TEXT = 2e4;
 async function transcribeAsset(projectDir, assetId, opts = {}) {
 	const root = resolve(projectDir);
 	const env = opts.env ?? process.env;
-	const { path: irPath, ir } = await loadContentIr$1(root);
+	const { path: irPath, ir } = await loadContentIr$2(root);
 	const asset = findMediaAsset(ir, assetId);
 	let words;
 	let meta;
@@ -235488,7 +235961,16 @@ async function stageVoice(run, spec, brand) {
 	const voiceCacheDir = o.voiceCacheDir ?? join(resolveDataDir(env).cache, "voice");
 	const mode = voiceMode(spec);
 	const narrated = mode === "narrated";
-	const sel = narrated ? await selectBackend(voiceChoice, env, backends) : await selectBackend("silent", env, backends);
+	const vp = await resolveVoicePolicy({
+		root,
+		spec,
+		brand: brand ?? null,
+		voiceChoice: narrated ? voiceChoice : "silent",
+		env,
+		backends,
+		cacheDir: voiceCacheDir
+	});
+	const sel = narrated ? await selectBackend(voiceChoice, env, backends, { paidGate: vp.gate }) : await selectBackend("silent", env, backends);
 	let voice;
 	let voiceReason = narrated ? sel.reason : mode === "native" ? "voice.mode is \"native\": the speech is in the footage (captions from the asset transcripts)" : "voice.mode is \"none\": no narration";
 	try {
@@ -235556,6 +236038,32 @@ async function stageVoice(run, spec, brand) {
 			voiceReason += `; word timings aligned to the audio with whisper (${al.aligned.length} scene(s))`;
 		} else if (al.skipped) voiceReason += `; word timings estimated (${al.skipped}; with it, captions and cues land exactly)`;
 	}
+	let paid_voice;
+	const decision = vp.decisions[voice.backend];
+	if (decision?.plan.paid) {
+		const hits = new Set(voice.cache_hits);
+		const done = decision.plan.scenes.filter((sc) => !hits.has(sc.scene_id));
+		if (done.length) {
+			const chars = done.reduce((n, sc) => n + sc.chars, 0);
+			const rate = decision.plan.usd_per_1k_chars;
+			const estimated_usd = rate === null ? null : Math.round(chars / 1e3 * rate * 1e4) / 1e4;
+			paid_voice = {
+				backend: voice.backend,
+				chars,
+				estimated_usd,
+				scenes: done.map((sc) => sc.scene_id)
+			};
+			await recordSpend(root, {
+				at: run.now().toISOString(),
+				provider: voice.backend,
+				chars,
+				estimated_usd,
+				scenes: paid_voice.scenes,
+				subject: decision.subject
+			});
+			voiceReason += `; ${decision.reason}`;
+		}
+	}
 	const trackById = new Map(voice.tracks.map((t) => [t.scene_id, t]));
 	const hasAudio = voice.tracks.some((t) => t.audio_path);
 	const timingSource = [...new Set(voice.tracks.filter((t) => t.words.length).map((t) => t.timing_source))].join("+") || "none";
@@ -235566,7 +236074,9 @@ async function stageVoice(run, spec, brand) {
 		narrated,
 		trackById,
 		hasAudio,
-		timingSource
+		timingSource,
+		policy: summarizePolicy(vp.loaded, root),
+		...paid_voice ? { paid_voice } : {}
 	};
 }
 /** c0. Footage assets (ContentIR → project files) and the music bed. */
@@ -236362,6 +236872,8 @@ async function renderProjectLocked(projectDir, o) {
 			asm
 		})
 	});
+	state.policy = vs.policy;
+	if (vs.paid_voice) state.paid_voice = vs.paid_voice;
 	const qa = await stageQa(run, state, asm.reel, asm.statePath);
 	progress({
 		stage: "export",
@@ -236732,6 +237244,12 @@ async function exportFromState(root, state, now, opts = {}) {
 				timing_source: state.voice.timing_source,
 				...state.voice_mode ? { mode: state.voice_mode } : {}
 			},
+			...state.policy ? { policy: {
+				sources: state.policy.sources,
+				effective: state.policy.effective,
+				enforced: state.policy.enforced
+			} } : {},
+			...state.paid_voice ? { paid_voice: state.paid_voice } : {},
 			...state.music ? { music: {
 				file: state.music.ref,
 				...state.music.title ? { title: state.music.title } : {},
@@ -241181,7 +241699,7 @@ function getLiteralValue(schema) {
 * @returns True if the status is terminal (completed, failed, or cancelled)
 * @experimental
 */
-function isTerminal(status) {
+function isTerminal$1(status) {
 	return status === "completed" || status === "failed" || status === "cancelled";
 }
 //#endregion
@@ -242352,11 +242870,11 @@ var Protocol = class {
 					}
 					const task = await this._taskStore.getTask(taskId, extra.sessionId);
 					if (!task) throw new McpError(ErrorCode.InvalidParams, `Task not found: ${taskId}`);
-					if (!isTerminal(task.status)) {
+					if (!isTerminal$1(task.status)) {
 						await this._waitForTaskUpdate(taskId, extra.signal);
 						return await handleTaskResult();
 					}
-					if (isTerminal(task.status)) {
+					if (isTerminal$1(task.status)) {
 						const result = await this._taskStore.getTaskResult(taskId, extra.sessionId);
 						this._clearTaskQueue(taskId);
 						return {
@@ -242387,7 +242905,7 @@ var Protocol = class {
 				try {
 					const task = await this._taskStore.getTask(request.params.taskId, extra.sessionId);
 					if (!task) throw new McpError(ErrorCode.InvalidParams, `Task not found: ${request.params.taskId}`);
-					if (isTerminal(task.status)) throw new McpError(ErrorCode.InvalidParams, `Cannot cancel task in terminal status: ${task.status}`);
+					if (isTerminal$1(task.status)) throw new McpError(ErrorCode.InvalidParams, `Cannot cancel task in terminal status: ${task.status}`);
 					await this._taskStore.updateTaskStatus(request.params.taskId, "cancelled", "Client cancelled task execution.", extra.sessionId);
 					this._clearTaskQueue(request.params.taskId);
 					const cancelledTask = await this._taskStore.getTask(request.params.taskId, extra.sessionId);
@@ -242701,7 +243219,7 @@ var Protocol = class {
 					type: "taskStatus",
 					task
 				};
-				if (isTerminal(task.status)) {
+				if (isTerminal$1(task.status)) {
 					if (task.status === "completed") yield {
 						type: "result",
 						result: await this.getTaskResult({ taskId }, resultSchema, options)
@@ -243093,7 +243611,7 @@ var Protocol = class {
 						params: task
 					});
 					await this.notification(notification);
-					if (isTerminal(task.status)) this._cleanupTaskProgressHandler(taskId);
+					if (isTerminal$1(task.status)) this._cleanupTaskProgressHandler(taskId);
 				}
 			},
 			getTaskResult: (taskId) => {
@@ -243102,7 +243620,7 @@ var Protocol = class {
 			updateTaskStatus: async (taskId, status, statusMessage) => {
 				const task = await taskStore.getTask(taskId, sessionId);
 				if (!task) throw new McpError(ErrorCode.InvalidParams, `Task "${taskId}" not found - it may have been cleaned up`);
-				if (isTerminal(task.status)) throw new McpError(ErrorCode.InvalidParams, `Cannot update task "${taskId}" from terminal status "${task.status}" to "${status}". Terminal states (completed, failed, cancelled) cannot transition to other states.`);
+				if (isTerminal$1(task.status)) throw new McpError(ErrorCode.InvalidParams, `Cannot update task "${taskId}" from terminal status "${task.status}" to "${status}". Terminal states (completed, failed, cancelled) cannot transition to other states.`);
 				await taskStore.updateTaskStatus(taskId, status, statusMessage, sessionId);
 				const updatedTask = await taskStore.getTask(taskId, sessionId);
 				if (updatedTask) {
@@ -243111,7 +243629,7 @@ var Protocol = class {
 						params: updatedTask
 					});
 					await this.notification(notification);
-					if (isTerminal(updatedTask.status)) this._cleanupTaskProgressHandler(taskId);
+					if (isTerminal$1(updatedTask.status)) this._cleanupTaskProgressHandler(taskId);
 				}
 			},
 			listTasks: (cursor) => {
@@ -251494,7 +252012,29 @@ async function checkDataDir(deps) {
 		fix: "Fix permissions on that directory, or set VIDEO_STUDIO_DATA to a writable location."
 	};
 }
-async function runDoctor(deps = defaultDoctorDeps()) {
+/**
+* policy.yaml in effect (user default in the plugin data dir, overridden by the project's) and
+* what it means for paid providers. An invalid file fails: renders refuse until it is fixed.
+*/
+async function checkPolicy(env, projectDir) {
+	try {
+		const lp = await loadPolicy(projectDir, env);
+		const keyNote = hasEnvValue(env.ELEVENLABS_API_KEY) && providerRule(lp.policy, "elevenlabs").allowed !== true ? "; ELEVENLABS_API_KEY is set but voice auto will not use it (not in providers.allow): request voice elevenlabs or add it to policy.yaml" : "";
+		return {
+			id: "policy",
+			status: "ok",
+			detail: `${describePolicy(lp)}${projectDir ? "" : " (user default only; pass project_dir for a project's policy)"}${keyNote}`
+		};
+	} catch (err) {
+		return {
+			id: "policy",
+			status: "fail",
+			detail: err instanceof Error ? err.message : String(err),
+			fix: "Fix policy.yaml (schema_get policy; version: 1) or remove it; renders refuse while it is invalid."
+		};
+	}
+}
+async function runDoctor(deps = defaultDoctorDeps(), opts = {}) {
 	const checks = [checkNode(deps.nodeVersion), await checkSqlite(deps)];
 	const ffmpeg = await resolveFfTool("ffmpeg", deps);
 	const ffprobe = await resolveFfTool("ffprobe", deps);
@@ -251505,7 +252045,7 @@ async function runDoctor(deps = defaultDoctorDeps()) {
 	const voice = await checkSystemVoice(deps);
 	if (voice) checks.push(voice);
 	const keys = checkProviderKeys(deps.env);
-	checks.push(keys.check, await checkDataDir(deps));
+	checks.push(keys.check, await checkPolicy(deps.env, opts.projectDir), await checkDataDir(deps));
 	const overall = checks.some((c) => c.status === "fail") ? "fail" : checks.some((c) => c.status === "warn") ? "warn" : "ok";
 	return {
 		ok: overall !== "fail",
@@ -251794,7 +252334,7 @@ async function findShorts(projectDir, assetId, opts = {}) {
 	const max = opts.max_sec ?? 60;
 	if (max <= min) throw new Error(`max_sec (${max}) must be greater than min_sec (${min})`);
 	const count = Math.max(1, Math.min(10, Math.floor(opts.count ?? 3)));
-	const { ir } = await loadContentIr$1(root);
+	const { ir } = await loadContentIr$2(root);
 	const asset = findMediaAsset(ir, assetId);
 	const words = await loadTranscriptWords(root, asset);
 	const duration = asset.media?.duration_sec;
@@ -251956,7 +252496,7 @@ const SHORT_SCENE_MAX_SEC = 12;
 */
 async function makeShortProjects(projectDir, result, opts = {}) {
 	const root = resolve(projectDir);
-	const { ir } = await loadContentIr$1(root);
+	const { ir } = await loadContentIr$2(root);
 	const base = mediaRefBase(findMediaAsset(ir, result.asset));
 	const spans = ir.evidence.filter((e) => e.ref.startsWith(`${base}#t=`) && e.locator.time_start_sec !== void 0).sort((a, b) => a.locator.time_start_sec - b.locator.time_start_sec);
 	const aspect = opts.aspect_ratio ?? "9:16";
@@ -252365,7 +252905,8 @@ function describeStep(s) {
 		case "wait": return `waited ${s.ms} ms`;
 	}
 }
-async function loadScript(root, rel) {
+/** Load and validate the project's DemoScript (inside the project only). */
+async function loadDemoScript(root, rel) {
 	let path;
 	try {
 		path = await resolveInsideProject(projectPaths(root), rel ?? join("project", "demo.json"));
@@ -252440,7 +252981,7 @@ async function recordDemo(projectDir, opts = {}) {
 	if (opts.confirm !== true) throw new Error("demo capture drives a browser against a URL: show the user the URL and steps, and call again with confirm: true once they approve");
 	const root = projectPaths(projectDir).root;
 	const env = opts.env ?? process.env;
-	const script = await loadScript(root, opts.script);
+	const script = await loadDemoScript(root, opts.script);
 	const now = opts.now ?? (() => Date.now());
 	const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 	const warnings = [];
@@ -253292,7 +253833,7 @@ function retimeWords(words, keep) {
 	return out;
 }
 async function tightenAsset(projectDir, assetId, opts = {}) {
-	const { path: irPath, ir } = await loadContentIr$1(projectDir);
+	const { path: irPath, ir } = await loadContentIr$2(projectDir);
 	const asset = findMediaAsset(ir, assetId);
 	const words = await loadTranscriptWords(projectDir, asset);
 	const src = join(projectDir, asset.path);
@@ -254029,6 +254570,10 @@ function formatDiff(r) {
 	if (r.spec.changes.length > 10) lines.push(`  - …${r.spec.changes.length - 10} more in ${r.report_md}`);
 	return lines.join("\n");
 }
+/** Longest image side in px: Claude's vision input downscales anything larger, making labels unreadable. */
+const REVIEW_MAX_IMAGE_PX = 1568;
+const PAD = 4;
+const MARGIN = 4;
 const DEFAULT_WIDTH = {
 	sheet: 240,
 	strip: 180,
@@ -254175,7 +254720,7 @@ async function reviewRender(projectDir, opts = {}) {
 			].map((f) => ({ time: clamp(dur * f) }));
 			notes.push("no render state with scene timings: sampled 25%, 50% and 75%");
 		} else {
-			const per = list.length * 3 <= 48 ? 3 : list.length * 2 <= 48 ? 2 : 1;
+			const per = list.length * 3 <= 90 ? 3 : list.length * 2 <= 90 ? 2 : 1;
 			if (per < 3) notes.push(`${list.length} scenes: ${per === 2 ? "middle and closing" : "middle"} frame of each (use scene for all three)`);
 			tiles = list.flatMap((s) => {
 				const len = s.end - s.start;
@@ -254197,9 +254742,10 @@ async function reviewRender(projectDir, opts = {}) {
 			});
 		}
 	}
-	if (tiles.length > 48) {
-		notes.push(`${tiles.length} tiles requested; showing the first 48 (review one scene at a time with scene)`);
-		tiles = tiles.slice(0, 48);
+	const maxTiles = mode === "sheet" && !opts.times?.length && !only && spans.length > 0 ? 90 : 48;
+	if (tiles.length > maxTiles) {
+		notes.push(`${tiles.length} tiles requested; showing the first ${maxTiles} (review one scene at a time with scene)`);
+		tiles = tiles.slice(0, maxTiles);
 	}
 	let crop = "";
 	if (mode === "crop") {
@@ -254219,9 +254765,19 @@ async function reviewRender(projectDir, opts = {}) {
 			}];
 		}
 	}
-	const width = Math.max(64, Math.round(opts.width ?? DEFAULT_WIDTH[mode]));
-	const cols = Math.max(1, Math.min(opts.cols ?? DEFAULT_COLS[mode], tiles.length));
-	const rows = Math.ceil(tiles.length / cols);
+	const aspect = mode === "crop" && opts.crop ? opts.crop.h * r.height / Math.max(1e-6, opts.crop.w * r.width) : r.height / r.width;
+	const layout = planSheets(tiles.length, {
+		width: Math.max(64, Math.round(opts.width ?? DEFAULT_WIDTH[mode])),
+		aspect,
+		cols: opts.cols ?? DEFAULT_COLS[mode],
+		group: mode === "sheet" && !opts.times?.length && tiles.length % 3 === 0 && tiles.every((x, i) => x.tag === [
+			"in",
+			"mid",
+			"out"
+		][i % 3]) ? 3 : 1
+	});
+	const width = layout.width;
+	notes.push(...layout.notes);
 	const outDir = join(projectPaths(r.root).root, "qa", "review");
 	const work = join(outDir, ".work");
 	await rm(work, {
@@ -254268,10 +254824,13 @@ async function reviewRender(projectDir, opts = {}) {
 	const flagged = flagScenes(findings, mode === "strip" ? [] : cues, spans.map((s) => s.id)).filter((f) => inImage.has(f.scene_id));
 	applyFlags(out, flagged);
 	if (mode === "strip") applyCues(out, cues, spans, frame);
+	const pageOf = (i) => layout.pages.findIndex(([a, b]) => i >= a && i <= b);
 	try {
 		for (const [i, tile] of out.entries()) {
 			const draw = tileDecor(tile, width, haveFont ? font : void 0);
-			const png = join(work, `${String(i + 1).padStart(4, "0")}.png`);
+			const p = pageOf(i);
+			await mkdir(join(work, `p${p}`), { recursive: true });
+			const png = join(work, `p${p}`, `${String(i - layout.pages[p][0] + 1).padStart(4, "0")}.png`);
 			for (let back = 0; back < 4 && !existsSync(png); back++) {
 				const at = Math.max(0, tile.time_sec - back * frame);
 				await runFfmpeg([
@@ -254295,30 +254854,52 @@ async function reviewRender(projectDir, opts = {}) {
 		}
 		for (const tile of out) if (tile.cues) tile.label += ` cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`;
 		if (!haveFont) notes.push("bundled fonts not found: tiles are unlabelled; use the tiles list for times");
-		const name = `${mode}-${r.quality ?? "render"}${opts.scene ? `-${opts.scene}` : ""}.jpg`;
-		const image = join(outDir, name);
-		await runFfmpeg([
-			"-y",
-			"-framerate",
-			"1",
-			"-i",
-			join(work, "%04d.png"),
-			"-vf",
-			`tile=${cols}x${rows}:padding=4:margin=4:color=0x808080`,
-			"-frames:v",
-			"1",
-			"-q:v",
-			"3",
-			image
-		], { timeoutMs: 6e4 });
+		const base = `${mode}-${r.quality ?? "render"}${opts.scene ? `-${opts.scene}` : ""}`;
+		const stale = (f) => f === `${base}.jpg` || f.startsWith(`${base}-p`) && /^\d+\.jpg$/.test(f.slice(base.length + 2));
+		for (const f of await readdir(outDir)) if (stale(f)) await rm(join(outDir, f), { force: true });
+		const pages = [];
+		for (const [p, [a, b]] of layout.pages.entries()) {
+			const n = b - a + 1;
+			const cols = Math.min(layout.cols, n);
+			const rows = Math.ceil(n / cols);
+			const image = join(outDir, layout.pages.length === 1 ? `${base}.jpg` : `${base}-p${p + 1}.jpg`);
+			await runFfmpeg([
+				"-y",
+				"-framerate",
+				"1",
+				"-i",
+				join(work, `p${p}`, "%04d.png"),
+				"-vf",
+				`tile=${cols}x${rows}:padding=${PAD}:margin=${MARGIN}:color=0x808080`,
+				"-frames:v",
+				"1",
+				"-q:v",
+				"3",
+				image
+			], { timeoutMs: 6e4 });
+			const scenes = [...new Set(out.slice(a, b + 1).map((x) => x.scene_id).filter((x) => Boolean(x)))];
+			const flaggedHere = flagged.filter((f) => scenes.includes(f.scene_id)).map((f) => f.scene_id);
+			pages.push({
+				image,
+				image_rel: relative(r.root, image),
+				cols,
+				rows,
+				tiles: [a, b],
+				scenes,
+				...flaggedHere.length ? { flagged: flaggedHere } : {}
+			});
+		}
 		return {
 			...r.quality ? { quality: r.quality } : {},
 			source: r.source,
 			mode,
-			image,
-			image_rel: relative(r.root, image),
-			cols,
-			rows,
+			image: pages[0].image,
+			image_rel: pages[0].image_rel,
+			images: pages.map((p) => p.image),
+			images_rel: pages.map((p) => p.image_rel),
+			pages,
+			cols: pages[0].cols,
+			rows: pages[0].rows,
 			tile_width: width,
 			tiles: out,
 			flagged,
@@ -254333,13 +254914,54 @@ async function reviewRender(projectDir, opts = {}) {
 	}
 }
 function formatReview(r) {
+	const pages = r.pages ?? [];
 	return [
-		`review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${r.cols}×${r.rows} → ${r.image}`.replace(/ {2}/g, " "),
+		(pages.length > 1 ? `review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${pages.length} images (each ≤ ${REVIEW_MAX_IMAGE_PX} px; Read every one, flagged first):` : `review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${r.cols}×${r.rows} → ${r.image}`).replace(/ {2}/g, " "),
+		...pages.length > 1 ? pages.map((p, i) => `  ${i + 1}. ${p.image} (${p.cols}×${p.rows}, tiles ${p.tiles[0] + 1}-${p.tiles[1] + 1}${p.scenes.length ? `, ${p.scenes[0]}${p.scenes.length > 1 ? `–${p.scenes[p.scenes.length - 1]}` : ""}` : ""}${p.flagged?.length ? `; flagged ${p.flagged.join(", ")}` : ""})`) : [],
 		...r.flagged.length ? [`flagged (bordered tiles; look here first): ${r.flagged.map((f) => `${f.scene_id}: ${[...new Map(f.findings.map((x) => [x.id, x.severity])).entries()].map(([id, sev]) => `${id} (${sev})`).join(", ")}`).join("; ")}`] : r.lint ? [`no scene-level lint findings (lint ${r.lint.status})`] : [],
 		...r.tiles.some((t) => t.cues) ? [`word cues: ${r.tiles.flatMap((t) => (t.cues ?? []).map((w) => `"${w}" at ${t.time_sec.toFixed(2)}s (tile ${t.index + 1})`)).join(", ")}; check the cued item is appearing on that tile`] : [],
-		"Read the image and check: text fits and is readable, nothing sits under captions or app UI, graphics land when their words are spoken, crops keep faces and subjects, transitions are clean.",
+		`Read the image${pages.length > 1 ? "s" : ""} and check: text fits and is readable, nothing sits under captions or app UI, graphics land when their words are spoken, crops keep faces and subjects, transitions are clean.`,
 		...r.notes.map((n) => `note: ${n}`)
 	].join("\n");
+}
+/**
+* Lay `n` tiles out over as few images as possible with every image ≤ maxPx on both sides, so
+* nothing is downscaled before Claude sees it. Columns shrink before tiles do; tiles shrink only
+* when a single tile would not fit. Groups (a scene's three frames) stay on one row and one image.
+*/
+function planSheets(n, o) {
+	const maxPx = o.maxPx ?? 1568;
+	const maxPer = Math.max(1, o.maxPerImage ?? 48);
+	const group = Math.max(1, o.group ?? 1);
+	const notes = [];
+	const even = (x) => Math.max(2, 2 * Math.round(x / 2));
+	let width = Math.max(2, Math.round(o.width));
+	const inner = maxPx - 8;
+	if (width > inner) width = inner - inner % 2;
+	let height = even(width * o.aspect);
+	if (height > inner) {
+		width = Math.max(2, Math.floor(inner / o.aspect) - Math.floor(inner / o.aspect) % 2);
+		height = even(width * o.aspect);
+	}
+	if (width !== Math.round(o.width)) notes.push(`tile width reduced to ${width}px so each image stays within ${maxPx}px`);
+	const colsFit = Math.max(1, Math.floor((inner + PAD) / (width + PAD)));
+	let cols = Math.max(1, Math.min(Math.round(o.cols), colsFit, Math.max(1, n)));
+	if (cols < Math.min(Math.round(o.cols), n)) notes.push(`${cols} columns (not ${o.cols}) so each image stays within ${maxPx}px wide`);
+	if (group > 1 && cols >= group) cols -= cols % group;
+	const rowsFit = Math.max(1, Math.floor((inner + PAD) / (height + PAD)));
+	const perImage = Math.max(1, Math.floor(Math.min(cols * rowsFit, maxPer) / cols) * cols);
+	const pages = [];
+	for (let a = 0; a < n; a += perImage) pages.push([a, Math.min(n, a + perImage) - 1]);
+	if (!pages.length) pages.push([0, -1]);
+	if (pages.length > 1) notes.push(`${n} tiles split over ${pages.length} images of up to ${perImage} (${cols}×${Math.ceil(perImage / cols)}) so labels stay readable`);
+	return {
+		width,
+		height,
+		cols,
+		rowsPerImage: Math.ceil(perImage / cols),
+		pages,
+		notes
+	};
 }
 //#endregion
 //#region src/compare.ts
@@ -254824,7 +255446,7 @@ async function findBrief(projectDir) {
 	}
 	return null;
 }
-async function loadContentIr(path) {
+async function loadContentIr$1(path) {
 	const text = await readIfExists$1(path);
 	if (text === null) return null;
 	const r = parseYamlOrJson(ContentIR, text);
@@ -254928,7 +255550,7 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 			notes.push(`defaults taken from ${found.path}`);
 		} else notes.push(`ignored invalid brief at ${found.path}; run brief_validate`);
 	} else notes.push("no creative brief found; using template defaults (fill audience and goal)");
-	const ir = await loadContentIr(planPaths(projectDir).contentIr);
+	const ir = await loadContentIr$1(planPaths(projectDir).contentIr);
 	if (!ir) notes.push("no valid source/content-ir.json; claim_refs cannot be suggested");
 	const target = opts.target_duration_sec ?? brief?.target_duration_sec ?? tpl.default_duration_sec;
 	const platform = opts.platform ?? brief?.platform ?? tpl.platforms[0];
@@ -255132,7 +255754,7 @@ async function renderStoryboard(projectDir) {
 	if (text === null) throw new Error(`spec file not found: ${paths.spec}`);
 	const parsed = parseYamlOrJson(VideoSpec, text);
 	if (!parsed.ok) throw new Error(`video-spec.json does not match the schema; run spec_validate first. ${parsed.errors.slice(0, 5).map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
-	const ir = await loadContentIr(paths.contentIr);
+	const ir = await loadContentIr$1(paths.contentIr);
 	const out = renderStoryboardMarkdown(parsed.data, ir);
 	await writeFileAtomic(paths.storyboard, out.markdown);
 	return {
@@ -255664,6 +256286,405 @@ function formatVerify(r) {
 	].join("\n");
 }
 //#endregion
+//#region src/output.ts
+const DEFAULTS = {
+	maxArray: 20,
+	maxString: 1e3,
+	precision: 3,
+	dropEmpty: true
+};
+/** Prune a value for the text copy (see {@link CompactOptions}). Returns undefined for a dropped value. */
+function compactValue(value, opts = {}, key) {
+	const o = {
+		...DEFAULTS,
+		...opts
+	};
+	if (value === null || value === void 0) return void 0;
+	if (typeof value === "string") {
+		let s = value;
+		if (o.relativeTo) s = relativize(s, o.relativeTo);
+		return s.length > o.maxString ? `${s.slice(0, o.maxString)}…(+${s.length - o.maxString} chars)` : s;
+	}
+	if (typeof value === "number") {
+		if (Number.isInteger(value) || !Number.isFinite(value)) return value;
+		const f = 10 ** o.precision;
+		return Math.round(value * f) / f;
+	}
+	if (typeof value !== "object") return typeof value === "function" || typeof value === "symbol" ? void 0 : value;
+	if (Array.isArray(value)) {
+		const limit = (key !== void 0 ? o.maxArrayFor?.[key] : void 0) ?? o.maxArray;
+		const kept = value.slice(0, limit).map((v) => compactValue(v, opts)).filter((v) => v !== void 0);
+		if (value.length > limit) {
+			const where = (key !== void 0 ? o.hints?.[key] : void 0) ?? o.hint ?? "structuredContent";
+			kept.push(`…${value.length - limit} more (full list: ${where})`);
+		}
+		return o.dropEmpty && !kept.length ? void 0 : kept;
+	}
+	if (value instanceof Date) return value.toISOString();
+	const out = {};
+	for (const [k, v] of Object.entries(value)) {
+		if (o.omit?.includes(k)) continue;
+		const c = compactValue(v, opts, k);
+		if (c !== void 0) out[k] = c;
+	}
+	return o.dropEmpty && !Object.keys(out).length ? void 0 : out;
+}
+function relativize(s, dir) {
+	const base = dir.replace(/[\\/]+$/, "");
+	if (s === base) return ".";
+	if (s.startsWith(`${base}/`) || s.startsWith(`${base}\\`)) return s.slice(base.length + 1);
+	return s;
+}
+/** Compact, single-line JSON of `data` after {@link compactValue} ("" when nothing is left). */
+function compactJson(data, opts = {}) {
+	const v = compactValue(data, opts);
+	return v === void 0 ? "" : JSON.stringify(v);
+}
+/**
+* The standard tool result: `summary`, then (when there is data) a newline and the compact JSON,
+* in one text block; `structuredContent` is the full object. With `relativeTo`, a
+* `(paths relative to <dir>)` line precedes the JSON.
+*/
+function toolResult(summary, data, opts = {}) {
+	const { isError, ...compact } = opts;
+	const json = data ? compactJson(data, compact) : "";
+	return {
+		content: [{
+			type: "text",
+			text: summary + (json && compact.relativeTo ? `\n(paths relative to ${compact.relativeTo.replace(/[\\/]+$/, "")})` : "") + (json ? `\n${json}` : "")
+		}],
+		...data ? { structuredContent: data } : {},
+		...isError ? { isError: true } : {}
+	};
+}
+//#endregion
+//#region src/job-status-view.ts
+const TERMINAL = /* @__PURE__ */ new Set([
+	"succeeded",
+	"failed",
+	"cancelled",
+	"interrupted"
+]);
+const CURSOR_RE = /^j1\.([a-z]+)\.([0-9a-f]{8})\.(\d+)$/;
+function progressKey(v) {
+	const p = v.progress;
+	return createHash("sha256").update(JSON.stringify([
+		v.status,
+		v.queue_position ?? null,
+		p.stage,
+		p.scene_index ?? null,
+		p.scene_count ?? null,
+		p.scene_id ?? null,
+		p.message
+	])).digest("hex").slice(0, 8);
+}
+/** The cursor for this state of the job. */
+function jobCursor(v) {
+	return `j1.${v.status}.${progressKey(v)}.${v.warnings?.length ?? 0}`;
+}
+function parseCursor(c) {
+	const m = c ? CURSOR_RE.exec(c) : null;
+	return m ? {
+		status: m[1],
+		key: m[2],
+		warnings: Number(m[3])
+	} : void 0;
+}
+function isTerminal(status) {
+	return TERMINAL.has(status);
+}
+function jobStatusView(view, opts = {}) {
+	const cursor = jobCursor(view);
+	const prev = parseCursor(opts.since);
+	const terminal = isTerminal(view.status);
+	if (!prev || terminal && !isTerminal(prev.status) || terminal && prev.status !== view.status) return {
+		full: true,
+		data: {
+			...view,
+			cursor
+		}
+	};
+	if (terminal) return {
+		full: false,
+		data: {
+			job_id: view.job_id,
+			status: view.status,
+			cursor,
+			delivered: true
+		},
+		summary: `job ${view.job_id}: ${view.status} (full result already returned; call job_status without since to see it again)`
+	};
+	const moved = prev.key !== progressKey(view) || prev.status !== view.status;
+	const warnings = view.warnings ?? [];
+	const fresh = prev.warnings < warnings.length ? warnings.slice(prev.warnings) : [];
+	const p = view.progress;
+	const data = {
+		job_id: view.job_id,
+		status: view.status,
+		...view.queue_position !== void 0 ? { queue_position: view.queue_position } : {},
+		...moved ? { progress: p } : { unchanged: true },
+		...fresh.length ? { new_warnings: fresh } : {},
+		cursor
+	};
+	const where = p.scene_count ? ` (scene ${p.scene_index ?? 0}/${p.scene_count})` : "";
+	return {
+		full: false,
+		data,
+		summary: `job ${view.job_id}: ${view.status}${view.queue_position ? ` (${view.queue_position} ahead in queue)` : ""}` + (moved ? `; ${p.stage}${where}: ${p.message}` : "; no change since last poll") + (fresh.length ? `\n${fresh.map((w) => `warning: ${w}`).join("\n")}` : "")
+	};
+}
+//#endregion
+//#region src/source-summary.ts
+const CLAIM_CHARS = 200;
+function cut(s, n) {
+	const one = s.replace(/\s+/g, " ").trim();
+	return one.length > n ? `${one.slice(0, n - 1)}…` : one;
+}
+/** Load and validate <project>/source/content-ir.json. */
+async function loadContentIr(projectDir) {
+	const path = join(projectPaths(projectDir).source, "content-ir.json");
+	let raw;
+	try {
+		raw = await readFile(path, "utf8");
+	} catch {
+		throw new Error(`no source/content-ir.json in ${projectDir}: ingest the sources first`);
+	}
+	let json;
+	try {
+		json = JSON.parse(raw);
+	} catch (err) {
+		throw new Error(`source/content-ir.json is not valid JSON (${err instanceof Error ? err.message : String(err)})`);
+	}
+	const parsed = ContentIR.safeParse(json);
+	if (!parsed.success) {
+		const issues = parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+		throw new Error(`source/content-ir.json is not a valid ContentIR (${issues})`);
+	}
+	return parsed.data;
+}
+/** Lowercase words only: evidence keeps the source's markup (`*`, `>`, links, escapes), sections are plain text. */
+function words(s) {
+	return ` ${s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+}
+/**
+* Assign each evidence span to the section of its source that contains it. Spans follow source
+* order, so matching uses a moving cursor (a repeated short span lands in the section where it
+* appears next, not the first one). A span matches a section whose heading + text contains its
+* words; failing that, the section sharing at least 60% of its distinct words; failing that
+* (speaker notes, markup the section text dropped), the section the previous span landed in.
+* Spans before any match are left out.
+*/
+function evidenceBySection(ir) {
+	const out = /* @__PURE__ */ new Map();
+	const bySource = /* @__PURE__ */ new Map();
+	for (const s of ir.sections) {
+		out.set(s.id, []);
+		bySource.set(s.source_id, [...bySource.get(s.source_id) ?? [], s]);
+	}
+	const cursor = /* @__PURE__ */ new Map();
+	const norm = /* @__PURE__ */ new Map();
+	const of = (s) => {
+		let t = norm.get(s.id);
+		if (!t) {
+			const text = words(`${s.heading ?? ""} ${s.text}`);
+			norm.set(s.id, t = {
+				text,
+				set: new Set(text.split(" ").filter(Boolean))
+			});
+		}
+		return t;
+	};
+	for (const e of ir.evidence) {
+		const secs = bySource.get(e.source_id);
+		if (!secs?.length) continue;
+		const needle = words(e.text);
+		if (!needle.trim()) continue;
+		const start = cursor.get(e.source_id) ?? 0;
+		const order = secs.map((_, k) => (start + k) % secs.length);
+		let hit = order.find((i) => of(secs[i]).text.includes(needle)) ?? -1;
+		if (hit < 0) {
+			const toks = [...new Set(needle.split(" ").filter((w) => w.length > 2))];
+			let best = 0;
+			if (toks.length >= 3) for (const i of order) {
+				const set = of(secs[i]).set;
+				const share = toks.filter((w) => set.has(w)).length / toks.length;
+				if (share > best) [best, hit] = [share, i];
+			}
+			if (best < .6) hit = cursor.has(e.source_id) ? start : -1;
+		}
+		if (hit < 0) continue;
+		cursor.set(e.source_id, hit);
+		out.get(secs[hit].id).push(e);
+	}
+	return out;
+}
+function summarizeIr(ir, opts = {}) {
+	const maxClaims = opts.maxClaims ?? 30;
+	const maxRefs = opts.maxEvidencePerSection ?? 2;
+	const maxSections = opts.maxSections ?? 100;
+	const single = ir.sources.length === 1;
+	const maxEntities = opts.maxEntities ?? 25;
+	const only = opts.source_id;
+	if (only && !ir.sources.some((s) => s.id === only)) throw new Error(`no source "${only}" (sources: ${ir.sources.map((s) => s.id).join(", ")})`);
+	const bySec = evidenceBySection(ir);
+	const refSource = new Map(ir.evidence.map((e) => [e.ref, e.source_id]));
+	const inScope = (sourceId) => !only || sourceId === only;
+	const sources = ir.sources.map((s) => {
+		const secs = ir.sections.filter((x) => x.source_id === s.id);
+		return {
+			id: s.id,
+			kind: s.kind,
+			...s.title ? { title: s.title } : {},
+			uri: s.uri,
+			sections: secs.length,
+			evidence: ir.evidence.filter((e) => e.source_id === s.id).length,
+			chars: secs.reduce((n, x) => n + x.text.length, 0)
+		};
+	});
+	const allSections = ir.sections.filter((s) => inScope(s.source_id));
+	const sections = allSections.slice(0, maxSections).map((s) => {
+		const ev = bySec.get(s.id) ?? [];
+		return {
+			id: s.id,
+			...single ? {} : { source_id: s.source_id },
+			...s.heading ? { heading: cut(s.heading, 120) } : {},
+			chars: s.text.length,
+			evidence: ev.length,
+			refs: ev.slice(0, maxRefs).map((e) => e.ref)
+		};
+	});
+	const allClaims = ir.claims.filter((c) => !only || c.evidence_refs.some((r) => refSource.get(r) === only));
+	const claims = allClaims.slice(0, maxClaims).map((c) => ({
+		id: c.id,
+		kind: c.kind,
+		text: cut(c.text, CLAIM_CHARS),
+		refs: c.evidence_refs.slice(0, 3)
+	}));
+	const entities = ir.entities.filter((e) => !only || (e.evidence_refs ?? []).some((r) => refSource.get(r) === only)).map((e) => ({
+		name: e.name,
+		kind: e.kind,
+		refs: e.evidence_refs?.length ?? 0
+	})).sort((a, b) => b.refs - a.refs).slice(0, maxEntities);
+	const assets = ir.assets.map((a) => ({
+		id: a.id,
+		kind: a.kind,
+		path: a.path,
+		...a.media ? { duration_sec: a.media.duration_sec } : {},
+		...a.media?.width ? {
+			width: a.media.width,
+			height: a.media.height
+		} : {},
+		...a.media ? { has_audio: a.media.has_audio } : {},
+		transcript: Boolean(a.media?.transcript),
+		...a.media?.transcript ? { transcript_words: a.media.transcript.words } : {},
+		...a.media?.shots ? { shots: a.media.shots.length } : {},
+		...a.source_ref ? { source_ref: a.source_ref } : {}
+	}));
+	const omittedSections = allSections.length - sections.length;
+	const omittedClaims = allClaims.length - claims.length;
+	const detail = [
+		"source_section {project_dir, id} returns one section's full text with every evidence ref inside it and the claims citing them (id may also be an evidence ref).",
+		omittedSections ? `${omittedSections} more section(s): pass source_id or a larger max_sections to list them.` : "",
+		omittedClaims ? `${omittedClaims} more claim(s): pass a larger max_claims.` : "",
+		"Cite evidence refs or claim ids exactly as listed in claim_refs."
+	].filter(Boolean).join(" ");
+	return {
+		ir_id: ir.id,
+		counts: {
+			sources: ir.sources.length,
+			sections: ir.sections.length,
+			evidence: ir.evidence.length,
+			entities: ir.entities.length,
+			claims: ir.claims.length,
+			assets: ir.assets.length,
+			warnings: ir.warnings.length
+		},
+		sources,
+		sections,
+		...omittedSections ? { sections_omitted: omittedSections } : {},
+		claims,
+		...omittedClaims ? { claims_omitted: omittedClaims } : {},
+		entities,
+		assets,
+		classification: ir.classification,
+		warnings: ir.warnings.slice(0, 20).map((w) => ({
+			code: w.code,
+			message: cut(w.message, 300),
+			...w.source_id ? { source_id: w.source_id } : {}
+		})),
+		detail
+	};
+}
+/** Compact outline of <project>/source/content-ir.json (see {@link SourceSummary}). */
+async function summarizeSource(projectDir, opts = {}) {
+	return summarizeIr(await loadContentIr(projectDir), opts);
+}
+function irSection(ir, id, opts = {}) {
+	const bySec = evidenceBySection(ir);
+	let sec = ir.sections.find((s) => s.id === id);
+	let matched;
+	if (!sec) {
+		const ev = ir.evidence.find((e) => e.ref === id);
+		if (ev) {
+			matched = ev.ref;
+			sec = ir.sections.find((s) => (bySec.get(s.id) ?? []).includes(ev));
+			if (!sec) throw new Error(`evidence ref "${id}" is not inside any section; its text: ${cut(ev.text, 300)}`);
+		}
+	}
+	if (!sec) {
+		const near = ir.sections.slice(0, 10).map((s) => s.id).join(", ");
+		throw new Error(`no section or evidence ref "${id}" in the ContentIR (sections start ${near}${ir.sections.length > 10 ? ", …" : ""}; see source_summary)`);
+	}
+	const max = Math.max(500, opts.max_chars ?? 2e4);
+	const offset = Math.max(0, Math.min(opts.offset ?? 0, sec.text.length));
+	const text = sec.text.slice(offset, offset + max);
+	const ev = bySec.get(sec.id) ?? [];
+	const refs = new Set(ev.map((e) => e.ref));
+	const claims = ir.claims.filter((c) => c.evidence_refs.some((r) => refs.has(r))).map((c) => ({
+		id: c.id,
+		kind: c.kind,
+		text: c.text,
+		refs: c.evidence_refs
+	}));
+	const siblings = ir.sections.filter((s) => s.source_id === sec.source_id);
+	const i = siblings.indexOf(sec);
+	return {
+		id: sec.id,
+		source_id: sec.source_id,
+		...sec.heading ? { heading: sec.heading } : {},
+		text,
+		chars: sec.text.length,
+		...offset ? { offset } : {},
+		...offset + text.length < sec.text.length ? { truncated: true } : {},
+		evidence: ev.map((e) => ({
+			ref: e.ref,
+			locator: e.locator,
+			preview: cut(e.text, 120)
+		})),
+		claims,
+		...matched ? { matched_ref: matched } : {},
+		...i > 0 ? { prev: siblings[i - 1].id } : {},
+		...i >= 0 && i < siblings.length - 1 ? { next: siblings[i + 1].id } : {}
+	};
+}
+/** One section of <project>/source/content-ir.json in full (id: a section id or an evidence ref). */
+async function sourceSection(projectDir, sectionId, opts = {}) {
+	return irSection(await loadContentIr(projectDir), sectionId, opts);
+}
+function formatSourceSummary(s) {
+	const c = s.counts;
+	const cls = s.classification;
+	return [
+		`ContentIR ${s.ir_id}: ${c.sources} source(s), ${c.sections} section(s), ${c.evidence} evidence span(s), ${c.claims} claim(s), ${c.entities} entit${c.entities === 1 ? "y" : "ies"}, ${c.assets} asset(s)`,
+		`classification: ${cls.data_class}${cls.contains_secrets ? ", secrets (redacted)" : ""}${cls.contains_pii ? ", PII" : ""}${cls.contains_likeness ? ", likeness" : ""}`,
+		...s.sources.map((x) => `${x.id} ${x.kind}${x.title ? ` "${x.title}"` : ""}: ${x.sections} section(s), ${x.chars} chars`),
+		s.detail
+	].join("\n");
+}
+function formatSourceSection(r) {
+	return `section ${r.id}${r.heading ? ` "${r.heading}"` : ""} (${r.source_id}, ${r.chars} chars, ${r.evidence.length} evidence ref(s), ${r.claims.length} claim(s))${r.truncated ? `; text cut: call again with offset ${(r.offset ?? 0) + r.text.length}` : ""}`;
+}
+//#endregion
 //#region src/server.ts
 const SERVER_NAME = "engine";
 const SERVER_VERSION = "0.1.0";
@@ -255686,6 +256707,13 @@ function errorResult(err, extra = {}, code = errorCode(err)) {
 			...extra
 		}
 	};
+}
+/** A refused consent: `[REFUSED]` with {consent_required, asked} so skills know whether to ask the user. */
+function consentRefused(what, c) {
+	return errorResult(/* @__PURE__ */ new Error(`${what}: ${c.reason}`), {
+		consent_required: !c.asked,
+		asked_user: c.asked
+	}, "REFUSED");
 }
 /** Wrap a handler so it never throws: failures become `isError: true` results. */
 function safe(fn) {
@@ -255714,17 +256742,9 @@ function formatJob(v) {
 	if (v.error) lines.push(`error${v.error_code ? ` [${v.error_code}]` : ""}: ${v.error}`);
 	return lines.join("\n");
 }
-function jsonResult(summary, data) {
-	return {
-		content: [{
-			type: "text",
-			text: summary
-		}, {
-			type: "text",
-			text: JSON.stringify(data, null, 2)
-		}],
-		structuredContent: data
-	};
+/** One compact text block (summary + compact JSON) plus the full data as structuredContent. */
+function jsonResult(summary, data, opts) {
+	return toolResult(summary, data, opts);
 }
 function createServer(options = {}) {
 	const cwd = options.cwd ?? (() => process.cwd());
@@ -255740,14 +256760,14 @@ function createServer(options = {}) {
 	});
 	server.registerTool("doctor", {
 		title: "Environment doctor",
-		description: "Check the local environment for video-studio: Node version, node:sqlite, ffmpeg/ffprobe (libass, libx264), Chrome, whisper.cpp, which provider API keys are configured (presence only) and the data directory. Returns each check with status ok|warn|fail and a fix.",
-		inputSchema: {},
+		description: "Check the local environment for video-studio: Node version, node:sqlite, ffmpeg/ffprobe (libass, libx264), Chrome, whisper.cpp, which provider API keys are configured (presence only), the effective policy.yaml (user default in the plugin data dir, overridden by <project_dir>'s) and the data directory. Returns each check with status ok|warn|fail and a fix.",
+		inputSchema: { project_dir: string().min(1).optional().describe("Also load this project's policy.yaml for the policy check") },
 		annotations: {
 			readOnlyHint: true,
 			openWorldHint: false
 		}
-	}, safe(async () => {
-		const report = await runDoctor((options.doctorDeps ?? defaultDoctorDeps)());
+	}, safe(async (args) => {
+		const report = await runDoctor((options.doctorDeps ?? defaultDoctorDeps)(), args.project_dir ? { projectDir: resolveInputPath(args.project_dir, cwd()) } : {});
 		return jsonResult(formatDoctorReport(report), report);
 	}));
 	server.registerTool("project_init", {
@@ -255802,6 +256822,50 @@ function createServer(options = {}) {
 		].join("\n"), {
 			project_created: created,
 			...summary
+		});
+	}));
+	server.registerTool("source_summary", {
+		title: "Source outline",
+		description: "Compact outline of <project_dir>/source/content-ir.json without loading it whole: sources (id, kind, title, uri, size), sections (id, heading, chars, evidence count, first refs), top claims (id, text ≤200 chars, refs), top entities, assets (duration, transcript, shots), classification, warnings. Use source_section to read a section in full. Cite refs and claim ids exactly as given.",
+		inputSchema: {
+			project_dir: string().min(1).describe("Project folder with source/content-ir.json"),
+			source_id: string().optional().describe("Only this source's sections and claims"),
+			max_sections: int().min(1).max(1e3).optional().describe("Default 100"),
+			max_claims: int().min(1).max(500).optional().describe("Default 30")
+		},
+		annotations: {
+			readOnlyHint: true,
+			openWorldHint: false
+		}
+	}, safe(async ({ project_dir, source_id, max_sections, max_claims }) => {
+		const s = await summarizeSource(resolveInputPath(project_dir, cwd()), {
+			...source_id ? { source_id } : {},
+			...max_sections ? { maxSections: max_sections } : {},
+			...max_claims ? { maxClaims: max_claims } : {}
+		});
+		return toolResult(formatSourceSummary(s), s, { maxArray: 1e3 });
+	}));
+	server.registerTool("source_section", {
+		title: "Source section",
+		description: "One section of source/content-ir.json in full: its text, every evidence ref inside it (ref, locator, preview) and the claims citing them, with prev/next section ids. id is a section id (sec-N) or an evidence ref (returns the section containing it). Long text pages with offset.",
+		inputSchema: {
+			project_dir: string().min(1).describe("Project folder with source/content-ir.json"),
+			id: string().min(1).describe("Section id (sec-N) or an evidence ref"),
+			offset: int().min(0).optional(),
+			max_chars: int().min(500).max(1e5).optional().describe("Default 20000")
+		},
+		annotations: {
+			readOnlyHint: true,
+			openWorldHint: false
+		}
+	}, safe(async ({ project_dir, id, offset, max_chars }) => {
+		const r = await sourceSection(resolveInputPath(project_dir, cwd()), id, {
+			...offset !== void 0 ? { offset } : {},
+			...max_chars ? { max_chars } : {}
+		});
+		return toolResult(formatSourceSection(r), r, {
+			maxArray: 1e3,
+			maxString: 2e5
 		});
 	}));
 	server.registerTool("spec_validate", {
@@ -255937,7 +257001,7 @@ function createServer(options = {}) {
 	}));
 	server.registerTool("render_submit", {
 		title: "Render a planned project (background job)",
-		description: "Start rendering <project_dir>/project/video-spec.json into <project_dir>/dist/ (reel.mp4 with burned captions, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target {video.mp4, cover.jpg, captions.srt/.vtt, post.json, qa.json}) plus qa/report.{json,md} and qa/lint.{json,md}. Validates the spec first and refuses on errors (returned with fixes). Returns {job_id} immediately; poll job_status every 10-20 s. Renders run one at a time; later submissions queue. Everything is cached, so re-submitting after a change only redoes what changed. voice: auto (ElevenLabs if configured, else system TTS, else silent; if a paid voice fails at synthesis it falls back to the system voice, then silent) | system | elevenlabs | silent. renderer: auto (HyperFrames if installed and Chrome launches, else ffmpeg) | hyperframes | ffmpeg. quality: preview (half resolution, 15 fps, fast encode; default) | final (1080 short side, 30 fps). placeholder (default true) draws titled cards for scenes that need a video provider. Rendering is local; the only network call is ElevenLabs when voice is auto/elevenlabs and a key is configured. Stop a job with render_cancel.",
+		description: "Start rendering <project_dir>/project/video-spec.json into <project_dir>/dist/ (reel.mp4 with burned captions, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target {video.mp4, cover.jpg, captions.srt/.vtt, post.json, qa.json}) plus qa/report.{json,md} and qa/lint.{json,md}. Validates the spec first and refuses on errors (returned with fixes). Returns {job_id} immediately; poll job_status every 10-20 s. Renders run one at a time; later submissions queue. Everything is cached, so re-submitting after a change only redoes what changed. voice: auto (ElevenLabs only if a key is configured AND policy.yaml providers.allow lists it or the spec's voice.provider_preference names it; else system TTS, else silent; if a paid voice fails at synthesis it falls back to the system voice, then silent) | system | elevenlabs (an explicit request counts as allowed unless providers.deny matches) | silent. Paid voice obeys policy.yaml spend limits: above spend.project_limit_usd or scene_limit_usd it is refused; above spend.approval_above_usd (or with no price estimate while limits are set) the engine asks the user in an approval dialog, or, when the client has none, requires approve_paid_voice: true after the user agreed in chat. renderer: auto (HyperFrames if installed and Chrome launches, else ffmpeg) | hyperframes | ffmpeg. quality: preview (half resolution, 15 fps, fast encode; default) | final (1080 short side, 30 fps). placeholder (default true) draws titled cards for scenes that need a video provider. Rendering is local; the only network call is ElevenLabs when it is configured and allowed. Stop a job with render_cancel.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Project folder containing project/video-spec.json"),
 			voice: _enum([
@@ -255954,7 +257018,8 @@ function createServer(options = {}) {
 			quality: QUALITY.optional().describe("preview (default) or final"),
 			burn_in_captions: boolean().optional().describe("Burn captions into reel.mp4 (default: the spec's captions.burn_in)"),
 			placeholder: boolean().optional().describe("Placeholder cards for non-motion-graphic scenes (default true)"),
-			brand_path: string().min(1).optional().describe("brand.yaml (default <project_dir>/brand.yaml when present)")
+			brand_path: string().min(1).optional().describe("brand.yaml (default <project_dir>/brand.yaml when present)"),
+			approve_paid_voice: boolean().optional().describe("Fallback for clients without approval dialogs: true only after the USER approved the paid voice charge this tool reported (CONSENT)")
 		},
 		annotations: {
 			readOnlyHint: false,
@@ -255964,8 +257029,9 @@ function createServer(options = {}) {
 		}
 	}, safe(async (args) => {
 		const root = resolveInputPath(args.project_dir, cwd());
+		let loaded;
 		try {
-			await loadValidSpec(root);
+			loaded = await loadValidSpec(root);
 		} catch (e) {
 			if (e instanceof SpecInvalidError) return {
 				isError: true,
@@ -255982,6 +257048,36 @@ function createServer(options = {}) {
 			};
 			throw e;
 		}
+		const voiceChoice = args.voice ?? "auto";
+		const voiceNotes = [];
+		if ((voiceChoice === "auto" || voiceChoice === "elevenlabs") && voiceMode(loaded.spec) === "narrated") {
+			const defaults = options.renderDefaults ?? {};
+			const brand = (await loadBrand(root, args.brand_path ? resolveInputPath(args.brand_path, cwd()) : void 0))?.brand;
+			const vp = await resolveVoicePolicy({
+				root,
+				spec: loaded.spec,
+				brand: brand ?? null,
+				voiceChoice,
+				env,
+				backends: {
+					...defaultBackends(),
+					...defaults.voiceBackends
+				},
+				...defaults.voiceCacheDir ? { cacheDir: defaults.voiceCacheDir } : {}
+			});
+			const refusal = voiceChoice === "elevenlabs" ? vp.gate("elevenlabs", true) : null;
+			const d = vp.decisions.elevenlabs;
+			if (d?.status === "refused" || refusal && d?.status !== "needs_consent") {
+				if (voiceChoice === "elevenlabs") return errorResult(/* @__PURE__ */ new Error(`render refused: ${refusal ?? d.reason}`), {}, "REFUSED");
+				voiceNotes.push(`${d.reason}; the render uses the system voice`);
+			} else if (d?.status === "needs_consent") {
+				const c = await obtainConsent(server, root, paidVoiceConsentRequest(d, args.approve_paid_voice));
+				if (!c.granted) {
+					if (voiceChoice === "elevenlabs" || !c.asked) return consentRefused("render not started (paid voice needs approval; or render with voice: system)", c);
+					voiceNotes.push(`paid voice not approved (${c.reason.split(";")[0]}); the render uses the system voice`);
+				} else voiceNotes.push(`paid voice approved (${c.via}${c.reused ? ", recorded earlier" : ""}): ${d.reason}`);
+			} else if (d) voiceNotes.push(d.reason);
+		}
 		const view = getJobs().submit(root, {
 			...args.voice ? { voice: args.voice } : {},
 			...args.renderer ? { renderer: args.renderer } : {},
@@ -255990,29 +257086,37 @@ function createServer(options = {}) {
 			...args.placeholder !== void 0 ? { placeholder: args.placeholder } : {},
 			...args.brand_path ? { brandPath: resolveInputPath(args.brand_path, cwd()) } : {}
 		});
-		return jsonResult(`render job ${view.job_id} ${view.status}${view.queue_position ? ` (${view.queue_position} ahead)` : ""}; poll job_status`, {
+		return jsonResult(`render job ${view.job_id} ${view.status}${view.queue_position ? ` (${view.queue_position} ahead)` : ""}; poll job_status${voiceNotes.length ? `\nvoice: ${voiceNotes.join("; ")}` : ""}`, {
 			job_id: view.job_id,
 			status: view.status,
 			project_dir: root,
+			...voiceNotes.length ? { voice_policy: voiceNotes } : {},
 			...view.queue_position !== void 0 ? { queue_position: view.queue_position } : {}
 		});
 	}));
 	server.registerTool("job_status", {
 		title: "Render job status",
-		description: "Status of a render job from render_submit: {status: queued|running|succeeded|failed|cancelled|interrupted, progress {stage, message, scene_index, scene_count}, result? (dist paths, width/height/fps/duration, qa {status, findings, report paths}, voice {backend, reason, timing_source}, renderer {used, reasons}, timing_adjustments, placeholders, warnings, cache), error?, error_code? (RENDER_LOCKED|SPEC_INVALID|FFMPEG_<KIND>|NOT_FOUND|REFUSED|ERROR), spec_errors?}. `cancelled` means render_cancel stopped it; `interrupted` means the engine restarted or shut down mid-job: submit again (cached work is reused).",
-		inputSchema: { job_id: string().min(1).describe("Job id from render_submit") },
+		description: "Status of a render job from render_submit: {status: queued|running|succeeded|failed|cancelled|interrupted, progress {stage, message, scene_index, scene_count}, result? (dist paths, width/height/fps/duration, qa {status, findings, report paths}, voice {backend, reason, timing_source}, renderer {used, reasons}, timing_adjustments, placeholders, warnings, cache), error?, error_code? (RENDER_LOCKED|SPEC_INVALID|FFMPEG_<KIND>|NOT_FOUND|REFUSED|ERROR), spec_errors?}. `cancelled` means render_cancel stopped it; `interrupted` means the engine restarted or shut down mid-job: submit again (cached work is reused). Pass the returned `cursor` as `since` on the next poll to get only what changed.",
+		inputSchema: {
+			job_id: string().min(1).describe("Job id from render_submit"),
+			since: string().optional().describe("The cursor from your previous job_status call: returns only what changed (progress, new warnings); the full result is returned once when the job finishes")
+		},
 		annotations: {
 			readOnlyHint: true,
 			openWorldHint: false
 		}
-	}, safe(async ({ job_id }) => {
+	}, safe(async ({ job_id, since }) => {
 		const v = getJobs().status(job_id);
 		if (!v) throw new Error(`unknown job ${job_id}`);
-		const data = v;
-		return v.status === "failed" ? {
-			...jsonResult(formatJob(v), data),
+		const d = jobStatusView(v, since ? { since } : {});
+		const res = toolResult(d.full ? formatJob(v) : d.summary, d.data, {
+			relativeTo: v.project_dir,
+			omit: ["request"]
+		});
+		return v.status === "failed" && d.full ? {
+			...res,
 			isError: true
-		} : jsonResult(formatJob(v), data);
+		} : res;
 	}));
 	server.registerTool("render_cancel", {
 		title: "Cancel a render job",
@@ -256065,8 +257169,12 @@ function createServer(options = {}) {
 			openWorldHint: false
 		}
 	}, safe(async ({ project_dir, quality }) => {
-		const r = await lintProject(resolveInputPath(project_dir, cwd()), quality ? { quality } : {});
-		return jsonResult(formatLint(r), r);
+		const root = resolveInputPath(project_dir, cwd());
+		const r = await lintProject(root, quality ? { quality } : {});
+		return jsonResult(formatLint(r), r, {
+			relativeTo: root,
+			hints: { findings: "qa/lint.json" }
+		});
 	}));
 	server.registerTool("export", {
 		title: "Re-export dist/",
@@ -256100,8 +257208,9 @@ function createServer(options = {}) {
 			openWorldHint: false
 		}
 	}, safe(async ({ project_dir }) => {
-		const r = await verifyProject(resolveInputPath(project_dir, cwd()));
-		return jsonResult(formatVerify(r), r);
+		const root = resolveInputPath(project_dir, cwd());
+		const r = await verifyProject(root);
+		return jsonResult(formatVerify(r), r, { relativeTo: root });
 	}));
 	server.registerTool("test", {
 		title: "Golden-frame test",
@@ -256155,8 +257264,12 @@ function createServer(options = {}) {
 			openWorldHint: false
 		}
 	}, safe(async ({ project_dir, ...o }) => {
-		const r = await reviewRender(resolveInputPath(project_dir, cwd()), o);
-		return jsonResult(formatReview(r), r);
+		const root = resolveInputPath(project_dir, cwd());
+		const r = await reviewRender(root, o);
+		return jsonResult(formatReview(r), r, {
+			relativeTo: root,
+			maxArrayFor: { tiles: 90 }
+		});
 	}));
 	const compareSide = union([
 		object$2({
@@ -256308,12 +257421,12 @@ function createServer(options = {}) {
 	}));
 	server.registerTool("transcribe", {
 		title: "Transcribe a video or audio asset",
-		description: "Produce a timed-word transcript for a ContentIR video/audio asset of <project_dir> with local whisper.cpp (whisper-cli), or import a caption file the user supplied (captions_file: project-relative .srt/.vtt). Writes source/transcripts/<asset>.json and records it on the asset's media.transcript, so captions, shorts and talking-head scenes can use it. The whisper model (~150 MB) is downloaded only with download_model: true; ask the user first. Local only.",
+		description: "Produce a timed-word transcript for a ContentIR video/audio asset of <project_dir> with local whisper.cpp (whisper-cli), or import a caption file the user supplied (captions_file: project-relative .srt/.vtt). Writes source/transcripts/<asset>.json and records it on the asset's media.transcript, so captions, shorts and talking-head scenes can use it. The whisper model (~150 MB) is downloaded only with the USER's approval: the engine asks them in an approval dialog when the client supports it (recorded in project/consent.json, not asked again); otherwise ask the user first and pass download_model: true. Local only.",
 		inputSchema: {
 			project_dir: string().min(1),
 			asset: string().min(1).describe("ContentIR asset id (see ingest output)"),
 			captions_file: string().min(1).optional().describe("Import this .srt/.vtt instead of running ASR"),
-			download_model: boolean().optional().describe("Consent to download the whisper base.en model into the plugin data dir")
+			download_model: boolean().optional().describe("Fallback for clients without approval dialogs: true only after the USER agreed to download the whisper base.en model (~148 MB) into the plugin data dir")
 		},
 		annotations: {
 			readOnlyHint: false,
@@ -256322,9 +257435,21 @@ function createServer(options = {}) {
 			openWorldHint: true
 		}
 	}, safe(async (args) => {
-		const r = await transcribeAsset(resolveInputPath(args.project_dir, cwd()), args.asset, {
+		const root = resolveInputPath(args.project_dir, cwd());
+		let download = false;
+		const model = args.captions_file ? void 0 : resolveWhisperModel(env);
+		if (model && !model.exists && model.from === "data_dir" && (args.download_model === true || server.server.getClientCapabilities()?.elicitation)) {
+			findMediaAsset((await loadContentIr$2(root)).ir, args.asset);
+			const c = await obtainConsent(server, root, modelDownloadConsentRequest({
+				...WHISPER_MODEL,
+				dest: model.path
+			}, args.download_model));
+			if (!c.granted) return consentRefused(`the whisper model was not downloaded`, c);
+			download = true;
+		}
+		const r = await transcribeAsset(root, args.asset, {
 			...args.captions_file ? { captions_file: args.captions_file } : {},
-			...args.download_model ? { download_model: true } : {},
+			...download ? { download_model: true } : {},
 			env
 		});
 		return jsonResult(`transcribed ${r.asset} (${r.source}): ${r.words} words → ${r.path}`, r);
@@ -256384,10 +257509,10 @@ function createServer(options = {}) {
 	}));
 	server.registerTool("demo", {
 		title: "Record a demo of the user's running app",
-		description: "Record project/demo.json (DemoScript: {schema_version, id, url, viewport {width, height}, steps: [goto|click|type|hover|scroll|zoom|wait], mask_selectors?}; schema_get demo-script) against an app the USER started (the plugin never starts one), with the system Chrome (headless, via the optional HyperFrames install's puppeteer-core). Every input, textarea, select and contenteditable is blurred, plus mask_selectors; a visible cursor follows the clicks. The recording becomes a ContentIR video asset (source/assets/demo-<id>.mp4) with one evidence span per step (video:demo-<id>.mp4#step-N), so screen_capture scenes cite only UI that was actually shown. Requires confirm: true after the user approved the URL and steps.",
+		description: "Record project/demo.json (DemoScript: {schema_version, id, url, viewport {width, height}, steps: [goto|click|type|hover|scroll|zoom|wait], mask_selectors?}; schema_get demo-script) against an app the USER started (the plugin never starts one), with the system Chrome (headless, via the optional HyperFrames install's puppeteer-core). Every input, textarea, select and contenteditable is blurred, plus mask_selectors; a visible cursor follows the clicks. The recording becomes a ContentIR video asset (source/assets/demo-<id>.mp4) with one evidence span per step (video:demo-<id>.mp4#step-N), so screen_capture scenes cite only UI that was actually shown. Needs the USER's approval of the URL and steps: the engine asks them in an approval dialog when the client supports it (recorded in project/consent.json and re-used for the same script); otherwise show them the URL and steps and pass confirm: true once they approve.",
 		inputSchema: {
 			project_dir: string().min(1),
-			confirm: boolean().describe("true only after the user approved the URL and the steps"),
+			confirm: boolean().optional().describe("Fallback for clients without approval dialogs: true only after the USER approved the URL and the steps"),
 			script: string().min(1).optional().describe("DemoScript path relative to the project (default project/demo.json)")
 		},
 		annotations: {
@@ -256397,8 +257522,12 @@ function createServer(options = {}) {
 			openWorldHint: true
 		}
 	}, safe(async (args) => {
-		const r = await recordDemo(resolveInputPath(args.project_dir, cwd()), {
-			confirm: args.confirm,
+		const root = resolveInputPath(args.project_dir, cwd());
+		const script = await loadDemoScript(root, args.script);
+		const c = await obtainConsent(server, root, demoConsentRequest(script, args.confirm));
+		if (!c.granted) return consentRefused("demo capture not started", c);
+		const r = await recordDemo(root, {
+			confirm: true,
 			...args.script ? { script: args.script } : {},
 			env
 		});

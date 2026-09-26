@@ -3,7 +3,7 @@ name: plan
 description: Turn ingested sources into a video plan without generating anything - infers audience, goal, platform and duration (showing assumptions), proposes and scores hooks, writes project/creative-brief.yaml and a grounded project/video-spec.json, validates both and renders a readable storyboard. Use when the user runs /video-studio:plan, asks for a script, storyboard, hook ideas or a video plan from a document, URL, repo or notes, or before rendering.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+).
-allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__template_list mcp__plugin_video-studio_engine__template_get mcp__plugin_video-studio_engine__spec_scaffold mcp__plugin_video-studio_engine__brief_validate mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__storyboard_render mcp__plugin_video-studio_engine__schema_get Read Write Edit Agent
+allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__source_summary mcp__plugin_video-studio_engine__source_section mcp__plugin_video-studio_engine__template_list mcp__plugin_video-studio_engine__template_get mcp__plugin_video-studio_engine__spec_scaffold mcp__plugin_video-studio_engine__brief_validate mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__storyboard_render mcp__plugin_video-studio_engine__schema_get Read Write Edit Agent
 ---
 
 # Plan a video (story director)
@@ -47,9 +47,17 @@ Load references only when you reach the step that needs them:
    changed file is refreshed in place. Pass `replace: true` only when the
    user wants to start over (existing `claim_refs` may stop resolving).
    If the engine tools are missing, suggest `/video-studio:doctor` and stop.
-3. Read `source/content-ir.json`. For anything larger than a short note,
-   delegate to the `source-researcher` agent for a research brief and use
-   its key facts and refs. Keep a working list: fact → evidence ref(s).
+3. Call `mcp__plugin_video-studio_engine__source_summary {project_dir}`:
+   an outline of the ContentIR (sources, sections with their size and first
+   evidence refs, the top claims with refs, assets, classification). Then
+   call `mcp__plugin_video-studio_engine__source_section {project_dir, id}`
+   for each section you will actually use (id: a section id or an evidence
+   ref): it returns that section's full text, every evidence ref inside it
+   and the claims citing them. **Never Read `source/content-ir.json`
+   whole**; it can be over 1 MB for a repo. For a large source (many
+   sections), delegate to the `source-researcher` agent for a research brief
+   instead and use its key facts and refs. Keep a working list: fact →
+   evidence ref(s), copied exactly from these results.
 4. If there is a `brand.yaml` (the user named one, or `<project_dir>/brand.yaml`),
    read it: `voice.avoid`, `claims.prohibited`, `cta.allowed`,
    `video.caption_preset` and terminology all constrain the script.

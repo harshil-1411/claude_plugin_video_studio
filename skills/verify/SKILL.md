@@ -3,7 +3,7 @@ name: verify
 description: Verify that a video-studio spec is grounded in its sources - which ContentIR claims and evidence each scene cites, which key claims no scene covers, which scenes make statements without claim_refs, and unresolved refs - and fix what it finds by editing the spec. Use when the user runs /video-studio:verify, asks whether a video's claims are backed by the sources, or before rendering a video with grounding strict.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+).
-allowed-tools: mcp__plugin_video-studio_engine__verify Read Edit
+allowed-tools: mcp__plugin_video-studio_engine__verify mcp__plugin_video-studio_engine__source_section Read Edit
 ---
 
 # Verify claim coverage
@@ -31,8 +31,9 @@ Run this loop when verify returns errors, or warnings the user wants cleared:
    finding's `fix` to `project/video-spec.json`, editing only the fields it
    names and keeping every other value:
    - `ungrounded_scene`: add the evidence ref(s) that support the scene's
-     text to its `claim_refs` (the fix suggests the nearest ones; open
-     `source/content-ir.json` to confirm the span says what the scene says).
+     text to its `claim_refs` (the fix suggests the nearest ones; confirm the
+     span says what the scene says with `source_section {project_dir, id:
+     <the ref>}`, which returns the section containing it).
      If no span supports it, reword the voiceover or on-screen text to what
      the sources do say. Never add a ref that does not support the text.
    - `semantic` on `claim_refs.N`: replace the ref with the one the fix names

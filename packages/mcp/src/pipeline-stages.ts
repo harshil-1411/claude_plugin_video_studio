@@ -71,6 +71,7 @@ import {
 } from "@video-studio/schema";
 import { layoutZones } from "@video-studio/platforms";
 import { type BackendChoice, type BackendSet, type SynthesizeSpecResult, defaultBackends, selectBackend, synthesizeSpec } from "@video-studio/voice";
+import { type PolicySummary, recordSpend, resolveVoicePolicy, summarizePolicy } from "./policy.js";
 import { COVER_VERSION, renderCover } from "./cover.js";
 import { type ResolvedMusic, resolveMusic } from "./music.js";
 import { lockFonts } from "./lock.js";
@@ -223,6 +224,10 @@ export interface VoiceStage {
   hasAudio: boolean;
   /** Word timing sources of the voice tracks (`none` without words); native transcripts override it later. */
   timingSource: string;
+  /** The effective policy.yaml this render ran under (recorded in render-state and provenance). */
+  policy: PolicySummary;
+  /** Estimated paid-voice charge of this render (only when a paid backend synthesized something). */
+  paid_voice?: { backend: string; chars: number; estimated_usd: number | null; scenes: string[] };
 }
 
 /**
@@ -237,7 +242,9 @@ export async function stageVoice(run: RenderRun, spec: VideoSpec, brand: Brand |
   // voice.mode none / native: nothing is synthesized, so no backend is asked (the silent one yields empty tracks).
   const mode = voiceMode(spec);
   const narrated = mode === "narrated";
-  const sel = narrated ? await selectBackend(voiceChoice, env, backends) : await selectBackend("silent", env, backends);
+  // policy.yaml: paid backends only when allowed (providers.allow, the spec or the request) and within the spend limits.
+  const vp = await resolveVoicePolicy({ root, spec, brand: brand ?? null, voiceChoice: narrated ? voiceChoice : "silent", env, backends, cacheDir: voiceCacheDir });
+  const sel = narrated ? await selectBackend(voiceChoice, env, backends, { paidGate: vp.gate }) : await selectBackend("silent", env, backends);
   let voice: SynthesizeSpecResult;
   let voiceReason = narrated
     ? sel.reason
@@ -295,10 +302,25 @@ export async function stageVoice(run: RenderRun, spec: VideoSpec, brand: Brand |
       voiceReason += `; word timings estimated (${al.skipped}; with it, captions and cues land exactly)`;
     }
   }
+  // Paid synthesis: record the estimated charge in project/spend.json (spend.project_limit_usd counts it).
+  let paid_voice: VoiceStage["paid_voice"];
+  const decision = vp.decisions[voice.backend];
+  if (decision?.plan.paid) {
+    const hits = new Set(voice.cache_hits);
+    const done = decision.plan.scenes.filter((sc) => !hits.has(sc.scene_id));
+    if (done.length) {
+      const chars = done.reduce((n, sc) => n + sc.chars, 0);
+      const rate = decision.plan.usd_per_1k_chars;
+      const estimated_usd = rate === null ? null : Math.round((chars / 1000) * rate * 10_000) / 10_000;
+      paid_voice = { backend: voice.backend, chars, estimated_usd, scenes: done.map((sc) => sc.scene_id) };
+      await recordSpend(root, { at: run.now().toISOString(), provider: voice.backend, chars, estimated_usd, scenes: paid_voice.scenes, subject: decision.subject });
+      voiceReason += `; ${decision.reason}`;
+    }
+  }
   const trackById = new Map(voice.tracks.map((t) => [t.scene_id, t]));
   const hasAudio = voice.tracks.some((t) => t.audio_path);
   const timingSource = [...new Set(voice.tracks.filter((t) => t.words.length).map((t) => t.timing_source))].join("+") || "none";
-  return { voice, reason: voiceReason, mode, narrated, trackById, hasAudio, timingSource };
+  return { voice, reason: voiceReason, mode, narrated, trackById, hasAudio, timingSource, policy: summarizePolicy(vp.loaded, root), ...(paid_voice ? { paid_voice } : {}) };
 }
 
 // ------------------------------------------------------------------------------------ c0. footage and music

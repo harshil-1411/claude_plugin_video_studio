@@ -44,8 +44,19 @@ Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixe
     - Tool annotations corrected. `variants` never double-queues, resubmits failed and cancelled renders, and skips folders under a live render lock.
     - `FfmpegError.kind` gives actionable first lines, and tool errors carry a `[CODE]` (RENDER_LOCKED, SPEC_INVALID, MODEL_MISSING, FFMPEG_*, REFUSED, NOT_FOUND, CANCELLED).
     - Follow-up: add `cancelled` to the `ExperimentVariant` status enum (it's shown as failed for now).
+  - Step 5 (spend, policy, consent; audit S2):
+    - `packages/mcp/src/policy.ts` loads `policy.yaml`: the user default in plugin data, overridden by `<project>/policy.yaml` or `project/policy.yaml`. An invalid file fails doctor and refuses renders.
+    - `voice: auto` uses ElevenLabs only if `providers.allow` matches, the spec's `voice.provider_preference` names it, or the user explicitly asked; `deny` always wins.
+    - Spend is estimated for uncached scenes (`ELEVENLABS_PRICING`, unverified rates) and tracked in `project/spend.json`, with limits and an approval threshold.
+    - Consent (`consent.ts`, `project/consent.json`) comes from MCP elicitation, where the user answers the engine directly, for paid voice, the whisper download and demo capture; tool flags are only the fallback. Policy is recorded in render-state and provenance.
+    - No skill needs `disable-model-invocation`, since no skill exists only for paid actions; engine gating covers render and create. Privacy, residency, retention and likeness rules are still advisory.
+  - Step 6 (leaner outputs):
+    - `output.ts` `toolResult`: one compact text block plus `structuredContent`. Measured: verify −54%, review −33 to −62%, job_status −61%.
+    - `job_status` takes `since` (cursor deltas while running).
+    - New `source_summary`/`source_section` tools: −88% to −97.6% vs reading `content-ir.json`. The plan, verify and shorts skills and source-researcher use them.
+    - `review` splits sheets into pages of ≤1568 px.
 - **Next:**
-  - Step 5: P1.2 spend and consent controls (policy.yaml loaded, paid voice only when allowed, consent recorded, `disable-model-invocation`).
+  - Step 7: multilingual ASR (`ggml-base`, `language`, detection) and speakers (tinydiarize). Both models are downloaded to the scratchpad and sha256-verified against Hugging Face: base `60ed5bc3…2efe` (147,951,465 B), small.en-tdrz `ceac3ec0…54b4` (487,614,184 B).
 
 ## Where things stand
 

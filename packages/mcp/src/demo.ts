@@ -17,7 +17,8 @@ import { projectSpecPaths } from "./spec-validate.js";
  * spans are the steps actually performed ("actual UI only": screen_capture scenes cite them).
  *
  * Safety: the plugin never starts the app; the caller must pass `confirm: true` after the user
- * approved the URL and steps. Every input, textarea, select and contenteditable is blurred in
+ * approved the URL and steps (the MCP tool asks the user itself through an elicitation dialog
+ * when the client supports it, and records the grant in project/consent.json; see consent.ts). Every input, textarea, select and contenteditable is blurred in
  * the page (plus `mask_selectors`), so typed text and secrets never reach the recording.
  * Chrome is driven through puppeteer-core resolved at runtime (the HyperFrames producer's copy,
  * or one installed next to it); nothing is downloaded.
@@ -199,7 +200,8 @@ function describeStep(s: DemoStep): string {
   }
 }
 
-async function loadScript(root: string, rel?: string): Promise<DemoScript> {
+/** Load and validate the project's DemoScript (inside the project only). */
+export async function loadDemoScript(root: string, rel?: string): Promise<DemoScript> {
   // Inside the project only (the script drives a browser; it must be the project's own file).
   let path: string;
   try {
@@ -263,7 +265,7 @@ export async function recordDemo(projectDir: string, opts: RecordDemoOptions = {
   }
   const root = projectPaths(projectDir).root;
   const env = opts.env ?? process.env;
-  const script = await loadScript(root, opts.script);
+  const script = await loadDemoScript(root, opts.script);
   const now = opts.now ?? (() => Date.now());
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const warnings: string[] = [];

@@ -140,6 +140,8 @@ async function renderProjectLocked(projectDir: string, o: RenderProjectOptions):
   const cover = await stageCover(run, { spec, inputs, planScenes, placements: captions.placements, slotMs: timeline.slotMs, zones, contracts, asm });
 
   const state = await stageRenderState(run, { inputs, target, vs, timingSource, timing, footage, music, cueLog, scenes, captions, audio, asm, cover });
+  state.policy = vs.policy;
+  if (vs.paid_voice) state.paid_voice = vs.paid_voice;
 
   // f'. technical QA on the reel (reused when the reel is unchanged), then persist the state
   const qa = await stageQa(run, state, asm.reel, asm.statePath);
@@ -479,6 +481,8 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
       spec_sha256: state.spec_sha256,
       ...(state.content_ir_sha256 ? { content_ir_sha256: state.content_ir_sha256 } : {}),
       voice: { backend: state.voice.backend, timing_source: state.voice.timing_source, ...(state.voice_mode ? { mode: state.voice_mode } : {}) },
+      ...(state.policy ? { policy: { sources: state.policy.sources, effective: state.policy.effective, enforced: state.policy.enforced } } : {}),
+      ...(state.paid_voice ? { paid_voice: state.paid_voice } : {}),
       ...(state.music ? { music: { file: state.music.ref, ...(state.music.title ? { title: state.music.title } : {}), license: state.music.license ?? null } } : {}),
       ...(state.footage?.length ? { footage: state.footage.map((f) => ({ asset: f.asset, file: f.path, sha256: f.sha256, scenes: f.scenes })) } : {}),
       ...(state.sfx?.length ? { sfx: state.sfx.map((x) => ({ file: x.file, sha256: x.sha256, scenes: x.scenes, license: x.license ?? null })) } : {}),

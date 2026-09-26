@@ -56,12 +56,17 @@ only after a transcript.
    {project_dir, asset}`. It runs whisper.cpp locally.
    - If the user has captions for it (.srt or .vtt), prefer those: pass
      `captions_file` (a path relative to the project folder).
-   - If `transcribe` says the whisper model is missing, **ask the user
-     first**. Tell them the size (about 148 MB), the source (Hugging Face,
-     `ggerganov/whisper.cpp`) and that it is stored in the plugin data folder.
-     Only after they agree, call it again with `download_model: true`. Never
-     pass `download_model: true` without that yes. If they decline, offer the
-     caption-file route.
+   - If the whisper model is missing and the client can show an approval
+     dialog, the engine asks the user itself (size about 148 MB, source,
+     destination) and records the answer in `project/consent.json`; a
+     `REFUSED` result with `asked_user: true` means they declined: do not
+     retry, offer the caption-file route.
+   - If `transcribe` instead says the model is missing (`MODEL_MISSING`, no
+     dialog available), **ask the user first**. Tell them the size (about
+     148 MB), the source (Hugging Face, `ggerganov/whisper.cpp`) and that it
+     is stored in the plugin data folder. Only after they agree, call it
+     again with `download_model: true`. Never pass `download_model: true`
+     without that yes. If they decline, offer the caption-file route.
 3. After transcribing, report the word and sentence counts and the first
    evidence refs (for example `video:talk.mp4#t=12.3-18.9`). Specs cite these
    refs in `claim_refs`.

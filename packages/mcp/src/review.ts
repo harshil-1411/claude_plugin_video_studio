@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { projectPaths } from "@video-studio/core";
 import { escapeFilterOption, escapeFilterPath, escapeFiltergraph, runFfmpeg } from "@video-studio/media";
@@ -69,10 +69,19 @@ export interface ReviewResult {
   quality?: Quality;
   source: string;
   mode: ReviewMode;
-  /** Absolute path of the JPEG. */
+  /** Absolute path of the (first) JPEG; kept for compatibility, see `images`. */
   image: string;
-  /** Project-relative path of the JPEG. */
+  /** Project-relative path of the (first) JPEG. */
   image_rel: string;
+  /**
+   * Every JPEG, in order. One unless the grid would exceed {@link REVIEW_MAX_IMAGE_PX} on a side
+   * (the vision downscale limit): then it is split into `<name>-p1.jpg`, `-p2.jpg`, … Read them all.
+   */
+  images: string[];
+  images_rel: string[];
+  /** Per image: its grid, the tile index range [first, last] and the scenes on it. */
+  pages: ReviewPage[];
+  /** Grid of the first image. */
   cols: number;
   rows: number;
   tile_width: number;
@@ -85,8 +94,25 @@ export interface ReviewResult {
   notes: string[];
 }
 
-/** Largest number of tiles in one image (keeps it readable and fast). */
+export interface ReviewPage {
+  image: string;
+  image_rel: string;
+  cols: number;
+  rows: number;
+  tiles: [number, number];
+  scenes: string[];
+  /** Scenes on this image with lint findings. */
+  flagged?: string[];
+}
+
+/** Largest number of tiles in one image, and in a strip, crop or `times` review overall. */
 export const REVIEW_MAX_TILES = 48;
+/** Largest number of tiles in a whole-video contact sheet (split over several images): 30 scenes × 3. */
+export const REVIEW_MAX_SHEET_TILES = 90;
+/** Longest image side in px: Claude's vision input downscales anything larger, making labels unreadable. */
+export const REVIEW_MAX_IMAGE_PX = 1568;
+const PAD = 4;
+const MARGIN = 4;
 const DEFAULT_WIDTH: Record<ReviewMode, number> = { sheet: 240, strip: 180, crop: 540 };
 const DEFAULT_COLS: Record<ReviewMode, number> = { sheet: 6, strip: 8, crop: 2 };
 
@@ -217,8 +243,9 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
       tiles = [0.25, 0.5, 0.75].map((f) => ({ time: clamp(dur * f) }));
       notes.push("no render state with scene timings: sampled 25%, 50% and 75%");
     } else {
-      // Three tiles per scene; long videos drop to mid + out, then mid only, so every scene shows.
-      const per = list.length * 3 <= REVIEW_MAX_TILES ? 3 : list.length * 2 <= REVIEW_MAX_TILES ? 2 : 1;
+      // Three tiles per scene (split over several images when needed); very long videos drop to
+      // mid + out, then mid only, so every scene shows.
+      const per = list.length * 3 <= REVIEW_MAX_SHEET_TILES ? 3 : list.length * 2 <= REVIEW_MAX_SHEET_TILES ? 2 : 1;
       if (per < 3) notes.push(`${list.length} scenes: ${per === 2 ? "middle and closing" : "middle"} frame of each (use scene for all three)`);
       tiles = list.flatMap((s) => {
         const len = s.end - s.start;
@@ -231,9 +258,11 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
       });
     }
   }
-  if (tiles.length > REVIEW_MAX_TILES) {
-    notes.push(`${tiles.length} tiles requested; showing the first ${REVIEW_MAX_TILES} (review one scene at a time with scene)`);
-    tiles = tiles.slice(0, REVIEW_MAX_TILES);
+  const wholeSheet = mode === "sheet" && !opts.times?.length && !only && spans.length > 0;
+  const maxTiles = wholeSheet ? REVIEW_MAX_SHEET_TILES : REVIEW_MAX_TILES;
+  if (tiles.length > maxTiles) {
+    notes.push(`${tiles.length} tiles requested; showing the first ${maxTiles} (review one scene at a time with scene)`);
+    tiles = tiles.slice(0, maxTiles);
   }
 
   let crop = "";
@@ -249,9 +278,17 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
     }
   }
 
-  const width = Math.max(64, Math.round(opts.width ?? DEFAULT_WIDTH[mode]));
-  const cols = Math.max(1, Math.min(opts.cols ?? DEFAULT_COLS[mode], tiles.length));
-  const rows = Math.ceil(tiles.length / cols);
+  // Tile aspect (h/w) of the frame or the crop region, for the image-size budget.
+  const aspect = mode === "crop" && opts.crop ? (opts.crop.h * r.height) / Math.max(1e-6, opts.crop.w * r.width) : r.height / r.width;
+  const layout = planSheets(tiles.length, {
+    width: Math.max(64, Math.round(opts.width ?? DEFAULT_WIDTH[mode])),
+    aspect,
+    cols: opts.cols ?? DEFAULT_COLS[mode],
+    // Keep a scene's in/mid/out together on one row when the sheet shows three per scene.
+    group: mode === "sheet" && !opts.times?.length && tiles.length % 3 === 0 && tiles.every((x, i) => x.tag === ["in", "mid", "out"][i % 3]) ? 3 : 1,
+  });
+  const width = layout.width;
+  notes.push(...layout.notes);
 
   const outDir = join(projectPaths(r.root).root, "qa", "review");
   const work = join(outDir, ".work");
@@ -288,12 +325,15 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
   const flagged = flagScenes(findings, mode === "strip" ? [] : cues, spans.map((s) => s.id)).filter((f) => inImage.has(f.scene_id));
   applyFlags(out, flagged);
   if (mode === "strip") applyCues(out, cues, spans, frame);
+  const pageOf = (i: number) => layout.pages.findIndex(([a, b]) => i >= a && i <= b);
   try {
     for (const [i, tile] of out.entries()) {
       const draw = tileDecor(tile, width, haveFont ? font : undefined);
       // Input-side seek is accurate when re-encoding and much faster than decoding from the start.
       // A seek onto the reel's final frame can come back empty: step back a frame at a time.
-      const png = join(work, `${String(i + 1).padStart(4, "0")}.png`);
+      const p = pageOf(i);
+      await mkdir(join(work, `p${p}`), { recursive: true });
+      const png = join(work, `p${p}`, `${String(i - layout.pages[p]![0] + 1).padStart(4, "0")}.png`);
       for (let back = 0; back < 4 && !existsSync(png); back++) {
         const at = Math.max(0, tile.time_sec - back * frame);
         await runFfmpeg(["-y", "-ss", at.toFixed(3), "-i", r.reel, "-frames:v", "1", "-vf", `${crop}scale=${width}:-2:flags=bicubic${draw}`, png], { timeoutMs: 60_000 });
@@ -306,20 +346,35 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
     }
     for (const tile of out) if (tile.cues) tile.label += ` cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`;
     if (!haveFont) notes.push("bundled fonts not found: tiles are unlabelled; use the tiles list for times");
-    const name = `${mode}-${r.quality ?? "render"}${opts.scene ? `-${opts.scene}` : ""}.jpg`;
-    const image = join(outDir, name);
-    await runFfmpeg(
-      ["-y", "-framerate", "1", "-i", join(work, "%04d.png"), "-vf", `tile=${cols}x${rows}:padding=4:margin=4:color=0x808080`, "-frames:v", "1", "-q:v", "3", image],
-      { timeoutMs: 60_000 },
-    );
+    const base = `${mode}-${r.quality ?? "render"}${opts.scene ? `-${opts.scene}` : ""}`;
+    // Drop this review's images from an earlier run (a split sheet may now have fewer pages).
+    const stale = (f: string) => f === `${base}.jpg` || (f.startsWith(`${base}-p`) && /^\d+\.jpg$/.test(f.slice(base.length + 2)));
+    for (const f of await readdir(outDir)) if (stale(f)) await rm(join(outDir, f), { force: true });
+    const pages: ReviewPage[] = [];
+    for (const [p, [a, b]] of layout.pages.entries()) {
+      const n = b - a + 1;
+      const cols = Math.min(layout.cols, n);
+      const rows = Math.ceil(n / cols);
+      const image = join(outDir, layout.pages.length === 1 ? `${base}.jpg` : `${base}-p${p + 1}.jpg`);
+      await runFfmpeg(
+        ["-y", "-framerate", "1", "-i", join(work, `p${p}`, "%04d.png"), "-vf", `tile=${cols}x${rows}:padding=${PAD}:margin=${MARGIN}:color=0x808080`, "-frames:v", "1", "-q:v", "3", image],
+        { timeoutMs: 60_000 },
+      );
+      const scenes = [...new Set(out.slice(a, b + 1).map((x) => x.scene_id).filter((x): x is string => Boolean(x)))];
+      const flaggedHere = flagged.filter((f) => scenes.includes(f.scene_id)).map((f) => f.scene_id);
+      pages.push({ image, image_rel: relative(r.root, image), cols, rows, tiles: [a, b], scenes, ...(flaggedHere.length ? { flagged: flaggedHere } : {}) });
+    }
     return {
       ...(r.quality ? { quality: r.quality } : {}),
       source: r.source,
       mode,
-      image,
-      image_rel: relative(r.root, image),
-      cols,
-      rows,
+      image: pages[0]!.image,
+      image_rel: pages[0]!.image_rel,
+      images: pages.map((p) => p.image),
+      images_rel: pages.map((p) => p.image_rel),
+      pages,
+      cols: pages[0]!.cols,
+      rows: pages[0]!.rows,
       tile_width: width,
       tiles: out,
       flagged,
@@ -332,8 +387,18 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
 }
 
 export function formatReview(r: ReviewResult): string {
+  const pages = r.pages ?? [];
   const lines = [
-    `review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${r.cols}×${r.rows} → ${r.image}`.replace(/ {2}/g, " "),
+    (pages.length > 1
+      ? `review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${pages.length} images (each ≤ ${REVIEW_MAX_IMAGE_PX} px; Read every one, flagged first):`
+      : `review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${r.cols}×${r.rows} → ${r.image}`
+    ).replace(/ {2}/g, " "),
+    ...(pages.length > 1
+      ? pages.map(
+          (p, i) =>
+            `  ${i + 1}. ${p.image} (${p.cols}×${p.rows}, tiles ${p.tiles[0] + 1}-${p.tiles[1] + 1}${p.scenes.length ? `, ${p.scenes[0]}${p.scenes.length > 1 ? `–${p.scenes[p.scenes.length - 1]}` : ""}` : ""}${p.flagged?.length ? `; flagged ${p.flagged.join(", ")}` : ""})`,
+        )
+      : []),
     ...(r.flagged.length
       ? [
           `flagged (bordered tiles; look here first): ${r.flagged.map((f) => `${f.scene_id}: ${[...new Map(f.findings.map((x) => [x.id, x.severity])).entries()].map(([id, sev]) => `${id} (${sev})`).join(", ")}`).join("; ")}`,
@@ -344,8 +409,73 @@ export function formatReview(r: ReviewResult): string {
     ...(r.tiles.some((t) => t.cues)
       ? [`word cues: ${r.tiles.flatMap((t) => (t.cues ?? []).map((w) => `"${w}" at ${t.time_sec.toFixed(2)}s (tile ${t.index + 1})`)).join(", ")}; check the cued item is appearing on that tile`]
       : []),
-    "Read the image and check: text fits and is readable, nothing sits under captions or app UI, graphics land when their words are spoken, crops keep faces and subjects, transitions are clean.",
+    `Read the image${pages.length > 1 ? "s" : ""} and check: text fits and is readable, nothing sits under captions or app UI, graphics land when their words are spoken, crops keep faces and subjects, transitions are clean.`,
     ...r.notes.map((n) => `note: ${n}`),
   ];
   return lines.join("\n");
+}
+
+export interface SheetPlanInput {
+  /** Requested tile width in px. */
+  width: number;
+  /** Tile height / width (of the frame, or of the crop region). */
+  aspect: number;
+  /** Requested columns. */
+  cols: number;
+  /** Tiles that belong together (a scene's in/mid/out): rows and images never split a group. */
+  group?: number;
+  /** Longest image side (default {@link REVIEW_MAX_IMAGE_PX}). */
+  maxPx?: number;
+  /** Most tiles per image (default {@link REVIEW_MAX_TILES}). */
+  maxPerImage?: number;
+}
+
+export interface SheetPlan {
+  /** Tile width actually used (reduced only when a single tile would not fit). */
+  width: number;
+  /** Tile height (even, as ffmpeg's scale=w:-2 makes it). */
+  height: number;
+  cols: number;
+  rowsPerImage: number;
+  /** Tile index ranges [first, last] per image. */
+  pages: Array<[number, number]>;
+  notes: string[];
+}
+
+/** Pixel extent of `k` tiles of size `s` with the tile filter's padding and margin. */
+export function gridPx(k: number, s: number): number {
+  return k * s + (k - 1) * PAD + 2 * MARGIN;
+}
+
+/**
+ * Lay `n` tiles out over as few images as possible with every image ≤ maxPx on both sides, so
+ * nothing is downscaled before Claude sees it. Columns shrink before tiles do; tiles shrink only
+ * when a single tile would not fit. Groups (a scene's three frames) stay on one row and one image.
+ */
+export function planSheets(n: number, o: SheetPlanInput): SheetPlan {
+  const maxPx = o.maxPx ?? REVIEW_MAX_IMAGE_PX;
+  const maxPer = Math.max(1, o.maxPerImage ?? REVIEW_MAX_TILES);
+  const group = Math.max(1, o.group ?? 1);
+  const notes: string[] = [];
+  const even = (x: number) => Math.max(2, 2 * Math.round(x / 2));
+  let width = Math.max(2, Math.round(o.width));
+  const inner = maxPx - 2 * MARGIN;
+  if (width > inner) width = inner - (inner % 2);
+  let height = even(width * o.aspect);
+  if (height > inner) {
+    width = Math.max(2, Math.floor(inner / o.aspect) - (Math.floor(inner / o.aspect) % 2));
+    height = even(width * o.aspect);
+  }
+  if (width !== Math.round(o.width)) notes.push(`tile width reduced to ${width}px so each image stays within ${maxPx}px`);
+  const colsFit = Math.max(1, Math.floor((inner + PAD) / (width + PAD)));
+  let cols = Math.max(1, Math.min(Math.round(o.cols), colsFit, Math.max(1, n)));
+  if (cols < Math.min(Math.round(o.cols), n)) notes.push(`${cols} columns (not ${o.cols}) so each image stays within ${maxPx}px wide`);
+  if (group > 1 && cols >= group) cols -= cols % group;
+  const rowsFit = Math.max(1, Math.floor((inner + PAD) / (height + PAD)));
+  const perImage = Math.max(1, Math.floor(Math.min(cols * rowsFit, maxPer) / cols) * cols);
+  const pages: Array<[number, number]> = [];
+  for (let a = 0; a < n; a += perImage) pages.push([a, Math.min(n, a + perImage) - 1]);
+  if (!pages.length) pages.push([0, -1]);
+  if (pages.length > 1) notes.push(`${n} tiles split over ${pages.length} images of up to ${perImage} (${cols}×${Math.ceil(perImage / cols)}) so labels stay readable`);
+  return { width, height, cols, rowsPerImage: Math.ceil(perImage / cols), pages, notes };
 }

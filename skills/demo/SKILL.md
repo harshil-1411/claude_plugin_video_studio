@@ -20,8 +20,15 @@ The plugin never starts an app. The user starts it and gives you the URL.
    one flow, 5–15 steps, `max_duration_sec` ≤ 60. Add `mask_selectors` for
    anything sensitive on screen (API keys, emails, account names); inputs are
    always blurred. Use dummy data for anything typed.
-3. Show the user the URL, the steps and the masked selectors, and ask them to
-   confirm. Only then call `demo {project_dir, confirm: true}`.
+3. Show the user the URL, the steps and the masked selectors. Then call
+   `demo {project_dir}`: when the client supports approval dialogs, the
+   engine shows the user the URL and steps itself and records their answer
+   in `project/consent.json` (an unchanged script is not asked again). A
+   `REFUSED` result with `asked_user: true` means they declined: stop. With
+   `consent_required: true` (no dialog available), ask the user to confirm in
+   chat and only after a clear yes call `demo {project_dir, confirm: true}`.
+   Never pass `confirm: true` without that yes, and never record a URL that
+   is not the user's own running app.
 4. If it fails: a missing selector → fix the step; no puppeteer-core → the
    HyperFrames install from `doctor`; no Chrome → install Google Chrome.
 5. Report the recording and its step timestamps. In the plan, use

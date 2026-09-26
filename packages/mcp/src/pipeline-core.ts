@@ -253,6 +253,10 @@ export interface RenderState {
   style?: string;
   /** Sound-event cues added to the captions ([music], sfx captions, [ambient sound]). */
   sound_events?: number;
+  /** policy.yaml in effect (sources + merged policy + what the engine enforced). */
+  policy?: import("./policy.js").PolicySummary;
+  /** Estimated paid-voice charge of this render (also appended to project/spend.json). */
+  paid_voice?: { backend: string; chars: number; estimated_usd: number | null; scenes: string[] };
 }
 
 export const toPosix = (p: string) => p.split(sep).join("/");

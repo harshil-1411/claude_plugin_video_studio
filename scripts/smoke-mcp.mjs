@@ -34,6 +34,8 @@ const expected = [
   "review",
   "schema_get",
   "shorts",
+  "source_section",
+  "source_summary",
   "spec_scaffold",
   "spec_validate",
   "storyboard_render",

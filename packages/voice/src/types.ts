@@ -46,4 +46,11 @@ export interface VoiceBackend {
   resolveVoice?(requested: string | undefined, env: Env, language?: string): Promise<string | undefined>;
   /** Options that change the output, folded into the cache key (rate, model, ...). */
   cacheOptions?(): Record<string, unknown>;
+  /**
+   * True when synthesis costs money (a paid API). `auto` only picks a paid backend when the caller's
+   * policy gate allows it. Unset: paid if the id is in PAID_BACKEND_IDS (elevenlabs).
+   */
+  readonly paid?: boolean;
+  /** Estimated price per 1,000 characters in USD, or null when unknown (see ELEVENLABS_PRICING). */
+  usdPer1kChars?(): number | null;
 }

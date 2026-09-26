@@ -9,8 +9,13 @@ allowed-tools: mcp__plugin_video-studio_engine__review Read
 # Review a render
 
 You can't watch the video, but you can look at it. The `review` tool writes
-an image of labelled frames (scene id, `in`/`mid`/`out`, time) to
-`qa/review/` and returns the path; Read it.
+images of labelled frames (scene id, `in`/`mid`/`out`, time) to
+`qa/review/` and returns their paths in `images` (`image` is the first).
+Each image stays within the ~1568 px vision limit so labels stay readable:
+a long video's contact sheet is split into `sheet-<quality>-p1.jpg`,
+`-p2.jpg`, …, three frames per scene, and `pages` says which scenes (and
+which flagged scenes) each image holds. Read every image, flagged ones
+first.
 
 ## 1. Contact sheet first
 
@@ -19,7 +24,8 @@ an image of labelled frames (scene id, `in`/`mid`/`out`, time) to
 scenes with findings get a red (error) or amber (warning) border, and the
 result's `flagged` list names each scene's findings (e.g. `s03:
 text_overflow (error)`). **Look at the flagged tiles first** and confirm
-each finding by eye; then check every scene:
+each finding by eye (the result's `pages[].flagged` says which image they
+are on); then check every scene:
 
 - **Text:** fits its box, readable at phone size, nothing cut off, no stray
   characters (e.g. a number glued to its unit).
@@ -52,5 +58,5 @@ terms (shorter `on_screen_text`, a different `motion`, `footage.focus`, a
 cue on a later word). When the user asked you to fix things (or you are in
 the render or create flow), edit the spec, re-render (only changed scenes
 re-render) and review again. Don't claim a render looks right without
-having Read the image. To let the user watch two versions (preview and
+having Read every image of the review. To let the user watch two versions (preview and
 final, or before and after a fix) in sync, suggest the `compare` skill.

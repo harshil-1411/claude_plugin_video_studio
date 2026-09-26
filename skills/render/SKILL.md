@@ -8,9 +8,16 @@ allowed-tools: mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-
 
 # Render a video
 
-Rendering is local and free: no paid API is called unless an ElevenLabs key
-is configured (then `voice: "auto"` uses it). Work in the project folder
-that holds `project/video-spec.json`; pass absolute paths.
+Rendering is local and free. The only paid API is ElevenLabs, and the engine
+uses it only when a key is configured **and** it is allowed: `policy.yaml`
+(`<project>/policy.yaml`, `project/policy.yaml`, or the user default in the
+plugin data folder) lists it in `providers.allow`, the spec names it in
+`voice.provider_preference`, or the user asked for `voice: "elevenlabs"`.
+Otherwise `voice: "auto"` uses the system voice and `voice.reason` says why
+the key was not used. Never add `providers.allow`, `provider_preference` or
+`voice: "elevenlabs"` on your own; only when the user asks for ElevenLabs.
+Work in the project folder that holds `project/video-spec.json`; pass
+absolute paths.
 
 ## 1. Check the spec
 
@@ -25,9 +32,22 @@ default to `auto`). It returns a `job_id` immediately. Only pass `voice` /
 `renderer` if the user asked (`silent` for no narration, `ffmpeg` to skip
 HyperFrames). `burn_in_captions: false` keeps captions only as sidecars.
 
+Paid voice and spend limits (`policy.yaml` `spend`): above
+`project_limit_usd` / `scene_limit_usd` the engine refuses ElevenLabs; above
+`approval_above_usd` it asks the user itself in an approval dialog (what,
+how many characters, estimated cost) and records the answer in
+`project/consent.json`. If `render_submit` returns `REFUSED` with
+`consent_required: true` (the client has no approval dialog), tell the user
+the characters and estimated cost from the message, ask them, and only after
+a clear yes call it again with `approve_paid_voice: true`, or with
+`voice: "system"` if they say no. `asked_user: true` means the user already
+answered in the dialog: do not ask again or retry.
+
 ## 3. Poll
 
-Call `job_status {job_id}` every 10-20 seconds. Tell the user the stage in
+Call `job_status {job_id}` every 10-20 seconds, passing the previous
+result's `cursor` as `since` so you only get what changed (the full result
+arrives once when the job finishes). Tell the user the stage in
 one short line when it changes (voice, scene 3/6, assemble, QA, export); do
 not repeat identical updates. A preview of a 30 s reel usually takes well
 under a minute; a final render several minutes. Other submissions queue:
@@ -79,7 +99,9 @@ From `result`:
 - **Voice and renderer used, and why**: quote `voice.reason` and
   `renderer.reasons` briefly. If the voice fell back to silent, say why
   (e.g. no system TTS in this environment) and how to get narration
-  (`voice: "system"` on macOS/Linux, or an ElevenLabs key via `/plugin`).
+  (`voice: "system"` on macOS/Linux, or ElevenLabs: a key via `/plugin`
+  plus the user's permission in `policy.yaml` `providers.allow`). If a
+  configured ElevenLabs key was not used, quote the policy reason.
   If HyperFrames was skipped, say the ffmpeg renderer drew the scenes and
   offer the optional setup below.
 - **Timing adjustments**: scenes whose narration ran long were extended in

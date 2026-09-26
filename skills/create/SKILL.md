@@ -75,8 +75,12 @@ Ask the user to choose:
 - **Stop**: leave the files as they are.
 
 Never start anything that costs money without an explicit approval.
-Rendering is local and free; it only calls ElevenLabs if the user
-configured a key (then say so before rendering).
+Rendering is local and free. ElevenLabs (paid) is used only when a key is
+configured and `policy.yaml` `providers.allow` or the spec's
+`voice.provider_preference` allows it, and the engine enforces the
+`policy.yaml` spend limits and asks the user in an approval dialog above
+`spend.approval_above_usd` (see the render skill). Never add ElevenLabs to
+the policy or the spec unless the user asks for it.
 
 ## 5. Render a preview
 

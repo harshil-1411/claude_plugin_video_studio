@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:video-studio:schema:policy",
   "title": "Policy",
-  "description": "policy.yaml: provider allow/deny globs, data-class routing, residency, retention, likeness consent, spend limits and grounding. Only the parts listed in docs/HANDOFF.md are enforced by the engine; the rest is advisory until the provider phase.",
+  "description": "policy.yaml (<project>/policy.yaml or <project>/project/policy.yaml, over an optional user default at ${CLAUDE_PLUGIN_DATA}/policy.yaml; objects merge, the project wins). Enforced by the engine today: providers.allow/deny for paid voice backends (ElevenLabs: voice auto uses a paid backend only when providers.allow matches it or the spec's voice.provider_preference or the render request names it; providers.deny always wins), and spend.project_limit_usd / scene_limit_usd (refuse paid voice above them, from a per-character estimate and project/spend.json) and spend.approval_above_usd (above it, or with no price estimate while any limit is set, the user must approve; recorded in project/consent.json). The effective policy is recorded in render-state and provenance. privacy, residency, retention, likeness and grounding are validated and recorded but advisory until the provider phase.",
   "additionalProperties": false,
   "properties": {
     "grounding": {

@@ -3,7 +3,7 @@ name: shorts
 description: Find the best standalone short clips (20-60 s by default) in a long recording such as a founder interview, podcast or talk, then write a talking-head VideoSpec for each chosen clip that plays the original footage and sound. Use when the user runs /video-studio:shorts, or asks to cut a long video into shorts, reels or clips.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+), a system ffmpeg, and whisper.cpp or a caption file for the transcript.
-allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__transcribe mcp__plugin_video-studio_engine__shorts mcp__plugin_video-studio_engine__schema_get mcp__plugin_video-studio_engine__spec_validate Read Write
+allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__transcribe mcp__plugin_video-studio_engine__shorts mcp__plugin_video-studio_engine__schema_get mcp__plugin_video-studio_engine__spec_validate Read Write mcp__plugin_video-studio_engine__source_summary
 ---
 
 # Long recording → short clips
@@ -17,7 +17,8 @@ that were not said.
 1. Use the project folder the user named, else the cwd (absolute path).
 2. If the video is not ingested yet, call `ingest {project_dir, inputs:
    [<video path>]}`. Note the video asset id (for example `asset-1`).
-3. If the asset has no `media.transcript` in `source/content-ir.json`, call
+3. If the asset has no transcript (`source_summary` lists each asset's
+   `transcript`), call
    `transcribe {project_dir, asset}`.
    - If the user has a .srt or .vtt for it, use `captions_file` instead.
    - If the whisper model is missing, **ask the user before downloading it**

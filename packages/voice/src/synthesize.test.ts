@@ -76,6 +76,18 @@ describe("selectBackend", () => {
     expect(sel.reason).toMatch(/elevenlabs unavailable: .*placeholder/);
   });
 
+  it("a paid gate skips a refused paid backend in auto and rejects it when requested explicitly", async () => {
+    const backends = set({ eleven: true, system: true });
+    const gate = (id: string, explicit: boolean) => (explicit ? null : `${id} not allowed by policy`);
+    const auto = await selectBackend("auto", {}, backends, { paidGate: gate });
+    expect(auto.backend.id).toBe("system");
+    expect(auto.reason).toBe("auto: elevenlabs not allowed by policy; using system (available)");
+    expect((await selectBackend("elevenlabs", {}, backends, { paidGate: gate })).backend.id).toBe("elevenlabs");
+    await expect(selectBackend("elevenlabs", {}, backends, { paidGate: () => "denied" })).rejects.toThrow(/unavailable: denied/);
+    // Only paid backends are gated.
+    expect((await selectBackend("auto", {}, { ...backends, elevenlabs: { ...backends.elevenlabs, paid: false } }, { paidGate: () => "no" })).backend.id).toBe("elevenlabs");
+  });
+
   it("honours explicit choices and rejects unavailable ones", async () => {
     const backends = set({ eleven: false, system: true });
     expect((await selectBackend("system", {}, backends)).backend.id).toBe("system");

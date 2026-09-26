@@ -13,6 +13,24 @@ export const DEFAULT_ELEVENLABS_MODEL = "eleven_multilingual_v2";
 export const DEFAULT_ELEVENLABS_OUTPUT = "mp3_44100_128";
 /** "Rachel", a stock premade voice; override with spec.voice.voice_id or ELEVENLABS_VOICE_ID. */
 export const DEFAULT_ELEVENLABS_VOICE = "21m00Tcm4TlvDq8ikWAM";
+/**
+ * Estimated ElevenLabs API price in USD per 1,000 characters, by model. Used only to check
+ * policy.yaml spend limits before synthesis, so it errs high.
+ * Source: elevenlabs.io/pricing/api (pay-as-you-go API rates, noted 2025; not re-verified from
+ * this sandbox, and subscription plans bill characters differently). A model missing here has no
+ * estimate: spend limits then require the user's explicit approval instead of an automatic check.
+ */
+export const ELEVENLABS_PRICING = {
+  source: "https://elevenlabs.io/pricing/api",
+  noted: "2025 (unverified)",
+  usd_per_1k_chars: {
+    eleven_multilingual_v2: 0.1,
+    eleven_v3: 0.1,
+    eleven_turbo_v2_5: 0.05,
+    eleven_flash_v2_5: 0.05,
+  } as Readonly<Record<string, number>>,
+} as const;
+
 /** Per-request character budget; well under every current model's limit (5k for eleven_v3). */
 export const DEFAULT_CHUNK_CHARS = 2500;
 
@@ -270,6 +288,8 @@ export function createElevenLabsBackend(options: ElevenLabsOptions = {}): Omit<V
 
   return {
     id: "elevenlabs",
+    paid: true,
+    usdPer1kChars: () => ELEVENLABS_PRICING.usd_per_1k_chars[modelId] ?? null,
     available,
     synthesize,
     resolveVoice,

@@ -570,11 +570,16 @@ describe("voice fallback after a synthesis failure", () => {
     "auto: a failing ElevenLabs falls back to the system voice, not straight to silent",
     async () => {
       const dir = await makeProject("voice-fallback");
+      // Paid voices need policy permission (voice auto never picks one on a key alone).
+      await writeFile(join(dir, "project", "policy.yaml"), "version: 1\nproviders: {allow: [elevenlabs]}\n");
       const r = await renderProject(dir, opts({ voice: "auto", voiceBackends: { system: longSystem, elevenlabs: failingEleven } }));
       expect(r.voice.backend).toBe("system");
       expect(r.voice.has_audio).toBe(true);
       expect(r.voice.reason).toMatch(/using elevenlabs .*elevenlabs failed at synthesis \(ElevenLabs 401 invalid api key\); fell back to the system voice \(fake say\)/);
       expect(r.voice.reason).not.toMatch(/silent/);
+      // The render state and provenance record the policy the render ran under.
+      const prov = JSON.parse(await readFile(r.dist.provenance, "utf8"));
+      expect(prov.render.policy).toMatchObject({ sources: [{ scope: "project", path: "project/policy.yaml" }], effective: { providers: { allow: ["elevenlabs"] } } });
     },
     T,
   );
@@ -583,6 +588,7 @@ describe("voice fallback after a synthesis failure", () => {
     "auto: when the system voice fails too, the reason says so before falling back to silent",
     async () => {
       const dir = await makeProject("voice-fallback-silent");
+      await writeFile(join(dir, "project", "policy.yaml"), "version: 1\nproviders: {allow: [elevenlabs]}\n");
       const r = await renderProject(dir, opts({ voice: "auto", voiceBackends: { system: failingSystem, elevenlabs: failingEleven } }));
       expect(r.voice.backend).toBe("silent");
       expect(r.voice.reason).toMatch(/elevenlabs failed at synthesis .*; system also failed at synthesis \(say exited with code 1\); falling back to silent \(no audio\)/);

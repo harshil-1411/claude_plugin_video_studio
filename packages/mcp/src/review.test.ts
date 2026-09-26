@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ffprobe, runFfmpeg } from "@video-studio/media";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { LintFinding } from "./lint.js";
-import { REVIEW_MAX_TILES, type ReviewTile, applyCues, applyFlags, flagScenes, formatReview, reviewRender, tileDecor } from "./review.js";
+import { REVIEW_MAX_IMAGE_PX, REVIEW_MAX_TILES, type ReviewTile, gridPx, planSheets, applyCues, applyFlags, flagScenes, formatReview, reviewRender, tileDecor } from "./review.js";
 
 let dir: string;
 
@@ -45,6 +45,8 @@ describe("review", () => {
     expect(formatReview(r)).toMatch(/Read the image/);
     // The work folder is cleaned up.
     expect(await readdir(join(dir, "qa", "review"))).toEqual(["sheet-preview.jpg"]);
+    expect(r.images).toEqual([r.image]);
+    expect(r.pages).toHaveLength(1);
   }, 60_000);
 
   it("strip: every frame of one scene", async () => {
@@ -81,7 +83,7 @@ describe("review", () => {
     expect(r.tiles.every((t) => t.time_sec <= 2.934)).toBe(true);
   }, 60_000);
 
-  it("long videos keep every scene on the sheet (fewer tiles per scene)", async () => {
+  it("long videos keep three tiles per scene, split over images within the vision limit", async () => {
     const many = join(dir, "..", `${Date.now()}-many`);
     await mkdir(join(many, "renders", "preview"), { recursive: true });
     const { copyFile } = await import("node:fs/promises");
@@ -89,14 +91,51 @@ describe("review", () => {
     const scenes = Array.from({ length: 20 }, (_, i) => ({ scene_id: `s${String(i + 1).padStart(2, "0")}`, duration_ms: 150 }));
     await writeFile(join(many, "renders", "preview", "render-state.json"), JSON.stringify({ quality: "preview", reel: "renders/preview/reel.mp4", target: { width: 180, height: 320, fps: 15 }, duration_ms: 3000, scenes }));
     try {
+      // 20 scenes x 3 = 60 tiles; at most 48 per image, so two images.
       const r = await reviewRender(many, { quality: "preview", width: 64 });
-      expect(r.tiles).toHaveLength(40);
+      expect(r.tiles).toHaveLength(60);
       expect(new Set(r.tiles.map((t) => t.scene_id)).size).toBe(20);
-      expect(r.notes.join(" ")).toMatch(/20 scenes: middle and closing frame of each/);
+      expect(r.images.map((i) => i.split("/").pop())).toEqual(["sheet-preview-p1.jpg", "sheet-preview-p2.jpg"]);
+      expect(r.image).toBe(r.images[0]);
+      expect(r.pages.map((p) => p.tiles)).toEqual([[0, 47], [48, 59]]);
+      expect(r.pages[1]!.scenes).toEqual(["s17", "s18", "s19", "s20"]);
+      for (const img of r.images) {
+        const p = await ffprobe(img);
+        expect(Math.max(p.width, p.height)).toBeLessThanOrEqual(REVIEW_MAX_IMAGE_PX);
+      }
+      expect(formatReview(r)).toMatch(/in 2 images/);
+      // A later single-image review of the same name removes the stale pages.
+      const one = await reviewRender(many, { quality: "preview", width: 64, cols: 60 });
+      expect(one.images).toHaveLength(2);
+      const again = await reviewRender(many, { quality: "preview", scene: "s01" });
+      expect(again.images).toHaveLength(1);
+      expect((await readdir(join(many, "qa", "review"))).sort()).toEqual(["sheet-preview-p1.jpg", "sheet-preview-p2.jpg", "sheet-preview-s01.jpg"]);
     } finally {
       await rm(many, { recursive: true, force: true });
     }
   }, 120_000);
+
+  it("plans sheets within the vision limit, keeping scenes whole", () => {
+    // 16 scenes of 9:16 at 240 px: 6 columns, 3 rows per image → 3 images (18, 18, 12 tiles).
+    const p = planSheets(48, { width: 240, aspect: 1920 / 1080, cols: 6, group: 3 });
+    expect([p.width, p.height, p.cols, p.rowsPerImage]).toEqual([240, 426, 6, 3]);
+    expect(p.pages).toEqual([[0, 17], [18, 35], [36, 47]]);
+    expect(gridPx(p.cols, p.width)).toBeLessThanOrEqual(REVIEW_MAX_IMAGE_PX);
+    expect(gridPx(p.rowsPerImage, p.height)).toBeLessThanOrEqual(REVIEW_MAX_IMAGE_PX);
+    // Small sheets stay one image.
+    expect(planSheets(9, { width: 240, aspect: 1920 / 1080, cols: 6, group: 3 }).pages).toEqual([[0, 8]]);
+    // Too many columns for the width: fewer columns, still a multiple of the group.
+    const wide = planSheets(30, { width: 400, aspect: 9 / 16, cols: 6, group: 3 });
+    expect(wide.cols).toBe(3);
+    expect(gridPx(wide.cols, wide.width)).toBeLessThanOrEqual(REVIEW_MAX_IMAGE_PX);
+    // A single tile taller than the limit shrinks.
+    const tall = planSheets(2, { width: 1080, aspect: 1920 / 1080, cols: 2 });
+    expect(gridPx(1, tall.height)).toBeLessThanOrEqual(REVIEW_MAX_IMAGE_PX);
+    expect(tall.notes.join(" ")).toMatch(/tile width reduced/);
+    // Full pages are a multiple of the columns (strip: 48 frames at 180x320, 8 columns).
+    const strip = planSheets(48, { width: 180, aspect: 320 / 180, cols: 8 });
+    expect(strip.pages).toEqual([[0, 31], [32, 47]]);
+  });
 
   it("explains bad input", async () => {
     await expect(reviewRender(dir, { mode: "crop" })).rejects.toThrow(/needs crop/);

@@ -7,6 +7,7 @@ import { resolveDataDir } from "@video-studio/core";
 import { hasEnvValue as hasValue, locateFfTool, parseBuildconf, which } from "@video-studio/media";
 import { bestNaturalVoice, parseSayVoices } from "@video-studio/voice";
 import { checkHyperframes } from "./hyperframes.js";
+import { describePolicy, loadPolicy, providerRule } from "./policy.js";
 
 // ffmpeg/ffprobe location and buildconf parsing live in @video-studio/media (shared with the render path).
 export { parseBuildconf, which };
@@ -370,7 +371,33 @@ export async function checkDataDir(deps: DoctorDeps): Promise<Check> {
       };
 }
 
-export async function runDoctor(deps: DoctorDeps = defaultDoctorDeps()): Promise<DoctorReport> {
+/**
+ * policy.yaml in effect (user default in the plugin data dir, overridden by the project's) and
+ * what it means for paid providers. An invalid file fails: renders refuse until it is fixed.
+ */
+export async function checkPolicy(env: Env, projectDir?: string): Promise<Check> {
+  try {
+    const lp = await loadPolicy(projectDir, env);
+    const keyNote =
+      hasValue(env.ELEVENLABS_API_KEY) && providerRule(lp.policy, "elevenlabs").allowed !== true
+        ? "; ELEVENLABS_API_KEY is set but voice auto will not use it (not in providers.allow): request voice elevenlabs or add it to policy.yaml"
+        : "";
+    return {
+      id: "policy",
+      status: "ok",
+      detail: `${describePolicy(lp)}${projectDir ? "" : " (user default only; pass project_dir for a project's policy)"}${keyNote}`,
+    };
+  } catch (err) {
+    return {
+      id: "policy",
+      status: "fail",
+      detail: err instanceof Error ? err.message : String(err),
+      fix: "Fix policy.yaml (schema_get policy; version: 1) or remove it; renders refuse while it is invalid.",
+    };
+  }
+}
+
+export async function runDoctor(deps: DoctorDeps = defaultDoctorDeps(), opts: { projectDir?: string } = {}): Promise<DoctorReport> {
   const checks: Check[] = [checkNode(deps.nodeVersion), await checkSqlite(deps)];
   const ffmpeg = await resolveFfTool("ffmpeg", deps);
   const ffprobe = await resolveFfTool("ffprobe", deps);
@@ -381,7 +408,7 @@ export async function runDoctor(deps: DoctorDeps = defaultDoctorDeps()): Promise
   const voice = await checkSystemVoice(deps);
   if (voice) checks.push(voice);
   const keys = checkProviderKeys(deps.env);
-  checks.push(keys.check, await checkDataDir(deps));
+  checks.push(keys.check, await checkPolicy(deps.env, opts.projectDir), await checkDataDir(deps));
   const overall: CheckStatus = checks.some((c) => c.status === "fail")
     ? "fail"
     : checks.some((c) => c.status === "warn")
