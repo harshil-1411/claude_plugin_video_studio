@@ -160,4 +160,28 @@ describe("variants tool with render: true", () => {
       await jobs.close();
     }
   });
+
+  it("variants tool: durations make paired cuts with duration_sec in the output; bad lengths are refused", async () => {
+    const server = createServer({ cwd: () => base, jobs: new RenderJobManager({ ledgerPath: null, env: {}, run: async () => ({}) as RenderProjectResult }) });
+    const client = new Client({ name: "test", version: "0.0.0" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    try {
+      const r = (await client.callTool({ name: "variants", arguments: { project_dir: base, durations: [15, 30] } })) as CallToolResult;
+      expect(r.isError).toBeFalsy();
+      const out = r.structuredContent as { variants: Array<{ id: string; duration_sec?: number }>; notes: string[] };
+      expect(out.variants.map((v) => [v.id, v.duration_sec])).toEqual([
+        ["statement-15s", 15],
+        ["statement-30s", 30],
+        ["question-15s", 15],
+        ["question-30s", 30],
+      ]);
+      expect(r.content.map((c) => (c.type === "text" ? c.text : "")).join("\n")).toMatch(/statement-15s \(hook statement, 15s cut\)/);
+      const bad = (await client.callTool({ name: "variants", arguments: { project_dir: base, durations: [200] } })) as CallToolResult;
+      expect(bad.isError).toBe(true);
+      expect(bad.content.map((c) => (c.type === "text" ? c.text : "")).join("\n")).toMatch(/200s is outside youtube_shorts/);
+    } finally {
+      await client.close();
+    }
+  });
 });

@@ -98,9 +98,25 @@ Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and th
      - **Known limits:**
        - `motion_density` counts sudden changes only. Crossfades and smooth motion don't count, so calibrate against the user's reference in W5.
        - Template `pacing` density fields are not read yet. W3 has the plan skill copy them into `spec.acceptance`.
-   - **Next: W3.**
-     - Lane A: `plan`/`create` inputs interview and beat-plan gate, `skills/plan/references/code-motion.md`, creative-director reviews stills against acceptance.
-     - Lane B: 6 templates (inputs and pacing), style `avoid` lists and version bumps, `variants` durations, hook check.
+   - **W3 done (2026-09-27).**
+     - **Lane A:**
+       - `template_get` and summaries return the inputs and density pacing.
+       - `brief_validate` runs `checkTemplateInputs`: a missing required input is an error; defaulted, unknown or off-list answers are warnings.
+       - `spec_scaffold` resolves acceptance (template pacing, overridden by the brief), and sets `master.loop`, `synth:` music notes and `motion` placeholders (`motion/<id>.html`).
+       - New `skills/plan/references/code-motion.md`: the contract, the kit, the lint rules, craft rules and a worked 9:16 example (it lints clean).
+       - `plan` asks for inputs first and turns vague asks into acceptance numbers. The `create` gate shows the beat plan, and `stills`/`compare` run after the preview.
+       - The creative director checks pacing, acceptance and on-screen banned effects.
+     - **Lane B:**
+       - 6 templates: `ui-morph-loop`, `kinetic-type`, `ambient-loop`, `slides-narrated`, `topic-explainer-9`, `product-hero` (24 in total).
+       - Style packs are at v2, with `avoid` lists.
+       - `variants` takes `durations` (paired cuts, sharing `retimeSpec` with `adapt`).
+       - Hook-strength check in `hooks.md`; contributor docs.
+     - **Lead:**
+       - `ExperimentVariant.duration_sec` in the schema, set by `variants`;
+       - personal intro and showreel pieces map to `kinetic-type` with `motion` scenes, not `product-hero`.
+   - **Next: W4.**
+     - Lane A: Phase 7 step 0 (`packages/prompts`, `provider-specs/*.yaml`, `prompt_pack` tool and skill).
+     - Lane B: the series bible.
 4. **Phase 7**, paid providers, ElevenLabs first (needs the user's API key). Step 0 comes first and is local: shot cards, `provider-specs/`, and `prompt_pack` (no keys, no network). The `policy.yaml`, spend and consent machinery it needs is now in place.
 5. **Phase 9**, publishing (needs platform developer accounts). Default targets are Instagram and YouTube Shorts: the user is in India, where TikTok is banned.
 
@@ -169,7 +185,7 @@ Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixe
 |---|---|
 | 0 Foundation | Done: pnpm/TS monorepo, zod schemas → `schemas/*.json`, core (cache, SQLite ledger, jobs), MCP server bundled to `dist/mcp.mjs` |
 | 1 Ingestion | Done: text, markdown, URL, local `.html`, PDF, DOCX, PPTX, repo, video/audio, clip folders → ContentIR |
-| 2 Planning | Done: 18 templates, `plan`/`create`, brief and strict-grounding spec validation, storyboard |
+| 2 Planning | Done: 24 templates, `plan`/`create`, brief and strict-grounding spec validation, storyboard |
 | 3 Local render | Done: `say`/silent voice, FFmpeg + HyperFrames (0.8.78) + footage renderers, captions, assembly, QA, export |
 | 4 Platform compiler | Done: per-platform `dist/<target>/`, `video.lock`, lint, verify/test/diff, covers (CI removed by the user) |
 | 5 Reel grammar | Done: 15 scene kinds, style packs, CC0 music beds, `voice.mode: none`, variants/adapt |

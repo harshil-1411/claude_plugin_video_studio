@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { writeFileAtomic } from "@video-studio/core";
 import {
+  type Acceptance,
   type AspectRatio,
   ContentIR,
   CreativeBrief,
@@ -127,10 +128,70 @@ export async function validateBrief(projectDir: string, templatesDir: string | n
           fix: "consider a hook with a preferred mechanism, or keep it and note why in assumptions",
         });
       }
+      checkTemplateInputs(tpl, brief, result);
     }
   }
   result.ok = result.errors.length === 0;
   return result;
+}
+
+/**
+ * The template's inputs against the brief's answers: a required input with no answer and no default
+ * blocks planning; a defaulted one is used but must be surfaced as an assumption.
+ */
+export function checkTemplateInputs(tpl: Template, brief: CreativeBrief, out: { errors: PlanIssue[]; warnings: PlanIssue[] }): void {
+  const answers = brief.inputs ?? {};
+  const inputs = tpl.inputs ?? [];
+  for (const input of inputs) {
+    const answer = answers[input.id]?.trim();
+    const path = `inputs.${input.id}`;
+    if (!answer) {
+      if (!input.required) continue;
+      if (input.default === undefined) {
+        out.errors.push({
+          path,
+          message: `template "${tpl.id}" needs input "${input.id}" and the brief has no answer`,
+          fix: `ask the user: "${input.prompt}"${input.options ? ` (${input.options.join(" / ")})` : ""}, then set inputs.${input.id} in the brief`,
+        });
+      } else {
+        out.warnings.push({
+          path,
+          message: `input "${input.id}" was not answered, so the template default "${input.default}" applies`,
+          fix: `list it in assumptions ({field: "${path}", value: "${input.default}", reason}) so the user can confirm, or ask: "${input.prompt}"`,
+        });
+      }
+      continue;
+    }
+    if (input.options && !input.options.includes(answer)) {
+      out.warnings.push({
+        path,
+        message: `answer "${answer}" is not one of the options for "${input.id}" (${input.options.join(", ")})`,
+        fix: `use one of: ${input.options.join(", ")}`,
+      });
+    }
+  }
+  const known = new Set(inputs.map((i) => i.id));
+  for (const id of Object.keys(answers)) {
+    if (known.has(id)) continue;
+    out.warnings.push({
+      path: `inputs.${id}`,
+      message: `template "${tpl.id}" has no input "${id}"`,
+      fix: known.size ? `use one of the template's input ids (${[...known].join(", ")}) or drop it` : "this template declares no inputs; drop it or keep it as a note",
+    });
+  }
+}
+
+/**
+ * The spec's acceptance checks: the template's pacing density fields, overridden field by field by
+ * the brief's acceptance. Undefined when neither sets anything (older templates stay unchanged).
+ */
+export function resolveAcceptance(tpl: Template, brief: CreativeBrief | null): Acceptance | undefined {
+  const merged: Acceptance = {
+    ...(tpl.pacing.min_changes_per_sec !== undefined ? { min_changes_per_sec: tpl.pacing.min_changes_per_sec } : {}),
+    ...(tpl.pacing.max_frozen_pct !== undefined ? { max_frozen_pct: tpl.pacing.max_frozen_pct } : {}),
+    ...(brief?.acceptance ?? {}),
+  };
+  return Object.keys(merged).length ? merged : undefined;
 }
 
 export function formatIssues(title: string, r: { ok: boolean; errors: PlanIssue[]; warnings: PlanIssue[] }): string {
@@ -141,6 +202,9 @@ export function formatIssues(title: string, r: { ok: boolean; errors: PlanIssue[
 }
 
 // ---------------------------------------------------------------- spec_scaffold
+
+/** Where a scaffolded `motion` scene's page lives, relative to the project folder. */
+const motionPage = (sceneId: string) => `motion/${sceneId}.html`;
 
 /** Visual strategies that show real footage (a `footage` block per scene). */
 const FOOTAGE_STRATEGIES = new Set<string>(["user_asset", "screen_capture"]);
@@ -282,11 +346,29 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
       visual_requirements: { continuity_refs: [] },
       claim_refs: [],
     };
-    if (b.suggested_deterministic_kind) scene.deterministic = { kind: b.suggested_deterministic_kind, props: {} };
+    if (b.suggested_deterministic_kind === "motion") {
+      // The plan writes the page next to the spec's project folder and fills text[] with every on-screen word.
+      scene.deterministic = { kind: "motion", props: { html: motionPage(scene.id), text: [] } };
+    } else if (b.suggested_deterministic_kind) scene.deterministic = { kind: b.suggested_deterministic_kind, props: {} };
     if (b.suggested_visual_strategy === "generated_video") scene.visual_requirements = { continuity_refs: [], modality: "video" };
     if (FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy)) scene.audio = { mode: sceneAudioMode };
     return scene;
   });
+
+  const acceptance = resolveAcceptance(tpl, brief);
+  if (acceptance) {
+    notes.push(
+      `acceptance ${JSON.stringify(acceptance)} copied into the spec (${brief?.acceptance ? "the brief's values win over the template's" : "from the template's pacing"}); QA and lint hold the render to it`,
+    );
+  }
+  if (beats.some((b) => b.suggested_deterministic_kind === "motion")) {
+    notes.push(
+      "motion scenes: write each page at its props.html (see skills/plan/references/code-motion.md), put every on-screen word in props.text, then spec_validate (motion stage) and stills on downbeats before rendering",
+    );
+  }
+  if (music?.startsWith("synth:")) {
+    notes.push(`music "${music}" is synthesized locally with an exact beat grid: set audio.beat_sync {enabled: true, snap: "downbeat"} so cuts land on bar starts`);
+  }
 
   const spec: VideoSpec = {
     schema_version: "1.0",
@@ -296,7 +378,7 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
     audience: brief?.audience ?? "TODO: audience",
     platform,
     aspect_ratio: aspect,
-    master: defaultMaster(aspect),
+    master: acceptance?.loop ? { ...defaultMaster(aspect), loop: true } : defaultMaster(aspect),
     ...(targets.length ? { targets } : {}),
     target_duration_sec: target,
     language: brief?.language ?? "en-US",
@@ -306,6 +388,7 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
     captions: { preset: tpl.caption_preset, burn_in: mode !== "none" },
     ...(style ? { style } : {}),
     ...(music ? { audio: { music: { file: music } } } : {}),
+    ...(acceptance ? { acceptance } : {}),
     scenes,
   };
 
@@ -322,7 +405,13 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
       word_budget: mode !== "narrated" ? Math.max(3, Math.floor((durations[i]! - 1) * 3)) : Math.floor(durations[i]! * tpl.pacing.max_words_per_sec),
       suggested_visual_strategy: b.suggested_visual_strategy,
       ...(b.suggested_deterministic_kind
-        ? { suggested_deterministic_kind: b.suggested_deterministic_kind, props_example: DETERMINISTIC_PROPS_EXAMPLES[b.suggested_deterministic_kind] }
+        ? {
+            suggested_deterministic_kind: b.suggested_deterministic_kind,
+            props_example:
+              b.suggested_deterministic_kind === "motion"
+                ? { ...DETERMINISTIC_PROPS_EXAMPLES.motion, html: motionPage(scenes[i]!.id) }
+                : DETERMINISTIC_PROPS_EXAMPLES[b.suggested_deterministic_kind],
+          }
         : {}),
       ...(FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy)
         ? {

@@ -384,14 +384,14 @@ describe("style packs", () => {
       const dir = await makeProject("styled", { ...spec, style: "energetic" });
       const r = await renderProject(dir, opts({ voice: "silent" }));
       const state = JSON.parse(await readFile(join(dir, "renders", "preview", "render-state.json"), "utf8"));
-      expect(state.style).toBe("energetic@1");
-      expect(state.tool_versions.style).toBe("energetic@1");
+      expect(state.style).toBe("energetic@2");
+      expect(state.tool_versions.style).toBe("energetic@2");
       expect(state.background).toBe("#160B33");
       const hook = state.scenes[0].text_boxes.find((b: { role: string }) => b.role === "hook");
       expect(hook.text).toBe("SEARCH FINDS WORDS");
       expect(hook.color).toBe("#FFFFFF");
       const lock = (await readLock(r.dist.lock))!;
-      expect(lock.tools.style).toBe("energetic@1");
+      expect(lock.tools.style).toBe("energetic@2");
       // Bundled Inter Bold for the 800 heading, Regular for the 500 body (the lock records bundled weights).
       expect(lock.fonts.map((f) => `${f.family}@${f.weight}:${f.file}`)).toEqual(expect.arrayContaining(["Inter@700:fonts/Inter/Inter-Bold.ttf", "Inter@400:fonts/Inter/Inter-Regular.ttf"]));
 
@@ -399,7 +399,7 @@ describe("style packs", () => {
       await writeFile(join(dir, "project", "video-spec.json"), JSON.stringify({ ...spec, style: "minimal" }, null, 2));
       const m = await renderProject(dir, opts({ voice: "silent" }));
       const lock2 = (await readLock(m.dist.lock))!;
-      expect(lock2.tools.style).toBe("minimal@1");
+      expect(lock2.tools.style).toBe("minimal@2");
       expect(lock2.scenes.map((x) => x.cache_key)).not.toEqual(lock.scenes.map((x) => x.cache_key));
     },
     T,

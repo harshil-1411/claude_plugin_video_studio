@@ -1,0 +1,94 @@
+# Archetype: a short product hero piece - every claim demonstrated, ending on a hero shot.
+schema_version: "1.0"
+id: product-hero
+name: Product hero
+description: A short, music-driven hero piece for one product - each selling point shown by a visible demonstration and backed by supplied evidence, the real logo and price composited in, ending on a hero shot with a slow push-in.
+goals: [launch, promote, announce]
+platforms: [instagram_reels, youtube_shorts, tiktok, linkedin, x]
+default_aspect_ratio: "9:16"
+default_duration_sec: 15
+duration_range: { min_sec: 8, max_sec: 30 }
+pacing: { avg_shot_sec: 1.8, max_words_per_sec: 2.5, min_changes_per_sec: 0.8, max_frozen_pct: 12 }
+caption_preset: bold
+voice_mode: none
+default_style: minimal
+default_music: "synth:drive"
+inputs:
+  - id: product
+    prompt: Which product is it, and what is its URL (if it has one)?
+    kind: text
+    required: true
+  - id: selling_points
+    prompt: What are the selling points (two or three), and what is the evidence for each - a clip, a measurement, a source?
+    kind: text
+    required: true
+  - id: photo
+    prompt: Which product photo should the hero shot use? (a clean, high-resolution shot)
+    kind: asset
+    required: true
+  - id: demo_clips
+    prompt: Do you have clips or screen recordings that show each selling point working?
+    kind: asset
+    required: false
+  - id: logo
+    prompt: Which logo file should appear (SVG or PNG)?
+    kind: asset
+    required: false
+    default: the logo in brand.yaml, or the product name set in type
+  - id: price
+    prompt: Should a price or offer appear? If so, exactly what?
+    kind: text
+    required: false
+  - id: reference
+    prompt: Is there a reference video whose pace or look you want to match?
+    kind: asset
+    required: false
+  - id: music
+    prompt: Do you have a licensed track, or may I synthesize an original score locally?
+    kind: choice
+    options: [synthesize a score, my licensed track]
+    required: false
+    default: synthesize a score
+beats:
+  - purpose: hook
+    share: 0.12
+    guidance: The product in motion on frame one - the most striking angle or the moment it works; no logo yet.
+    suggested_visual_strategy: user_asset
+  - purpose: problem
+    share: 0.13
+    guidance: One beat of the pain the product removes, shown, not told.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: demo
+    share: 0.2
+    guidance: Selling point 1, demonstrated on screen - the clip or UI doing the thing - with at most four words of type.
+    suggested_visual_strategy: user_asset
+  - purpose: demo
+    share: 0.2
+    guidance: Selling point 2 (and 3 if short), each with its own visible demonstration.
+    suggested_visual_strategy: screen_capture
+  - purpose: proof
+    share: 0.13
+    guidance: The supplied evidence - the measurement, review count or source - as a stat, cited in claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: stat
+  - purpose: reveal
+    share: 0.12
+    guidance: The hero shot - the product photo with a slow push-in, held long enough to read.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: end_card
+    share: 0.1
+    guidance: The push-in settles; the real logo and, if supplied, the exact price are composited on it.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: end_card
+hook_mechanisms: [demo, pattern_interrupt, before_after, promise]
+rules:
+  - "Every selling point has a visible demonstration (a clip, screen capture or UI state of the real product) and supplied evidence; a point without both is cut, not illustrated."
+  - "The logo and the price are composited from the supplied files and text, never generated or redrawn; the price is copied exactly."
+  - "The product is always the real product from the supplied photo or clips; never generate or restyle it."
+  - "Ends on the hero shot: the product photo with a slow, steady push-in (about 3-6 % scale over the shot, closed-form easing, no bounce) that settles under the end card."
+  - "About 0.8 big changes per second, cuts on the score's downbeats (audio.beat_sync.snap downbeat), at most 12 % frozen; the hero shot is the one long hold."
+  - "voice.mode is none; on-screen words are short (four words or fewer per shot) and every claim cites claim_refs."
+  - "Declare effects in props.effects; nothing from the style's motion.avoid list."
+  - CTA must be an allowed brand CTA if a brand profile is present; otherwise it lives in the post copy.

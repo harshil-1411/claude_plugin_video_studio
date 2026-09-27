@@ -1,7 +1,7 @@
 # Loud and fast: deep purple, yellow accent, extra-bold upper-case headings, springy staggered entrances.
 id: energetic
 name: Energetic
-version: 1
+version: 2
 description: Deep purple with a yellow accent and pink secondary, extra-bold upper-case headings a size larger, spring entrances with a fast stagger and whip transitions. For launches, listicles and hooks that must stop the scroll.
 palette:
   background: "#160B33"
@@ -27,3 +27,4 @@ motion:
   stagger_ms: 70
   transition: whip
   transition_ms: 250
+  avoid: [shake, rgb_split, lens_flare, particle_burst, neon_glow, grid_floor]

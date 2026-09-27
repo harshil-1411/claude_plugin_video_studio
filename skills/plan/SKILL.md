@@ -3,7 +3,7 @@ name: plan
 description: Turn ingested sources into a video plan without generating anything - infers audience, goal, platform and duration (showing assumptions), proposes and scores hooks, writes project/creative-brief.yaml and a grounded project/video-spec.json, validates both and renders a readable storyboard. Use when the user runs /video-studio:plan, asks for a script, storyboard, hook ideas or a video plan from a document, URL, repo or notes, or before rendering.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+).
-allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__source_summary mcp__plugin_video-studio_engine__source_section mcp__plugin_video-studio_engine__template_list mcp__plugin_video-studio_engine__template_get mcp__plugin_video-studio_engine__spec_scaffold mcp__plugin_video-studio_engine__brief_validate mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__storyboard_render mcp__plugin_video-studio_engine__schema_get mcp__plugin_video-studio_engine__footage_look mcp__plugin_video-studio_engine__footage_notes Read Write Edit Agent
+allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__source_summary mcp__plugin_video-studio_engine__source_section mcp__plugin_video-studio_engine__template_list mcp__plugin_video-studio_engine__template_get mcp__plugin_video-studio_engine__spec_scaffold mcp__plugin_video-studio_engine__brief_validate mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__storyboard_render mcp__plugin_video-studio_engine__schema_get mcp__plugin_video-studio_engine__footage_look mcp__plugin_video-studio_engine__footage_notes mcp__plugin_video-studio_engine__stills AskUserQuestion Read Write Edit Agent
 ---
 
 # Plan a video (story director)
@@ -21,6 +21,9 @@ Load references only when you reach the step that needs them:
   payoff, callback, CTA), pattern interrupts, retention checks, and how they
   map to `purpose`, `motion` and `transition`.
 - `references/visual-strategy.md`: scene content → `visual_strategy` + kind.
+- `references/code-motion.md`: writing a `motion` page (contract, kit,
+  lint, craft rules, banned effects, the stills loop). Load it only when
+  the spec gets a `motion` scene.
 
 ## Safety rules (always)
 
@@ -73,10 +76,19 @@ Infer the rest from the sources and the request (defaults in
 
 Ask the user only when a value cannot be reasonably inferred **and** a wrong
 guess would waste the plan (usually the desired action or the audience for a
-generic source). At most 1-2 short questions, in one message, each with your
-proposed default. Otherwise proceed and let the user correct the assumptions.
+generic source). Hold those questions for step 3's inputs round, so the
+user answers once. Otherwise proceed and let the user correct the assumptions.
 
-### 3. Template
+**Ambition becomes numbers.** Turn vague superlatives ("go all out", "make
+it pop", "like the reference", "premium") into `brief.acceptance` and say so
+in `assumptions` (field `acceptance`). For a social reel that means about
+`min_changes_per_sec: 1`, `max_frozen_pct: 5`, `max_static_sec: 1.5`,
+`hold_ms: 400`; add `loop: true` for "loop", "seamless" or ambient pieces.
+When the user gave a reference video, calibrate the numbers to it after the
+first preview (`compare`). A plain explainer needs no acceptance: the
+template's pacing applies.
+
+### 3. Template and inputs
 
 Call `template_list`, pick the template (reel grammar) whose beats fit the
 goal and the source, then `template_get {id}`. Follow its beats (purpose,
@@ -102,12 +114,40 @@ share of duration, guidance), pacing and rules. Beats come before scenes.
 | Daily-life clips with their own sound, a few words of text | `silent-vlog` |
 | Close-up, tactile loops, crisp sound, no text | `oddly-satisfying` |
 | A few long, calm takes with natural sound (optional soft bed) | `ambient-slice-of-life` |
+| A UI that changes state: one shape morphing, never cut, looping | `ui-morph-loop` |
+| Exact words as full-frame kinetic type on music; a personal intro or showreel (with `motion` scenes) | `kinetic-type` |
+| A calm, seamless loop (background, ambient brand piece) | `ambient-loop` |
+| A deck or slides with narration | `slides-narrated` |
+| A topic explained in about 9 shots (~45 s), one look throughout | `topic-explainer-9` |
+| A product as the hero: showcase, launch teaser | `product-hero` |
 
 The five footage archetypes need ingested video (ContentIR assets of kind
 `video`, or `image` for stills); `talking-head` also needs the clip's
 transcript (captions come from it). Pick `text-over-music` when the user asks for no voice, music only, or
 "text on screen"; any other template can also run without voice by passing
 `voice_mode: "none"` to `spec_scaffold`.
+
+**Inputs first.** `template_get` returns `inputs[]` `{id, prompt, kind,
+required, options?, default?}`. Before writing anything, ask for the
+required ones the request doesn't already answer, together with any
+step-2 question, in **one** round of **at most 3-4 questions**
+(AskUserQuestion when available, else one short message). Give each
+question 2-4 choices with your proposed default first, e.g. "Reference
+video: (a) I'll attach one, (b) none, match the template's pace".
+
+- For showcase, intro, promo and launch reels, always ask for a
+  **reference video** (the pace to match) and, when a person or product is
+  the subject, a **photo** (portrait or product shot), even if the
+  template doesn't list them.
+- Music: a **licensed track** the user owns (a project file plus its
+  licence) or a **synthesized score** (`synth:<preset>`: `pulse` 120 BPM,
+  `lofi` 80, `ambient` 60, `drive` 128; generated locally, CC0, exact beat
+  grid). Default to synth for music-led pieces.
+- Ingest what they give (a clip or photo becomes a ContentIR asset).
+- Record every answer in `brief.inputs` (`{input id: answer}`: the text,
+  the choice, or the asset id / project file). An unanswered input with a
+  `default` uses it; list it in `assumptions`. `brief_validate` errors on a
+  required input with neither.
 
 ### 4. Hooks
 
@@ -125,7 +165,8 @@ Prefer the template's `hook_mechanisms`.
 Write `<project_dir>/project/creative-brief.yaml` (fields in
 `references/brief-and-spec-fields.md`; `template` = the template id;
 `chosen_hook` = the exact text of a candidate; `key_messages` = 2-4 grounded
-points). Call `brief_validate {project_dir}` and fix every error before going on.
+points; `inputs` and `acceptance` from steps 2-3). Call `brief_validate
+{project_dir}` and fix every error before going on.
 
 ### 6. Spec
 
@@ -134,15 +175,20 @@ points). Call `brief_validate {project_dir}` and fix every error before going on
    disk) with one scene per beat and timing, plus `master` (the production
    canvas), `targets` (platform contract ids, e.g. `instagram`, `tiktok`,
    `youtube-shorts`), the template's `style`, and for music-led templates
-   `voice.mode: "none"` and `audio.music`. Keep its structure unless the story needs a
+   `voice.mode: "none"` and `audio.music`. It copies `acceptance` into the
+   spec (the brief's numbers win over the template's pacing), sets
+   `master.loop` for looping pieces, and gives `motion` beats
+   `props {html: "motion/<id>.html", text: []}`. Keep its structure unless the story needs a
    beat split or merged; keep ids `s01`, `s02`, ... in order.
    - `style`: `minimal` (quiet, clean), `editorial` (story and quotes),
      `technical` (code, diagrams), `energetic` (bold, fast cuts). Pass the
      user's choice; otherwise keep the template default.
    - `music`: `bundled:ambient` (calm), `bundled:lofi` (relaxed),
-     `bundled:upbeat` (energetic), `bundled:minimal`. A user's own track is
-     a project-relative path and needs `audio.music.license` (only a track
-     they have the rights to). Narrated videos have no music unless asked.
+     `bundled:upbeat` (energetic), `bundled:minimal`, or a synthesized
+     score `synth:pulse|lofi|ambient|drive` (override e.g. `synth: {bpm:
+     124, seed: 3}`). A user's own track is a project-relative path and
+     needs `audio.music.license` (only a track they have the rights to).
+     Narrated videos have no music unless asked.
 2. Fill every scene following `references/script-writing.md` and
    `references/visual-strategy.md`:
    - **One idea per scene.** A second idea means a second scene.
@@ -151,7 +197,8 @@ points). Call `brief_validate {project_dir}` and fix every error before going on
      `contrarian_claim` or `story` scene), order the points from least to
      most surprising, close the loop in a `payoff`/`result`/`reveal`/
      `loop_back` scene that calls back to the hook, then one CTA. Plan a
-     visual change every 2-4 s with `motion {pattern, intensity?}`
+     visual change every 2-4 s (about every second when `acceptance`
+     asks for it: that takes `motion` scenes) with `motion {pattern, intensity?}`
      (`push_in`, `pull_out`, `punch`, `reveal`, `drift`, `hold`) and
      `transition`, varied rather than repeated. Lint warns
      (`story_structure`) when the tension or the payoff is missing.
@@ -184,9 +231,19 @@ points). Call `brief_validate {project_dir}` and fix every error before going on
    - With `voice.mode: "native"` (talking head): every `voiceover` stays
      `""`; pick spans on sentence boundaries from the asset transcript;
      captions come from it automatically.
-   - `audio.beat_sync {enabled: true, tolerance_ms?}` (music-led footage
-     reels): the render moves cuts onto beats of the bed (±250 ms by
+   - `audio.beat_sync {enabled: true, snap?, tolerance_ms?}` (music-led
+     pieces): the render moves cuts onto beats of the bed (±250 ms by
      default) and reports it as timing adjustments; the spec is unchanged.
+     Use `snap: "downbeat"` for music-led reels so cuts land on bar starts,
+     and size scenes in whole bars (at 120 BPM a bar is 2 s).
+   - **Reference-grade motion** (the brief has `acceptance` with about one
+     change per second, or the idea needs one shape morphing, full-frame
+     type or colour flips): make those scenes `motion` and write each page
+     following `references/code-motion.md`, with every on-screen word in
+     `props.text`. Plan each state change on the beat grid (list it as
+     `time → state` per scene; the create skill shows it at approval).
+     Run its loop (`spec_validate`, then `stills` on downbeats) before
+     hand-off.
    - `voiceover` written for the ear: short sentences, contractions, no
      parentheses, spell out symbols. Duration ≈ words ÷ 2.3-2.8 (+0.3 s
      breath). Scene 1 is the chosen hook, verbatim or nearly.
@@ -240,6 +297,9 @@ Call `storyboard_render {project_dir}` and present:
    corrections.
 3. **Storyboard**: the table from `storyboard.md` (scene, time, purpose,
    voiceover, on-screen text, visual, refs). Do not re-describe it.
+   For music-led or `motion` pieces add the **beat plan** (every state or
+   cut with its time and beat/bar), the `acceptance` numbers, and the
+   style and music chosen.
 4. **Validation**: passed, or the remaining errors.
 5. **Flags**: suspicious source instructions, thin sources, PII/secrets.
 6. **Next step**: offer revisions (hook, tone, length, a scene), or, once

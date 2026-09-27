@@ -579,7 +579,9 @@ describe("taste guard, acceptance and loop seam", () => {
     const stylesDir = mkdtempSync(join(tmpdir(), "vs-lint-styles-"));
     writeFileSync(join(stylesDir, "README.md"), "styles\n");
     const raw = readFileSync(join(import.meta.dirname, "..", "..", "..", "styles", "minimal.yaml"), "utf8");
-    writeFileSync(join(stylesDir, "minimal.yaml"), raw.replace(/\n  transition_ms: (\d+)/, "\n  transition_ms: $1\n  avoid: [shake, neon_glow]"));
+    // The shipped minimal pack avoids every stock effect, neon_glow included.
+    expect(raw).toMatch(/\n  avoid: \[[^\]]*neon_glow/);
+    writeFileSync(join(stylesDir, "minimal.yaml"), raw);
     const dir = project((s) => {
       s.style = "minimal";
       s.scenes[0].deterministic = { kind: "motion", props: { html: "motion/a.html", text: ["Captions hide"], effects: ["neon_glow"] } };

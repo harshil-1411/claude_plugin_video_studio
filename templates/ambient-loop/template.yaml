@@ -1,0 +1,77 @@
+# Archetype: a calm, seamless loop - a locked frame where only small regions move.
+schema_version: "1.0"
+id: ambient-loop
+name: Ambient loop
+description: A calm, seamlessly looping piece - a desk, a window, a product on a shelf - with the background locked and motion only in small regions (steam, light, a blinking cursor, water). Every cyclic motion completes within the loop, on a synthesized ambient score.
+goals: [promote, announce, educate]
+platforms: [instagram_reels, youtube_shorts, tiktok, linkedin, youtube]
+default_aspect_ratio: "9:16"
+default_duration_sec: 12
+duration_range: { min_sec: 6, max_sec: 60 }
+pacing: { avg_shot_sec: 6, max_words_per_sec: 1.5, min_changes_per_sec: 0.1, max_frozen_pct: 30 }
+caption_preset: minimal
+voice_mode: none
+default_style: minimal
+default_music: "synth:ambient"
+inputs:
+  - id: scene
+    prompt: What should the loop show - the place, the object, and what moves in it?
+    kind: text
+    required: true
+  - id: photo
+    prompt: Is there a photo or still to base the scene on (the product, the place)?
+    kind: asset
+    required: false
+  - id: reference
+    prompt: Is there a reference video whose mood or pace you want to match?
+    kind: asset
+    required: false
+  - id: loop_length
+    prompt: How long should one loop be?
+    kind: choice
+    options: ["8 s", "12 s", "16 s"]
+    required: false
+    default: "12 s"
+  - id: music
+    prompt: Do you have a licensed track, or may I synthesize an original ambient score locally?
+    kind: choice
+    options: [synthesize a score, my licensed track, no music]
+    required: false
+    default: synthesize a score
+beats:
+  - purpose: hook
+    share: 0.2
+    guidance: The locked, fully composed frame with its first small motion already running; at most one short line of type.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: story
+    share: 0.25
+    guidance: A second region wakes - light shifts, steam rises - while everything else stays still.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: story
+    share: 0.2
+    guidance: The motions overlap at their calmest, still inside their own regions.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: payoff
+    share: 0.2
+    guidance: The quiet peak - the moment the small motions line up (the light fully across, the cursor at rest) - held.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: end_card
+    share: 0.15
+    guidance: Every motion returns to its starting phase so the last frame equals the first; a quiet name or handle may sit in a corner.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+hook_mechanisms: [pattern_interrupt, story, curiosity_gap]
+rules:
+  - "Build the piece as one motion page (merge the scaffolded scenes into one scene and keep the beats as timings), so there is no cut anywhere in the loop."
+  - "Seamless loop: set master.loop true and acceptance.loop true. The first and last frames must match (seam SSIM ≥ 0.99)."
+  - "Every cyclic motion's period divides the loop length (a 12 s loop allows 1, 2, 3, 4, 6 or 12 s periods); drive them from t, never from a timer."
+  - "The background is locked: no camera move, no global colour shift. Motion lives in one to three small regions."
+  - "The music bed loops at the same seam: with synth:ambient (60 BPM, 4 s bars) the loop is a whole number of bars (8, 12 or 16 s)."
+  - "Calm pacing: at least a small change every 10 s (min_changes_per_sec 0.1) and at most 30 % of the runtime frozen; no fast cuts, no flashes."
+  - "If a photo is supplied, it is the locked background; animate only regions that plausibly move in it and never invent objects that weren't there."
+  - "voice.mode is none; captions off. At most one short line of text in the whole loop."
+  - CTA lives in the post copy; if a brand profile exists, any on-screen name uses an allowed brand CTA.

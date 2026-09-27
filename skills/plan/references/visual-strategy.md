@@ -23,6 +23,7 @@ Use generative video only where a picture adds meaning that text cannot.
 | Product UI from a supplied image | `motion_graphic` | `screenshot` | `asset` (ContentIR asset id), `callouts` |
 | Call to action | `motion_graphic` | `cta` | `headline`, `action`, `command`/`url` |
 | Closing logo / title card | `motion_graphic` | `end_card` | `title`, `subtitle` (props may be empty) |
+| Reference-grade motion: one shape morphing through states, full-frame kinetic type, colour flips, about one change per second | `motion_graphic` | `motion` | `html` (`motion/<id>.html`, a page you write), `text` (every on-screen word), `effects`, `loop`; see `code-motion.md` |
 | Live product walkthrough the user will record | `screen_capture` | — | describe the flow in `visual_requirements.subject` |
 | B-roll, atmosphere, visual metaphor, abstract concept | `generated_video` | — | capability-only `visual_requirements` |
 | Presenter speaking to camera | `avatar` | — | only if the user asked and consented |
@@ -39,6 +40,11 @@ Rules:
 - `asset` in `screenshot`/`split_screen` must be a ContentIR asset id.
 - Numbers in any props (`stat.value`, `chart.series`, `timeline` text) need
   `claim_refs` like numbers in voiceover.
+- Choose `motion` when the brief's `acceptance` asks for about one big
+  change per second or a seamless loop, or when no fixed kind can show the
+  idea; a fixed kind that fits is cheaper to get right. A `motion` page
+  renders only in HyperFrames (ffmpeg draws a labelled text stand-in and
+  reports it); `motion` is not drawn over footage.
 - Short developer videos can be 100% deterministic; that is a good default.
   Mix in at most 1-2 generative scenes where a metaphor genuinely helps.
 - With `data_policy: "local-only"` (confidential sources), avoid

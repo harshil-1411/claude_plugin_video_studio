@@ -1,0 +1,87 @@
+# Archetype: one shape that never cuts, morphing through real UI states, looping.
+schema_version: "1.0"
+id: ui-morph-loop
+name: UI morph loop
+description: One continuous shape that never cuts - a card, a panel, a window - morphing through 8-12 real UI states of the product, driven by an on-screen cursor, on a synthesized score. The last state flows back into the first, so the reel loops seamlessly.
+goals: [launch, promote, announce, explain]
+platforms: [instagram_reels, youtube_shorts, tiktok, linkedin, x]
+default_aspect_ratio: "9:16"
+default_duration_sec: 14
+duration_range: { min_sec: 6, max_sec: 20 }
+pacing: { avg_shot_sec: 1.4, max_words_per_sec: 2.5, min_changes_per_sec: 1.0, max_frozen_pct: 10 }
+caption_preset: minimal
+voice_mode: none
+default_style: minimal
+default_music: "synth:pulse"
+inputs:
+  - id: product
+    prompt: Which product is this, and what is its URL (if it has one)?
+    kind: text
+    required: true
+  - id: ui_states
+    prompt: What are the real UI states to show, in order - screenshots, or each screen's real labels, values and data? (8-12 states)
+    kind: asset
+    required: true
+  - id: brand
+    prompt: Do you have brand colours and fonts (a brand.yaml, or hex codes and font names)?
+    kind: file
+    required: false
+    default: the minimal style pack's palette and bundled fonts
+  - id: formats
+    prompt: Which format - vertical 9:16, square 1:1, or both?
+    kind: choice
+    options: ["9:16", "1:1", both]
+    required: false
+    default: "9:16"
+  - id: music
+    prompt: Do you have a licensed track, or may I synthesize an original score locally?
+    kind: choice
+    options: [synthesize a score, my licensed track, no music]
+    required: false
+    default: synthesize a score
+  - id: reference
+    prompt: Is there a reference video whose pace or feel you want to match?
+    kind: asset
+    required: false
+beats:
+  - purpose: hook
+    share: 0.12
+    guidance: The shape is already moving on frame one and lands in the first real UI state; no logo, no title card.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: problem
+    share: 0.16
+    guidance: The cursor meets the state that shows the pain - the empty list, the error, the slow way - so the viewer wants the next state.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: step
+    share: 0.22
+    guidance: The cursor clicks, drags or types and the same shape morphs through the next three or four real states, one change per beat.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: step
+    share: 0.2
+    guidance: The next three or four states, faster; each state is readable before the cursor moves on.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: reveal
+    share: 0.18
+    guidance: The payoff state - the finished result with its real data - held for at least 400 ms, the one deliberate pause.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: end_card
+    share: 0.12
+    guidance: The product name appears on the shape as it morphs back into the opening state, so the last frame flows into the first.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+hook_mechanisms: [demo, pattern_interrupt, before_after]
+rules:
+  - "Real UI only: every state, label and number comes from the product's real screens or data the user supplied. No lorem ipsum, placeholder names or made-up metrics."
+  - "Every scene is a motion page (deterministic kind motion). Build the beats as one page spanning the piece (merge the scaffolded scenes into one scene and keep the beats as state timings), or as consecutive pages whose boundary frames match exactly, so it reads as one unbroken shot."
+  - "One shape carries the whole piece and never cuts: states morph (size, radius, position, content) instead of switching screens. Lay out each final state first, then tween into it."
+  - "8-12 states in 12-16 s: about one big change per second (min_changes_per_sec 1.0, max_frozen_pct 10), plus at least one hold of 400 ms or more."
+  - "The cursor drives every change: it moves, then the UI responds on the beat. Cues land on the measured beat grid of the score."
+  - "Loop: set master.loop true and acceptance.loop true; the last frame equals the first, and every cyclic motion period divides the loop length. With synth:pulse (120 BPM, 2 s bars) use a length that is a whole number of bars."
+  - "Text inside the UI is its real text; viewer-facing copy also goes in props.text. voice.mode is none; captions off."
+  - "Declare effects in props.effects; nothing from the style's motion.avoid list."
+  - CTA lives in the post copy and on the end card's product name only; if a brand profile exists, use an allowed brand CTA.

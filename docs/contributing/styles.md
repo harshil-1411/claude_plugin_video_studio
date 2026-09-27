@@ -17,6 +17,11 @@ packs that ship with the plugin.
 - `motion` with `personality`, `easing`, `enter_ms`, `exit_ms`, `stagger_ms`, `transition` and
   `transition_ms`. The assembler still joins scenes with cuts, so `transition` is recorded but
   not drawn yet.
+- `motion.avoid` (optional): the stock effects the pack bans, from the closed `EffectId` list in
+  `packages/schema/src/craft.ts` (`shake`, `rgb_split`, `lens_flare`, `particle_burst`,
+  `shockwave`, `neon_glow`, `grid_floor`, `flash`, `bouncy_easing`). A `motion` scene declares
+  the effects it draws in `props.effects`, and lint reports each one the active style avoids as
+  `banned_effect`, an error. `brand.yaml` `visual.forbidden` is checked the same way.
 - `captions` (optional), with the same fields as the brand's `captions`: `family`, `weight`,
   `active_word`, `plate_opacity` and `max_lines`.
 
@@ -42,5 +47,10 @@ packs that ship with the plugin.
   is recorded in `video.lock` (`tools.style`). Without a bump, cached clips keep the old look.
 - A new pack must look clearly different from the existing ones, which the tests also check.
   Add a row to `styles/README.md`.
+- **Fill in `motion.avoid`** to match the pack's personality: a calm pack bans everything, a loud
+  one may keep an effect that suits it (for example `flash` on a downbeat). Ban `shake`,
+  `neon_glow` and `grid_floor` unless the pack is built around them. Explain what the pack
+  allows in the taste-guard table in `styles/README.md`. The list changes no pixels, but it is
+  still a change, so bump `version`.
 - Run `npx vitest run packages/renderer/src/styles.test.ts`, then render a preview of an
   example with `style: <id>` and check the frames by eye.

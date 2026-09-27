@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { canonicalJson, sha256Hex } from "@video-studio/core";
 import { ExperimentManifest, type ExperimentPlan, type Scene, VideoSpec } from "@video-studio/schema";
 import { adaptProject, scaleDurations } from "./adapt.js";
-import { experimentStatus, prepareVariants, variantSpec } from "./variants.js";
+import { checkDurations, experimentStatus, prepareVariants, variantDuration, variantSpec } from "./variants.js";
 
 const EXAMPLE = join(import.meta.dirname, "..", "..", "..", "examples", "text-to-motion-graphic");
 let tmp: string;
@@ -106,6 +106,52 @@ describe("variants", () => {
     const r = await prepareVariants(dir);
     expect(r.manifest.variants[0]).toMatchObject({ id: "long", status: "failed" });
     expect(r.invalid[0]!.errors.join("\n")).toMatch(/lasts 60s/);
+  });
+
+  it("checkDurations: at most 4 distinct lengths inside the platform norms and every target contract", async () => {
+    const spec = VideoSpec.parse(JSON.parse(await readFile(join(base, "project", "video-spec.json"), "utf8")));
+    expect(await checkDurations(spec, [15, 30])).toEqual([]);
+    expect((await checkDurations(spec, [10, 15, 20, 30, 45])).join("\n")).toMatch(/at most 4/);
+    expect((await checkDurations(spec, [15, 15])).join("\n")).toMatch(/duplicate duration 15/);
+    // youtube_shorts norms: 7–90 s.
+    expect((await checkDurations(spec, [5])).join("\n")).toMatch(/5s is outside youtube_shorts' 7–90s/);
+    expect((await checkDurations(spec, [120])).join("\n")).toMatch(/120s is outside youtube_shorts' 7–90s/);
+    // A target contract's own limit applies too (facebook-page-api: 3–90 s, instagram_reels norm 7–90 s).
+    const fb = { ...spec, platform: "linkedin" as const, targets: ["facebook-page-api"] };
+    expect((await checkDurations(fb, [100])).join("\n")).toMatch(/facebook-page-api accepts 3–90s/);
+    // Every scene keeps at least 0.5 s.
+    const many = { ...spec, platform: "generic" as const, scenes: Array.from({ length: 6 }, (_, i) => ({ ...spec.scenes[0]!, id: `s${i}` })) };
+    expect((await checkDurations(many, [2])).join("\n")).toMatch(/6 scenes need at least 3s/);
+  });
+
+  it("durations: paired cuts of different lengths from one spec, recorded per variant", async () => {
+    const dir = join(tmp, "cuts");
+    await cp(base, dir, { recursive: true });
+    await rm(join(dir, "variants"), { recursive: true, force: true });
+    const one = { ...structuredClone(plan), id: "cuts-1", hooks: [plan.hooks[0]!] };
+    delete one.covers;
+    await writeFile(join(dir, "project", "variants.json"), JSON.stringify(one));
+    const r = await prepareVariants(dir, undefined, { durations: [15, 30] });
+    expect(r.manifest.variants.map((v) => v.id)).toEqual(["statement-15s", "statement-30s"]);
+    expect(r.manifest.variants.map(variantDuration)).toEqual([15, 30]);
+    for (const [i, d] of [15, 30].entries()) {
+      const v = r.manifest.variants[i]!;
+      const spec = VideoSpec.parse(JSON.parse(await readFile(join(dir, v.project_dir, "project", "video-spec.json"), "utf8")));
+      expect(spec.target_duration_sec).toBe(d);
+      expect(spec.scenes.reduce((a, s) => a + s.duration_sec, 0)).toBeCloseTo(d, 5);
+      expect(spec.scenes[0]!.voiceover).toBe("Keyword search finds words, not meaning.");
+      expect(spec.id).toMatch(new RegExp(`-${d}s$`));
+    }
+    // The 15 s cut of narrated copy says which scenes to trim (Claude edits the words).
+    expect(r.notes.join("\n")).toMatch(/statement-15s: s\d+: \d+ voiceover words in [\d.]+s; trim to ≤ \d+ words/);
+    // Called again without durations, the experiment keeps its cuts.
+    const again = await prepareVariants(dir);
+    expect(again.manifest.variants.map((v) => v.id)).toEqual(["statement-15s", "statement-30s"]);
+    // An empty list goes back to the base length only.
+    const reset = await prepareVariants(dir, undefined, { durations: [] });
+    expect(reset.manifest.variants.map((v) => v.id)).toEqual(["statement"]);
+    expect(variantDuration(reset.manifest.variants[0]!)).toBeUndefined();
+    await expect(prepareVariants(dir, undefined, { durations: [15, 15] })).rejects.toThrow(/duplicate duration 15/);
   });
 
   it("explains how to start when there is no plan", async () => {

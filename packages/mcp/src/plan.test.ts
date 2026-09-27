@@ -19,6 +19,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const examples = resolve(here, "../../schema/examples");
 const EXPECTED_TEMPLATES = [
   "aesthetic-broll",
+  "ambient-loop",
   "ambient-slice-of-life",
   "animated-explainer",
   "before-after",
@@ -28,14 +29,19 @@ const EXPECTED_TEMPLATES = [
   "educational",
   "explain",
   "faceless-listicle",
+  "kinetic-type",
   "listicle",
   "oddly-satisfying",
   "product-demo",
+  "product-hero",
   "product-launch",
   "product-ui",
   "silent-vlog",
+  "slides-narrated",
   "talking-head",
   "text-over-music",
+  "topic-explainer-9",
+  "ui-morph-loop",
 ];
 
 let tmp: string;
@@ -90,7 +96,7 @@ describe("templates", () => {
   });
 
   it("getTemplate rejects unknown and path-like ids with the available list", async () => {
-    await expect(getTemplate(templatesDir, "nope")).rejects.toThrow(/available: aesthetic-broll, ambient-slice-of-life, animated-explainer, before-after/);
+    await expect(getTemplate(templatesDir, "nope")).rejects.toThrow(/available: aesthetic-broll, ambient-loop, ambient-slice-of-life, animated-explainer, before-after/);
     await expect(getTemplate(templatesDir, "../schemas")).rejects.toThrow(/unknown template/);
   });
 });
@@ -245,7 +251,7 @@ assumptions: []
     await writeFile(join(root, "project/creative-brief.yaml"), yaml.replace('"Something else"', '"One"').replace("product-launch", "no-such-template"));
     const unknown = await validateBrief(root, templatesDir);
     expect(unknown.errors.map((e) => e.path)).toEqual(["template"]);
-    expect(unknown.errors[0]!.message).toContain("available: aesthetic-broll, ambient-slice-of-life, animated-explainer");
+    expect(unknown.errors[0]!.message).toContain("available: aesthetic-broll, ambient-loop, ambient-slice-of-life, animated-explainer");
   });
 
   it("returns schema errors with fixes and throws when no brief exists", async () => {
@@ -423,5 +429,122 @@ describe("footage archetypes", () => {
     expect(v.spec.audio).toBeUndefined();
     expect(v.spec.scenes.every((s) => s.audio?.mode === "native")).toBe(true);
     expect(v.notes.join(" ")).not.toMatch(/no music bed/);
+  });
+});
+
+describe("template inputs, acceptance and motion scaffolds", () => {
+  const TEMPLATE = `schema_version: "1.0"
+id: reel-motion
+name: Motion reel
+description: A music-led reel built from motion pages.
+goals: [explain]
+platforms: [instagram_reels]
+default_aspect_ratio: "9:16"
+default_duration_sec: 12
+duration_range: { min_sec: 6, max_sec: 30 }
+pacing: { avg_shot_sec: 1, max_words_per_sec: 3, min_changes_per_sec: 0.8, max_frozen_pct: 5 }
+caption_preset: minimal
+voice_mode: none
+default_music: "synth:pulse"
+beats:
+  - { purpose: hook, share: 0.3, guidance: Open on the promise., suggested_visual_strategy: motion_graphic, suggested_deterministic_kind: motion }
+  - { purpose: point, share: 0.5, guidance: Show it working., suggested_visual_strategy: motion_graphic, suggested_deterministic_kind: motion }
+  - { purpose: cta, share: 0.2, guidance: One action., suggested_visual_strategy: motion_graphic, suggested_deterministic_kind: end_card }
+hook_mechanisms: [promise]
+rules: [One idea per beat.]
+inputs:
+  - { id: reference, prompt: "Do you have a reference video whose pace you want?", kind: asset, required: true }
+  - { id: track, prompt: "Licensed track, or synthesize one?", kind: choice, required: true, options: [synth, licensed], default: synth }
+  - { id: photo, prompt: "A portrait photo?", kind: asset, required: false }
+`;
+  const BRIEF = (extra: string) => `schema_version: "1.0"
+goal: explain
+audience: engineers
+platform: instagram_reels
+aspect_ratio: "9:16"
+target_duration_sec: 12
+language: en
+tone: [bold]
+desired_action: Try it
+hook_candidates:
+  - { text: "One", mechanism: promise, scores: {clarity: 8} }
+  - { text: "Two", mechanism: question, scores: {clarity: 7} }
+  - { text: "Three", mechanism: contrarian, scores: {clarity: 6} }
+chosen_hook: "One"
+template: reel-motion
+assumptions: [{ field: audience, value: engineers, reason: from the source }]
+${extra}`;
+  let tplDir: string;
+  beforeAll(async () => {
+    tplDir = join(tmp, "tpl-motion");
+    await mkdir(join(tplDir, "reel-motion"), { recursive: true });
+    await writeFile(join(tplDir, "reel-motion", "template.yaml"), TEMPLATE);
+  });
+
+  it("summaries carry inputs and the pacing density fields only when a template has them", async () => {
+    const { summarizeTemplate } = await import("./templates.js");
+    const t = await getTemplate(tplDir, "reel-motion");
+    expect(summarizeTemplate(t)).toMatchObject({
+      min_changes_per_sec: 0.8,
+      max_frozen_pct: 5,
+      inputs: [
+        { id: "reference", required: true },
+        { id: "track", required: true, default: "synth" },
+        { id: "photo", required: false },
+      ],
+    });
+    const plain = summarizeTemplate(await getTemplate(templatesDir, "explain"));
+    expect(Object.keys(plain)).toEqual(["id", "name", "description", "goals", "platforms", "default_duration_sec", "beat_count"]);
+  });
+
+  it("brief_validate: unanswered required input is an error, a defaulted one a warning, an unknown answer a warning", async () => {
+    const root = await exampleProject("brief-inputs", { brief: BRIEF("") });
+    const r = await validateBrief(root, tplDir);
+    expect(r.ok).toBe(false);
+    expect(r.errors.map((e) => e.path)).toEqual(["inputs.reference"]);
+    expect(r.errors[0]!.fix).toContain("Do you have a reference video whose pace you want?");
+    expect(r.warnings.map((w) => w.path)).toEqual(["inputs.track"]);
+    expect(r.warnings[0]!.fix).toMatch(/assumptions/);
+
+    await writeFile(join(root, "project/creative-brief.yaml"), BRIEF("inputs: { reference: source/ref.mp4, track: licensed, mood: dark }\n"));
+    const ok = await validateBrief(root, tplDir);
+    expect(ok.ok).toBe(true);
+    expect(ok.warnings.map((w) => w.path)).toEqual(["inputs.mood"]);
+
+    await writeFile(join(root, "project/creative-brief.yaml"), BRIEF("inputs: { reference: source/ref.mp4, track: vinyl }\n"));
+    const badChoice = await validateBrief(root, tplDir);
+    expect(badChoice.warnings.map((w) => w.path)).toEqual(["inputs.track"]);
+    expect(badChoice.warnings[0]!.message).toMatch(/synth, licensed/);
+  });
+
+  it("spec_scaffold copies acceptance (brief wins per field), sets loop, synth music and motion placeholders", async () => {
+    const root = await exampleProject("scaffold-motion", { brief: null });
+    const r = await scaffoldSpec(root, tplDir, { template_id: "reel-motion" });
+    expect(r.spec.acceptance).toEqual({ min_changes_per_sec: 0.8, max_frozen_pct: 5 });
+    expect(r.spec.master).toEqual({ width: 1080, height: 1920, fps: 30 });
+    expect(r.spec.audio?.music?.file).toBe("synth:pulse");
+    expect(r.spec.scenes[0]!.deterministic).toEqual({ kind: "motion", props: { html: "motion/s01.html", text: [] } });
+    expect(r.spec.scenes[1]!.deterministic).toEqual({ kind: "motion", props: { html: "motion/s02.html", text: [] } });
+    expect(r.spec.scenes[2]!.deterministic).toEqual({ kind: "end_card", props: {} });
+    expect(r.scene_guidance[0]!.props_example).toMatchObject({ html: "motion/s01.html" });
+    const notes = r.notes.join(" ");
+    expect(notes).toMatch(/code-motion\.md/);
+    expect(notes).toMatch(/snap: "downbeat"/);
+    expect(notes).toMatch(/acceptance/);
+    expect(VideoSpec.safeParse(r.spec).success).toBe(true);
+
+    await writeFile(join(root, "project/creative-brief.yaml"), BRIEF("inputs: { reference: r.mp4 }\nacceptance: { min_changes_per_sec: 1, hold_ms: 400, loop: true }\n"));
+    const b = await scaffoldSpec(root, tplDir, { template_id: "reel-motion" });
+    expect(b.spec.acceptance).toEqual({ min_changes_per_sec: 1, max_frozen_pct: 5, hold_ms: 400, loop: true });
+    expect(b.spec.master).toEqual({ width: 1080, height: 1920, fps: 30, loop: true });
+    expect(validateVideoSpecSemantics(b.spec).errors.filter((e) => e.path === "master.loop")).toEqual([]);
+  });
+
+  it("templates without the new fields scaffold exactly as before (no acceptance, no loop)", async () => {
+    const root = await exampleProject("scaffold-legacy");
+    const r = await scaffoldSpec(root, templatesDir, { template_id: "explain" });
+    expect(r.spec.acceptance).toBeUndefined();
+    expect(r.spec.master).toEqual({ width: 1080, height: 1920, fps: 30 });
+    expect(r.notes.join(" ")).not.toMatch(/acceptance|code-motion/);
   });
 });

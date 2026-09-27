@@ -15644,6 +15644,7 @@ const ExperimentVariant = strictObject({
 	id: Id.describe("<hook id>-<cover id>"),
 	hook_id: Id,
 	cover_id: Id.optional(),
+	duration_sec: number().positive().max(600).optional().describe("Length of a paired cut (variants durations); absent for the base length."),
 	project_dir: FilePath.describe("variants/<id>, relative to the base project."),
 	spec_sha256: Sha256,
 	status: _enum([
@@ -262352,6 +262353,30 @@ function scaleDurations(durations, target) {
 	scaled[longest] = Math.max(MIN_SCENE_SEC, round1$2(scaled[longest] + diff));
 	return scaled;
 }
+/**
+* Retime a spec to `target` seconds in place: scene durations scaled proportionally (exact total),
+* target_duration_sec set and the cover's focal time scaled. Words are not rewritten; for narrated
+* specs the notes name every scene whose voiceover no longer fits. Shared by `adapt` and the
+* `durations` of `variants`.
+*/
+function retimeSpec(spec, target) {
+	const from = spec.target_duration_sec;
+	const factor = target / spec.scenes.reduce((a, s) => a + s.duration_sec, 0);
+	const durations = scaleDurations(spec.scenes.map((s) => s.duration_sec), target);
+	spec.scenes.forEach((s, i) => s.duration_sec = durations[i]);
+	spec.target_duration_sec = target;
+	if (spec.cover) spec.cover.focal_time_sec = round1$2(spec.cover.focal_time_sec * factor);
+	const notes = [];
+	if (voiceMode(spec) === "narrated") for (const s of spec.scenes) {
+		const words = s.voiceover.trim() ? s.voiceover.trim().split(/\s+/).length : 0;
+		const max = Math.floor(s.duration_sec * MAX_WPS);
+		if (words > max) notes.push(`${s.id}: ${words} voiceover words in ${s.duration_sec}s; trim to ≤ ${max} words (or merge/drop a scene)`);
+	}
+	return {
+		change: `duration ${from}s → ${target}s (scenes scaled ×${Math.round(factor * 100) / 100})`,
+		notes
+	};
+}
 async function adaptProject(projectDir, outDir, opts) {
 	const root = projectPaths(projectDir).root;
 	const out = resolve(outDir);
@@ -262391,17 +262416,9 @@ async function adaptProject(projectDir, outDir, opts) {
 		for (const k of Object.keys(spec.publish)) if (!keep.has(k)) delete spec.publish[k];
 	}
 	if (opts.target_duration_sec && opts.target_duration_sec !== src.target_duration_sec) {
-		const factor = opts.target_duration_sec / src.scenes.reduce((a, s) => a + s.duration_sec, 0);
-		const durations = scaleDurations(src.scenes.map((s) => s.duration_sec), opts.target_duration_sec);
-		spec.scenes.forEach((s, i) => s.duration_sec = durations[i]);
-		spec.target_duration_sec = opts.target_duration_sec;
-		if (spec.cover) spec.cover.focal_time_sec = round1$2(spec.cover.focal_time_sec * factor);
-		changes.push(`duration ${src.target_duration_sec}s → ${opts.target_duration_sec}s (scenes scaled ×${Math.round(factor * 100) / 100})`);
-		if (voiceMode(spec) === "narrated") for (const s of spec.scenes) {
-			const words = s.voiceover.trim() ? s.voiceover.trim().split(/\s+/).length : 0;
-			const max = Math.floor(s.duration_sec * MAX_WPS);
-			if (words > max) notes.push(`${s.id}: ${words} voiceover words in ${s.duration_sec}s; trim to ≤ ${max} words (or merge/drop a scene)`);
-		}
+		const r = retimeSpec(spec, opts.target_duration_sec);
+		changes.push(r.change);
+		notes.push(...r.notes);
 	}
 	if (changes.length === 0) notes.push("nothing to adapt: the options match the source spec");
 	const specsDir = findPlatformSpecsDir();
@@ -266606,7 +266623,10 @@ function summarizeTemplate(t) {
 		goals: t.goals,
 		platforms: t.platforms,
 		default_duration_sec: t.default_duration_sec,
-		beat_count: t.beats.length
+		beat_count: t.beats.length,
+		...t.pacing.min_changes_per_sec !== void 0 ? { min_changes_per_sec: t.pacing.min_changes_per_sec } : {},
+		...t.pacing.max_frozen_pct !== void 0 ? { max_frozen_pct: t.pacing.max_frozen_pct } : {},
+		...t.inputs?.length ? { inputs: t.inputs } : {}
 	};
 }
 //#endregion
@@ -266700,10 +266720,63 @@ async function validateBrief(projectDir, templatesDir) {
 				message: `chosen hook uses "${chosen.mechanism}", which template "${tpl.id}" does not list (${tpl.hook_mechanisms.join(", ")})`,
 				fix: "consider a hook with a preferred mechanism, or keep it and note why in assumptions"
 			});
+			checkTemplateInputs(tpl, brief, result);
 		}
 	}
 	result.ok = result.errors.length === 0;
 	return result;
+}
+/**
+* The template's inputs against the brief's answers: a required input with no answer and no default
+* blocks planning; a defaulted one is used but must be surfaced as an assumption.
+*/
+function checkTemplateInputs(tpl, brief, out) {
+	const answers = brief.inputs ?? {};
+	const inputs = tpl.inputs ?? [];
+	for (const input of inputs) {
+		const answer = answers[input.id]?.trim();
+		const path = `inputs.${input.id}`;
+		if (!answer) {
+			if (!input.required) continue;
+			if (input.default === void 0) out.errors.push({
+				path,
+				message: `template "${tpl.id}" needs input "${input.id}" and the brief has no answer`,
+				fix: `ask the user: "${input.prompt}"${input.options ? ` (${input.options.join(" / ")})` : ""}, then set inputs.${input.id} in the brief`
+			});
+			else out.warnings.push({
+				path,
+				message: `input "${input.id}" was not answered, so the template default "${input.default}" applies`,
+				fix: `list it in assumptions ({field: "${path}", value: "${input.default}", reason}) so the user can confirm, or ask: "${input.prompt}"`
+			});
+			continue;
+		}
+		if (input.options && !input.options.includes(answer)) out.warnings.push({
+			path,
+			message: `answer "${answer}" is not one of the options for "${input.id}" (${input.options.join(", ")})`,
+			fix: `use one of: ${input.options.join(", ")}`
+		});
+	}
+	const known = new Set(inputs.map((i) => i.id));
+	for (const id of Object.keys(answers)) {
+		if (known.has(id)) continue;
+		out.warnings.push({
+			path: `inputs.${id}`,
+			message: `template "${tpl.id}" has no input "${id}"`,
+			fix: known.size ? `use one of the template's input ids (${[...known].join(", ")}) or drop it` : "this template declares no inputs; drop it or keep it as a note"
+		});
+	}
+}
+/**
+* The spec's acceptance checks: the template's pacing density fields, overridden field by field by
+* the brief's acceptance. Undefined when neither sets anything (older templates stay unchanged).
+*/
+function resolveAcceptance(tpl, brief) {
+	const merged = {
+		...tpl.pacing.min_changes_per_sec !== void 0 ? { min_changes_per_sec: tpl.pacing.min_changes_per_sec } : {},
+		...tpl.pacing.max_frozen_pct !== void 0 ? { max_frozen_pct: tpl.pacing.max_frozen_pct } : {},
+		...brief?.acceptance ?? {}
+	};
+	return Object.keys(merged).length ? merged : void 0;
 }
 function formatIssues(title, r) {
 	const lines = [`${r.ok ? "VALID" : "INVALID"}: ${title}`];
@@ -266711,6 +266784,8 @@ function formatIssues(title, r) {
 	for (const w of r.warnings) lines.push(`warning ${w.path || "(root)"}: ${w.message}\n        fix: ${w.fix}`);
 	return lines.join("\n");
 }
+/** Where a scaffolded `motion` scene's page lives, relative to the project folder. */
+const motionPage = (sceneId) => `motion/${sceneId}.html`;
 /** Visual strategies that show real footage (a `footage` block per scene). */
 const FOOTAGE_STRATEGIES = /* @__PURE__ */ new Set(["user_asset", "screen_capture"]);
 /**
@@ -266787,7 +266862,14 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 			visual_requirements: { continuity_refs: [] },
 			claim_refs: []
 		};
-		if (b.suggested_deterministic_kind) scene.deterministic = {
+		if (b.suggested_deterministic_kind === "motion") scene.deterministic = {
+			kind: "motion",
+			props: {
+				html: motionPage(scene.id),
+				text: []
+			}
+		};
+		else if (b.suggested_deterministic_kind) scene.deterministic = {
 			kind: b.suggested_deterministic_kind,
 			props: {}
 		};
@@ -266798,6 +266880,10 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 		if (FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy)) scene.audio = { mode: sceneAudioMode };
 		return scene;
 	});
+	const acceptance = resolveAcceptance(tpl, brief);
+	if (acceptance) notes.push(`acceptance ${JSON.stringify(acceptance)} copied into the spec (${brief?.acceptance ? "the brief's values win over the template's" : "from the template's pacing"}); QA and lint hold the render to it`);
+	if (beats.some((b) => b.suggested_deterministic_kind === "motion")) notes.push("motion scenes: write each page at its props.html (see skills/plan/references/code-motion.md), put every on-screen word in props.text, then spec_validate (motion stage) and stills on downbeats before rendering");
+	if (music?.startsWith("synth:")) notes.push(`music "${music}" is synthesized locally with an exact beat grid: set audio.beat_sync {enabled: true, snap: "downbeat"} so cuts land on bar starts`);
 	const spec = {
 		schema_version: "1.0",
 		...ir ? { content_ir_id: ir.id } : {},
@@ -266806,7 +266892,10 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 		audience: brief?.audience ?? "TODO: audience",
 		platform,
 		aspect_ratio: aspect,
-		master: defaultMaster(aspect),
+		master: acceptance?.loop ? {
+			...defaultMaster(aspect),
+			loop: true
+		} : defaultMaster(aspect),
 		...targets.length ? { targets } : {},
 		target_duration_sec: target,
 		language: brief?.language ?? "en-US",
@@ -266821,6 +266910,7 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 		},
 		...style ? { style } : {},
 		...music ? { audio: { music: { file: music } } } : {},
+		...acceptance ? { acceptance } : {},
 		scenes
 	};
 	return {
@@ -266835,7 +266925,10 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 			suggested_visual_strategy: b.suggested_visual_strategy,
 			...b.suggested_deterministic_kind ? {
 				suggested_deterministic_kind: b.suggested_deterministic_kind,
-				props_example: DETERMINISTIC_PROPS_EXAMPLES[b.suggested_deterministic_kind]
+				props_example: b.suggested_deterministic_kind === "motion" ? {
+					...DETERMINISTIC_PROPS_EXAMPLES.motion,
+					html: motionPage(scenes[i].id)
+				} : DETERMINISTIC_PROPS_EXAMPLES[b.suggested_deterministic_kind]
 			} : {},
 			...FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy) ? { footage_example: {
 				asset: clips.find((a) => a.kind === "video")?.id ?? clips[0]?.id ?? "<video asset id from source/content-ir.json>",
@@ -266968,6 +267061,10 @@ async function renderStoryboard(projectDir) {
 * clips are copied along, so a variant only re-renders its hook scene (the cover is composed from
 * the master). `variants/experiment.json` records the experiment; statuses are recomputed from
 * each variant's dist/video.lock, so the file never goes stale.
+*
+* `durations` (e.g. [15, 30]) adds paired cuts: every hook × cover pair is also retimed to each
+* length with `adapt`'s duration logic, as variants/<hook>-<cover>-<n>s/. The length is part of the
+* variant id (read it back with `variantDuration`), so later calls without `durations` keep the cuts.
 */
 const VARIANTS_FILE = "variants.json";
 const EXPERIMENT_FILE = "experiment.json";
@@ -266979,6 +267076,55 @@ const COPY = [
 	"brand.yaml",
 	"project"
 ];
+/**
+* Problems with the requested cut lengths for this spec: at most 4, no duplicates, each inside
+* the platform's norms and every target contract's duration range, and long enough for every
+* scene to keep 0.5 s.
+*/
+async function checkDurations(spec, durations) {
+	const errors = [];
+	if (durations.length > 4) errors.push(`${durations.length} durations requested; at most 4 paired cuts per experiment`);
+	const norm = PLATFORM_NORMS[spec.platform];
+	const specsDir = findPlatformSpecsDir();
+	const contracts = specsDir ? await loadContracts(specsDir) : [];
+	const targets = resolveTargets(spec).map((t) => contracts.find((c) => c.id === t)).filter((c) => c !== void 0);
+	const seen = /* @__PURE__ */ new Set();
+	for (const d of durations) {
+		if (!Number.isFinite(d) || d <= 0) {
+			errors.push(`duration ${d} must be a positive number of seconds`);
+			continue;
+		}
+		if (seen.has(d)) errors.push(`duplicate duration ${d}s`);
+		seen.add(d);
+		if (d < norm.min_sec || d > norm.max_sec) errors.push(`${d}s is outside ${spec.platform}' ${norm.min_sec}–${norm.max_sec}s range`);
+		for (const c of targets) {
+			const { min, max } = c.video.duration_sec;
+			if (min !== void 0 && d < min || max !== void 0 && d > max) errors.push(`${d}s: target ${c.id} accepts ${min ?? 0}–${max ?? "∞"}s`);
+		}
+		const least = spec.scenes.length * MIN_SCENE_SEC;
+		if (d < least) errors.push(`${d}s is too short: ${spec.scenes.length} scenes need at least ${least}s (${MIN_SCENE_SEC}s each)`);
+	}
+	return errors;
+}
+const durationSuffix = (d) => `${d}s`;
+/** The manifest with each paired cut's `duration_sec` filled in (manifests written before the field existed carry it only in the id). */
+function withDurations(m) {
+	return {
+		...m,
+		variants: m.variants.map((v) => ({
+			...v,
+			...variantDuration(v) !== void 0 ? { duration_sec: variantDuration(v) } : {}
+		}))
+	};
+}
+/** The cut length a variant was retimed to (its `duration_sec`, else read from its id), or undefined for the base length. */
+function variantDuration(v) {
+	if (v.duration_sec !== void 0) return v.duration_sec;
+	const prefix = v.cover_id ? `${v.hook_id}-${v.cover_id}` : v.hook_id;
+	if (!v.id.startsWith(`${prefix}-`)) return void 0;
+	const m = /^(\d+(?:\.\d+)?)s$/.exec(v.id.slice(prefix.length + 1));
+	return m ? Number(m[1]) : void 0;
+}
 const SPEC_INVALID = "spec invalid:";
 /** A variant whose spec failed validation (rendering it is pointless until the plan is fixed). */
 function isSpecInvalid(v) {
@@ -267003,8 +267149,14 @@ async function loadBaseSpec(root) {
 	if (!r.ok) throw new Error(`project/video-spec.json is invalid; run spec_validate first (${r.errors.slice(0, 3).map((e) => `${e.path}: ${e.message}`).join("; ")})`);
 	return r.data;
 }
-/** The variant's spec: base spec with the hook scene replaced (keeping its id and slot) and the cover swapped. */
-function variantSpec(base, plan, hookId, coverId) {
+/**
+* The variant's spec: base spec with the hook scene replaced (keeping its id and slot) and the
+* cover swapped; with `durationSec`, then retimed to that length (a paired cut).
+*/
+function variantSpec(base, plan, hookId, coverId, durationSec) {
+	return variantSpecWithNotes(base, plan, hookId, coverId, durationSec).spec;
+}
+function variantSpecWithNotes(base, plan, hookId, coverId, durationSec) {
 	const hook = plan.hooks.find((h) => h.id === hookId);
 	const cover = coverId ? plan.covers?.find((c) => c.id === coverId) : void 0;
 	const idx = Math.max(0, base.scenes.findIndex((s) => s.purpose === "hook"));
@@ -267016,9 +267168,16 @@ function variantSpec(base, plan, hookId, coverId) {
 	};
 	spec.target_duration_sec = Math.round((base.target_duration_sec + (hook.scene.duration_sec - baseHook.duration_sec)) * 100) / 100;
 	if (cover) spec.cover = structuredClone(cover.cover);
-	const suffix = coverId ? `${hookId}-${coverId}` : hookId;
-	spec.id = `${base.id ?? "video"}-${suffix}`.replace(/[^A-Za-z0-9_.@:-]/g, "-");
-	return spec;
+	const notes = durationSec !== void 0 ? retimeSpec(spec, durationSec).notes : [];
+	spec.id = `${base.id ?? "video"}-${variantId(hookId, coverId, durationSec)}`.replace(/[^A-Za-z0-9_.@:-]/g, "-");
+	return {
+		spec,
+		notes
+	};
+}
+function variantId(hookId, coverId, durationSec) {
+	const pair = coverId ? `${hookId}-${coverId}` : hookId;
+	return durationSec !== void 0 ? `${pair}-${durationSuffix(durationSec)}` : pair;
 }
 /**
 * Status of a prepared variant from its files and its render job: rendered when its dist lock
@@ -267087,12 +267246,22 @@ async function prepareVariants(projectDir, now = () => /* @__PURE__ */ new Date(
 	const vdir = variantsDir(root);
 	await mkdir(vdir, { recursive: true });
 	const prev = await readJson(join(vdir, EXPERIMENT_FILE)).catch(() => void 0);
+	const requested = o.durations ?? previousDurations(prev, plan.id);
+	const durationErrors = await checkDurations(base, requested);
+	if (durationErrors.length) throw new Error(`durations: ${durationErrors.join("; ")}`);
+	const lengths = requested.length ? [...requested] : [void 0];
 	const covers = plan.covers?.length ? plan.covers.map((c) => c.id) : [void 0];
+	const pairs = plan.hooks.flatMap((hook) => covers.flatMap((coverId) => lengths.map((durationSec) => ({
+		hook,
+		coverId,
+		durationSec
+	}))));
 	const variants = [];
 	const invalid = [];
 	const skipped = [];
-	for (const hook of plan.hooks) for (const coverId of covers) {
-		const id = coverId ? `${hook.id}-${coverId}` : hook.id;
+	const notes = [];
+	for (const { hook, coverId, durationSec } of pairs) {
+		const id = variantId(hook.id, coverId, durationSec);
 		const dir = join(vdir, id);
 		const holder = await renderLockHolder(join(dir, "renders", ".render.lock"), o.lockDeps);
 		if (holder) {
@@ -267107,8 +267276,9 @@ async function prepareVariants(projectDir, now = () => /* @__PURE__ */ new Date(
 				id,
 				hook_id: hook.id,
 				...coverId ? { cover_id: coverId } : {},
+				...durationSec !== void 0 ? { duration_sec: durationSec } : {},
 				project_dir: `variants/${id}`,
-				spec_sha256: onDisk ?? sha256Hex(canonicalJson(variantSpec(base, plan, hook.id, coverId))),
+				spec_sha256: onDisk ?? sha256Hex(canonicalJson(variantSpec(base, plan, hook.id, coverId, durationSec))),
 				status: "rendering"
 			}, o.jobs);
 			variants.push(st.status === "rendered" ? st : {
@@ -267131,7 +267301,9 @@ async function prepareVariants(projectDir, now = () => /* @__PURE__ */ new Date(
 			const scenes = join(root, "renders", q, "scenes");
 			if (existsSync(scenes) && !existsSync(join(dir, "renders", q, "scenes"))) await cp(scenes, join(dir, "renders", q, "scenes"), { recursive: true });
 		}
-		const spec = variantSpec(base, plan, hook.id, coverId);
+		const built = variantSpecWithNotes(base, plan, hook.id, coverId, durationSec);
+		const spec = built.spec;
+		notes.push(...built.notes.map((n) => `${id}: ${n}`));
 		const { spec: specPath, contentIr } = projectSpecPaths(dir);
 		await writeFile(specPath, `${JSON.stringify(spec, null, 2)}\n`);
 		const check = await validateSpecFile(specPath, existsSync(contentIr) ? contentIr : null);
@@ -267141,6 +267313,7 @@ async function prepareVariants(projectDir, now = () => /* @__PURE__ */ new Date(
 			id,
 			hook_id: hook.id,
 			...coverId ? { cover_id: coverId } : {},
+			...durationSec !== void 0 ? { duration_sec: durationSec } : {},
 			project_dir: `variants/${id}`,
 			spec_sha256,
 			status: check.ok ? "prepared" : "failed",
@@ -267170,8 +267343,19 @@ async function prepareVariants(projectDir, now = () => /* @__PURE__ */ new Date(
 		manifest,
 		manifest_path,
 		invalid,
-		skipped
+		skipped,
+		notes
 	};
+}
+/** The cut lengths of the existing experiment (same plan id), so a refresh keeps its cuts. */
+function previousDurations(prev, planId) {
+	if (!prev || prev.experiment_id !== planId) return [];
+	const out = [];
+	for (const v of prev.variants) {
+		const d = variantDuration(v);
+		if (d !== void 0 && !out.includes(d)) out.push(d);
+	}
+	return out;
 }
 /** Re-read variants/experiment.json and refresh each variant's status from its files. */
 async function experimentStatus(projectDir, jobs = {}, lookup) {
@@ -267196,12 +267380,13 @@ async function experimentStatus(projectDir, jobs = {}, lookup) {
 	return next;
 }
 /** One-screen summary. */
-function formatVariants(m, invalid = [], skipped = []) {
+function formatVariants(m, invalid = [], skipped = [], notes = []) {
 	return [
 		`experiment ${m.experiment_id}: ${m.variants.length} variant(s); hypothesis: ${m.hypothesis}`,
-		...m.variants.map((v) => `- ${v.id} (hook ${v.hook_id}${v.cover_id ? `, cover ${v.cover_id}` : ""}): ${v.status}${v.job_id ? ` [job ${v.job_id}]` : ""}${v.dist ? ` → ${v.dist}` : ""}${v.error ? ` — ${v.error}` : ""}`),
+		...m.variants.map((v) => `- ${v.id} (hook ${v.hook_id}${v.cover_id ? `, cover ${v.cover_id}` : ""}${variantDuration(v) !== void 0 ? `, ${variantDuration(v)}s cut` : ""}): ${v.status}${v.job_id ? ` [job ${v.job_id}]` : ""}${v.dist ? ` → ${v.dist}` : ""}${v.error ? ` — ${v.error}` : ""}`),
 		...invalid.flatMap((i) => i.errors.slice(0, 3).map((e) => `  ${i.id}: ${e}`)),
-		...skipped.map((k) => `skipped: ${k.reason}`)
+		...skipped.map((k) => `skipped: ${k.reason}`),
+		...notes.map((n) => `note: ${n}`)
 	].join("\n");
 }
 //#endregion
@@ -268137,7 +268322,7 @@ function createServer$1(options = {}) {
 	}));
 	server.registerTool("template_list", {
 		title: "List story templates",
-		description: "List the bundled story templates (beat structures with pacing and caption preset). Returns {templates: [{id, name, description, goals[], platforms[], default_duration_sec, beat_count}]}. Use template_get for the full beats.",
+		description: "List the bundled story templates (beat structures with pacing and caption preset). Returns {templates: [{id, name, description, goals[], platforms[], default_duration_sec, beat_count, min_changes_per_sec?, max_frozen_pct?, inputs?}]}. Use template_get for the full beats.",
 		inputSchema: {},
 		annotations: {
 			readOnlyHint: true,
@@ -268149,7 +268334,7 @@ function createServer$1(options = {}) {
 	}));
 	server.registerTool("template_get", {
 		title: "Get a story template",
-		description: "Return one story template in full: goals, platforms, default and allowed duration, pacing {avg_shot_sec, max_words_per_sec}, caption preset, beats[] {purpose, share, guidance, suggested_visual_strategy, suggested_deterministic_kind?, optional?}, preferred hook_mechanisms and rules.",
+		description: "Return one story template in full: goals, platforms, default and allowed duration, pacing {avg_shot_sec, max_words_per_sec, min_changes_per_sec?, max_frozen_pct?}, caption preset, beats[] {purpose, share, guidance, suggested_visual_strategy, suggested_deterministic_kind?, optional?}, preferred hook_mechanisms, rules, default_style/default_music, and inputs[] {id, prompt, kind, required, options?, default?}: ask the required inputs before writing the brief and record the answers in brief.inputs.",
 		inputSchema: { id: string().min(1).describe("Template id from template_list, e.g. explain") },
 		annotations: {
 			readOnlyHint: true,
@@ -268161,7 +268346,7 @@ function createServer$1(options = {}) {
 	}));
 	server.registerTool("brief_validate", {
 		title: "Validate a CreativeBrief",
-		description: "Validate <project_dir>/project/creative-brief.yaml (or .yml/.json; YAML or JSON) against the CreativeBrief schema, then check it. Errors: schema violations, chosen_hook not among hook_candidates, unknown template. Warnings: fewer than 3 hook candidates or repeated mechanisms, no assumptions, duration or aspect ratio outside platform norms (e.g. reels/shorts/tiktok <= 90s, 9:16), and poor fit with the chosen template. Returns {ok, brief_path, errors[], warnings[]}, each issue {path, message, fix}.",
+		description: "Validate <project_dir>/project/creative-brief.yaml (or .yml/.json; YAML or JSON) against the CreativeBrief schema, then check it. Errors: schema violations, chosen_hook not among hook_candidates, unknown template. Warnings: fewer than 3 hook candidates or repeated mechanisms, no assumptions, duration or aspect ratio outside platform norms (e.g. reels/shorts/tiktok <= 90s, 9:16), and poor fit with the chosen template. Template inputs: a required input with no answer in brief.inputs and no default is an error (the fix quotes the question to ask); a defaulted one is a warning to list in assumptions; an answer to an unknown input id or outside a choice's options is a warning. Returns {ok, brief_path, errors[], warnings[]}, each issue {path, message, fix}.",
 		inputSchema: { project_dir: string().min(1).describe("Project folder containing project/creative-brief.yaml") },
 		annotations: {
 			readOnlyHint: true,
@@ -268173,7 +268358,7 @@ function createServer$1(options = {}) {
 	}));
 	server.registerTool("spec_scaffold", {
 		title: "Scaffold a VideoSpec from a template",
-		description: "Return (does not write) a skeleton VideoSpec built from a template's beats: one scene per beat with durations scaled to the target (summing exactly to it), the suggested visual strategy and deterministic kind, and empty voiceover/on_screen_text/props placeholders for you to fill. Defaults come from the project's creative brief when present. Also returns per-scene guidance with word budgets, the template rules and notes. Write the filled spec to project/video-spec.json, then run spec_validate.",
+		description: "Return (does not write) a skeleton VideoSpec built from a template's beats: one scene per beat with durations scaled to the target (summing exactly to it), the suggested visual strategy and deterministic kind, and empty voiceover/on_screen_text/props placeholders for you to fill (motion scenes get props {html: \"motion/<scene id>.html\", text: []}: write the page there). Copies acceptance into the spec (the brief's acceptance wins field by field over the template's pacing density), sets master.loop when acceptance.loop, and audio.music from the template default (bundled:<id> or synth:<preset>). Defaults come from the project's creative brief when present. Also returns per-scene guidance with word budgets, the template rules and notes. Write the filled spec to project/video-spec.json, then run spec_validate.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Project folder (reads project/creative-brief.yaml and source/content-ir.json if present)"),
 			template_id: string().min(1).describe("Template id from template_list"),
@@ -268200,6 +268385,7 @@ function createServer$1(options = {}) {
 		return jsonResult([
 			`scaffolded ${r.spec.scenes.length} scenes from template "${r.template_id}" (${r.spec.target_duration_sec}s, ${r.spec.platform}, ${r.spec.aspect_ratio}, targets: ${r.spec.targets?.join(", ") || "none"}); not written`,
 			...r.scene_guidance.map((g) => `${g.scene_id} ${g.purpose} ${g.duration_sec}s (<= ${g.word_budget} words): ${g.guidance}`),
+			...r.spec.acceptance ? [`acceptance: ${JSON.stringify(r.spec.acceptance)}`] : [],
 			...r.notes.map((n) => `note: ${n}`)
 		].join("\n"), r);
 	}));
@@ -268595,11 +268781,12 @@ function createServer$1(options = {}) {
 	}));
 	server.registerTool("variants", {
 		title: "Prepare (and render) A/B variants",
-		description: "Build an A/B experiment from <project_dir>/project/variants.json (ExperimentPlan: {schema_version, id, hypothesis, metric?, hooks: [{id, label?, scene}], covers?: [{id, label?, cover: {headline, focal_time_sec}}]}; schema_get experiment-plan). Every hook × cover pair becomes variants/<hook>-<cover>/, a full project whose spec is the base spec with the hook scene and cover swapped (validated like spec_validate). Writes variants/experiment.json (hypothesis, base spec hash, variants with status). Each call rebuilds the variant folders from the base (their source/ and project/ are replaced; renders/ is kept), except a variant whose render is running right now, which is left as is and listed under skipped. With render: true, queues one render job per variant that is not rendered and not already queued or running (failed or cancelled renders are resubmitted; renders run one at a time; poll job_status or call variants again with status_only: true). A variant is `rendering` only while its job is queued or running. Base scene clips are reused, so a variant mostly re-renders its hook scene.",
+		description: "Build an A/B experiment from <project_dir>/project/variants.json (ExperimentPlan: {schema_version, id, hypothesis, metric?, hooks: [{id, label?, scene}], covers?: [{id, label?, cover: {headline, focal_time_sec}}]}; schema_get experiment-plan). Every hook × cover pair becomes variants/<hook>-<cover>/, a full project whose spec is the base spec with the hook scene and cover swapped (validated like spec_validate). Writes variants/experiment.json (hypothesis, base spec hash, variants with status). Each call rebuilds the variant folders from the base (their source/ and project/ are replaced; renders/ is kept), except a variant whose render is running right now, which is left as is and listed under skipped. With render: true, queues one render job per variant that is not rendered and not already queued or running (failed or cancelled renders are resubmitted; renders run one at a time; poll job_status or call variants again with status_only: true). A variant is `rendering` only while its job is queued or running. Base scene clips are reused, so a variant mostly re-renders its hook scene. durations (e.g. [15, 30]) adds paired cuts: every hook × cover pair is also retimed to each length (scenes scaled proportionally, like adapt) as variants/<hook>-<cover>-<n>s/; at most 4 lengths, each inside the platform's norms and every target's duration range. Later calls without durations keep the experiment's cuts; [] goes back to the base length. Words are not rewritten: narration that no longer fits a shorter cut is listed as notes; for narrated specs make the short cut with adapt (its own project, words trimmed) and run variants there. Returns the manifest with duration_sec per cut, plus invalid, skipped and notes.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Planned (ideally rendered) base project"),
 			render: boolean().optional().describe("Queue a render job per unrendered variant (default false: prepare only)"),
 			status_only: boolean().optional().describe("Only refresh and report variants/experiment.json"),
+			durations: array(number().positive().max(600)).max(4).optional().describe("Paired cut lengths in seconds, e.g. [15, 30] (at most 4); omitted keeps the experiment's cuts, [] removes them"),
 			quality: QUALITY.optional().describe("Render quality for render: true (default preview)"),
 			voice: _enum([
 				"auto",
@@ -268630,9 +268817,12 @@ function createServer$1(options = {}) {
 		};
 		if (args.status_only) {
 			const m = await experimentStatus(root, {}, lookup);
-			return jsonResult(formatVariants(m), m);
+			return jsonResult(formatVariants(m), withDurations(m));
 		}
-		const r = await prepareVariants(root, void 0, { jobs: lookup });
+		const r = await prepareVariants(root, void 0, {
+			jobs: lookup,
+			...args.durations ? { durations: args.durations } : {}
+		});
 		let manifest = r.manifest;
 		if (args.render) {
 			const jobs = {};
@@ -268648,11 +268838,12 @@ function createServer$1(options = {}) {
 			}
 			manifest = await experimentStatus(root, jobs, lookup);
 		}
-		return jsonResult(formatVariants(manifest, r.invalid, r.skipped), {
-			...manifest,
+		return jsonResult(formatVariants(manifest, r.invalid, r.skipped, r.notes), {
+			...withDurations(manifest),
 			manifest_path: r.manifest_path,
 			invalid: r.invalid,
-			skipped: r.skipped
+			skipped: r.skipped,
+			notes: r.notes
 		});
 	}));
 	server.registerTool("adapt", {

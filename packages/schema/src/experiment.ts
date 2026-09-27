@@ -51,6 +51,7 @@ export const ExperimentVariant = z.strictObject({
   id: Id.describe("<hook id>-<cover id>"),
   hook_id: Id,
   cover_id: Id.optional(),
+  duration_sec: z.number().positive().max(600).optional().describe("Length of a paired cut (variants durations); absent for the base length."),
   project_dir: FilePath.describe("variants/<id>, relative to the base project."),
   spec_sha256: Sha256,
   status: z.enum(["prepared", "rendering", "rendered", "failed"]),

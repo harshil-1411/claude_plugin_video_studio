@@ -69,6 +69,12 @@ export interface TemplateSummary {
   platforms: string[];
   default_duration_sec: number;
   beat_count: number;
+  /** Motion density the format needs (pacing.min_changes_per_sec), when the template sets it. */
+  min_changes_per_sec?: number;
+  /** Most of the runtime that may be frozen, in percent (pacing.max_frozen_pct), when set. */
+  max_frozen_pct?: number;
+  /** Inputs the plan asks for first, when the template declares any. */
+  inputs?: { id: string; prompt: string; kind: string; required: boolean; options?: string[]; default?: string }[];
 }
 
 export function summarizeTemplate(t: Template): TemplateSummary {
@@ -80,5 +86,8 @@ export function summarizeTemplate(t: Template): TemplateSummary {
     platforms: t.platforms,
     default_duration_sec: t.default_duration_sec,
     beat_count: t.beats.length,
+    ...(t.pacing.min_changes_per_sec !== undefined ? { min_changes_per_sec: t.pacing.min_changes_per_sec } : {}),
+    ...(t.pacing.max_frozen_pct !== undefined ? { max_frozen_pct: t.pacing.max_frozen_pct } : {}),
+    ...(t.inputs?.length ? { inputs: t.inputs } : {}),
   };
 }

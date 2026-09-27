@@ -1,7 +1,7 @@
 # Magazine feel: near-black page, cream text, a warm accent, title-case headings set flush left.
 id: editorial
 name: Editorial
-version: 1
+version: 2
 description: High-contrast near-black and cream with a warm accent, title-case headings aligned left, smooth ease-in-out reveals. For stories, opinions, case studies and quotes.
 palette:
   background: "#121110"
@@ -27,3 +27,4 @@ motion:
   stagger_ms: 140
   transition: crossfade
   transition_ms: 400
+  avoid: [shake, rgb_split, particle_burst, shockwave, neon_glow, grid_floor, flash, bouncy_easing]

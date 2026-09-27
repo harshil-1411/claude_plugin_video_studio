@@ -1,7 +1,7 @@
 # Calm and quiet: a light page, regular-weight headings, slightly smaller type and slow fades.
 id: minimal
 name: Minimal
-version: 1
+version: 2
 description: Light background, regular-weight headings with room around them, calm ease-out fades. For explainers and thoughtful, low-key topics.
 palette:
   background: "#F6F5F2"
@@ -27,3 +27,4 @@ motion:
   stagger_ms: 180
   transition: crossfade
   transition_ms: 500
+  avoid: [shake, rgb_split, lens_flare, particle_burst, shockwave, neon_glow, grid_floor, flash, bouncy_easing]

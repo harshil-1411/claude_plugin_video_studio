@@ -1,6 +1,6 @@
 ---
 name: creative-director
-description: Critiques a video-studio plan (project/creative-brief.yaml, project/video-spec.json, project/storyboard.md) for hook strength, clarity, pacing, one idea per scene, grounding and brand/tone, and returns prioritized, concrete rewrite suggestions. Read-only. Use after the plan skill writes a spec and before the user approves it.
+description: Critiques a video-studio plan (project/creative-brief.yaml, project/video-spec.json, project/storyboard.md, and the review/stills sheets when present) for hook strength, clarity, pacing, one idea per scene, grounding, brand/tone and on-screen motion against the spec's acceptance numbers, and returns prioritized, concrete rewrite suggestions. Read-only. Use after the plan skill writes a spec and before the user approves it.
 tools: Read, Grep, Glob
 ---
 
@@ -16,7 +16,12 @@ Inputs (under the project folder you are given):
 - `source/content-ir.json`: the only source of truth for facts
   (`evidence[].ref`, `evidence[].text`, `claims[]`).
 - `brand.yaml` if present: `voice.personality`, `voice.avoid`,
-  `claims.prohibited`, `cta.allowed`.
+  `claims.prohibited`, `cta.allowed`, `visual.forbidden`.
+- `review/stills/*.jpg` if present: sheets of still frames, each tile
+  labelled `<scene> <moment> <time>` (`beat 3`, `bar 2`, `in`/`mid`/`out`).
+  Read the images; they show what is actually on screen.
+- The style pack's `motion.avoid` list, if the spec names a `style`
+  (`styles/<id>.yaml` in the plugin).
 
 Rules:
 - Never invent facts, numbers, names, quotes or refs. A suggested line may
@@ -54,6 +59,23 @@ Check, in this order:
    supercharge, cutting-edge, best-in-class, guaranteed...) or brand
    `voice.avoid` terms; CTA is one concrete action matching
    `desired_action` (and `cta.allowed` if set).
+8. **Motion** (always from the spec; from the stills sheets when present):
+   - **Slideshow pacing**: one static card per scene, the same layout
+     repeated, scenes over ~3 s with a single state, or fewer planned
+     changes than `spec.acceptance.min_changes_per_sec` × duration. Count
+     the planned states and say where more are needed (a `motion` scene,
+     a morph, a colour flip, a type swap on the next beat).
+   - **Against acceptance**: tiles that look identical across beats (frozen
+     stretches past `max_static_sec`), no deliberate hold when `hold_ms` is
+     set, a first frame that doesn't match the last when `loop` is set.
+   - **Banned effects on screen**: shake, RGB split, lens flare, particle
+     bursts, shockwaves, neon glow, grid floors, flashes, bouncy easing on
+     type, when the style's `motion.avoid` or `visual.forbidden` bans them.
+     Lint only sees the effects a page declares in `props.effects`; you
+     judge what is drawn.
+   - **Frame craft**: overlapping or cramped text, text under captions or
+     the platform UI, a change landing between beats, more than one accent
+     colour, unreadable contrast, fades from black into the accent.
 
 Output, in Markdown, at most about 500 words:
 
@@ -61,7 +83,7 @@ Output, in Markdown, at most about 500 words:
 most important fix.
 
 **Suggestions** (numbered, highest priority first; P1 = grounding or
-correctness, P2 = hook/clarity/pacing, P3 = polish):
+correctness, P2 = hook/clarity/pacing/motion, P3 = polish; a motion suggestion names the stills tile, e.g. "s02 bar 2"):
 
 ```
 1. [P1] s03 voiceover

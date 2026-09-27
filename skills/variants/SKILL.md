@@ -1,6 +1,6 @@
 ---
 name: variants
-description: Create an A/B experiment from a planned video-studio project - several hooks and covers from one spec, each rendered as its own package with an experiment manifest (hypothesis, variant ids). Use when the user runs /video-studio:variants, wants to test hooks or thumbnails, or asks for "a few versions" of the same video.
+description: Create an A/B experiment from a planned video-studio project - several hooks and covers from one spec, optionally in paired cut lengths (e.g. 15 s and 30 s), each rendered as its own package with an experiment manifest (hypothesis, variant ids, cut length). Use when the user runs /video-studio:variants, wants to test hooks or thumbnails, or asks for "a few versions" of the same video.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+).
 allowed-tools: mcp__plugin_video-studio_engine__variants mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__schema_get mcp__plugin_video-studio_engine__lint Read Write
@@ -10,6 +10,8 @@ allowed-tools: mcp__plugin_video-studio_engine__variants mcp__plugin_video-studi
 
 A variant changes **only** the hook scene and the cover; every other scene is
 shared with the base project, so the experiment isolates what it tests.
+Paired cuts (`durations`) add one more axis: every hook × cover pair is also
+retimed to each length, with the same proportional scaling as `adapt`.
 
 1. Resolve the project folder (absolute). It needs a valid
    `project/video-spec.json` (run the `validate` skill first if unsure).
@@ -29,6 +31,22 @@ shared with the base project, so the experiment isolates what it tests.
      focal_time_sec (inside the hook)}}`.
 3. Call `variants {project_dir}` to prepare. Fix every variant listed as
    `failed` by editing `project/variants.json`, then call it again.
+   - **Paired cuts:** when the user wants the same piece at several lengths
+     (e.g. "a 15 and a 30"), pass `durations: [15, 30]`. Each pair then
+     becomes `variants/<hook>-<cover>-15s/` and `-30s/`, and the output lists
+     `duration_sec` per variant. The rules:
+     - at most 4 lengths, no duplicates;
+     - each length inside the platform's norms (e.g. 7-90 s for Reels and
+       Shorts) and every target contract's duration range;
+     - each length long enough for every scene to keep 0.5 s.
+     The engine refuses bad lengths with the reason.
+   - Later calls without `durations` keep the experiment's cuts;
+     `durations: []` goes back to the base length only.
+   - Words are not rewritten. For a narrated spec, the notes list every
+     scene whose voiceover no longer fits a shorter cut. Don't render those;
+     make the short cut with `adapt` instead (its own project, where you trim
+     the narration), then run `variants` there. Paired cuts work best for
+     `voice.mode: none` pieces (text over music, motion loops).
 4. Call `variants {project_dir, render: true}` (add `quality: "final"` when
    the user wants final renders). Renders queue one at a time; poll
    `job_status` for each job id every 10–20 s, or
@@ -39,7 +57,7 @@ shared with the base project, so the experiment isolates what it tests.
    `render: true` resubmits it.
 5. Optionally run `lint` on one variant folder (`variants/<id>`) per hook.
 6. Report: the hypothesis and metric, then one line per variant (id, hook
-   label, cover headline, status, `variants/<id>/dist/`). Remind the user to
+   label, cover headline, cut length if any, status, `variants/<id>/dist/`). Remind the user to
    post variants under comparable conditions (same time slot, audience) and
    to compare only the chosen metric; the plugin does not publish or fetch
    analytics.

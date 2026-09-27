@@ -33,7 +33,7 @@ export interface AdaptResult {
 /** Words per second above which narration is too dense (matches lint's MAX_WORDS_PER_SEC). */
 const MAX_WPS = 3.3;
 /** Shortest scene the schema allows. */
-const MIN_SCENE_SEC = 0.5;
+export const MIN_SCENE_SEC = 0.5;
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -46,6 +46,30 @@ export function scaleDurations(durations: readonly number[], target: number): nu
   const longest = scaled.indexOf(Math.max(...scaled));
   scaled[longest] = Math.max(MIN_SCENE_SEC, round1(scaled[longest]! + diff));
   return scaled;
+}
+
+/**
+ * Retime a spec to `target` seconds in place: scene durations scaled proportionally (exact total),
+ * target_duration_sec set and the cover's focal time scaled. Words are not rewritten; for narrated
+ * specs the notes name every scene whose voiceover no longer fits. Shared by `adapt` and the
+ * `durations` of `variants`.
+ */
+export function retimeSpec(spec: VideoSpec, target: number): { change: string; notes: string[] } {
+  const from = spec.target_duration_sec;
+  const factor = target / spec.scenes.reduce((a, s) => a + s.duration_sec, 0);
+  const durations = scaleDurations(spec.scenes.map((s) => s.duration_sec), target);
+  spec.scenes.forEach((s, i) => (s.duration_sec = durations[i]!));
+  spec.target_duration_sec = target;
+  if (spec.cover) spec.cover.focal_time_sec = round1(spec.cover.focal_time_sec * factor);
+  const notes: string[] = [];
+  if (voiceMode(spec) === "narrated") {
+    for (const s of spec.scenes) {
+      const words = s.voiceover.trim() ? s.voiceover.trim().split(/\s+/).length : 0;
+      const max = Math.floor(s.duration_sec * MAX_WPS);
+      if (words > max) notes.push(`${s.id}: ${words} voiceover words in ${s.duration_sec}s; trim to ≤ ${max} words (or merge/drop a scene)`);
+    }
+  }
+  return { change: `duration ${from}s → ${target}s (scenes scaled ×${Math.round(factor * 100) / 100})`, notes };
 }
 
 export async function adaptProject(projectDir: string, outDir: string, opts: AdaptOptions): Promise<AdaptResult> {
@@ -87,19 +111,9 @@ export async function adaptProject(projectDir: string, outDir: string, opts: Ada
   }
 
   if (opts.target_duration_sec && opts.target_duration_sec !== src.target_duration_sec) {
-    const factor = opts.target_duration_sec / src.scenes.reduce((a, s) => a + s.duration_sec, 0);
-    const durations = scaleDurations(src.scenes.map((s) => s.duration_sec), opts.target_duration_sec);
-    spec.scenes.forEach((s, i) => (s.duration_sec = durations[i]!));
-    spec.target_duration_sec = opts.target_duration_sec;
-    if (spec.cover) spec.cover.focal_time_sec = round1(spec.cover.focal_time_sec * factor);
-    changes.push(`duration ${src.target_duration_sec}s → ${opts.target_duration_sec}s (scenes scaled ×${Math.round(factor * 100) / 100})`);
-    if (voiceMode(spec) === "narrated") {
-      for (const s of spec.scenes) {
-        const words = s.voiceover.trim() ? s.voiceover.trim().split(/\s+/).length : 0;
-        const max = Math.floor(s.duration_sec * MAX_WPS);
-        if (words > max) notes.push(`${s.id}: ${words} voiceover words in ${s.duration_sec}s; trim to ≤ ${max} words (or merge/drop a scene)`);
-      }
-    }
+    const r = retimeSpec(spec, opts.target_duration_sec);
+    changes.push(r.change);
+    notes.push(...r.notes);
   }
   if (changes.length === 0) notes.push("nothing to adapt: the options match the source spec");
 

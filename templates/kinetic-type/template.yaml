@@ -1,0 +1,78 @@
+# Archetype: the exact words, animated by role, timed to the voice or the track.
+schema_version: "1.0"
+id: kinetic-type
+name: Kinetic type
+description: The user's exact words, in their exact order, animated word by word - each word's size, weight and motion set by its role - on a cue sheet taken from the measured voiceover phrases or the measured onsets of a track.
+goals: [promote, announce, launch, educate, explain]
+platforms: [instagram_reels, youtube_shorts, tiktok, linkedin, x]
+default_aspect_ratio: "9:16"
+default_duration_sec: 20
+duration_range: { min_sec: 8, max_sec: 60 }
+pacing: { avg_shot_sec: 1.5, max_words_per_sec: 3.0, min_changes_per_sec: 1.0, max_frozen_pct: 10 }
+caption_preset: bold
+default_style: energetic
+inputs:
+  - id: text
+    prompt: What are the exact words, in order? I will not change, add or drop any.
+    kind: text
+    required: true
+  - id: audio
+    prompt: What carries the timing - a system voiceover, your own recorded voiceover, or a licensed track with lyrics?
+    kind: choice
+    options: [system voiceover, my recorded voiceover, licensed track with lyrics]
+    required: false
+    default: system voiceover
+  - id: audio_file
+    prompt: If it is your recording or a track, which file is it?
+    kind: file
+    required: false
+  - id: brand
+    prompt: Do you have brand colours and fonts (a brand.yaml, or hex codes and font names)?
+    kind: file
+    required: false
+    default: the energetic style pack
+  - id: reference
+    prompt: Is there a reference video whose type style or pace you want to match?
+    kind: asset
+    required: false
+beats:
+  - purpose: hook
+    share: 0.1
+    guidance: The first phrase lands on the first beat, big and readable at a glance; no intro, no logo.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: question
+    share: 0.16
+    guidance: The phrase that opens the question or the tension, words entering one by one on their cues.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: point
+    share: 0.2
+    guidance: The next phrases; emphasis words scale or change weight, connectives stay small.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: point
+    share: 0.2
+    guidance: The build - phrases arrive faster, the layout tightens toward the key line.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: reveal
+    share: 0.2
+    guidance: The key phrase, set largest, with the one deliberate hold of at least 400 ms before anything moves again.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: cta
+    share: 0.14
+    guidance: The last words of the text (or the brand CTA if the text ends before one) settle and stay readable.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+hook_mechanisms: [pattern_interrupt, question, contrarian, promise]
+rules:
+  - "Exact words in exact order: the on-screen words are the user's text verbatim. Never paraphrase, reorder, add or drop a word; if it doesn't fit the length, ask."
+  - "Give every word a role before animating: emphasis (largest, the accent colour), subject or verb (full size), connective (small, quiet). The role sets size, weight and motion, never random styling."
+  - "Cue sheet: for speech, cue each phrase from the measured voiceover word timings (never the script estimate); for lyrics, cue from the track's measured onsets (beats analysis or transcribe). Record it in the scene's props.text and cues."
+  - "Every word is fully readable, at rest, before it transforms or leaves (about 250 ms at least); content enters after its container starts moving and leaves before the next change, so words never overlap."
+  - "At least one hold of 400 ms or more (acceptance.hold_ms 400) on the key phrase; about one big change per second elsewhere."
+  - "One accent colour. With a narrated voiceover the type is the caption: captions.burn_in false. With a lyrics track, voice.mode is none and the track is the music bed."
+  - "Declare effects in props.effects; nothing from the style's motion.avoid list."
+  - CTA must be the text's own last line or an allowed brand CTA if a brand profile is present.

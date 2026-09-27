@@ -48,6 +48,43 @@ warns when the chosen hook uses one the template does not list.
 
 Pick the highest total. Ties: evidence strength, then clarity.
 
+## Hook-strength check: big, relatable, easy, new, safe
+
+Run this on every candidate after the rubric. Start from the video's
+**genuine content promise**, meaning what the video really delivers according to the
+ContentIR. Then ask which of the five qualities the hook truly has. A hook
+earns a quality only through that promise. Wording that sounds big or new
+does not count.
+
+| Quality | The hook has it when | It does not have it when |
+|---|---|---|
+| **Big** | the stake is large for this audience: time, money, risk or a real change in how they work, as the sources show it | the stake is inflated past the sources, or is large only for someone else |
+| **Relatable** | the viewer recognises their own situation, pain or goal in the first line | it needs context the viewer lacks, or describes a niche they are not in |
+| **Easy** | it is understood on one hearing, with one idea and no jargon the audience lacks | it needs a second read, stacks two numbers or opens with a lead-in |
+| **New** | it tells this audience something they don't already assume: a sourced fact, a fresh angle, a result shown for the first time | it restates common knowledge, or claims novelty the product does not have |
+| **Safe** | every word is true to the sources, fair to others and within the brand's rules and policy | it relies on an unverified claim, attacks a named competitor, makes a health, money or legal promise, or uses a banned phrase |
+
+Rules:
+
+- **Never invent data or claims to make a hook land.** Do not round a number
+  up, add a statistic, imply a result the product has not shown or create a
+  customer story to earn "big" or "new". If the genuine promise is modest,
+  write a modest hook that is easy and relatable. That beats a big hook the
+  video can't pay off.
+- **Safe is a gate, not a score.** A candidate that isn't safe is dropped,
+  whatever its total.
+- **Note which qualities each candidate truly has.** Record them in the
+  candidate's `scores` beside the rubric scores (0-10), for example
+  `big: 7, relatable: 9, easy: 8, new: 4`. A candidate you keep is safe, so
+  it has no `safe` score. When you show the candidates to the user, give one
+  short reason per quality, for example "relatable: every reviewer hits
+  this; new: only for non-engineers". Leave a quality low when the hook
+  doesn't have it; don't round it up.
+- A strong hook usually has **at least three** of big, relatable, easy and
+  new, and is always safe. With fewer than three, try another mechanism
+  before settling. If none gets there, choose the most honest candidate and
+  say so in the brief's assumptions.
+
 ---
 
 ## Contrarian claim

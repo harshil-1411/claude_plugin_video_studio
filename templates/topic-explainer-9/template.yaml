@@ -1,0 +1,94 @@
+# Archetype: a 9-shot, ~45 s topic explainer in one style bible.
+schema_version: "1.0"
+id: topic-explainer-9
+name: Topic explainer (9 shots)
+description: Nine shots in about 45 seconds that explain one topic - one idea per shot, one style bible (palette, texture, symbol set) across all of them, narration written as a voiceover and every fact backed by the source. Plans its own 15 s and 30 s cuts.
+goals: [explain, educate, promote]
+platforms: [instagram_reels, youtube_shorts, tiktok, linkedin, youtube]
+default_aspect_ratio: "9:16"
+default_duration_sec: 45
+duration_range: { min_sec: 30, max_sec: 60 }
+pacing: { avg_shot_sec: 5, max_words_per_sec: 2.8, min_changes_per_sec: 0.6, max_frozen_pct: 15 }
+caption_preset: minimal
+default_style: editorial
+inputs:
+  - id: topic
+    prompt: What topic should the video explain, and for whom?
+    kind: text
+    required: true
+  - id: sources
+    prompt: Which sources back the facts (a document, URL or notes to ingest)?
+    kind: file
+    required: true
+  - id: style_bible
+    prompt: Which look should the style bible start from?
+    kind: choice
+    options: [editorial, minimal, technical, energetic]
+    required: false
+    default: editorial
+  - id: reference
+    prompt: Is there a reference video whose look or pace you want to match?
+    kind: asset
+    required: false
+  - id: cuts
+    prompt: Do you also want a 15 s and a 30 s cut?
+    kind: choice
+    options: [both, 30 s only, 15 s only, none]
+    required: false
+    default: none
+beats:
+  - purpose: hook
+    share: 0.1
+    guidance: Shot 1 - the most surprising true thing about the topic, as one line and one image from the symbol set.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: question
+    share: 0.11
+    guidance: Shot 2 - the question the video answers, framed so the viewer wants the answer.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: kinetic_text
+  - purpose: context
+    share: 0.11
+    guidance: Shot 3 - the one piece of context needed to follow the rest; drop it first for short cuts.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: diagram
+  - purpose: point
+    share: 0.11
+    guidance: Shot 4 - the first idea, one symbol doing one thing.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: point
+    share: 0.11
+    guidance: Shot 5 - the second idea, reusing a symbol from shot 4 so the viewer tracks it.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: point
+    share: 0.11
+    guidance: Shot 6 - the third idea, where the symbols combine.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: diagram
+  - purpose: proof
+    share: 0.12
+    guidance: Shot 7 - the strongest fact or number from the source, cited in claim_refs.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: stat
+  - purpose: payoff
+    share: 0.13
+    guidance: Shot 8 - the answer to shot 2's question in one line, the symbols resolved into their final arrangement.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: motion
+  - purpose: cta
+    share: 0.1
+    guidance: Shot 9 - one next step (follow, read, try) matching desired_action.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+hook_mechanisms: [curiosity_gap, question, statistic, contrarian]
+rules:
+  - "Nine shots, one idea each, about 5 s per shot (≈ 45 s). Don't add a tenth; merge instead."
+  - "Write the style bible before any shot and record it in the brief: the palette (the style pack's colours, one accent), one texture (grain, paper, flat), and a symbol set of 3-5 recurring shapes or icons. Every shot uses only these."
+  - "Narration is written as a voiceover: short spoken sentences, one thought per shot, numbers said the way people say them, no parentheses or lists."
+  - "Every fact and number is backed by the source and cites claim_refs; nothing is added to make a shot land."
+  - "Cuts: a 30 s cut keeps shots 1, 2, 4, 6, 7, 8 and 9 (drop context and one point); a 15 s cut keeps shots 1, 7, 8 and 9. Make them with adapt (then trim the narration and drop the shots), never by speeding up the voice."
+  - "About 0.6 big changes per second and at most 15 % frozen: every shot moves within itself, not only at the cut."
+  - "Declare effects in props.effects; nothing from the style's motion.avoid list."
+  - CTA must be an allowed brand CTA if a brand profile is present.

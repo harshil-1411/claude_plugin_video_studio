@@ -11,6 +11,24 @@ templates may set `default_style`. The file name must equal `id`.
 | `technical` | Dark editor palette, terminal-green accent, left-aligned semibold headings, JetBrains Mono for code; snap entrances (160 ms), no exit fade, hard cuts. | Developer tools, code, architecture. |
 | `energetic` | Deep purple, yellow accent, extra-bold UPPER-CASE headings a size larger, centred; spring entrances with a fast 70 ms stagger. | Launches, listicles, scroll-stopping hooks. |
 
+## Taste guard (`motion.avoid`)
+
+Each pack bans stock effects that make motion look templated (`EffectId` in
+`packages/schema/src/craft.ts`). A `motion` scene declares the effects it draws in
+`props.effects`; lint reports any that its style avoids as `banned_effect` (an error), next to
+anything `brand.yaml` lists under `visual.forbidden`.
+
+| id | Avoids | Allows, and why |
+|---|---|---|
+| `minimal` | all nine: `shake`, `rgb_split`, `lens_flare`, `particle_burst`, `shockwave`, `neon_glow`, `grid_floor`, `flash`, `bouncy_easing` | Nothing: a calm pack moves by position, scale and opacity only. |
+| `editorial` | all but `lens_flare` | A soft, warm light leak suits its photographic, printed-page look; everything louder breaks the tone. |
+| `technical` | all but `rgb_split` | A one-frame channel split on a hard cut is a terminal/glitch idiom that fits precise snaps; overshoot and bounce do not. |
+| `energetic` | `shake`, `rgb_split`, `lens_flare`, `particle_burst`, `neon_glow`, `grid_floor` | Its spring entrances already overshoot (`bouncy_easing`), and a `flash` or a single `shockwave` ring on a downbeat or drop suits a launch; shake, glitch and neon still read as cheap. |
+
+Every pack bans `shake`, `neon_glow` and `grid_floor`. Lint only sees declared effects; the
+`creative-director` agent also reviews the stills sheet for effects a page draws without
+declaring them.
+
 ## Precedence
 
 `renderer defaults < style < brand`. The style fills the palette, fonts, weights, text

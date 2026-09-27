@@ -3,7 +3,7 @@ name: create
 description: End-to-end video-studio flow - turn free text, a URL, a document or a local repo into a finished video package - plan (brief, grounded scene spec, storyboard), approval, local render with captions, QA and dist/ export. Use when the user runs /video-studio:create, or asks to "make a video", "turn this into a reel/short" or similar from any source.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+).
-allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__review Skill Read Write Edit
+allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__review mcp__plugin_video-studio_engine__stills mcp__plugin_video-studio_engine__compare Skill Read Write Edit
 ---
 
 # Create a video
@@ -65,7 +65,20 @@ The plan skill writes the brief, the spec and the storyboard and presents them.
 
 ## 4. Approval gate
 
-Ask the user to choose:
+Before asking, show what will be built, in a few lines on top of the
+plan skill's storyboard:
+
+- **Beat plan**: every state change or cut with its time and its place on
+  the music's grid (e.g. `s01 0.0 pill in · 1.0 beat 3 accent wipe · 2.0
+  bar 2 circle + line 2 · 2.5–3.0 hold · 3.0 fill`). With a music bed, each
+  one sits on a beat, and cuts on downbeats (`beat_sync.snap: downbeat`).
+  Without music, give the times alone.
+- **Acceptance**: the `spec.acceptance` numbers (changes per second,
+  frozen %, longest static stretch, hold, loop), or "template pacing".
+- **Look and sound**: the style, the music (bundled, `synth:<preset>` or
+  the user's track) and the reference video, if one was given.
+
+Then ask the user to choose:
 
 - **Approve**: say that the plan is approved and go to step 5.
 - **Revise**: apply the requested change (hook, tone, length, a scene,
@@ -96,7 +109,18 @@ TTS is unavailable, or ffmpeg because HyperFrames is not installed).
 
 Before showing the preview, run the render skill's step 4: `review` the
 preview and do its review → fix → re-render loop (at most 2 passes,
-spec-level fixes only). Show the user the result with what you fixed. Then
+spec-level fixes only). Within those passes:
+
+- `stills {project_dir, at: "downbeats"}` (or `beats`) for `motion`
+  scenes: view the sheet and fix cramped, overlapping or off-grid moments
+  in the page before re-rendering;
+- `compare {project_dir, a: {reference: <file>}}` when the user gave a
+  reference video: every metric it reports as a miss is a defect;
+- `frozen_frames` or `motion_density` fails, and lint `acceptance_unmet`,
+  are defects to fix (more states, shorter holds, `motion` scenes), not
+  notes to report.
+
+Show the user the result with what you fixed, and the `compare` path. Then
 walk through the QA findings. Frozen frames are a real defect, not
 something to explain away: over 15% of the runtime frozen (or the brief's
 `acceptance.max_frozen_pct`) fails QA, and `motion_density` / `longest_static`

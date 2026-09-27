@@ -1,0 +1,81 @@
+# Archetype: approved slides, one narration per slide, timed from the measured audio.
+schema_version: "1.0"
+id: slides-narrated
+name: Narrated slides
+description: A narrated slide video - the slides are agreed first, then each slide gets its own narration; slide durations come from the measured audio and captions from the final audio. For talks, lessons, updates and decks turned into video.
+goals: [explain, educate, announce, case_study]
+platforms: [youtube, linkedin, x, instagram_reels, youtube_shorts]
+default_aspect_ratio: "16:9"
+default_duration_sec: 60
+duration_range: { min_sec: 30, max_sec: 180 }
+pacing: { avg_shot_sec: 8, max_words_per_sec: 2.6, min_changes_per_sec: 0.2, max_frozen_pct: 40 }
+caption_preset: minimal
+default_style: editorial
+inputs:
+  - id: topic
+    prompt: What is the talk about, and who is it for? (an outline helps)
+    kind: text
+    required: true
+  - id: deck
+    prompt: Do you have existing slides (a PDF or slide images) to use, or should I draft them?
+    kind: file
+    required: false
+    default: draft the slides from the source material
+  - id: voice
+    prompt: Who narrates - the system voice or your own recording?
+    kind: choice
+    options: [system voice, my recording]
+    required: false
+    default: system voice
+  - id: brand
+    prompt: Do you have brand colours and fonts (a brand.yaml, or hex codes and font names)?
+    kind: file
+    required: false
+    default: the editorial style pack
+beats:
+  - purpose: hook
+    share: 0.08
+    guidance: The title slide states the promise in one line; the narration says why it matters to this audience.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: problem
+    share: 0.14
+    guidance: The slide with the problem or open question the talk answers.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: point
+    share: 0.2
+    guidance: The first main slide - one idea, at most three short bullets or one diagram.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: diagram
+  - purpose: point
+    share: 0.2
+    guidance: The second main slide, building on the first.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: proof
+    share: 0.14
+    guidance: The evidence slide - a chart or stat from the source, cited in claim_refs; optional for short versions.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: chart
+    optional: true
+  - purpose: result
+    share: 0.14
+    guidance: The summary slide - what the viewer now knows or can do.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: typography
+  - purpose: cta
+    share: 0.1
+    guidance: One next step on its own slide, matching desired_action.
+    suggested_visual_strategy: motion_graphic
+    suggested_deterministic_kind: cta
+hook_mechanisms: [promise, question, pain_point, statistic]
+rules:
+  - "Slides first: show the slide list (title and bullets or diagram per slide) and get it approved before writing any narration."
+  - "One slide per scene. Narration is written per slide, only about what that slide shows, for the ear (short sentences, numbers spoken as words)."
+  - "If the user supplied a deck, each scene shows its slide as an asset (screenshot kind with the slide image); never redraw a supplied slide with different text."
+  - "Durations come from the measured audio: after the voice is synthesized or recorded, set each scene's duration to its measured narration plus a 0.4-0.8 s tail, never to the script estimate."
+  - "Captions come from the final audio (word timings aligned to the rendered voice), not from the script."
+  - "Reveal bullets on the phrase that introduces them so slides are not frozen for long (at most 40 % of the runtime static)."
+  - Numbers and claims cite claim_refs from the source.
+  - CTA must be an allowed brand CTA if a brand profile is present.

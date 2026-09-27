@@ -59,6 +59,8 @@ are strict: unknown keys are errors.
 | `hook_candidates[].scores` | yes | map name → 0-10; use `relevance`, `clarity`, `curiosity`, `evidence_strength`, `visual_potential` |
 | `chosen_hook` | yes | exact text of one candidate |
 | `template` | no | template id from `template_list`, e.g. `devtool-launch`, `text-over-music` |
+| `inputs` | no | answers to the template's `inputs[]`, `{input id: string}` (text, choice, asset id or project file); a required input with no answer and no default is a `brief_validate` error |
+| `acceptance` | no | measurable checks, copied to the spec: `min_changes_per_sec` (0–10), `max_frozen_pct` (0–100, default 15), `max_static_sec`, `hold_ms` (a deliberate hold, e.g. 400), `loop`. Vague asks ("go all out") become these numbers; note it in `assumptions` |
 | `assumptions` | yes (may be `[]`) | `{field, value, reason}`; `value` is a string |
 
 ## VideoSpec (`project/video-spec.json`)
@@ -70,14 +72,15 @@ Top level:
 | `schema_version` | yes | `"1.0"` |
 | `id`, `title`, `content_ir_id`, `brief_id` | no | `brief_id` = the brief's `id` |
 | `goal`, `audience`, `platform`, `aspect_ratio`, `target_duration_sec`, `language` | yes | copy from the brief |
-| `master` | no | `{width, height, fps}`; production canvas, ratio must equal `aspect_ratio`, even sides, fps `24`/`30`/`60`. Default 1080 px short side @ 30 (`1080×1920` for 9:16); keep what `spec_scaffold` returns |
+| `master` | no | `{width, height, fps, loop?}`; `loop: true` = the video loops seamlessly (QA checks the seam; set it whenever `acceptance.loop` is); production canvas, ratio must equal `aspect_ratio`, even sides, fps `24`/`30`/`60`. Default 1080 px short side @ 30 (`1080×1920` for 9:16); keep what `spec_scaffold` returns |
 | `targets` | no | copy from the brief or `spec_scaffold`; unknown ids are errors |
 | `brand_profile` | no | e.g. `acme@3` |
 | `policy_profile` | no | string |
 | `grounding` | yes | `strict` by default |
 | `voice` | yes | `{mode?, rate_wpm?, provider_preference?, voice_id?, style?}`; `rate_wpm` 110–230 (default 160; 145–165 sounds natural, slower for dense technical lines); `mode`: `narrated` (default), `none` (no speech: every `voiceover` is `""`) or `native` (the speech is in the footage: every `voiceover` is `""`, captions come from the asset transcripts); leave `provider_preference` out unless the user asked; `style` in plain words ("calm, precise") |
 | `style` | no | style pack id: `minimal`, `editorial`, `technical`, `energetic` (look and motion; brand colours and fonts override it). `spec_scaffold` sets the template's `default_style` |
-| `audio` | no | `{music?: {file, volume_db?, duck_db?, fade_in_ms?, fade_out_ms?, loop?, start_sec?, license?}, beat_sync?: {enabled, tolerance_ms?}}`. `beat_sync` snaps cuts to beats of the bed at render time (default ±250 ms), reported as timing adjustments. `file`: `bundled:ambient` / `bundled:lofi` / `bundled:upbeat` / `bundled:minimal` (CC0, bundled) or a path relative to the project; a user file needs `license {id, source?, attribution?}` (e.g. `CC0-1.0`, `CC-BY-4.0`, `user-owned`) and only a track the user has the rights to |
+| `acceptance` | no | as in the brief; `spec_scaffold` copies it (the brief's values win over the template's `pacing.min_changes_per_sec`/`max_frozen_pct`). QA and lint (`acceptance_unmet`) hold the render to it |
+| `audio` | no | `{music?: {file, volume_db?, duck_db?, fade_in_ms?, fade_out_ms?, loop?, start_sec?, license?, synth?}, beat_sync?: {enabled, tolerance_ms?, snap?}}`. `beat_sync` snaps cuts to beats of the bed at render time (default ±250 ms), reported as timing adjustments; `snap: "downbeat"` only to bar starts. `file`: `bundled:ambient` / `bundled:lofi` / `bundled:upbeat` / `bundled:minimal` (CC0, bundled), `synth:pulse` (120 BPM) / `synth:lofi` (80) / `synth:ambient` (60) / `synth:drive` (128) (synthesized locally, CC0, exact beat grid; `synth {bpm?, key?, progression?, drop_bar?, seed?}` overrides the preset) or a path relative to the project; a user file needs `license {id, source?, attribution?}` (e.g. `CC0-1.0`, `CC-BY-4.0`, `user-owned`) and only a track the user has the rights to |
 | `captions` | yes | `{preset, burn_in, position?}`; preset from brand `video.caption_preset` or the template, else `minimal`; `burn_in: true` for short-form narrated videos, `false` with `voice.mode: none` (no speech to caption) |
 | `cover` | no (write it) | `{headline, focal_time_sec}`: thumbnail text ≤ 6 words, different from the hook voiceover; `focal_time_sec` inside the hook scene |
 | `publish` | no (write it) | map target id → `{post_caption, hashtags?, ai_disclosure?}`; one entry per target; hashtags look like `#devtools`; the post caption is not the voiceover |
@@ -93,7 +96,7 @@ Scene:
 | `voiceover` | yes | `""` for silent scenes and for every scene when `voice.mode` is `none` |
 | `on_screen_text` | no | ≤ 6 words |
 | `visual_strategy` | yes | `motion_graphic`, `generated_video`, `avatar`, `screen_capture`, `user_asset`, `stock` |
-| `deterministic` | if `motion_graphic` | `{kind, props}`; kind: `typography`, `code`, `chart`, `diagram`, `screenshot`, `comparison`, `cta`, `end_card`, `quote`, `stat`, `timeline`, `split_screen`, `lower_third`, `kinetic_text`, `map`; props non-empty except `end_card` (shapes in `visual-strategy.md`) |
+| `deterministic` | if `motion_graphic` | `{kind, props}`; kind: `typography`, `code`, `chart`, `diagram`, `screenshot`, `comparison`, `cta`, `end_card`, `quote`, `stat`, `timeline`, `split_screen`, `lower_third`, `kinetic_text`, `map`, `motion` (a page you write: `{html, text?, effects?, loop?}`, see `code-motion.md`); props non-empty except `end_card` (shapes in `visual-strategy.md`) |
 | `visual_requirements` | yes | object; `continuity_refs` required (may be `[]`); optional `subject`, `camera`, `style`, `modality` (`video`/`image`/`none`), `realism` (`low`/`medium`/`high`), `character_reference` & `audio_generation` (`required`/`optional`/`none`), `max_cost_usd` (≥ 0), `data_policy` (`external-ok`/`local-only`), `preference` (list of `continuity`/`quality`/`speed`/`cost`) |
 | `claim_refs` | yes (may be `[]`) | ContentIR `evidence[].ref` or `claims[].id`, copied exactly |
 | `transition` | no | `cut`, `crossfade`, `fade_black`, `slide`, `zoom`, `whip` |

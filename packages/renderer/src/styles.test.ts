@@ -47,6 +47,21 @@ describe("styles/ packs", () => {
     expect(new Set(styles.map((s) => s.motion.easing)).size).toBe(CORE.length);
   });
 
+  it("every core pack has a taste guard (motion.avoid) that fits its personality", async () => {
+    const avoid = Object.fromEntries(await Promise.all(CORE.map(async (id) => [id, new Set((await getStyle(dir, id)).motion.avoid ?? [])] as const)));
+    // Nobody shakes the camera or splits RGB channels for polish; neon glow and synthwave grid floors date a piece.
+    for (const id of CORE) for (const e of ["shake", "neon_glow", "grid_floor"]) expect(avoid[id]!.has(e as never), `${id} avoids ${e}`).toBe(true);
+    // Calm packs ban every stock effect.
+    expect(avoid.minimal!.size).toBe(9);
+    expect(avoid.editorial!.size).toBeGreaterThanOrEqual(8);
+    // Energetic keeps on-beat flashes and its spring overshoot; technical keeps a one-frame glitch on a cut.
+    expect(avoid.energetic!.has("flash")).toBe(false);
+    expect(avoid.energetic!.has("bouncy_easing")).toBe(false);
+    expect(avoid.energetic!.has("rgb_split")).toBe(true);
+    expect(avoid.technical!.has("rgb_split")).toBe(false);
+    expect(avoid.technical!.has("bouncy_easing")).toBe(true);
+  });
+
   it("unknown ids fail with the available ids; ids must match the file name", async () => {
     await expect(getStyle(dir, "nope")).rejects.toThrow(/unknown style "nope"; available: .*editorial.*minimal/);
     await expect(getStyle(dir, "../minimal")).rejects.toThrow(/unknown style/);
@@ -60,6 +75,6 @@ describe("styles/ packs", () => {
   });
 
   it("styleRef is <id>@<version>", async () => {
-    expect(styleRef(await getStyle(dir, "minimal"))).toBe("minimal@1");
+    expect(styleRef(await getStyle(dir, "minimal"))).toBe("minimal@2");
   });
 });

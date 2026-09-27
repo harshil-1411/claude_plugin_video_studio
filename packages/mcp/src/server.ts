@@ -33,7 +33,7 @@ import { type RenderProjectOptions, type RenderProjectResult, SpecInvalidError, 
 import { type ErrorCode, type RenderJobView, RenderJobManager, errorCode, isActiveJob } from "./render-jobs.js";
 import { formatSpecValidation, projectSpecPaths, validateSpecFile } from "./spec-validate.js";
 import { findTemplatesDir, getTemplate, loadTemplates, requireTemplatesDir, summarizeTemplate } from "./templates.js";
-import { type JobLookup, experimentStatus, formatVariants, needsRender, prepareVariants } from "./variants.js";
+import { type JobLookup, experimentStatus, formatVariants, needsRender, prepareVariants, withDurations } from "./variants.js";
 import { formatVerify, verifyProject } from "./verify.js";
 import { type CompactOptions, toolResult } from "./output.js";
 import { jobStatusView } from "./job-status-view.js";
@@ -329,7 +329,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "List story templates",
       description:
-        "List the bundled story templates (beat structures with pacing and caption preset). Returns {templates: [{id, name, description, goals[], platforms[], default_duration_sec, beat_count}]}. Use template_get for the full beats.",
+        "List the bundled story templates (beat structures with pacing and caption preset). Returns {templates: [{id, name, description, goals[], platforms[], default_duration_sec, beat_count, min_changes_per_sec?, max_frozen_pct?, inputs?}]}. Use template_get for the full beats.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
@@ -345,7 +345,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Get a story template",
       description:
-        "Return one story template in full: goals, platforms, default and allowed duration, pacing {avg_shot_sec, max_words_per_sec}, caption preset, beats[] {purpose, share, guidance, suggested_visual_strategy, suggested_deterministic_kind?, optional?}, preferred hook_mechanisms and rules.",
+        "Return one story template in full: goals, platforms, default and allowed duration, pacing {avg_shot_sec, max_words_per_sec, min_changes_per_sec?, max_frozen_pct?}, caption preset, beats[] {purpose, share, guidance, suggested_visual_strategy, suggested_deterministic_kind?, optional?}, preferred hook_mechanisms, rules, default_style/default_music, and inputs[] {id, prompt, kind, required, options?, default?}: ask the required inputs before writing the brief and record the answers in brief.inputs.",
       inputSchema: { id: z.string().min(1).describe("Template id from template_list, e.g. explain") },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
@@ -360,7 +360,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Validate a CreativeBrief",
       description:
-        "Validate <project_dir>/project/creative-brief.yaml (or .yml/.json; YAML or JSON) against the CreativeBrief schema, then check it. Errors: schema violations, chosen_hook not among hook_candidates, unknown template. Warnings: fewer than 3 hook candidates or repeated mechanisms, no assumptions, duration or aspect ratio outside platform norms (e.g. reels/shorts/tiktok <= 90s, 9:16), and poor fit with the chosen template. Returns {ok, brief_path, errors[], warnings[]}, each issue {path, message, fix}.",
+        "Validate <project_dir>/project/creative-brief.yaml (or .yml/.json; YAML or JSON) against the CreativeBrief schema, then check it. Errors: schema violations, chosen_hook not among hook_candidates, unknown template. Warnings: fewer than 3 hook candidates or repeated mechanisms, no assumptions, duration or aspect ratio outside platform norms (e.g. reels/shorts/tiktok <= 90s, 9:16), and poor fit with the chosen template. Template inputs: a required input with no answer in brief.inputs and no default is an error (the fix quotes the question to ask); a defaulted one is a warning to list in assumptions; an answer to an unknown input id or outside a choice's options is a warning. Returns {ok, brief_path, errors[], warnings[]}, each issue {path, message, fix}.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Project folder containing project/creative-brief.yaml"),
       },
@@ -377,7 +377,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Scaffold a VideoSpec from a template",
       description:
-        "Return (does not write) a skeleton VideoSpec built from a template's beats: one scene per beat with durations scaled to the target (summing exactly to it), the suggested visual strategy and deterministic kind, and empty voiceover/on_screen_text/props placeholders for you to fill. Defaults come from the project's creative brief when present. Also returns per-scene guidance with word budgets, the template rules and notes. Write the filled spec to project/video-spec.json, then run spec_validate.",
+        "Return (does not write) a skeleton VideoSpec built from a template's beats: one scene per beat with durations scaled to the target (summing exactly to it), the suggested visual strategy and deterministic kind, and empty voiceover/on_screen_text/props placeholders for you to fill (motion scenes get props {html: \"motion/<scene id>.html\", text: []}: write the page there). Copies acceptance into the spec (the brief's acceptance wins field by field over the template's pacing density), sets master.loop when acceptance.loop, and audio.music from the template default (bundled:<id> or synth:<preset>). Defaults come from the project's creative brief when present. Also returns per-scene guidance with word budgets, the template rules and notes. Write the filled spec to project/video-spec.json, then run spec_validate.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Project folder (reads project/creative-brief.yaml and source/content-ir.json if present)"),
         template_id: z.string().min(1).describe("Template id from template_list"),
@@ -416,6 +416,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
         const summary = [
           `scaffolded ${r.spec.scenes.length} scenes from template "${r.template_id}" (${r.spec.target_duration_sec}s, ${r.spec.platform}, ${r.spec.aspect_ratio}, targets: ${r.spec.targets?.join(", ") || "none"}); not written`,
           ...r.scene_guidance.map((g) => `${g.scene_id} ${g.purpose} ${g.duration_sec}s (<= ${g.word_budget} words): ${g.guidance}`),
+          ...(r.spec.acceptance ? [`acceptance: ${JSON.stringify(r.spec.acceptance)}`] : []),
           ...r.notes.map((n) => `note: ${n}`),
         ].join("\n");
         return jsonResult(summary, r as unknown as Record<string, unknown>);
@@ -804,11 +805,12 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Prepare (and render) A/B variants",
       description:
-        "Build an A/B experiment from <project_dir>/project/variants.json (ExperimentPlan: {schema_version, id, hypothesis, metric?, hooks: [{id, label?, scene}], covers?: [{id, label?, cover: {headline, focal_time_sec}}]}; schema_get experiment-plan). Every hook × cover pair becomes variants/<hook>-<cover>/, a full project whose spec is the base spec with the hook scene and cover swapped (validated like spec_validate). Writes variants/experiment.json (hypothesis, base spec hash, variants with status). Each call rebuilds the variant folders from the base (their source/ and project/ are replaced; renders/ is kept), except a variant whose render is running right now, which is left as is and listed under skipped. With render: true, queues one render job per variant that is not rendered and not already queued or running (failed or cancelled renders are resubmitted; renders run one at a time; poll job_status or call variants again with status_only: true). A variant is `rendering` only while its job is queued or running. Base scene clips are reused, so a variant mostly re-renders its hook scene.",
+        "Build an A/B experiment from <project_dir>/project/variants.json (ExperimentPlan: {schema_version, id, hypothesis, metric?, hooks: [{id, label?, scene}], covers?: [{id, label?, cover: {headline, focal_time_sec}}]}; schema_get experiment-plan). Every hook × cover pair becomes variants/<hook>-<cover>/, a full project whose spec is the base spec with the hook scene and cover swapped (validated like spec_validate). Writes variants/experiment.json (hypothesis, base spec hash, variants with status). Each call rebuilds the variant folders from the base (their source/ and project/ are replaced; renders/ is kept), except a variant whose render is running right now, which is left as is and listed under skipped. With render: true, queues one render job per variant that is not rendered and not already queued or running (failed or cancelled renders are resubmitted; renders run one at a time; poll job_status or call variants again with status_only: true). A variant is `rendering` only while its job is queued or running. Base scene clips are reused, so a variant mostly re-renders its hook scene. durations (e.g. [15, 30]) adds paired cuts: every hook × cover pair is also retimed to each length (scenes scaled proportionally, like adapt) as variants/<hook>-<cover>-<n>s/; at most 4 lengths, each inside the platform's norms and every target's duration range. Later calls without durations keep the experiment's cuts; [] goes back to the base length. Words are not rewritten: narration that no longer fits a shorter cut is listed as notes; for narrated specs make the short cut with adapt (its own project, words trimmed) and run variants there. Returns the manifest with duration_sec per cut, plus invalid, skipped and notes.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Planned (ideally rendered) base project"),
         render: z.boolean().optional().describe("Queue a render job per unrendered variant (default false: prepare only)"),
         status_only: z.boolean().optional().describe("Only refresh and report variants/experiment.json"),
+        durations: z.array(z.number().positive().max(600)).max(4).optional().describe("Paired cut lengths in seconds, e.g. [15, 30] (at most 4); omitted keeps the experiment's cuts, [] removes them"),
         quality: QUALITY.optional().describe("Render quality for render: true (default preview)"),
         voice: z.enum(["auto", "system", "elevenlabs", "silent"]).optional(),
         renderer: z.enum(["auto", "hyperframes", "ffmpeg"]).optional(),
@@ -816,7 +818,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
     safe(
-      async (args: { project_dir: string; render?: boolean; status_only?: boolean; quality?: "preview" | "final"; voice?: "auto" | "system" | "elevenlabs" | "silent"; renderer?: "auto" | "hyperframes" | "ffmpeg" }) => {
+      async (args: { project_dir: string; render?: boolean; status_only?: boolean; durations?: number[]; quality?: "preview" | "final"; voice?: "auto" | "system" | "elevenlabs" | "silent"; renderer?: "auto" | "hyperframes" | "ffmpeg" }) => {
         const root = resolveInputPath(args.project_dir, cwd());
         const lookup: JobLookup = (id) => {
           const j = getJobs().status(id);
@@ -824,9 +826,9 @@ export function createServer(options: ServerOptions = {}): McpServer {
         };
         if (args.status_only) {
           const m = await experimentStatus(root, {}, lookup);
-          return jsonResult(formatVariants(m), m as unknown as Record<string, unknown>);
+          return jsonResult(formatVariants(m), withDurations(m) as unknown as Record<string, unknown>);
         }
-        const r = await prepareVariants(root, undefined, { jobs: lookup });
+        const r = await prepareVariants(root, undefined, { jobs: lookup, ...(args.durations ? { durations: args.durations } : {}) });
         let manifest = r.manifest;
         if (args.render) {
           const jobs: Record<string, string> = {};
@@ -844,7 +846,13 @@ export function createServer(options: ServerOptions = {}): McpServer {
           }
           manifest = await experimentStatus(root, jobs, lookup);
         }
-        return jsonResult(formatVariants(manifest, r.invalid, r.skipped), { ...manifest, manifest_path: r.manifest_path, invalid: r.invalid, skipped: r.skipped } as unknown as Record<string, unknown>);
+        return jsonResult(formatVariants(manifest, r.invalid, r.skipped, r.notes), {
+          ...withDurations(manifest),
+          manifest_path: r.manifest_path,
+          invalid: r.invalid,
+          skipped: r.skipped,
+          notes: r.notes,
+        } as unknown as Record<string, unknown>);
       },
     ),
   );
