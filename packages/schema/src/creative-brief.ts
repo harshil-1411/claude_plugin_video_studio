@@ -10,6 +10,7 @@ import {
   PlatformTargetId,
   SchemaVersion,
 } from "./common.js";
+import { Acceptance } from "./craft.js";
 
 export const HookMechanism = z.enum([
   "curiosity_gap",
@@ -64,6 +65,8 @@ export const CreativeBrief = z
     hook_candidates: z.array(HookCandidate).min(1),
     chosen_hook: NonEmptyString.describe("Text of the selected hook; should match a hook candidate."),
     template: Id.optional(),
+    acceptance: Acceptance.optional().describe("Measurable checks the render must meet; vague asks (\"go all out\") become numbers here. Copied to the VideoSpec."),
+    inputs: z.record(Id, z.string()).optional().describe("Answers to the template's inputs, keyed by input id (text, choice value, or project-relative file / asset id)."),
     assumptions: z.array(Assumption),
   })
   .meta({

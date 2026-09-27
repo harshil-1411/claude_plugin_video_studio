@@ -24,7 +24,8 @@ const TOKENS: VisualTokens = {
 };
 const PORTRAIT: RenderTarget = { width: 1080, height: 1920, fps: 30, aspect_ratio: "9:16" };
 const LANDSCAPE: RenderTarget = { width: 1920, height: 1080, fps: 30, aspect_ratio: "16:9" };
-const KINDS = Object.keys(DETERMINISTIC_PROPS_EXAMPLES) as DeterministicKind[];
+/** Kinds built into the composer (`motion` pages are Claude-authored and tested separately). */
+const KINDS = [...HYPERFRAMES_KINDS];
 
 function req(kind: DeterministicKind, props: Record<string, unknown>, over: Partial<SceneRenderRequest> = {}, duration = 3): SceneRenderRequest {
   const scene: Scene = {

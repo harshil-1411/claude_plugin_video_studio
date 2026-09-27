@@ -12946,6 +12946,111 @@ const HexColor = string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{
 /** Relative or absolute file path (no validation of existence). */
 const FilePath = string().min(1);
 //#endregion
+//#region ../schema/dist/craft.js
+/**
+* Craft vocabulary shared by specs, briefs, templates and style packs (Phase 6.5): the effects a
+* style can ban, measurable acceptance checks, local score synthesis, and project-relative files.
+*/
+/**
+* Effects that make motion look templated. A style's `motion.avoid` bans them; a `motion` scene
+* declares the ones it uses in `props.effects`, and lint reports the overlap as `banned_effect`.
+*/
+const EffectId = _enum([
+	"shake",
+	"rgb_split",
+	"lens_flare",
+	"particle_burst",
+	"shockwave",
+	"neon_glow",
+	"grid_floor",
+	"flash",
+	"bouncy_easing"
+]);
+/**
+* Measurable acceptance checks for a piece. The plan skill turns vague asks ("go all out") into
+* these numbers; QA and lint check the render against them.
+*/
+const Acceptance = strictObject({
+	min_changes_per_sec: number().min(0).max(10).optional().describe("Big visual changes per second the render must reach (motion density)."),
+	max_frozen_pct: number().min(0).max(100).optional().describe("Most of the runtime that may be frozen, in percent (default 15)."),
+	max_static_sec: number().positive().max(60).optional().describe("Longest allowed stretch with no visual change."),
+	hold_ms: int().min(0).max(5e3).optional().describe("At least one deliberate hold this long, so change feels earned (e.g. 400)."),
+	loop: boolean().optional().describe("The piece must loop seamlessly (last frame flows into the first).")
+}).describe("Measurable acceptance checks; the numbers QA and lint hold the render to.");
+/** A roman-numeral chord degree; lower case is minor (e.g. vi). */
+const ChordDegree = _enum([
+	"I",
+	"ii",
+	"iii",
+	"IV",
+	"V",
+	"vi",
+	"vii",
+	"i",
+	"III",
+	"iv",
+	"v",
+	"VI",
+	"VII"
+]);
+/**
+* Parameters for a locally synthesized score (ffmpeg only, no downloads). Deterministic: the same
+* parameters always give the same audio, so the beat grid is known without detection.
+*/
+const SynthParams = strictObject({
+	bpm: int().min(60).max(200),
+	key: string().regex(/^[A-G](#|b)?m?$/, "expected a key like C, F#, Bb or Am").optional().describe("Musical key (default C, or Am for minor presets)."),
+	progression: array(ChordDegree).min(1).max(16).optional().describe("Chord degrees, one per bar, repeated."),
+	drop_bar: int().min(1).max(256).optional().describe("Bar where the full arrangement enters (1-based)."),
+	seed: int().min(0).optional().describe("Seed for the hi-hat and texture patterns.")
+}).describe("A locally synthesized score; `music.file` names the preset as `synth:<preset>`.");
+/**
+* A path relative to the project folder: no absolute paths, no `..` segments and no URL schemes.
+* The engine still resolves it with symlink checks before reading it.
+*/
+const ProjectRelativePath = string().min(1).refine((p) => !/^([a-zA-Z]:)?[\\/]/.test(p), "must be relative to the project folder").refine((p) => !p.split(/[\\/]/).includes(".."), "must not contain `..`").refine((p) => !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p), "must be a project file, not a URL");
+//#endregion
+//#region ../schema/dist/shot-card.js
+/**
+* A provider-neutral shot card for generated footage (Phase 7). Prompt compilers turn it into
+* each provider's syntax; the card itself never names a provider or model. Duration and aspect
+* ratio come from the scene and the spec.
+*/
+/** The one job a shot does in the sequence. */
+const ShotPurpose = _enum([
+	"emotion",
+	"plot",
+	"pressure"
+]);
+const ShotSubject = strictObject({
+	id: Id.describe("Stable name used across shots, e.g. hero or product."),
+	role: NonEmptyString.describe("What the reference is for, e.g. 'identity, wardrobe' or 'camera movement only'."),
+	asset: Id.optional().describe("ContentIR asset id of the reference image or clip.")
+}).describe("A character, product or location bound to a reference.");
+const ShotAudio = strictObject({
+	dialogue: array(strictObject({
+		speaker: Id,
+		line: NonEmptyString
+	})).optional(),
+	sfx: array(NonEmptyString).max(3).optional().describe("At most 3 specific sounds, each tied to a visible event."),
+	ambience: string().optional(),
+	music: string().optional().describe("Music cue; the licensed or synthesized bed is usually added in the edit instead.")
+}).describe("What the shot sounds like.");
+const ShotCard = strictObject({
+	purpose: ShotPurpose,
+	subjects: array(ShotSubject).max(9).optional(),
+	action: NonEmptyString.describe("One clear subject action (timed beats inside it if the shot is over 4 s)."),
+	camera: NonEmptyString.describe("One clear camera move, or \"locked\"."),
+	environment: string().optional().describe("Location, time, weather and one environmental detail."),
+	look: string().optional().describe("Lighting, lens, grade and texture."),
+	audio: ShotAudio.optional(),
+	on_screen_text: _enum(["post", "generated"]).optional().describe("post (default): logos, prices, UI and copy are composited afterwards, never generated."),
+	continuity: array(NonEmptyString).optional().describe("What must stay identical to the previous shot (count, wardrobe, props, handedness)."),
+	end_state: string().optional().describe("The final image of the shot; lets the next shot start from it."),
+	first_frame_from: Id.optional().describe("Scene id whose approved last frame is this shot's first frame."),
+	exclusions: array(NonEmptyString).optional().describe("Things the model must not do (compiled only where the provider accepts negatives).")
+}).describe("Provider-neutral shot card for a generated_video or avatar scene.");
+//#endregion
 //#region ../schema/dist/content-ir.js
 const Source = strictObject({
 	id: Id,
@@ -13178,6 +13283,8 @@ const CreativeBrief = strictObject({
 	hook_candidates: array(HookCandidate).min(1),
 	chosen_hook: NonEmptyString.describe("Text of the selected hook; should match a hook candidate."),
 	template: Id.optional(),
+	acceptance: Acceptance.optional().describe("Measurable checks the render must meet; vague asks (\"go all out\") become numbers here. Copied to the VideoSpec."),
+	inputs: record(Id, string()).optional().describe("Answers to the template's inputs, keyed by input id (text, choice value, or project-relative file / asset id)."),
 	assumptions: array(Assumption)
 }).meta({
 	id: "CreativeBrief",
@@ -13315,6 +13422,7 @@ const label = (v) => typeof v === "object" && v !== null ? str$2(v.label) || str
 * - cta: headline, action (with command and url) · end_card: title, subtitle
 * - quote: text, attribution · stat: the number (its count-up finishes on the cue), the label
 * - lower_third: the name card, the headline · kinetic_text: each word or phrase (`kineticUnits`)
+* - motion: each `text` entry (the page reads the cue times from `window.__vs`)
 */
 function cueItems(kind, props) {
 	switch (kind) {
@@ -13340,6 +13448,7 @@ function cueItems(kind, props) {
 		case "stat": return ["value", "label"];
 		case "lower_third": return ["name", ...str$2(props.headline).trim() ? ["headline"] : []];
 		case "kinetic_text": return kineticUnits(str$2(props.text), props.rhythm === "phrase" ? "phrase" : "word");
+		case "motion": return arr(props.text).map(str$2);
 	}
 }
 /** A speech token for matching: NFKC, lower case, surrounding punctuation stripped. */
@@ -13413,7 +13522,8 @@ const DeterministicKind = _enum([
 	"split_screen",
 	"lower_third",
 	"kinetic_text",
-	"map"
+	"map",
+	"motion"
 ]);
 const DeterministicScene = strictObject({
 	kind: DeterministicKind,
@@ -13554,6 +13664,7 @@ const Scene = strictObject({
 	audio: SceneAudio.optional(),
 	sfx: array(SoundEffect).max(8).optional(),
 	motion: SceneMotion.optional(),
+	shot: ShotCard.optional().describe("Provider-neutral shot card for generated_video / avatar scenes; prompt packs and provider adapters compile it."),
 	burn_captions: boolean().optional().describe("false: no burned-in captions over this scene (e.g. kinetic_text already shows the spoken words). The .srt/.vtt captions keep every word. Default: captions.burn_in."),
 	cues: array(SceneCue).max(12).optional().describe("Word cues: each reveal item of the deterministic graphic appears as its word is spoken. Items without a cue keep the default stagger, never ahead of an earlier cue.")
 });
@@ -13585,17 +13696,20 @@ const AudioSettings = strictObject({
 		fade_out_ms: int().min(0).max(1e4).optional(),
 		loop: boolean().optional().describe("Loop the track to cover the video (default true)."),
 		start_sec: number().min(0).optional().describe("Offset into the track."),
-		license: AudioLicense.optional().describe("Required for user files; bundled tracks carry their own.")
-	}).describe("Background music mixed under the voice.").optional(),
+		license: AudioLicense.optional().describe("Required for user files; bundled and synthesized tracks carry their own."),
+		synth: SynthParams.optional().describe("Overrides the preset's parameters when `file` is `synth:<preset>`.")
+	}).describe("Background music mixed under the voice: a bundled bed, a project file, or a locally synthesized score.").optional(),
 	beat_sync: strictObject({
 		enabled: boolean(),
-		tolerance_ms: int().min(0).max(1e3).optional()
+		tolerance_ms: int().min(0).max(1e3).optional(),
+		snap: _enum(["beat", "downbeat"]).optional().describe("Snap cuts to any beat (default) or only to downbeats (bar starts).")
 	}).optional().describe("Snap scene cuts to beats detected in the music bed (default tolerance 250 ms).")
 }).describe("Audio beds beyond the voice.");
 const MasterCanvas = strictObject({
 	width: int().min(2).max(7680),
 	height: int().min(2).max(7680),
-	fps: Fps
+	fps: Fps,
+	loop: boolean().optional().describe("The video loops seamlessly: QA checks that the last frame flows into the first and the music seam.")
 }).describe("Production master canvas every target is compiled from. Defaults to 1080 px on the short side at 30 fps.");
 const Cover = strictObject({
 	headline: NonEmptyString.describe("Cover/thumbnail text; separate from on-screen text, captions and post captions."),
@@ -13628,6 +13742,7 @@ const VideoSpec = strictObject({
 	captions: CaptionSettings,
 	style: Id.optional().describe("Style pack id: styles/<id>.yaml (look and motion). Brand colours and fonts override it."),
 	audio: AudioSettings.optional(),
+	acceptance: Acceptance.optional().describe("Measurable checks QA and lint hold the render to (copied from the brief)."),
 	cover: Cover.optional(),
 	publish: record(PlatformTargetId, PublishSettings).optional().describe("Post copy keyed by target id."),
 	scenes: array(Scene).min(1)
@@ -13770,6 +13885,12 @@ const DeterministicProps = {
 			y: number().min(0).max(1)
 		})).min(1).max(8).describe("Pins in normalized coordinates of an abstract map panel (no geographic data)."),
 		route: boolean().optional().describe("Connect the points in order.")
+	}),
+	motion: strictObject({
+		html: ProjectRelativePath.refine((p) => /\.html?$/i.test(p), "must be an .html file").describe("Project-relative HTML page exposing window.readyForCapture and a pure window.seek(t); local assets must sit next to it."),
+		text: array(NonEmptyString).optional().describe("Every piece of viewer-facing copy, in order. The engine passes it to the page as window.__vs.text, and the page draws its copy from there (so grounding, verify, localize and word cues all see it)."),
+		effects: array(EffectId).optional().describe("Effects the page uses; lint checks them against the style's avoid list."),
+		loop: boolean().optional().describe("The scene loops: render(0) must equal render(duration).")
 	})
 };
 /** Minimal valid props per kind, used in actionable fixes and scaffold guidance. */
@@ -13863,6 +13984,10 @@ const DETERMINISTIC_PROPS_EXAMPLES = {
 			y: .6
 		}],
 		route: true
+	},
+	motion: {
+		html: "motion/s01.html",
+		text: ["Docs in.", "Video out."]
 	}
 };
 /** Allowed deviation of summed scene durations from `target_duration_sec`. */
@@ -14063,6 +14188,22 @@ function validateVideoSpecSemantics(spec, ir) {
 						fix: near.length ? `use an existing asset id, e.g. ${near.map((x) => `"${x}"`).join(", ")}` : "ingest the image first, or use another kind"
 					});
 				}
+			}
+		}
+		if (scene.shot) {
+			if (scene.visual_strategy !== "generated_video" && scene.visual_strategy !== "avatar") warnings.push({
+				path: `${at}.shot`,
+				message: `${sid}: a shot card only applies to generated_video or avatar scenes (this one is ${scene.visual_strategy})`,
+				fix: "remove `shot`, or set visual_strategy to \"generated_video\""
+			});
+			const from = scene.shot.first_frame_from;
+			if (from !== void 0) {
+				const j = spec.scenes.findIndex((s) => s.id === from);
+				if (j < 0 || j >= i) errors.push({
+					path: `${at}.shot.first_frame_from`,
+					message: `${sid}: first_frame_from "${from}" is not an earlier scene`,
+					fix: j < 0 ? `use the id of an earlier scene, e.g. ${closestMatches(from, sceneIds).map((x) => `"${x}"`).join(", ") || "s01"}` : "chain only from a scene that comes before this one"
+				});
 			}
 		}
 		if ((scene.visual_strategy === "user_asset" || scene.visual_strategy === "screen_capture") && !scene.footage) errors.push({
@@ -14350,6 +14491,11 @@ function validateVideoSpecSemantics(spec, ir) {
 		message: `goal is "${spec.goal}" but the last scene is "${last.purpose}"`,
 		fix: "end with a \"cta\" or \"end_card\" scene that states the desired action"
 	});
+	if (spec.acceptance?.loop && !spec.master?.loop) warnings.push({
+		path: "master.loop",
+		message: "acceptance.loop is set but master.loop is not, so QA won't check the loop seam",
+		fix: "set master.loop: true (and give the master canvas its width, height and fps)"
+	});
 	return {
 		ok: errors.length === 0,
 		errors,
@@ -14370,7 +14516,10 @@ const NON_CLAIM_KEYS = /* @__PURE__ */ new Set([
 	"route",
 	"mode",
 	"rhythm",
-	"type"
+	"type",
+	"html",
+	"effects",
+	"loop"
 ]);
 /** The viewer-facing text in deterministic props, one value per line (for grounding checks). */
 function propsText(props) {
@@ -15001,7 +15150,8 @@ const StyleMotion = strictObject({
 	exit_ms: int().min(0).max(2e3),
 	stagger_ms: int().min(0).max(1e3).describe("Delay between successive elements (lines, bullets, words)."),
 	transition: Transition.describe("Default transition between scenes."),
-	transition_ms: int().min(0).max(2e3)
+	transition_ms: int().min(0).max(2e3),
+	avoid: array(EffectId).optional().describe("Effects this style bans (taste guard); lint reports a scene that uses one as banned_effect.")
 }).describe("Motion tokens; brand.motion overrides personality and transition_ms when set.");
 /**
 * styles/<id>.yaml: a look-and-motion pack (minimal, editorial, technical, energetic, ...).
@@ -21985,8 +22135,24 @@ const TemplateBeat = strictObject({
 }).describe("One beat of a template's story structure; becomes one scene when scaffolded.");
 const TemplatePacing = strictObject({
 	avg_shot_sec: number().positive().max(30),
-	max_words_per_sec: number().positive().max(6)
+	max_words_per_sec: number().positive().max(6),
+	min_changes_per_sec: Acceptance.shape.min_changes_per_sec.describe("Motion density this format needs; the brief's acceptance overrides it."),
+	max_frozen_pct: Acceptance.shape.max_frozen_pct.describe("Most of the runtime that may be frozen, in percent; the brief's acceptance overrides it.")
 });
+/** An input the plan skill asks for before planning (reference video, photo, real UI states, brand, track). */
+const TemplateInput = strictObject({
+	id: Id,
+	prompt: NonEmptyString.describe("The question to ask, in plain words."),
+	kind: _enum([
+		"text",
+		"asset",
+		"choice",
+		"file"
+	]).describe("text: a short answer; asset: an image or clip to ingest; choice: one of `options`; file: any project file (e.g. a licensed track)."),
+	required: boolean(),
+	options: array(NonEmptyString).min(2).optional().describe("The choices, for kind choice."),
+	default: string().optional().describe("What the plan uses (and records as an assumption) when the user skips the question.")
+}).describe("One input a template needs from the user.");
 const DurationRange = strictObject({
 	min_sec: number().positive(),
 	max_sec: number().positive().max(600)
@@ -22008,7 +22174,8 @@ const Template$1 = strictObject({
 	rules: array(NonEmptyString).describe("Story rules the plan must follow, e.g. one idea per scene."),
 	voice_mode: VoiceMode.optional().describe("Archetypes without speech (e.g. text-over-music) set none."),
 	default_style: Id.optional().describe("Style pack the scaffold selects unless the user picks one."),
-	default_music: string().optional().describe("Music bed the scaffold selects, e.g. bundled:lofi.")
+	default_music: string().optional().describe("Music bed the scaffold selects, e.g. bundled:lofi or synth:<preset>."),
+	inputs: array(TemplateInput).optional().describe("Inputs to ask for first; required ones block planning until answered or defaulted.")
 }).superRefine((t, ctx) => {
 	const sum = t.beats.reduce((s, b) => s + b.share, 0);
 	if (Math.abs(sum - 1) > .01) ctx.addIssue({
@@ -22020,6 +22187,37 @@ const Template$1 = strictObject({
 		code: "custom",
 		path: ["duration_range"],
 		message: "min_sec must be <= max_sec"
+	});
+	const inputIds = /* @__PURE__ */ new Set();
+	(t.inputs ?? []).forEach((input, i) => {
+		if (inputIds.has(input.id)) ctx.addIssue({
+			code: "custom",
+			path: [
+				"inputs",
+				i,
+				"id"
+			],
+			message: `duplicate input id "${input.id}"`
+		});
+		inputIds.add(input.id);
+		if (input.kind === "choice" && !input.options) ctx.addIssue({
+			code: "custom",
+			path: [
+				"inputs",
+				i,
+				"options"
+			],
+			message: "a choice input needs options"
+		});
+		if (input.kind !== "choice" && input.options) ctx.addIssue({
+			code: "custom",
+			path: [
+				"inputs",
+				i,
+				"options"
+			],
+			message: "options only apply to choice inputs"
+		});
 	});
 	if (t.default_duration_sec < t.duration_range.min_sec || t.default_duration_sec > t.duration_range.max_sec) ctx.addIssue({
 		code: "custom",
@@ -28530,6 +28728,7 @@ function renderMap(ctx) {
 		...labels
 	].filter(Boolean).join("\n");
 }
+/** Built-in kinds. `motion` pages are Claude-authored and wrapped separately, not built here. */
 const RENDERERS = {
 	typography: renderTypography,
 	code: renderCode,
@@ -28890,7 +29089,7 @@ function buildComposition(req, opts = {}) {
 	const { scene, target, project_dir } = req;
 	const det = scene.deterministic;
 	if (!det) throw new Error(`scene ${scene.id} has no deterministic content`);
-	const render = RENDERERS[det.kind];
+	const render = det.kind === "motion" ? void 0 : RENDERERS[det.kind];
 	if (!render) throw new Error(`scene ${scene.id}: unsupported deterministic kind "${String(det.kind)}"`);
 	const W = Math.round(target.width);
 	const H = Math.round(target.height);
@@ -256509,6 +256708,8 @@ function collectProps(c, base, kind, props) {
 		case "map":
 			add(c, p("title"), "props", props.title, short(props.title));
 			arr(props.points).forEach((pt, j) => add(c, p(`points.${j}.label`), "props", obj(pt).label, "map pin label: 1–2 words"));
+			break;
+		case "motion": arr(props.text).forEach((t, j) => add(c, p(`text.${j}`), "props", t, short(t), "motion page copy: the page draws it from window.__vs.text, so keep each line about as long as the source"));
 	}
 }
 /** Every viewer-facing string of `spec`, with translator notes for `to`. */

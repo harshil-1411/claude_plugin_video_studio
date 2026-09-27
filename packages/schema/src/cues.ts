@@ -31,6 +31,7 @@ const label = (v: unknown): string => (typeof v === "object" && v !== null ? str
  * - cta: headline, action (with command and url) · end_card: title, subtitle
  * - quote: text, attribution · stat: the number (its count-up finishes on the cue), the label
  * - lower_third: the name card, the headline · kinetic_text: each word or phrase (`kineticUnits`)
+ * - motion: each `text` entry (the page reads the cue times from `window.__vs`)
  */
 export function cueItems(kind: DeterministicKind, props: Record<string, unknown>): string[] {
   switch (kind) {
@@ -66,6 +67,8 @@ export function cueItems(kind: DeterministicKind, props: Record<string, unknown>
       return ["name", ...(str(props.headline).trim() ? ["headline"] : [])];
     case "kinetic_text":
       return kineticUnits(str(props.text), props.rhythm === "phrase" ? "phrase" : "word");
+    case "motion":
+      return arr(props.text).map(str);
   }
 }
 

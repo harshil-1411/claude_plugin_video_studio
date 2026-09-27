@@ -15,6 +15,8 @@ import {
   SchemaVersion,
   UsdAmount,
 } from "./common.js";
+import { Acceptance, EffectId, ProjectRelativePath, SynthParams } from "./craft.js";
+import { ShotCard } from "./shot-card.js";
 import type { ContentIR } from "./content-ir.js";
 
 export const ScenePurpose = z.enum([
@@ -66,6 +68,8 @@ export const DeterministicKind = z.enum([
   "lower_third",
   "kinetic_text",
   "map",
+  // Phase 6.5: a Claude-authored seek(t) HTML composition
+  "motion",
 ]);
 
 export const DeterministicScene = z
@@ -218,6 +222,7 @@ export const Scene = z.strictObject({
   audio: SceneAudio.optional(),
   sfx: z.array(SoundEffect).max(8).optional(),
   motion: SceneMotion.optional(),
+  shot: ShotCard.optional().describe("Provider-neutral shot card for generated_video / avatar scenes; prompt packs and provider adapters compile it."),
   burn_captions: z
     .boolean()
     .optional()
@@ -278,15 +283,20 @@ export const MusicBed = z
     fade_out_ms: z.int().min(0).max(10_000).optional(),
     loop: z.boolean().optional().describe("Loop the track to cover the video (default true)."),
     start_sec: z.number().min(0).optional().describe("Offset into the track."),
-    license: AudioLicense.optional().describe("Required for user files; bundled tracks carry their own."),
+    license: AudioLicense.optional().describe("Required for user files; bundled and synthesized tracks carry their own."),
+    synth: SynthParams.optional().describe("Overrides the preset's parameters when `file` is `synth:<preset>`."),
   })
-  .describe("Background music mixed under the voice.");
+  .describe("Background music mixed under the voice: a bundled bed, a project file, or a locally synthesized score.");
 
 export const AudioSettings = z
   .strictObject({
     music: MusicBed.optional(),
     beat_sync: z
-      .strictObject({ enabled: z.boolean(), tolerance_ms: z.int().min(0).max(1000).optional() })
+      .strictObject({
+        enabled: z.boolean(),
+        tolerance_ms: z.int().min(0).max(1000).optional(),
+        snap: z.enum(["beat", "downbeat"]).optional().describe("Snap cuts to any beat (default) or only to downbeats (bar starts)."),
+      })
       .optional()
       .describe("Snap scene cuts to beats detected in the music bed (default tolerance 250 ms)."),
   })
@@ -297,6 +307,7 @@ export const MasterCanvas = z
     width: z.int().min(2).max(7680),
     height: z.int().min(2).max(7680),
     fps: Fps,
+    loop: z.boolean().optional().describe("The video loops seamlessly: QA checks that the last frame flows into the first and the music seam."),
   })
   .describe("Production master canvas every target is compiled from. Defaults to 1080 px on the short side at 30 fps.");
 
@@ -342,6 +353,7 @@ export const VideoSpec = z
     captions: CaptionSettings,
     style: Id.optional().describe("Style pack id: styles/<id>.yaml (look and motion). Brand colours and fonts override it."),
     audio: AudioSettings.optional(),
+    acceptance: Acceptance.optional().describe("Measurable checks QA and lint hold the render to (copied from the brief)."),
     cover: Cover.optional(),
     publish: z.record(PlatformTargetId, PublishSettings).optional().describe("Post copy keyed by target id."),
     scenes: z.array(Scene).min(1),
@@ -373,6 +385,7 @@ export type SceneAudio = z.infer<typeof SceneAudio>;
 export type SoundEffect = z.infer<typeof SoundEffect>;
 export type MotionPattern = z.infer<typeof MotionPattern>;
 export type SceneMotion = z.infer<typeof SceneMotion>;
+export type MotionProps = z.infer<typeof DeterministicProps.motion>;
 export type AudioSettings = z.infer<typeof AudioSettings>;
 export type CaptionSettings = z.infer<typeof CaptionSettings>;
 export type MasterCanvas = z.infer<typeof MasterCanvas>;
@@ -482,6 +495,19 @@ export const DeterministicProps = {
       .describe("Pins in normalized coordinates of an abstract map panel (no geographic data)."),
     route: z.boolean().optional().describe("Connect the points in order."),
   }),
+  motion: z.strictObject({
+    html: ProjectRelativePath.refine((p) => /\.html?$/i.test(p), "must be an .html file").describe(
+      "Project-relative HTML page exposing window.readyForCapture and a pure window.seek(t); local assets must sit next to it.",
+    ),
+    text: z
+      .array(NonEmptyString)
+      .optional()
+      .describe(
+        "Every piece of viewer-facing copy, in order. The engine passes it to the page as window.__vs.text, and the page draws its copy from there (so grounding, verify, localize and word cues all see it).",
+      ),
+    effects: z.array(EffectId).optional().describe("Effects the page uses; lint checks them against the style's avoid list."),
+    loop: z.boolean().optional().describe("The scene loops: render(0) must equal render(duration)."),
+  }),
 } as const satisfies Record<DeterministicKind, z.ZodType>;
 
 /** Minimal valid props per kind, used in actionable fixes and scaffold guidance. */
@@ -501,6 +527,7 @@ export const DETERMINISTIC_PROPS_EXAMPLES: Record<DeterministicKind, Record<stri
   lower_third: { name: "Ada Lovelace", title: "Engineer", headline: "Why we built it" },
   kinetic_text: { text: "Docs in. Video out.", rhythm: "word", emphasis: "Video" },
   map: { title: "Where it runs", points: [{ label: "Laptop", x: 0.3, y: 0.4 }, { label: "CI", x: 0.7, y: 0.6 }], route: true },
+  motion: { html: "motion/s01.html", text: ["Docs in.", "Video out."] },
 };
 
 export interface SemanticIssue {
@@ -747,6 +774,26 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
             path: `${at}.deterministic.props.asset`,
             message: `${sid}: screenshot asset "${r.data.asset}" is not a ContentIR asset id`,
             fix: near.length ? `use an existing asset id, e.g. ${near.map((x) => `"${x}"`).join(", ")}` : "ingest the image first, or use another kind",
+          });
+        }
+      }
+    }
+    if (scene.shot) {
+      if (scene.visual_strategy !== "generated_video" && scene.visual_strategy !== "avatar") {
+        warnings.push({
+          path: `${at}.shot`,
+          message: `${sid}: a shot card only applies to generated_video or avatar scenes (this one is ${scene.visual_strategy})`,
+          fix: 'remove `shot`, or set visual_strategy to "generated_video"',
+        });
+      }
+      const from = scene.shot.first_frame_from;
+      if (from !== undefined) {
+        const j = spec.scenes.findIndex((s) => s.id === from);
+        if (j < 0 || j >= i) {
+          errors.push({
+            path: `${at}.shot.first_frame_from`,
+            message: `${sid}: first_frame_from "${from}" is not an earlier scene`,
+            fix: j < 0 ? `use the id of an earlier scene, e.g. ${closestMatches(from, sceneIds).map((x) => `"${x}"`).join(", ") || "s01"}` : "chain only from a scene that comes before this one",
           });
         }
       }
@@ -1048,11 +1095,19 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
     });
   }
 
+  if (spec.acceptance?.loop && !spec.master?.loop) {
+    warnings.push({
+      path: "master.loop",
+      message: "acceptance.loop is set but master.loop is not, so QA won't check the loop seam",
+      fix: "set master.loop: true (and give the master canvas its width, height and fps)",
+    });
+  }
+
   return { ok: errors.length === 0, errors, warnings };
 }
 
 /** Props keys that hold layout, ids or code rather than claims the viewer reads. */
-const NON_CLAIM_KEYS = new Set(["asset", "x", "y", "current", "highlight_lines", "code", "language", "command", "url", "route", "mode", "rhythm", "type"]);
+const NON_CLAIM_KEYS = new Set(["asset", "x", "y", "current", "highlight_lines", "code", "language", "command", "url", "route", "mode", "rhythm", "type", "html", "effects", "loop"]);
 
 /** The viewer-facing text in deterministic props, one value per line (for grounding checks). */
 export function propsText(props: unknown): string {

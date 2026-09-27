@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { DETERMINISTIC_PROPS_EXAMPLES, type DeterministicKind, type Scene } from "@video-studio/schema";
 import { CUE_LEAD_S } from "./cue-timing.js";
 import { OPENING_LEAD_MAX_S, openingLead, openingStart } from "./entrance.js";
-import { type AssTextFonts, buildFilterGraph, composeScene, elementStarts, motionTiming } from "./ffmpeg-renderer.js";
+import { type AssTextFonts, buildFilterGraph, composeScene, elementStarts, FFMPEG_RENDERER_KINDS, motionTiming } from "./ffmpeg-renderer.js";
 import { footageOverlay } from "./footage.js";
-import { buildComposition } from "./hyperframes-compose.js";
+import { buildComposition, HYPERFRAMES_KINDS } from "./hyperframes-compose.js";
 import { resolveTokens, targetForAspect } from "./tokens.js";
 import type { RenderTarget, ResolvedCue } from "./types.js";
 
@@ -64,7 +64,7 @@ describe("scene opening: FFmpeg renderer", () => {
   });
 
   it("the opening frame is not empty in any kind: something is already on screen at t = 0", () => {
-    for (const kind of Object.keys(DETERMINISTIC_PROPS_EXAMPLES) as DeterministicKind[]) {
+    for (const kind of FFMPEG_RENDERER_KINDS) {
       const t = ffmpegStarts(kind, DETERMINISTIC_PROPS_EXAMPLES[kind]);
       expect(Math.min(...t.starts), kind).toBeLessThan(0);
     }
@@ -134,7 +134,7 @@ describe("scene opening: HyperFrames renderer", () => {
   });
 
   it("every kind opens with something already entering at frame 0", () => {
-    for (const kind of Object.keys(DETERMINISTIC_PROPS_EXAMPLES) as DeterministicKind[]) {
+    for (const kind of HYPERFRAMES_KINDS) {
       const html = buildComposition({ scene: scene(kind), target, tokens, out_path: "/o.mp4", project_dir: "/p" }).html;
       expect(html, kind).toMatch(/--t:-0\.\d+s/);
     }

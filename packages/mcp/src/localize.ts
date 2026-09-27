@@ -240,6 +240,9 @@ function collectProps(c: Collector, base: string, kind: string, props: Record<st
       add(c, p("title"), "props", props.title, short(props.title));
       arr(props.points).forEach((pt, j) => add(c, p(`points.${j}.label`), "props", obj(pt).label, "map pin label: 1–2 words"));
       break;
+    case "motion":
+      arr(props.text).forEach((t, j) => add(c, p(`text.${j}`), "props", t, short(t), "motion page copy: the page draws it from window.__vs.text, so keep each line about as long as the source"));
+      break;
     default:
       // code: never translated.
       break;

@@ -1454,7 +1454,8 @@ function renderMap(ctx: KindCtx): string {
     .join("\n");
 }
 
-const RENDERERS: Record<DeterministicKind, (ctx: KindCtx) => string> = {
+/** Built-in kinds. `motion` pages are Claude-authored and wrapped separately, not built here. */
+const RENDERERS: Record<Exclude<DeterministicKind, "motion">, (ctx: KindCtx) => string> = {
   typography: renderTypography,
   code: renderCode,
   chart: renderChart,
@@ -1843,7 +1844,7 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
   const { scene, target, project_dir } = req;
   const det = scene.deterministic;
   if (!det) throw new Error(`scene ${scene.id} has no deterministic content`);
-  const render = RENDERERS[det.kind];
+  const render = det.kind === "motion" ? undefined : RENDERERS[det.kind];
   if (!render) throw new Error(`scene ${scene.id}: unsupported deterministic kind "${String(det.kind)}"`);
   const W = Math.round(target.width);
   const H = Math.round(target.height);

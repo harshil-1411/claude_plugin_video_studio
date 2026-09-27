@@ -165,7 +165,8 @@
                       "split_screen",
                       "lower_third",
                       "kinetic_text",
-                      "map"
+                      "map",
+                      "motion"
                     ],
                     "type": "string"
                   },
@@ -473,6 +474,151 @@
                 },
                 "maxItems": 8,
                 "type": "array"
+              },
+              "shot": {
+                "description": "Provider-neutral shot card for generated_video / avatar scenes; prompt packs and provider adapters compile it.",
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "description": "One clear subject action (timed beats inside it if the shot is over 4 s).",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "audio": {
+                    "description": "What the shot sounds like.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "ambience": {
+                        "type": "string"
+                      },
+                      "dialogue": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "line": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "speaker": {
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "speaker",
+                            "line"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "music": {
+                        "description": "Music cue; the licensed or synthesized bed is usually added in the edit instead.",
+                        "type": "string"
+                      },
+                      "sfx": {
+                        "description": "At most 3 specific sounds, each tied to a visible event.",
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 3,
+                        "type": "array"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "camera": {
+                    "description": "One clear camera move, or \"locked\".",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "continuity": {
+                    "description": "What must stay identical to the previous shot (count, wardrobe, props, handedness).",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "end_state": {
+                    "description": "The final image of the shot; lets the next shot start from it.",
+                    "type": "string"
+                  },
+                  "environment": {
+                    "description": "Location, time, weather and one environmental detail.",
+                    "type": "string"
+                  },
+                  "exclusions": {
+                    "description": "Things the model must not do (compiled only where the provider accepts negatives).",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "first_frame_from": {
+                    "description": "Scene id whose approved last frame is this shot's first frame.",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                    "type": "string"
+                  },
+                  "look": {
+                    "description": "Lighting, lens, grade and texture.",
+                    "type": "string"
+                  },
+                  "on_screen_text": {
+                    "description": "post (default): logos, prices, UI and copy are composited afterwards, never generated.",
+                    "enum": [
+                      "post",
+                      "generated"
+                    ],
+                    "type": "string"
+                  },
+                  "purpose": {
+                    "enum": [
+                      "emotion",
+                      "plot",
+                      "pressure"
+                    ],
+                    "type": "string"
+                  },
+                  "subjects": {
+                    "items": {
+                      "description": "A character, product or location bound to a reference.",
+                      "additionalProperties": false,
+                      "properties": {
+                        "asset": {
+                          "description": "ContentIR asset id of the reference image or clip.",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                          "type": "string"
+                        },
+                        "id": {
+                          "description": "Stable name used across shots, e.g. hero or product.",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                          "type": "string"
+                        },
+                        "role": {
+                          "description": "What the reference is for, e.g. 'identity, wardrobe' or 'camera movement only'.",
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "role"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 9,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "purpose",
+                  "action",
+                  "camera"
+                ],
+                "type": "object"
               },
               "transition": {
                 "enum": [

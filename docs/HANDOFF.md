@@ -41,7 +41,18 @@ Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and th
      - a synthesized score;
      - inputs interview and beat-plan approval;
      - 6 new templates.
-   - How it runs: in waves W0–W5, following the "Agent execution model" in PLAN.md (at most 2 worktree agents, contract-first, one lane holds Chrome). Start with W0, the schema contracts, done by the lead.
+   - How it runs: in waves W0–W5, following the "Agent execution model" in PLAN.md (at most 2 worktree agents, contract-first, one lane holds Chrome).
+   - **W0 done (2026-09-27): the schema contracts.**
+     - New files:
+       - `packages/schema/src/craft.ts`: `EffectId`, `Acceptance`, `SynthParams`, `ProjectRelativePath`;
+       - `packages/schema/src/shot-card.ts`: `ShotCard`.
+     - The `motion` kind and its props: `html`, `text`, `effects`, `loop`.
+     - VideoSpec: `master.loop`, `audio.beat_sync.snap`, `music.synth`, `scene.shot`, `spec.acceptance`.
+     - Style: `motion.avoid`. Template: `inputs`, plus `pacing.min_changes_per_sec` and `pacing.max_frozen_pct`. Brief: `acceptance` and `inputs`.
+     - Beats: optional v2 fields on `BeatAnalysis`.
+     - Semantic checks for shot chaining and loop vs acceptance; tests in `craft.test.ts`; schemas regenerated.
+     - **Until W1 lands, no renderer draws `motion`:** a render fails with a reported "does not draw motion" reason. Renderer tests loop over each renderer's own kind list.
+   - **Next: W1.** Lane A builds the `motion` composer adapter, `motion-kit.js`, the CSP and static lint, and the cache key. Lane B builds beats v2, SFX peak alignment and `score.ts`.
 4. **Phase 7**, paid providers, ElevenLabs first (needs the user's API key). Step 0 comes first and is local: shot cards, `provider-specs/`, and `prompt_pack` (no keys, no network). The `policy.yaml`, spend and consent machinery it needs is now in place.
 5. **Phase 9**, publishing (needs platform developer accounts). Default targets are Instagram and YouTube Shorts: the user is in India, where TikTok is banned.
 

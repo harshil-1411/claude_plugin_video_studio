@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HexColor, Id, NonEmptyString } from "./common.js";
 import { BrandCaptions, FontWeight, MotionPersonality } from "./brand.js";
+import { EffectId } from "./craft.js";
 import { Transition } from "./video-spec.js";
 
 /** Easing curves the renderers implement (CSS/GSAP in HyperFrames, alpha/position curves in ffmpeg). */
@@ -15,6 +16,7 @@ export const StyleMotion = z
     stagger_ms: z.int().min(0).max(1000).describe("Delay between successive elements (lines, bullets, words)."),
     transition: Transition.describe("Default transition between scenes."),
     transition_ms: z.int().min(0).max(2000),
+    avoid: z.array(EffectId).optional().describe("Effects this style bans (taste guard); lint reports a scene that uses one as banned_effect."),
   })
   .describe("Motion tokens; brand.motion overrides personality and transition_ms when set.");
 

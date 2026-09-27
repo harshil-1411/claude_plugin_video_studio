@@ -17,6 +17,16 @@ export interface BeatAnalysis {
   onsets_ms: number[];
   /** Strength-weighted share of onsets within 40 ms of a beat (0–1); below 0.6 no tempo is reported. */
   confidence?: number;
+  /** Beat v2 (Phase 6.5): bar starts, in ms. */
+  downbeats_ms?: number[];
+  /** Mean low-band energy per bar (0–1, normalised to the loudest bar), one entry per downbeat. */
+  bar_energy?: number[];
+  /** Start of the biggest sustained energy rise (the drop), in ms. */
+  drop_ms?: number;
+  /** Half- or double-time reading when the tempo is ambiguous. */
+  alternate_bpm?: number;
+  /** Bumped whenever detection changes, so cached analyses are recomputed. */
+  analysis_version?: number;
 }
 
 const MIN_CONFIDENCE = 0.6;

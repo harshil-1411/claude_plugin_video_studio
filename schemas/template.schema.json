@@ -65,7 +65,8 @@
               "split_screen",
               "lower_third",
               "kinetic_text",
-              "map"
+              "map",
+              "motion"
             ],
             "type": "string"
           },
@@ -111,7 +112,7 @@
       "type": "number"
     },
     "default_music": {
-      "description": "Music bed the scaffold selects, e.g. bundled:lofi.",
+      "description": "Music bed the scaffold selects, e.g. bundled:lofi or synth:<preset>.",
       "type": "string"
     },
     "default_style": {
@@ -183,6 +184,58 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
       "type": "string"
     },
+    "inputs": {
+      "description": "Inputs to ask for first; required ones block planning until answered or defaulted.",
+      "items": {
+        "description": "One input a template needs from the user.",
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "description": "What the plan uses (and records as an assumption) when the user skips the question.",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "kind": {
+            "description": "text: a short answer; asset: an image or clip to ingest; choice: one of `options`; file: any project file (e.g. a licensed track).",
+            "enum": [
+              "text",
+              "asset",
+              "choice",
+              "file"
+            ],
+            "type": "string"
+          },
+          "options": {
+            "description": "The choices, for kind choice.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 2,
+            "type": "array"
+          },
+          "prompt": {
+            "description": "The question to ask, in plain words.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "prompt",
+          "kind",
+          "required"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "name": {
       "minLength": 1,
       "type": "string"
@@ -195,9 +248,21 @@
           "maximum": 30,
           "type": "number"
         },
+        "max_frozen_pct": {
+          "description": "Most of the runtime that may be frozen, in percent; the brief's acceptance overrides it.",
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
+        },
         "max_words_per_sec": {
           "exclusiveMinimum": 0,
           "maximum": 6,
+          "type": "number"
+        },
+        "min_changes_per_sec": {
+          "description": "Motion density this format needs; the brief's acceptance overrides it.",
+          "maximum": 10,
+          "minimum": 0,
           "type": "number"
         }
       },

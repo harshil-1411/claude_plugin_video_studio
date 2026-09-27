@@ -5,6 +5,41 @@
   "description": "The creative intent for one video: goal, audience, platform, duration, tone, hooks and surfaced assumptions.",
   "additionalProperties": false,
   "properties": {
+    "acceptance": {
+      "description": "Measurable checks the render must meet; vague asks (\"go all out\") become numbers here. Copied to the VideoSpec.",
+      "additionalProperties": false,
+      "properties": {
+        "hold_ms": {
+          "description": "At least one deliberate hold this long, so change feels earned (e.g. 400).",
+          "maximum": 5000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "loop": {
+          "description": "The piece must loop seamlessly (last frame flows into the first).",
+          "type": "boolean"
+        },
+        "max_frozen_pct": {
+          "description": "Most of the runtime that may be frozen, in percent (default 15).",
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
+        },
+        "max_static_sec": {
+          "description": "Longest allowed stretch with no visual change.",
+          "exclusiveMinimum": 0,
+          "maximum": 60,
+          "type": "number"
+        },
+        "min_changes_per_sec": {
+          "description": "Big visual changes per second the render must reach (motion density).",
+          "maximum": 10,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "aspect_ratio": {
       "enum": [
         "9:16",
@@ -126,6 +161,17 @@
     "id": {
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
       "type": "string"
+    },
+    "inputs": {
+      "description": "Answers to the template's inputs, keyed by input id (text, choice value, or project-relative file / asset id).",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+        "type": "string"
+      },
+      "type": "object"
     },
     "key_messages": {
       "items": {

@@ -5,6 +5,41 @@
   "description": "What we are making: a provider-independent scene graph that declares capability requirements, never model names.",
   "additionalProperties": false,
   "properties": {
+    "acceptance": {
+      "description": "Measurable checks QA and lint hold the render to (copied from the brief).",
+      "additionalProperties": false,
+      "properties": {
+        "hold_ms": {
+          "description": "At least one deliberate hold this long, so change feels earned (e.g. 400).",
+          "maximum": 5000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "loop": {
+          "description": "The piece must loop seamlessly (last frame flows into the first).",
+          "type": "boolean"
+        },
+        "max_frozen_pct": {
+          "description": "Most of the runtime that may be frozen, in percent (default 15).",
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
+        },
+        "max_static_sec": {
+          "description": "Longest allowed stretch with no visual change.",
+          "exclusiveMinimum": 0,
+          "maximum": 60,
+          "type": "number"
+        },
+        "min_changes_per_sec": {
+          "description": "Big visual changes per second the render must reach (motion density).",
+          "maximum": 10,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "aspect_ratio": {
       "enum": [
         "9:16",
@@ -29,6 +64,14 @@
             "enabled": {
               "type": "boolean"
             },
+            "snap": {
+              "description": "Snap cuts to any beat (default) or only to downbeats (bar starts).",
+              "enum": [
+                "beat",
+                "downbeat"
+              ],
+              "type": "string"
+            },
             "tolerance_ms": {
               "maximum": 1000,
               "minimum": 0,
@@ -41,7 +84,7 @@
           "type": "object"
         },
         "music": {
-          "description": "Background music mixed under the voice.",
+          "description": "Background music mixed under the voice: a bundled bed, a project file, or a locally synthesized score.",
           "additionalProperties": false,
           "properties": {
             "duck_db": {
@@ -66,7 +109,7 @@
               "type": "string"
             },
             "license": {
-              "description": "Required for user files; bundled tracks carry their own.",
+              "description": "Required for user files; bundled and synthesized tracks carry their own.",
               "additionalProperties": false,
               "properties": {
                 "attribution": {
@@ -96,6 +139,62 @@
               "description": "Offset into the track.",
               "minimum": 0,
               "type": "number"
+            },
+            "synth": {
+              "description": "Overrides the preset's parameters when `file` is `synth:<preset>`.",
+              "additionalProperties": false,
+              "properties": {
+                "bpm": {
+                  "maximum": 200,
+                  "minimum": 60,
+                  "type": "integer"
+                },
+                "drop_bar": {
+                  "description": "Bar where the full arrangement enters (1-based).",
+                  "maximum": 256,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "key": {
+                  "description": "Musical key (default C, or Am for minor presets).",
+                  "pattern": "^[A-G](#|b)?m?$",
+                  "type": "string"
+                },
+                "progression": {
+                  "description": "Chord degrees, one per bar, repeated.",
+                  "items": {
+                    "enum": [
+                      "I",
+                      "ii",
+                      "iii",
+                      "IV",
+                      "V",
+                      "vi",
+                      "vii",
+                      "i",
+                      "III",
+                      "iv",
+                      "v",
+                      "VI",
+                      "VII"
+                    ],
+                    "type": "string"
+                  },
+                  "maxItems": 16,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "seed": {
+                  "description": "Seed for the hi-hat and texture patterns.",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "bpm"
+              ],
+              "type": "object"
             },
             "volume_db": {
               "description": "Bed level before ducking. Default -18 dB.",
@@ -233,6 +332,10 @@
           "maximum": 7680,
           "minimum": 2,
           "type": "integer"
+        },
+        "loop": {
+          "description": "The video loops seamlessly: QA checks that the last frame flows into the first and the music seam.",
+          "type": "boolean"
         },
         "width": {
           "maximum": 7680,
@@ -396,7 +499,8 @@
                   "split_screen",
                   "lower_third",
                   "kinetic_text",
-                  "map"
+                  "map",
+                  "motion"
                 ],
                 "type": "string"
               },
@@ -704,6 +808,151 @@
             },
             "maxItems": 8,
             "type": "array"
+          },
+          "shot": {
+            "description": "Provider-neutral shot card for generated_video / avatar scenes; prompt packs and provider adapters compile it.",
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "description": "One clear subject action (timed beats inside it if the shot is over 4 s).",
+                "minLength": 1,
+                "type": "string"
+              },
+              "audio": {
+                "description": "What the shot sounds like.",
+                "additionalProperties": false,
+                "properties": {
+                  "ambience": {
+                    "type": "string"
+                  },
+                  "dialogue": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "line": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "speaker": {
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "speaker",
+                        "line"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "music": {
+                    "description": "Music cue; the licensed or synthesized bed is usually added in the edit instead.",
+                    "type": "string"
+                  },
+                  "sfx": {
+                    "description": "At most 3 specific sounds, each tied to a visible event.",
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 3,
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              },
+              "camera": {
+                "description": "One clear camera move, or \"locked\".",
+                "minLength": 1,
+                "type": "string"
+              },
+              "continuity": {
+                "description": "What must stay identical to the previous shot (count, wardrobe, props, handedness).",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "end_state": {
+                "description": "The final image of the shot; lets the next shot start from it.",
+                "type": "string"
+              },
+              "environment": {
+                "description": "Location, time, weather and one environmental detail.",
+                "type": "string"
+              },
+              "exclusions": {
+                "description": "Things the model must not do (compiled only where the provider accepts negatives).",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "first_frame_from": {
+                "description": "Scene id whose approved last frame is this shot's first frame.",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                "type": "string"
+              },
+              "look": {
+                "description": "Lighting, lens, grade and texture.",
+                "type": "string"
+              },
+              "on_screen_text": {
+                "description": "post (default): logos, prices, UI and copy are composited afterwards, never generated.",
+                "enum": [
+                  "post",
+                  "generated"
+                ],
+                "type": "string"
+              },
+              "purpose": {
+                "enum": [
+                  "emotion",
+                  "plot",
+                  "pressure"
+                ],
+                "type": "string"
+              },
+              "subjects": {
+                "items": {
+                  "description": "A character, product or location bound to a reference.",
+                  "additionalProperties": false,
+                  "properties": {
+                    "asset": {
+                      "description": "ContentIR asset id of the reference image or clip.",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                      "type": "string"
+                    },
+                    "id": {
+                      "description": "Stable name used across shots, e.g. hero or product.",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                      "type": "string"
+                    },
+                    "role": {
+                      "description": "What the reference is for, e.g. 'identity, wardrobe' or 'camera movement only'.",
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "role"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 9,
+                "type": "array"
+              }
+            },
+            "required": [
+              "purpose",
+              "action",
+              "camera"
+            ],
+            "type": "object"
           },
           "transition": {
             "enum": [

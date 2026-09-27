@@ -66,6 +66,24 @@
       "description": "Motion tokens; brand.motion overrides personality and transition_ms when set.",
       "additionalProperties": false,
       "properties": {
+        "avoid": {
+          "description": "Effects this style bans (taste guard); lint reports a scene that uses one as banned_effect.",
+          "items": {
+            "enum": [
+              "shake",
+              "rgb_split",
+              "lens_flare",
+              "particle_burst",
+              "shockwave",
+              "neon_glow",
+              "grid_floor",
+              "flash",
+              "bouncy_easing"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
         "easing": {
           "enum": [
             "linear",
