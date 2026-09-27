@@ -328,6 +328,7 @@ export const Hashtag = z.string().regex(/^#[\p{L}\p{N}_]+$/u, "expected a hashta
 
 export const PublishSettings = z
   .strictObject({
+    title: z.string().min(1).max(200).optional().describe("Video title for platforms that have one (YouTube); defaults to the spec title."),
     post_caption: z.string().describe("Text posted with the video on the platform; separate from speech captions."),
     hashtags: z.array(Hashtag).optional(),
     ai_disclosure: z.boolean().optional().describe("Mark the post as AI-generated where the platform supports it."),

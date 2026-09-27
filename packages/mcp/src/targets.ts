@@ -85,6 +85,8 @@ export interface PostJson {
   contract_version: number;
   /** "spec" when the text comes from `publish.<target>`, "generated" when derived from the spec and brief. */
   source: "spec" | "generated";
+  /** The video title from `publish.<target>.title`, for platforms that have one (YouTube). */
+  title?: string;
   post_caption: string;
   hashtags: string[];
   /** Caption plus hashtags, ready to paste; this is what the platform's character limit counts. */
@@ -225,6 +227,7 @@ export async function packageTargets(i: PackageTargetsInput, allTargetIds: reado
       route: c.route,
       contract_version: c.contract_version,
       source: publish ? "spec" : "generated",
+      ...(publish?.title?.trim() ? { title: publish.title.trim() } : {}),
       post_caption: caption,
       hashtags,
       full_text: fullText(caption, hashtags),

@@ -399,6 +399,12 @@
           "post_caption": {
             "description": "Text posted with the video on the platform; separate from speech captions.",
             "type": "string"
+          },
+          "title": {
+            "description": "Video title for platforms that have one (YouTube); defaults to the spec title.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
           }
         },
         "required": [

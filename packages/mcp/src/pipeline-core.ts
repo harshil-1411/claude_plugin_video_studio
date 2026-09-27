@@ -43,8 +43,8 @@ export type Env = Record<string, string | undefined>;
 
 /** Engine version recorded in manifests. Keep in sync with SERVER_VERSION. */
 export const ENGINE_VERSION = "0.1.0";
-/** Bump when technical QA's checks change, so cached QA results are re-run. 2: background-aware black frames, intended silence. 4: motion density, longest static stretch, frozen share fails above its limit, loop seam, acceptance numbers. */
-export const QA_VERSION = 4;
+/** Bump when technical QA's checks change, so cached QA results are re-run. 2: background-aware black frames, intended silence. 4: motion density, longest static stretch, frozen share fails above its limit, loop seam, acceptance numbers. 5: flashing (single-frame luma spikes, flashes per second), av_sync (audio start and length against the video frames). */
+export const QA_VERSION = 5;
 /** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). 4: the caption plate is its own ASS layer (no dark bars around highlighted words). 5: loudness true peak −1.5 dBTP (headroom for the AAC encode). 6: the brand logo is overlaid in the concat encode (one fewer H.264 generation). 7: sound effects land by their peak, not their first sample. */
 export const ASSEMBLY_VERSION = 7;
 /** Scene transition length when neither the scene nor the style sets one (ms). */
@@ -253,6 +253,10 @@ export interface RenderState {
     motion?: QaMotionMetrics;
     /** Loop seam measured on the reel (master.loop). */
     loop_seam?: { ssim: number | null; audio_jump_db: number | null };
+    /** Flash and flicker measured on the reel (for lint's `flashing`). Mean luma; red flashes are not measured. */
+    flash?: { spikes: number; spike_times_s: number[]; flash_rate_max: number; flash_window?: { start_s: number; end_s: number } };
+    /** Audio start and length against the video frames (ms), when the reel has audio. */
+    av_sync?: { offset_ms: number; length_diff_ms: number };
   };
   /** spec.acceptance at render time: the numbers QA held the render to. */
   acceptance?: { min_changes_per_sec?: number; max_frozen_pct?: number; max_static_sec?: number; hold_ms?: number; loop?: boolean };

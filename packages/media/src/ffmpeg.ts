@@ -418,6 +418,25 @@ export interface ProbeResult {
   bit_depth: number | null;
   /** True for a PQ (smpte2084) or HLG (arib-std-b67) transfer: needs tonemapping for SDR output. */
   hdr: boolean;
+  /** Timing of the video stream (null without one): what the A/V sync check reads. */
+  video_timing: StreamTiming | null;
+  /** Timing of the audio stream (null without one). */
+  audio_timing: StreamTiming | null;
+}
+
+/**
+ * One stream's timing as the container declares it. `start_s` honours the MP4 edit list, so AAC
+ * priming that the edit list skips does not show up as an offset (one that is not skipped does).
+ */
+export interface StreamTiming {
+  /** `start_time` (s); null when ffprobe does not report it. */
+  start_s: number | null;
+  /** Stream `duration` (s); null when not reported (e.g. Matroska keeps it in a tag). */
+  duration_s: number | null;
+  /** `nb_frames` from the container (packets for audio); null when not reported. */
+  nb_frames: number | null;
+  /** Decoded frame count (`nb_read_frames`), only with `ffprobe(..., { countFrames: true })`. */
+  nb_read_frames: number | null;
 }
 
 /** HDR transfer characteristics: PQ and HLG. */
@@ -453,6 +472,9 @@ interface RawStream {
   channels?: number;
   pix_fmt?: string;
   duration?: string;
+  start_time?: string;
+  nb_frames?: string;
+  nb_read_frames?: string;
   disposition?: { attached_pic?: number };
   color_transfer?: string;
   color_primaries?: string;
@@ -477,6 +499,22 @@ function parseRate(r: string | undefined): number | null {
   if (!n || !Number.isFinite(n)) return null;
   const v = d ? n / d : n;
   return Number.isFinite(v) && v > 0 ? Math.round(v * 1000) / 1000 : null;
+}
+
+/** A finite number from an ffprobe string field ("N/A" and absent give null). */
+function probeNum(x: string | number | undefined): number | null {
+  if (x === undefined || x === null || x === "" || x === "N/A") return null;
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+}
+
+function streamTiming(s: RawStream | undefined): StreamTiming | null {
+  if (!s) return null;
+  const frames = (x: string | undefined) => {
+    const n = probeNum(x);
+    return n !== null && Number.isInteger(n) && n >= 0 ? n : null;
+  };
+  return { start_s: probeNum(s.start_time), duration_s: probeNum(s.duration), nb_frames: frames(s.nb_frames), nb_read_frames: frames(s.nb_read_frames) };
 }
 
 export function parseProbeJson(json: string): ProbeResult {
@@ -510,14 +548,20 @@ export function parseProbeJson(json: string): ProbeResult {
     color_primaries: known(v?.color_primaries),
     bit_depth: pixFmtBitDepth(v?.pix_fmt) ?? (Number.isInteger(raw) && raw > 0 ? raw : null),
     hdr: transfer !== null && HDR_TRANSFERS.has(transfer),
+    video_timing: streamTiming(v),
+    audio_timing: streamTiming(a),
   };
 }
 
-/** ffprobe a media file. */
-export async function ffprobe(path: string, opts: Pick<RunOptions, "signal" | "tools" | "timeoutMs"> = {}): Promise<ProbeResult> {
+/**
+ * ffprobe a media file. `countFrames` decodes every stream to report exact frame counts
+ * (`nb_read_frames`); it costs a full decode, so it is off by default.
+ */
+export async function ffprobe(path: string, opts: Pick<RunOptions, "signal" | "tools" | "timeoutMs"> & { countFrames?: boolean } = {}): Promise<ProbeResult> {
   const { ffprobe: bin } = await getTools(opts.tools);
-  const { stdout } = await runProcess(bin, ["-v", "error", "-print_format", "json", "-show_streams", "-show_format", "--", path], {
-    ...opts,
+  const { countFrames, ...run } = opts;
+  const { stdout } = await runProcess(bin, ["-v", "error", ...(countFrames ? ["-count_frames"] : []), "-print_format", "json", "-show_streams", "-show_format", "--", path], {
+    ...run,
     timeoutMs: opts.timeoutMs ?? 60_000,
     captureStdout: true,
   });

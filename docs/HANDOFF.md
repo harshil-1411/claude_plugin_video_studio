@@ -150,7 +150,19 @@ Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and th
        - Goldens recorded in `tests/golden-frames/code-motion-loop/`. The golden test first failed because it asked HyperFrames for 15 fps; it is fixed to 24 fps.
      - ✅ **Release notes:** `CHANGELOG` 0.3.0, `plugin.json` 0.3.0 and the README. Tagged `v0.3.0` after the real render passed.
      - **Remaining:** rebuild the self-intro reel in a new project with the user's reference and photo, then `compare`; tune `motion_density` if needed.
-   - **Next: Phase 6.6, craft and hygiene** (planned and approved 2026-09-27 in `docs/PLAN.md`, from the tubeai-skills (MIT) review; ideas re-expressed, nothing copied). Implementation waits for the user's go. The eight items:
+   - **Next: Phase 6.6, craft and hygiene** (planned and approved 2026-09-27 in `docs/PLAN.md`, from the tubeai-skills (MIT) review; ideas re-expressed, nothing copied). Started 2026-09-27.
+     - **W0 (`cd576c7`):** glossary, motion timing and speech-pacing schemas, and `research-specs/titles.yaml`.
+     - **W1:**
+       - `flashing` QA and lint: luma spikes, and more than 3 flashes/s (approximates WCAG 2.3.1; red flashes not measured).
+       - `av_sync` QA: measured 0 ms offset on our output, since ffmpeg's edit list handles AAC priming, so the mux is unchanged.
+       - Probe `video_timing` and `audio_timing`, and `QA_VERSION` 5.
+       - Lints `insert_early`, `insert_overstays` and `insert_crowded` (skipped without speech timing), and `title_length` from `research-specs/titles.yaml`.
+       - `publish.<target>.title`, carried into `post.json`.
+       - Social copy moved to `social-copy.ts`, which removes the lint → pipeline import cycle.
+       - Motion page copy now shows in the storyboard.
+       - Vitest `testTimeout` raised to 20 s: under full load, real-ffmpeg tests passed 5 s.
+     - **Next: W2**, with items 3, 5 and 6.
+     - The eight items:
      - flash/flicker QA;
      - insert-sync lint;
      - motion timing measured from a reference into a style pack;

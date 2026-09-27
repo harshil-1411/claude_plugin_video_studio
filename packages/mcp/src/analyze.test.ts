@@ -247,7 +247,7 @@ describe("shorts", () => {
     await expect(readFile(join(project, m.project_dir, "source", "assets", "talk.mp4"))).rejects.toThrow();
     const words = JSON.parse(await readFile(join(project, m.project_dir, "source", "transcripts", "asset-1.json"), "utf8")) as Array<{ start_ms: number }>;
     expect(words[0]!.start_ms).toBeLessThan(1500);
-  });
+  }, 20_000);
 
   it("needs a transcript", async () => {
     const { project } = await syntheticProject();

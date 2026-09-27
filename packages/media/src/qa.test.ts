@@ -2,15 +2,25 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type FfmpegTools, ffmpegFeatures, resolveFfmpeg, runFfmpeg } from "./ffmpeg.js";
+import { muxAudio } from "./compose.js";
+import { type FfmpegTools, type ProbeResult, ffmpegFeatures, ffprobe, resolveFfmpeg, runFfmpeg } from "./ffmpeg.js";
 import {
   BIG_CHANGE_SCORE,
   CUT_SCORE,
   DEFAULT_MAX_FROZEN_PCT,
+  FLASH_MAX_PER_SEC,
+  FLASH_SPIKE_Y,
   LOOP_AUDIO_JUMP_DB,
   LOOP_SSIM_MIN,
+  type LumaSample,
   analyzeVideo,
+  avSyncCheck,
+  flashCheck,
+  flashStats,
+  measureAvSync,
   motionStats,
+  parseDetections,
+  parseLuma,
   parseSceneChanges,
   rmsDb,
   technicalQa,
@@ -46,6 +56,68 @@ describe("scene-change parsing and motion stats (pure)", () => {
   it("measures RMS level in dB with a silence floor", () => {
     expect(rmsDb(new Float32Array(100))).toBe(-90);
     expect(rmsDb(new Float32Array(100).fill(0.5))).toBeCloseTo(-6.02, 1);
+  });
+});
+
+describe("flash and A/V sync measurement (pure)", () => {
+  // Luma samples at 15 fps from a list of 8-bit YAVG values.
+  const luma = (ys: number[]): LumaSample[] => ys.map((y, i) => ({ t: Math.round((i / 15) * 1000) / 1000, y }));
+
+  it("parses per-frame YAVG with its pts, across interleaved lines, scaled to 8 bits", () => {
+    const log = [
+      "[Parsed_metadata_4 @ 0xabc] frame:0    pts:0       pts_time:0",
+      "[Parsed_silencedetect_0 @ 0xdef] silence_start: 0",
+      "[Parsed_metadata_4 @ 0xabc] lavfi.signalstats.YAVG=126",
+      "[Parsed_scdet_2 @ 0x1] lavfi.scd.score: 15.625, lavfi.scd.time: 0.066667",
+      "[Parsed_metadata_4 @ 0xabc] frame:1    pts:1       pts_time:0.0666667",
+      "[Parsed_metadata_4 @ 0xabc] lavfi.signalstats.YAVG=235.5",
+      // A YAVG line without a pending frame header is ignored.
+      "[Parsed_metadata_4 @ 0xabc] lavfi.signalstats.YAVG=16",
+    ].join("\n");
+    expect(parseLuma(log)).toEqual([
+      { t: 0, y: 126 },
+      { t: 0.067, y: 235.5 },
+    ]);
+    // 10-bit YAVG is scaled down to 8-bit code values; other parsers still read the same log.
+    expect(parseLuma(log, 10)[0]!.y).toBe(31.5);
+    expect(parseSceneChanges(log)).toEqual([{ t: 0.067, score: 15.625 }]);
+  });
+
+  it("flags a lone white frame as a spike but not a flash rate", () => {
+    const f = flashStats(luma([100, 100, 100, 235, 100, 100, 100]));
+    expect(f).toMatchObject({ frames: 7, spikes: 1, spike_times_s: [0.2], flash_rate_max: 1 });
+    expect(flashCheck(f)).toMatchObject({ id: "flashing", status: "warn" });
+    // A two-frame step is a cut, not a spike; noise below the spike threshold is nothing.
+    expect(flashStats(luma([100, 100, 235, 235, 235])).spikes).toBe(0);
+    expect(flashStats(luma([100, 100 + FLASH_SPIKE_Y - 1, 100])).spikes).toBe(0);
+  });
+
+  it("fails a 5 Hz black/white strobe and passes a slow fade", () => {
+    const strobe = flashStats(luma(Array.from({ length: 45 }, (_, i) => (i % 3 < 2 ? 235 : 16))));
+    expect(strobe.flash_rate_max).toBe(5);
+    expect(strobe.flash_rate_max).toBeGreaterThan(FLASH_MAX_PER_SEC);
+    expect(flashCheck(strobe)).toMatchObject({ status: "fail", detail: expect.stringMatching(/red flashes are not measured/) });
+    const fade = flashStats(luma(Array.from({ length: 30 }, (_, i) => 16 + Math.round((219 * i) / 29))));
+    expect(fade).toMatchObject({ spikes: 0, transitions: 1, flash_rate_max: 0 });
+    expect(flashCheck(fade).status).toBe("ok");
+    // Swings above 80% luminance on both ends do not count (WCAG's darker-state rule).
+    expect(flashStats(luma(Array.from({ length: 30 }, (_, i) => (i % 2 ? 235 : 220)))).transitions).toBe(0);
+  });
+
+  it("measures the audio offset and lengths, and skips without audio", () => {
+    const base = { has_video: true, has_audio: true, fps: 15, duration_s: 2 } as ProbeResult;
+    const timing = (start: number, dur: number) => ({ start_s: start, duration_s: dur, nb_frames: 30, nb_read_frames: null });
+    const ok = measureAvSync({ ...base, video_timing: timing(0, 2), audio_timing: timing(0, 2) }, 30)!;
+    expect(ok).toMatchObject({ offset_ms: 0, video_frames: 30, video_length_s: 2, audio_length_s: 2, length_diff_ms: 0 });
+    expect(avSyncCheck(ok).status).toBe("ok");
+    // Unskipped AAC priming (1024 samples at 48 kHz) is within one 15 fps frame; 100 ms is not.
+    expect(avSyncCheck(measureAvSync({ ...base, video_timing: timing(0, 2), audio_timing: timing(0.021333, 2) }, 30)).status).toBe("ok");
+    const late = avSyncCheck(measureAvSync({ ...base, video_timing: timing(0, 2), audio_timing: timing(0.1, 2) }, 30));
+    expect(late).toMatchObject({ status: "fail", detail: expect.stringMatching(/audio starts 100 ms after/) });
+    // A short audio track: a warning, not a sync failure.
+    expect(avSyncCheck(measureAvSync({ ...base, video_timing: timing(0, 2), audio_timing: timing(0, 1.8) }, 30)).status).toBe("warn");
+    expect(measureAvSync({ ...base, has_audio: false })).toBeNull();
+    expect(avSyncCheck(null)).toMatchObject({ status: "ok", detail: expect.stringMatching(/not applicable/) });
   });
 });
 
@@ -159,5 +231,83 @@ describe.skipIf(!tools)("motion density, frozen share and loop seam on synthetic
     expect(bad.detail).toMatch(/SSIM/);
     // Without loop, no seam check.
     expect((await technicalQa(p("loop.mp4"), { width: 160, height: 288, duration_s: 2 }, { tools: tools! })).checks.some((c) => c.id === "loop_seam")).toBe(false);
+  }, 60_000);
+});
+
+// Flash and A/V sync on synthetic clips: 160x288, 3 s, 15 fps, x264 ultrafast.
+describe.skipIf(!tools)("flashing and A/V sync on synthetic clips", () => {
+  let dir: string;
+  const p = (n: string) => join(dir, n);
+  const x264 = ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"];
+  const S = "s=160x288:r=15";
+  const gen = (args: string[]) => runFfmpeg(["-y", ...args], { tools: tools! });
+  const expect3 = { width: 160, height: 288, duration_s: 3, require_audio: false };
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "vs-qa-flash-"));
+    await Promise.all([
+      // Mid-grey with one all-white frame (frame 22, 1.467 s).
+      gen(["-f", "lavfi", "-i", `color=c=0x606060:${S}:d=3,drawbox=x=0:y=0:w=iw:h=ih:c=white:t=fill:enable='eq(n,22)'`, ...x264, p("spike.mp4")]),
+      // Black/white strobe: 2 frames white, 1 black at 15 fps = 5 Hz, 5 flashes/s.
+      gen(["-f", "lavfi", "-i", `color=c=black:${S}:d=3,drawbox=x=0:y=0:w=iw:h=ih:c=white:t=fill:enable='lt(mod(n,3),2)'`, ...x264, p("strobe.mp4")]),
+      // Dark grey, a smooth 1 s fade up to mid-grey, then a hard cut to another mid-grey.
+      gen(["-f", "lavfi", "-i", `color=c=black:${S}:d=3,format=yuv420p,geq=lum='if(lt(T,1),64,if(lt(T,2),64+64*(T-1),90))':cb=128:cr=128`, ...x264, p("fadecut.mp4")]),
+      // Video only and a tone, for the mux.
+      gen(["-f", "lavfi", "-i", `color=c=0x303030:${S}:d=2`, ...x264, p("silent.mp4")]),
+      gen(["-f", "lavfi", "-i", "sine=f=440:d=2", "-ar", "48000", p("tone.wav")]),
+    ]);
+  }, 60_000);
+
+  afterAll(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it("warns on a single white frame, fails a 5 Hz strobe, passes a fade and a cut", async () => {
+    const spike = await technicalQa(p("spike.mp4"), expect3, { tools: tools! });
+    expect(spike.checks.find((c) => c.id === "flashing")).toMatchObject({ status: "warn", detail: expect.stringMatching(/1 single-frame luma spike\(s\) at 1\.47s/) });
+    expect(spike.metrics.flash).toMatchObject({ frames: 45, spikes: 1 });
+    expect(spike.metrics.flash!.flash_rate_max).toBeLessThanOrEqual(FLASH_MAX_PER_SEC);
+    const strobe = await technicalQa(p("strobe.mp4"), expect3, { tools: tools! });
+    expect(strobe.checks.find((c) => c.id === "flashing")).toMatchObject({ status: "fail", fix: expect.stringMatching(/3 per second/) });
+    expect(strobe.metrics.flash!.flash_rate_max).toBe(5);
+    expect(strobe.status).toBe("fail");
+    const fade = await technicalQa(p("fadecut.mp4"), expect3, { tools: tools! });
+    expect(fade.checks.find((c) => c.id === "flashing")).toMatchObject({ status: "ok" });
+    expect(fade.metrics.flash).toMatchObject({ spikes: 0 });
+    expect(fade.metrics.flash!.flash_rate_max).toBeLessThanOrEqual(1);
+    // Nothing else changed: no audio → no av_sync check; the report carries the flash metrics.
+    expect(fade.checks.map((c) => c.id)).not.toContain("av_sync");
+    expect(fade.checks.find((c) => c.id === "audio_stream")).toMatchObject({ status: "ok" });
+    const md = await readFile((await writeQaReport(dir, fade)).md, "utf8");
+    expect(md).toMatch(/- Flashing: worst \d flash\(es\) in 1 s/);
+  }, 60_000);
+
+  it("keeps the other QA outputs as before (the luma filters only add a measurement)", async () => {
+    for (const clip of ["spike.mp4", "fadecut.mp4"]) {
+      const a = await analyzeVideo(p(clip), {}, { tools: tools! });
+      // The detector chain without signalstats, as before this check existed.
+      const { stderr } = await runFfmpeg(["-i", p(clip), "-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=0.1,freezedetect=n=-60dB:d=1.0,scdet=t=${BIG_CHANGE_SCORE}`, "-f", "null", "-"], { tools: tools!, keepStderr: true });
+      const before = parseDetections(stderr, a.probe.duration_s);
+      expect({ black: a.black, freeze: a.freeze }).toEqual({ black: before.black, freeze: before.freeze });
+      expect(a.motion).toEqual(motionStats(parseSceneChanges(stderr), a.probe.duration_s, before.freeze));
+      expect(a.flash.frames).toBe(45);
+    }
+  }, 60_000);
+
+  it("muxes a tone onto a video with the audio starting within one frame", async () => {
+    await muxAudio(p("silent.mp4"), p("tone.wav"), p("muxed.mp4"), { tools: tools! });
+    const probe = await ffprobe(p("muxed.mp4"), { tools: tools!, countFrames: true });
+    expect(probe.video_timing!.nb_read_frames).toBe(30);
+    const sync = measureAvSync(probe)!;
+    expect(Math.abs(sync.offset_ms)).toBeLessThanOrEqual(1000 / 15);
+    expect(Math.abs(sync.length_diff_ms)).toBeLessThanOrEqual(1000 / 15 + 10);
+    const qa = await technicalQa(p("muxed.mp4"), { width: 160, height: 288, duration_s: 2 }, { tools: tools! });
+    expect(qa.checks.find((c) => c.id === "av_sync")).toMatchObject({ status: "ok" });
+    expect(qa.metrics.av_sync).toMatchObject({ video_frames: 30 });
+    // Audio delayed by 200 ms fails.
+    await gen(["-i", p("silent.mp4"), "-itsoffset", "0.2", "-i", p("tone.wav"), "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", p("late.mp4")]);
+    const late = await technicalQa(p("late.mp4"), { width: 160, height: 288, duration_s: 2.2, tolerance_s: 1 }, { tools: tools! });
+    expect(late.checks.find((c) => c.id === "av_sync")).toMatchObject({ status: "fail" });
+    expect(late.metrics.av_sync!.offset_ms).toBeGreaterThan(150);
   }, 60_000);
 });

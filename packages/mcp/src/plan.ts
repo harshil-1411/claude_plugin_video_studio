@@ -524,8 +524,11 @@ export function renderStoryboardMarkdown(spec: VideoSpec, ir: ContentIR | null):
   spec.scenes.forEach((s, i) => {
     const p = pacing[i]!;
     const visual = s.deterministic ? `${s.visual_strategy} / ${s.deterministic.kind}` : s.visual_strategy;
+    // A motion page draws its copy from props.text; show it so the storyboard reads like the reel.
+    const motionText = s.deterministic?.kind === "motion" && Array.isArray(s.deterministic.props.text) ? (s.deterministic.props.text as unknown[]).filter((t): t is string => typeof t === "string").join(" / ") : "";
+    const onScreen = [s.on_screen_text ?? "", motionText].filter((t) => t.trim()).join(" · ");
     lines.push(
-      `| ${s.id} | ${p.start_sec.toFixed(1)}–${p.end_sec.toFixed(1)}s | ${s.purpose} | ${cell(s.voiceover)} | ${cell(s.on_screen_text)} | ${visual} | ${claimCell(s.claim_refs)} |`,
+      `| ${s.id} | ${p.start_sec.toFixed(1)}–${p.end_sec.toFixed(1)}s | ${s.purpose} | ${cell(s.voiceover)} | ${cell(onScreen)} | ${visual} | ${claimCell(s.claim_refs)} |`,
     );
   });
 

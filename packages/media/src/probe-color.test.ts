@@ -29,3 +29,21 @@ describe("probe rotation and colour", () => {
     expect(hasZimg("--enable-libx264")).toBe(false);
   });
 });
+
+describe("probe stream timing (A/V sync)", () => {
+  const both = (v: Record<string, unknown>, a: Record<string, unknown>) =>
+    parseProbeJson(JSON.stringify({ streams: [{ codec_type: "video", codec_name: "h264", width: 160, height: 288, ...v }, { codec_type: "audio", codec_name: "aac", ...a }], format: { duration: "2" } }));
+
+  it("reads start_time, duration, nb_frames and nb_read_frames per stream", () => {
+    const p = both({ start_time: "0.000000", duration: "2.000000", nb_frames: "30", nb_read_frames: "30" }, { start_time: "0.021333", duration: "2.010000", nb_frames: "95" });
+    expect(p.video_timing).toEqual({ start_s: 0, duration_s: 2, nb_frames: 30, nb_read_frames: 30 });
+    expect(p.audio_timing).toEqual({ start_s: 0.021333, duration_s: 2.01, nb_frames: 95, nb_read_frames: null });
+  });
+
+  it("gives null for absent or N/A fields, and null timing for a missing stream", () => {
+    const p = both({}, { start_time: "N/A", nb_frames: "N/A" });
+    expect(p.video_timing).toEqual({ start_s: null, duration_s: null, nb_frames: null, nb_read_frames: null });
+    expect(p.audio_timing).toEqual({ start_s: null, duration_s: null, nb_frames: null, nb_read_frames: null });
+    expect(probe({ start_time: "-0.5" })).toMatchObject({ video_timing: { start_s: -0.5 }, audio_timing: null });
+  });
+});

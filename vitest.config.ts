@@ -8,5 +8,8 @@ export default defineConfig({
     // Keep resource use low on small machines.
     pool: "forks",
     maxWorkers: 2,
+    // Many tests run real ffmpeg on tiny clips; under a full two-worker run the slowest pass 5 s,
+    // so the default timeout flaked. Tests that need longer still set their own.
+    testTimeout: 20_000,
   },
 });

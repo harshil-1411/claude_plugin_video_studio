@@ -71,6 +71,21 @@ Run this loop when lint returns errors, or warnings the user wants cleared:
        word earlier.
      - `cue_too_close`: two cues in a scene land under 0.4 s apart. Drop
        one cue or cue a later word.
+     - `insert_early`: a data insert (a stat, a chart value, any number in
+       the graphic) is on screen over 1 s before the voice says its number.
+       Add the cue the fix names (`cues: [{word: "40"}]`), or move a cue that
+       sits on the wrong word. An uncued item counts from the scene start
+       (its stagger is ignored). A number that is only in the layout (a
+       title) can't be cued: say it sooner or move it into a cued item.
+     - `insert_overstays`: a scene's only data insert stays over 2.5 s after
+       the sentence that says it ends, while another sentence plays. Split
+       the scene after that sentence (the next thought gets its own visual),
+       or end the scene sooner.
+     - `insert_crowded`: one sentence cues two or more data items. Keep one
+       insert per statement: cue the later item on a word in a later
+       sentence, or split the scene.
+     - The insert checks use the voice word timings and skip the render
+       when there are none (`timing_source: none`, silent voice).
    - `text_repeats_captions`: a narrated scene's on-screen text repeats its
      voiceover word for word while burned-in captions show the same words.
      For kinetic text that types out the narration, set `burn_captions:
@@ -85,6 +100,11 @@ Run this loop when lint returns errors, or warnings the user wants cleared:
    - `cutaway_rhythm`: a cutaway (`footage.cutaway`) starts inside the
      hook's first second, lasts outside 3–10 s, or leaves under 2 s of the
      speaker since the previous one. Move, lengthen, split or merge it.
+   - `title_length`: the social title (`spec.title`, else the brief's
+     hook) or a multi-line publish caption's first line is outside 24–58
+     characters. The band is a heuristic from `research-specs/titles.yaml`,
+     not a platform limit, and unverified: trim filler or add the concrete
+     payoff as the fix says, and ignore it when the user prefers the title.
    - `story_structure` (3+ scenes): no tension scene (question, problem,
      contrarian_claim, story) in the first 40% after the hook, or the last
      scene before the CTA/end card is not a payoff (payoff, result, reveal,

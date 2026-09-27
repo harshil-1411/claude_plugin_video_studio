@@ -16,9 +16,15 @@ import {
   resolveTargets,
   voiceMode,
   MIN_CUE_GAP_MS,
+  type CreativeBrief,
+  type DeterministicKind,
+  type TitleRules,
+  cueItems,
+  cueToken,
 } from "@video-studio/schema";
-import { LOOP_AUDIO_JUMP_DB, LOOP_SSIM_MIN } from "@video-studio/media";
+import { FLASH_MAX_PER_SEC, LOOP_AUDIO_JUMP_DB, LOOP_SSIM_MIN } from "@video-studio/media";
 import {
+  CUE_LEAD_S,
   REFRAME,
   type Script,
   dominantScript,
@@ -31,6 +37,9 @@ import {
   scriptsIn,
   subjectEdgeHits,
 } from "@video-studio/renderer";
+import { loadBrief } from "./pipeline-core.js";
+import { socialCopyParts } from "./social-copy.js";
+import { findResearchSpecsDir, loadTitleRules } from "./research-specs.js";
 import { loadSeries } from "./series.js";
 import { projectSpecPaths } from "./spec-validate.js";
 
@@ -100,6 +109,16 @@ export const ONSCREEN_SPOKEN_SHARE = 0.6;
 export const STORY_SETUP_FRACTION = 0.4;
 /** Cutaway rhythm over a talking head: no cutaway in the hook's first second, 3–10 s each, 2 s of face between. */
 export const CUTAWAY = { hook_sec: 1, min_sec: 3, max_sec: 10, face_gap_sec: 2 } as const;
+/**
+ * Insert sync (design rules): a data insert (a stat, a chart value, a number on screen) should
+ * appear when the voice says it, leave when its thought ends, and have its statement to itself.
+ * It may enter at most INSERT_EARLY_MAX_S before its number is said, and stay at most
+ * INSERT_TAIL_MAX_S after that sentence ends while another sentence is spoken.
+ */
+export const INSERT_EARLY_MAX_S = 1;
+export const INSERT_TAIL_MAX_S = 2.5;
+/** A pause at least this long between spoken words ends a sentence when the words carry no punctuation. */
+export const SENTENCE_GAP_MS = 700;
 /** Caption cues for sound events carry this scene_id prefix (pipeline SOUND_CUE_SCENE_PREFIX). */
 const SOUND_CUE_PREFIX = "sound:";
 
@@ -136,6 +155,8 @@ export interface LintOptions {
   specsDir?: string | null;
   /** styles directory (tests); default: the bundled one. */
   stylesDir?: string | null;
+  /** research-specs directory (tests); default: the bundled one. None: the title lint is skipped. */
+  researchSpecsDir?: string | null;
 }
 
 /** The parts of renders/<quality>/render-state.json lint reads (written by the pipeline). */
@@ -161,6 +182,8 @@ interface RenderStateView {
 interface QaStateView {
   motion?: { changes_per_sec: number; longest_static_s: number; frozen_s: number; frozen_pct: number; cuts_per_sec?: number };
   loop_seam?: { ssim: number | null; audio_jump_db: number | null };
+  /** Flash and flicker on the reel (lane A, `checkFlashing`). */
+  flash?: { spikes: number; spike_times_s: number[]; flash_rate_max: number; flash_window?: { start_s: number; end_s: number } };
 }
 
 /** captions/captions.json (media `CaptionJson`): the words and the captions built from them. */
@@ -1280,6 +1303,249 @@ export async function checkMotionUnsafe(root: string, spec: VideoSpec, out: Lint
   }
 }
 
+// ------------------------------------------------------------------------------------ inserts
+
+const NUMBER_WORDS: Readonly<Record<string, number>> = Object.freeze({
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+});
+const NUMBER_RE = /\d+(?:,\d{3})*(?:\.\d+)?/g;
+const normNumber = (s: string) => String(Number(s.replace(/,/g, "")));
+
+/** The numbers in a text, normalised ("1,200" → "1200", "40%" → "40", "1.50" → "1.5"). */
+export function numberTokens(text: string): string[] {
+  return [...new Set([...text.matchAll(NUMBER_RE)].map((m) => normNumber(m[0])))];
+}
+
+/** The number a spoken word says ("40", "40%", "$1,200", "forty", "forty-two"), or undefined. */
+function spokenNumber(word: string): string | undefined {
+  const t = cueToken(word);
+  const m = /^[$€£¥₹]?(\d+(?:,\d{3})*(?:\.\d+)?)/u.exec(t);
+  if (m) return normNumber(m[1]!);
+  const parts = t.split("-");
+  if (!parts.every((p) => p in NUMBER_WORDS)) return undefined;
+  const [a, b] = parts.map((p) => NUMBER_WORDS[p]!) as [number, number | undefined];
+  if (b === undefined) return String(a);
+  return parts.length === 2 && a >= 20 && a % 10 === 0 && b < 10 ? String(a + b) : undefined;
+}
+
+/** A data insert: reveal item `item` (-1: props text outside every item, on screen from the scene start). */
+interface DataItem {
+  item: number;
+  numbers: string[];
+}
+
+const KEYED_ITEMS: Partial<Record<DeterministicKind, (props: Record<string, unknown>, name: string) => unknown>> = {
+  comparison: (p, n) => p[n],
+  split_screen: (p, n) => p[n],
+  cta: (p, n) => (n === "action" ? [p.action, p.command, p.url] : p[n]),
+  end_card: (p, n) => p[n],
+  quote: (p, n) => p[n],
+  lower_third: (p, n) => (n === "name" ? [p.name, p.title] : p[n]),
+  stat: (p, n) => (n === "value" ? p.value : [p.label, p.context]),
+};
+
+/**
+ * The data inserts of a deterministic graphic: its reveal items (`cueItems`) that carry a number,
+ * plus one item -1 for numbers elsewhere in the props (titles, units). Code blocks carry no data.
+ */
+function dataItems(kind: DeterministicKind, props: Record<string, unknown>): DataItem[] {
+  if (kind === "code") return [];
+  const labels = cueItems(kind, props);
+  const keyed = KEYED_ITEMS[kind];
+  const series = kind === "chart" && props.type !== "stat" && Array.isArray(props.series) ? (props.series as unknown[]) : undefined;
+  const texts = labels.map((label, i) => {
+    if (keyed) return propsText(keyed(props, label) ?? "");
+    if (series) return propsText(series[i]);
+    if (kind === "chart") return propsText(props.value ?? "");
+    return label;
+  });
+  const out: DataItem[] = texts.map((t, item) => ({ item, numbers: numberTokens(t) })).filter((d) => d.numbers.length);
+  const inItems = new Set(out.flatMap((d) => d.numbers));
+  const rest = numberTokens(propsText(props)).filter((n) => !inItems.has(n));
+  if (rest.length) out.push({ item: -1, numbers: rest });
+  return out;
+}
+
+interface Sentence {
+  first: number;
+  last: number;
+  start: number;
+  end: number;
+}
+
+/** Sentences of a scene's spoken words: split after sentence-final punctuation or a SENTENCE_GAP_MS pause. */
+function sentences(words: ReadonlyArray<{ word: string; start_ms: number; end_ms: number }>): Sentence[] {
+  const out: Sentence[] = [];
+  let first = 0;
+  words.forEach((w, i) => {
+    const next = words[i + 1];
+    if (next && !/[.!?…]["'”’)\]]*$/u.test(w.word.trim()) && next.start_ms - w.end_ms < SENTENCE_GAP_MS) return;
+    out.push({ first, last: i, start: words[first]!.start_ms, end: w.end_ms });
+    first = i + 1;
+  });
+  return out;
+}
+
+const sentenceText = (words: ReadonlyArray<{ word: string }>, s: Sentence) => words.slice(s.first, s.last + 1).map((w) => w.word.trim()).join(" ");
+
+/**
+ * Insert sync, from the voice-track word times (scene-local) and the placed word cues:
+ * - `insert_early`: a data item enters more than INSERT_EARLY_MAX_S before the voice first says its
+ *   number. A cued item enters CUE_LEAD_S before its word; an uncued one enters with the scene (its
+ *   default stagger is renderer-specific and ignored, so this errs early); an uncued item after a
+ *   cued one follows that cue and is not judged.
+ * - `insert_overstays`: in a scene with one data item, the sentence saying it ends and a different
+ *   sentence plays while the scene goes on more than INSERT_TAIL_MAX_S.
+ * - `insert_crowded`: one sentence triggers more than one data item through placed cues.
+ * Skipped without speech timing (no voice timing, or a scene without words): never guessed.
+ */
+export function checkInserts(
+  spec: Pick<VideoSpec, "scenes">,
+  state: Pick<RenderStateView, "voice" | "scenes" | "cues"> | undefined,
+  tracks: readonly VoiceTrackView[] | undefined,
+  out: LintFinding[],
+): void {
+  if (!state?.voice?.timing_source || state.voice.timing_source === "none" || !tracks?.length) return;
+  for (const s of spec.scenes) {
+    if (!s.deterministic) continue;
+    const durMs = state.scenes?.find((x) => x.scene_id === s.id)?.duration_ms ?? s.duration_sec * 1000;
+    const words = (tracks.find((t) => t.scene_id === s.id)?.words ?? []).filter((w) => w.word.trim() && w.start_ms < durMs);
+    if (!words.length) continue;
+    const items = dataItems(s.deterministic.kind, s.deterministic.props as Record<string, unknown>);
+    if (!items.length) continue;
+    const placed = (state.cues ?? []).filter((c) => c.scene_id === s.id && c.status === "placed" && c.at_ms !== undefined);
+    const cueAt = new Map<number, number>();
+    for (const c of placed) if (!cueAt.has(c.item)) cueAt.set(c.item, c.at_ms!);
+    const said = (d: DataItem) => {
+      const i = words.findIndex((w) => {
+        const n = spokenNumber(w.word);
+        return n !== undefined && d.numbers.includes(n);
+      });
+      return i < 0 ? undefined : { index: i, word: cueToken(words[i]!.word), ms: words[i]!.start_ms };
+    };
+    const sents = sentences(words);
+    const sentenceOf = (index: number) => sents.find((x) => x.first <= index && index <= x.last)!;
+    const sentenceAt = (ms: number) => sents.find((x) => x.start <= ms && ms <= x.end) ?? sents.filter((x) => x.start <= ms).pop();
+
+    // insert_early
+    const early: Array<{ d: DataItem; word: string; lead: number; enter: number; at: number }> = [];
+    for (const d of items) {
+      const heard = said(d);
+      if (!heard) continue;
+      let enter: number;
+      if (cueAt.has(d.item)) enter = Math.max(0, cueAt.get(d.item)! / 1000 - CUE_LEAD_S);
+      else if (d.item > 0 && [...cueAt.keys()].some((k) => k >= 0 && k < d.item)) continue;
+      else enter = 0;
+      const lead = heard.ms / 1000 - enter;
+      if (lead > INSERT_EARLY_MAX_S) early.push({ d, word: heard.word, lead, enter, at: heard.ms / 1000 });
+    }
+    if (early.length) {
+      const worst = [...early].sort((a, b) => b.lead - a.lead)[0]!;
+      const how = cueAt.has(worst.d.item) ? `its cue brings it in at ${round2(worst.enter)}s` : worst.d.item < 0 ? "it is part of the scene's layout" : "it enters with the scene, default stagger ignored";
+      const fixes = early.map(({ d, word }) => {
+        if (d.item < 0) return `say "${word}" within ${INSERT_EARLY_MAX_S}s of scene ${s.id}'s start, or move it into a cued item`;
+        if (cueAt.has(d.item)) return `move scene ${s.id}'s cue for item ${d.item} to {word: "${word}"}`;
+        return undefined;
+      });
+      const add = early.filter((e, k) => !fixes[k]).map(({ d, word }) => (d.item === 0 && !s.cues?.length ? `{word: "${word}"}` : `{word: "${word}", item: ${d.item}}`));
+      out.push({
+        id: "insert_early",
+        severity: "warning",
+        scene_id: s.id,
+        message: `${early.length} data insert(s) in ${s.id} appear before the voice says them; "${worst.word}" is on screen ${round2(worst.lead)}s before the voice says it at ${round2(worst.at)}s (${how}; limit ${INSERT_EARLY_MAX_S}s)`,
+        fix: [...(add.length ? [`add cues: [${add.join(", ")}] to scene ${s.id}`] : []), ...fixes.filter(Boolean)].join("; ") + " so the insert lands on its word",
+      });
+    }
+
+    // insert_overstays
+    if (items.length === 1) {
+      const heard = said(items[0]!);
+      if (heard) {
+        const own = sentenceOf(heard.index);
+        const next = sents[sents.indexOf(own) + 1];
+        const tail = durMs - own.end;
+        if (next && tail > INSERT_TAIL_MAX_S * 1000) {
+          const text = sentenceText(words, own);
+          const endWords = text.split(" ").slice(-3).join(" ");
+          out.push({
+            id: "insert_overstays",
+            severity: "warning",
+            scene_id: s.id,
+            message: `the "${heard.word}" insert in ${s.id} stays ${round2(tail / 1000)}s after its sentence ("${snippet(text, 60)}") ends at ${round2(own.end / 1000)}s, while "${snippet(sentenceText(words, next))}" is spoken (limit ${INSERT_TAIL_MAX_S}s)`,
+            fix: `split scene ${s.id} after "…${endWords}" (move "${snippet(sentenceText(words, next), 30)}" and what follows into a new scene with its own visual), or end it sooner (duration_sec about ${Math.ceil(own.end / 100 + 5) / 10}) and move the rest of the voiceover to the next scene`,
+          });
+        }
+      }
+    }
+
+    // insert_crowded
+    const bySentence = new Map<Sentence, Array<{ item: number; word: string }>>();
+    for (const c of placed) {
+      const d = items.find((x) => x.item === c.item);
+      const sent = d && sentenceAt(c.at_ms!);
+      if (!sent) continue;
+      const list = bySentence.get(sent) ?? [];
+      if (!list.some((x) => x.item === c.item)) list.push({ item: c.item, word: c.word });
+      bySentence.set(sent, list);
+    }
+    for (const [sent, list] of bySentence) {
+      if (list.length < 2) continue;
+      const later = list[list.length - 1]!;
+      out.push({
+        id: "insert_crowded",
+        severity: "warning",
+        scene_id: s.id,
+        message: `one sentence ("${snippet(sentenceText(words, sent), 60)}") triggers ${list.length} data items (items ${list.map((x) => x.item).join(", ")}) in ${s.id}; viewers take in one insert per statement`,
+        fix: `one insert per statement: cue item ${later.item} ("${later.word}") on a word in a later sentence, or split scene ${s.id} so each number gets its own sentence and scene`,
+      });
+    }
+  }
+}
+
+// ------------------------------------------------------------------------------------ titles
+
+/**
+ * Titles outside the research-specs/titles.yaml band: the generated social title (spec.title,
+ * else the brief's chosen hook, else the first voiceover sentence) and, for publish copy with a
+ * separate first line, that headline line. Warnings only: the band is a heuristic.
+ */
+export function checkTitleLength(spec: VideoSpec, brief: CreativeBrief | undefined, rules: TitleRules | undefined, out: LintFinding[]): void {
+  if (!rules) return;
+  const { min_chars: min, max_chars: max } = rules.title_length;
+  const basis = `${rules.basis}${rules.verified ? "" : ", unverified"}; research-specs/titles.yaml`;
+  const check = (title: string, what: string, field: string, target?: string) => {
+    const n = Array.from(title).length;
+    if (n >= min && n <= max) return;
+    const fix =
+      field === "generated"
+        ? `set spec.title to a title of ${min}–${max} characters (the generated one comes from the brief's chosen_hook or the first voiceover sentence)`
+        : n < min
+          ? `expand ${field} by at least ${min - n} characters with the concrete payoff (what the viewer learns or gets, a number), to ${min}–${max}`
+          : `trim ${field} by at least ${n - max} characters (drop filler words and qualifiers, keep the concrete promise), to ${min}–${max}`;
+    out.push({
+      id: "title_length",
+      severity: "warning",
+      ...(target ? { target } : {}),
+      message: `${what} "${snippet(title, 60)}" is ${n} characters; titles of ${min}–${max} characters tend to carry a concrete promise without being cut off (${basis})`,
+      fix,
+    });
+  };
+  const title = socialCopyParts(spec, brief).title;
+  check(title, "title", spec.title?.trim() ? "spec.title" : "generated");
+  for (const [target, copy] of Object.entries(spec.publish ?? {})) {
+    if (copy.title?.trim()) {
+      check(copy.title.trim(), `publish.${target}.title`, `publish.${target}.title`, target);
+      continue;
+    }
+    const lines = copy.post_caption.split("\n");
+    if (lines.length < 2) continue;
+    const headline = lines[0]!.replace(/(^|\s)#[\p{L}\p{N}_]+/gu, " ").trim();
+    if (headline) check(headline, `publish.${target} headline`, `the first line of publish.${target}.post_caption`, target);
+  }
+}
+
 // ------------------------------------------------------------------------------------ craft
 
 /**
@@ -1427,6 +1693,8 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   checkOnScreenBrief(spec, state, findings);
   const brand = await loadBrand(paths.root);
   await checkTiming(paths.root, spec, state, brand, findings);
+  const tracks = state?.voice?.tracks_path ? await readOptionalJson<VoiceTrackView[]>(join(paths.root, state.voice.tracks_path)) : undefined;
+  checkInserts(spec, state, tracks, findings);
   checkStory(spec, findings);
   checkCutaways(spec, findings);
   const irMedia = await readOptionalJson<IrMediaView>(join(paths.root, "source", "content-ir.json"));
@@ -1437,7 +1705,10 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   checkBannedEffect(spec, await styleAvoid(spec, opts.stylesDir === undefined ? findStylesDir() : opts.stylesDir, paths.root), brand, findings);
   checkAcceptance(spec, state, findings);
   checkLoopSeam(spec, state, findings);
+  checkFlashing(state, findings);
   checkPostCopy(spec, contracts, findings);
+  const titleRules = await loadTitleRules(opts.researchSpecsDir === undefined ? findResearchSpecsDir() : opts.researchSpecsDir);
+  if (titleRules) checkTitleLength(spec, await loadBrief(paths.root), titleRules, findings);
   const coverView: CoverView | undefined = state?.cover
     ? {
         ...(state.cover.headline_box ? { headline_box: state.cover.headline_box } : {}),
@@ -1472,4 +1743,34 @@ export function formatLint(r: LintResult): string {
     `lint ${r.status}: ${r.counts.errors} error(s), ${r.counts.warnings} warning(s) for ${r.targets.join(", ") || "no targets"} (${r.rendered ? `${r.quality} render checked` : `no ${r.quality} render; spec-only checks`}); report ${r.report_md}`,
     ...r.findings.map((f) => `- ${f.severity} ${f.id}${f.target ? ` [${f.target}]` : ""}${f.scene_id ? ` ${f.scene_id}` : ""}: ${f.message} (fix: ${f.fix})`),
   ].join("\n");
+}
+
+// ------------------------------------------------------------------------------------ flashing
+
+/**
+ * flashing: QA's flash measurement on the reel (RenderState.qa.flash). More than
+ * FLASH_MAX_PER_SEC flashes in one second is an error (WCAG 2.3.1 general flashes, approximated on
+ * mean luma; red flashes are not measured) with no acceptance override; any single-frame luma spike
+ * is a warning. Silent when QA has not measured it.
+ */
+export function checkFlashing(state: Pick<RenderStateView, "qa"> | undefined, out: LintFinding[]): void {
+  const f = state?.qa?.flash;
+  if (!f) return;
+  if (f.flash_rate_max > FLASH_MAX_PER_SEC) {
+    const at = f.flash_window ? ` at ${f.flash_window.start_s.toFixed(2)}–${f.flash_window.end_s.toFixed(2)}s` : "";
+    out.push({
+      id: "flashing",
+      severity: "error",
+      message: `the render flashes ${f.flash_rate_max} times in one second${at} (limit ${FLASH_MAX_PER_SEC}/s, WCAG 2.3.1; measured on mean luma, red flashes not covered)`,
+      fix: "slow the flashing to at most 3 per second, lower its contrast or shrink the flashing area, then re-render; this has no acceptance override",
+    });
+  } else if (f.spikes > 0) {
+    const times = f.spike_times_s.map((t) => `${t.toFixed(2)}s`).join(", ");
+    out.push({
+      id: "flashing",
+      severity: "warning",
+      message: `${f.spikes} single-frame luma spike(s) at ${times}${f.spikes > f.spike_times_s.length ? ", …" : ""}`,
+      fix: "check those frames (qa/report.md lists them): a lone white or black frame is usually a render glitch or a hard flash; replace it or ease it with a short fade",
+    });
+  }
 }

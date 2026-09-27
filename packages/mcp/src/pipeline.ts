@@ -1,7 +1,7 @@
 import { copyFile, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { ensureDir, hashFile, projectPaths, readJson, writeJsonAtomic } from "@video-studio/core";
-import { type MotionStats, type QaReport, technicalQa, writeQaReport } from "@video-studio/media";
+import { type FlashStats, type MotionStats, type QaReport, technicalQa, writeQaReport } from "@video-studio/media";
 import { type SceneRenderEntry, findFontsDir, findStylesDir, getStyle, LAYOUT_VERSION, parseFontChain, resolveTokens } from "@video-studio/renderer";
 import { CreativeBrief, RenderManifest, type SceneRender, VideoSpec, parseYamlOrJson, resolveTargets, type C2paRecord } from "@video-studio/schema";
 import { ZONES_VERSION, findPlatformSpecsDir, loadContracts } from "@video-studio/platforms";
@@ -10,6 +10,9 @@ import { COVER_VERSION } from "./cover.js";
 import { LOCK_FILE, buildLock, listFiles, lockAssets, lockFonts, serializeLock, withSeriesAssets } from "./lock.js";
 import { acquireRenderLock } from "./render-lock.js";
 import { type LintResult, lintProject } from "./lint.js";
+import { socialCopy, socialCopyParts } from "./social-copy.js";
+
+export { socialCopy, socialCopyParts };
 import { TARGET_PACKAGE_VERSION, packageTargets } from "./targets.js";
 import { projectSpecPaths } from "./spec-validate.js";
 import {
@@ -251,8 +254,15 @@ async function runQaOn(root: string, state: RenderState, reelSha?: string): Prom
     expect_key: qaExpectKey(state),
     ...(report.metrics.motion ? { motion: motionView(report.metrics.motion) } : {}),
     ...(report.metrics.loop_seam ? { loop_seam: report.metrics.loop_seam } : {}),
+    ...(report.metrics.flash ? { flash: flashView(report.metrics.flash) } : {}),
+    ...(report.metrics.av_sync ? { av_sync: { offset_ms: report.metrics.av_sync.offset_ms, length_diff_ms: report.metrics.av_sync.length_diff_ms } } : {}),
   };
   return { status, findings, report_json: files.json, report_md: files.md };
+}
+
+/** The flash numbers render-state keeps: spike times capped at 20 (qa/report.json has them all). */
+function flashView(f: FlashStats): NonNullable<NonNullable<RenderState["qa"]>["flash"]> {
+  return { spikes: f.spikes, spike_times_s: f.spike_times_s.slice(0, 20), flash_rate_max: f.flash_rate_max, ...(f.flash_window ? { flash_window: f.flash_window } : {}) };
 }
 
 function motionView(m: MotionStats): QaMotionMetrics {
@@ -305,75 +315,6 @@ export async function exportProject(
 
 // ------------------------------------------------------------------------------------ export
 
-const STOPWORDS = new Set(
-  "a an and are as at be but by can do does for from how in into is it its of on or so that the their this to what when where which who why with without you your in 30s seconds explain explained actually".split(
-    " ",
-  ),
-);
-
-const PLATFORM_TAGS: Record<string, string[]> = {
-  youtube_shorts: ["shorts"],
-  instagram_reels: ["reels"],
-  tiktok: ["fyp"],
-  linkedin: [],
-  youtube: [],
-  x: [],
-  generic: [],
-};
-
-function hashtag(word: string): string {
-  return word.replace(/[^A-Za-z0-9]+/g, " ").trim().split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("");
-}
-
-function firstSentence(text: string): string {
-  return (text.split(/(?<=[.!?])\s/)[0] ?? text).trim();
-}
-
-/** Deterministic social copy (title, 2–3 line description, hashtags). Claude refines it in the skill. */
-export function socialCopy(spec: VideoSpec, brief?: CreativeBrief): string {
-  const { title, lines, hashtags } = socialCopyParts(spec, brief);
-  return [
-    "<!-- Generated deterministically from the spec and brief by video-studio. Refine the wording before posting; keep every claim grounded in the sources. -->",
-    `# ${title}`,
-    "",
-    ...lines,
-    "",
-    hashtags.join(" "),
-    "",
-  ].join("\n");
-}
-
-/** The pieces of {@link socialCopy}: title, up to 3 description lines and up to 7 hashtags (with `#`). */
-export function socialCopyParts(spec: VideoSpec, brief?: CreativeBrief): { title: string; lines: string[]; hashtags: string[] } {
-  const title = spec.title?.trim() || brief?.chosen_hook || firstSentence(spec.scenes[0]?.voiceover ?? "") || "New video";
-  const lines: string[] = [];
-  const hook = spec.scenes.find((s) => s.purpose === "hook");
-  if (hook?.voiceover.trim()) lines.push(hook.voiceover.trim());
-  const messages = brief?.key_messages?.length
-    ? brief.key_messages
-    : spec.scenes.filter((s) => !["hook", "cta", "end_card"].includes(s.purpose) && s.voiceover.trim()).map((s) => firstSentence(s.voiceover));
-  if (messages[0] && !lines.includes(messages[0])) lines.push(messages[0]);
-  const action = brief?.desired_action ?? spec.scenes.find((s) => s.purpose === "cta")?.voiceover.trim();
-  if (action) lines.push(action);
-  const contentWords = (text: string) =>
-    text
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((w) => w.length >= 4 && !STOPWORDS.has(w) && !/^\d+$/.test(w));
-  // Title words first, then words the narration repeats across scenes (most frequent first).
-  const freq = new Map<string, number>();
-  for (const sc of spec.scenes) for (const w of new Set(contentWords(sc.voiceover))) freq.set(w, (freq.get(w) ?? 0) + 1);
-  const repeated = [...freq].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([w]) => w);
-  const tags: string[] = [];
-  const add = (w: string) => {
-    const t = hashtag(w);
-    if (t && !tags.some((x) => x.toLowerCase() === t.toLowerCase() || x.toLowerCase() === `${t.toLowerCase()}s` || `${x.toLowerCase()}s` === t.toLowerCase())) tags.push(t);
-  };
-  for (const w of contentWords(title)) add(w);
-  for (const w of repeated.slice(0, 3)) add(w);
-  for (const w of [...(PLATFORM_TAGS[spec.platform] ?? []), spec.goal === "explain" ? "explained" : spec.goal]) add(w);
-  return { title, lines: lines.slice(0, 3), hashtags: tags.slice(0, 7).map((t) => `#${t}`) };
-}
 
 async function exportFromState(root: string, state: RenderState, now: () => Date, opts: { sign?: boolean; c2pa?: C2paDeps } = {}): Promise<DistFiles> {
   const paths = projectPaths(root);

@@ -265,6 +265,18 @@ assumptions: []
   });
 });
 
+describe("storyboard: motion scenes", () => {
+  it("lists a motion page's copy as its on-screen text", async () => {
+    const { renderStoryboardMarkdown } = await import("./plan.js");
+    const spec = VideoSpec.parse({
+      schema_version: "1.0", goal: "explain", audience: "devs", platform: "generic", aspect_ratio: "9:16", target_duration_sec: 2, language: "en-US",
+      grounding: "off", voice: { mode: "none" }, captions: { preset: "clean", burn_in: false },
+      scenes: [{ id: "s01", duration_sec: 2, purpose: "hook", voiceover: "", visual_strategy: "motion_graphic", visual_requirements: { continuity_refs: [] }, claim_refs: [], deterministic: { kind: "motion", props: { html: "motion/s01.html", text: ["30+", "How?"] } } }],
+    });
+    expect(renderStoryboardMarkdown(spec, null).markdown).toContain("| 30+ / How? |");
+  });
+});
+
 describe("storyboard_render", () => {
   it("writes a readable storyboard for the example project", async () => {
     const root = await exampleProject("storyboard");

@@ -9089,6 +9089,25 @@ function parseRate(r) {
 	const v = d ? n / d : n;
 	return Number.isFinite(v) && v > 0 ? Math.round(v * 1e3) / 1e3 : null;
 }
+/** A finite number from an ffprobe string field ("N/A" and absent give null). */
+function probeNum(x) {
+	if (x === void 0 || x === null || x === "" || x === "N/A") return null;
+	const n = Number(x);
+	return Number.isFinite(n) ? n : null;
+}
+function streamTiming(s) {
+	if (!s) return null;
+	const frames = (x) => {
+		const n = probeNum(x);
+		return n !== null && Number.isInteger(n) && n >= 0 ? n : null;
+	};
+	return {
+		start_s: probeNum(s.start_time),
+		duration_s: probeNum(s.duration),
+		nb_frames: frames(s.nb_frames),
+		nb_read_frames: frames(s.nb_read_frames)
+	};
+}
 function parseProbeJson(json) {
 	const data = JSON.parse(json);
 	const streams = data.streams ?? [];
@@ -9119,15 +9138,22 @@ function parseProbeJson(json) {
 		color_transfer: transfer,
 		color_primaries: known(v?.color_primaries),
 		bit_depth: pixFmtBitDepth(v?.pix_fmt) ?? (Number.isInteger(raw) && raw > 0 ? raw : null),
-		hdr: transfer !== null && HDR_TRANSFERS.has(transfer)
+		hdr: transfer !== null && HDR_TRANSFERS.has(transfer),
+		video_timing: streamTiming(v),
+		audio_timing: streamTiming(a)
 	};
 }
-/** ffprobe a media file. */
+/**
+* ffprobe a media file. `countFrames` decodes every stream to report exact frame counts
+* (`nb_read_frames`); it costs a full decode, so it is off by default.
+*/
 async function ffprobe(path, opts = {}) {
 	const { ffprobe: bin } = await getTools(opts.tools);
+	const { countFrames, ...run } = opts;
 	const { stdout } = await runProcess(bin, [
 		"-v",
 		"error",
+		...countFrames ? ["-count_frames"] : [],
 		"-print_format",
 		"json",
 		"-show_streams",
@@ -9135,7 +9161,7 @@ async function ffprobe(path, opts = {}) {
 		"--",
 		path
 	], {
-		...opts,
+		...run,
 		timeoutMs: opts.timeoutMs ?? 6e4,
 		captureStdout: true
 	});
@@ -10828,6 +10854,8 @@ async function pngSize$1(path) {
 const LOOP_SSIM_MIN = .99;
 /** Floor for RMS levels (dB), so two silent ends compare as equal. */
 const SILENCE_DB = -90;
+/** Spike times kept in the metrics and the check detail. */
+const SPIKE_TIMES_MAX = 50;
 /** Default blackdetect pixel threshold (fraction of the luma range). */
 const BLACK_PIX_TH = .1;
 /** Normalised limited-range luma (0–1) of a #RRGGBB colour, BT.709. */
@@ -10960,6 +10988,188 @@ function motionStats(changes, durationS, freeze) {
 		frozen_pct: d > 0 ? Math.round(frozen / d * 1e3) / 10 : 0
 	};
 }
+/**
+* Per-frame mean luma from `signalstats` + `metadata=mode=print` log lines: a `frame:N pts:P
+* pts_time:T` line followed by `lavfi.signalstats.YAVG=Y` from the same filter instance. Other
+* filters' lines may interleave (the audio chain runs in its own thread), so the pending time is
+* kept per instance. `bitDepth` scales YAVG to 8-bit code values.
+*/
+function parseLuma(stderr, bitDepth = 8) {
+	const scale = bitDepth > 8 ? 2 ** (bitDepth - 8) : 1;
+	const pending = /* @__PURE__ */ new Map();
+	const out = [];
+	for (const line of stderr.split(/\r?\n/)) {
+		if (!line.includes("pts_time:") && !line.includes("lavfi.signalstats.YAVG=")) continue;
+		const who = /\[Parsed_metadata_\d+ @ ([^\]]+)\]/.exec(line)?.[1] ?? "";
+		const pts = /\bpts_time:\s*(-?[\d.]+(?:e-?\d+)?)/.exec(line);
+		if (pts) {
+			const t = Number(pts[1]);
+			if (Number.isFinite(t)) pending.set(who, t);
+			continue;
+		}
+		const y = /lavfi\.signalstats\.YAVG=(-?[\d.]+)/.exec(line);
+		const t = pending.get(who);
+		if (!y || t === void 0) continue;
+		pending.delete(who);
+		const v = Number(y[1]);
+		if (Number.isFinite(v)) out.push({
+			t: r3$4(t),
+			y: v / scale
+		});
+	}
+	return out;
+}
+/** Limited-range 8-bit luma to approximate relative luminance (0–1): normalise, then the sRGB EOTF. */
+function relativeLuminance$1(y8) {
+	const l = Math.min(1, Math.max(0, (y8 - 16) / 219));
+	return l <= .04045 ? l / 12.92 : ((l + .055) / 1.055) ** 2.4;
+}
+/**
+* Spikes, transitions and the worst 1 s flash window from per-frame luma. Transitions are the legs
+* of a zig-zag over relative luminance with a {@link FLASH_DELTA} reversal threshold, so a slow fade
+* is one transition and encoder noise none; a leg counts when its darker end is below
+* {@link FLASH_DARK_MAX}. A flash is a pair of opposing transitions (WCAG 2.3.1), so the rate is
+* floor(transitions in the window / 2), timed at each leg's end.
+*/
+function flashStats(samples) {
+	const n = samples.length;
+	const spikeTimes = [];
+	let spikes = 0;
+	for (let i = 1; i < n - 1; i++) {
+		const a = samples[i].y - samples[i - 1].y;
+		const b = samples[i].y - samples[i + 1].y;
+		if (Math.abs(a) >= 40 && Math.abs(b) >= 40 && Math.sign(a) === Math.sign(b)) {
+			spikes++;
+			if (spikeTimes.length < SPIKE_TIMES_MAX) spikeTimes.push(samples[i].t);
+		}
+	}
+	const lum = samples.map((s) => relativeLuminance$1(s.y));
+	const legs = [];
+	const leg = (from, to) => {
+		if (Math.min(lum[from], lum[to]) < .8) legs.push(samples[to].t);
+	};
+	let dir = 0;
+	let lo = 0;
+	let hi = 0;
+	let pivot = 0;
+	let ext = 0;
+	for (let i = 1; i < n; i++) {
+		const v = lum[i];
+		if (dir === 0) {
+			if (v > lum[hi]) hi = i;
+			if (v < lum[lo]) lo = i;
+			if (lum[hi] - lum[lo] >= .1) {
+				dir = hi > lo ? 1 : -1;
+				[pivot, ext] = hi > lo ? [lo, hi] : [hi, lo];
+			}
+			continue;
+		}
+		if (dir * (v - lum[ext]) >= 0) ext = i;
+		else if (dir * (lum[ext] - v) >= .1) {
+			leg(pivot, ext);
+			pivot = ext;
+			ext = i;
+			dir = -dir;
+		}
+	}
+	if (dir !== 0) leg(pivot, ext);
+	let best = 0;
+	let window;
+	for (let i = 0, j = 0; j < legs.length; j++) {
+		while (legs[j] - legs[i] >= 1) i++;
+		const flashes = Math.floor((j - i + 1) / 2);
+		if (flashes > best) {
+			best = flashes;
+			window = {
+				start_s: legs[i],
+				end_s: legs[j]
+			};
+		}
+	}
+	return {
+		frames: n,
+		spikes,
+		spike_times_s: spikeTimes,
+		transitions: legs.length,
+		flash_rate_max: best,
+		...window ? { flash_window: window } : {}
+	};
+}
+/** flashing: fail above {@link FLASH_MAX_PER_SEC} flashes in any second (no override), warn on any single-frame spike. */
+function flashCheck(f) {
+	const scope = "mean-luma approximation of WCAG 2.3.1 general flashes; red flashes are not measured";
+	if (f.flash_rate_max > 3) {
+		const at = f.flash_window ? ` at ${f.flash_window.start_s.toFixed(2)}–${f.flash_window.end_s.toFixed(2)}s` : "";
+		return {
+			id: "flashing",
+			status: "fail",
+			detail: `${f.flash_rate_max} flashes in one second${at} (limit 3/s; ${scope})`,
+			fix: "Slow the flashing to at most 3 per second, lower its contrast, or shrink the flashing area; faster flashes can trigger seizures."
+		};
+	}
+	if (f.spikes > 0) {
+		const times = f.spike_times_s.map((t) => `${t.toFixed(2)}s`).join(", ");
+		return {
+			id: "flashing",
+			status: "warn",
+			detail: `${f.spikes} single-frame luma spike(s) at ${times}${f.spikes > f.spike_times_s.length ? ", …" : ""}; worst ${f.flash_rate_max} flash(es)/s (${scope})`,
+			fix: "Check those frames: a lone white or black frame is usually a render glitch or a hard flash; replace it, or ease it with a short fade."
+		};
+	}
+	return {
+		id: "flashing",
+		status: "ok",
+		detail: `no single-frame spikes; worst ${f.flash_rate_max} flash(es) in one second (limit 3/s; ${scope})`
+	};
+}
+/**
+* Audio against video: starts (probe `start_time`, which honours the MP4 edit list) and lengths
+* (decoded video frames / fps against the audio stream's duration). Null without both streams.
+*/
+function measureAvSync(probe, decodedFrames) {
+	if (!probe.has_video || !probe.has_audio) return null;
+	const v = probe.video_timing;
+	const a = probe.audio_timing;
+	const fps = probe.fps;
+	const frames = decodedFrames || v?.nb_read_frames || v?.nb_frames || null;
+	const videoStart = v?.start_s ?? 0;
+	const audioStart = a?.start_s ?? 0;
+	const videoLength = frames && fps ? frames / fps : v?.duration_s ?? probe.duration_s;
+	const audioLength = a?.duration_s ?? probe.duration_s;
+	return {
+		fps,
+		video_start_s: r3$4(videoStart),
+		audio_start_s: r3$4(audioStart),
+		offset_ms: Math.round((audioStart - videoStart) * 1e4) / 10,
+		video_frames: frames,
+		video_length_s: r3$4(videoLength),
+		audio_length_s: r3$4(audioLength),
+		length_diff_ms: Math.round((audioLength - videoLength) * 1e4) / 10
+	};
+}
+/**
+* av_sync: the audio must start within one frame of the video (fail: lip sync drifts by that much)
+* and last as long as the video's frames within one frame + {@link AV_LENGTH_SLACK_MS} (warn: a tail
+* mismatch is cut or padded by platforms, not heard as drift). Not applicable without audio.
+*/
+function avSyncCheck(s) {
+	if (!s) return {
+		id: "av_sync",
+		status: "ok",
+		detail: "not applicable: needs both an audio and a video stream"
+	};
+	const frameMs = s.fps ? 1e3 / s.fps : 1e3 / 30;
+	const startOk = Math.abs(s.offset_ms) <= frameMs + .5;
+	const lengthOk = Math.abs(s.length_diff_ms) <= frameMs + 10;
+	const detail = [`audio starts ${s.offset_ms} ms after the video (${s.audio_start_s}s vs ${s.video_start_s}s; limit one frame, ${Math.round(frameMs * 10) / 10} ms)`, `audio ${s.audio_length_s}s vs video ${s.video_length_s}s (${s.video_frames ?? "?"} frames at ${s.fps ?? "?"} fps; difference ${s.length_diff_ms} ms)`].join("; ");
+	const fixes = [...startOk ? [] : ["re-mux the audio so it starts with the video (AAC priming needs an edit list: mux to MP4/MOV with ffmpeg, not a raw .aac)"], ...lengthOk ? [] : ["pad or trim the audio to the video's frame count (muxAudio does)"]];
+	return {
+		id: "av_sync",
+		status: !startOk ? "fail" : lengthOk ? "ok" : "warn",
+		detail,
+		...fixes.length ? { fix: `${fixes.join("; ")}.` } : {}
+	};
+}
 /** RMS level (dB full scale) of mono PCM, floored at -90 dB. */
 function rmsDb(pcm) {
 	if (!pcm.length) return SILENCE_DB;
@@ -10969,14 +11179,15 @@ function rmsDb(pcm) {
 	return rms > 0 ? Math.max(SILENCE_DB, Math.round(20 * Math.log10(rms) * 100) / 100) : SILENCE_DB;
 }
 /**
-* One ffprobe plus one decode pass: blackdetect, freezedetect and scdet on the video, silencedetect
-* and ebur128 on the audio. Shared by technical QA and `compare` (a reference video).
+* One ffprobe plus one decode pass: blackdetect, freezedetect, scdet and per-frame mean luma
+* (signalstats) on the video, silencedetect and ebur128 on the audio. Shared by technical QA and
+* `compare` (a reference video).
 */
 async function analyzeVideo$1(videoPath, o = {}, opts = {}) {
 	const probe = o.probe ?? await ffprobe(videoPath, opts);
 	const args = ["-i", videoPath];
 	const black = blackThreshold(o.background);
-	if (probe.has_video) args.push("-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=${black.pix_th},freezedetect=n=-60dB:d=1.0,scdet=t=5`);
+	if (probe.has_video) args.push("-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=${black.pix_th},freezedetect=n=-60dB:d=1.0,scdet=t=5,signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG`);
 	if (probe.has_audio) args.push("-map", "0:a:0", "-af", "silencedetect=n=-50dB:d=1.0,ebur128=peak=true:framelog=quiet");
 	args.push("-f", "null", "-");
 	const { stderr } = await runFfmpeg(args, {
@@ -10985,10 +11196,12 @@ async function analyzeVideo$1(videoPath, o = {}, opts = {}) {
 	});
 	const det = parseDetections(stderr, probe.duration_s);
 	const motion = motionStats(probe.has_video ? parseSceneChanges(stderr) : [], probe.duration_s, det.freeze);
+	const flash = flashStats(probe.has_video ? parseLuma(stderr, probe.bit_depth ?? 8) : []);
 	return {
 		probe,
 		...det,
 		motion,
+		flash,
 		black_threshold: black
 	};
 }
@@ -11184,12 +11397,15 @@ async function technicalQa(videoPath, expect, opts = {}) {
 			detail: `black at ${fmtRanges(det.black)}${black.nearBlack ? " (the background is near black, so sparse scenes can read as black)" : ""}`,
 			fix: "Check the scene(s) at those times rendered correctly; re-render them if blank."
 		});
+		checks.push(flashCheck(det.flash));
 		checks.push(...motionChecks(det.motion, det.freeze, acc));
 		if (expect.loop) {
 			loopSeam = await measureLoopSeam(videoPath, probe, opts);
 			checks.push(loopSeamCheck(loopSeam));
 		}
 	}
+	const avSync = measureAvSync(probe, det.flash.frames);
+	if (probe.has_audio) checks.push(avSyncCheck(avSync));
 	if (probe.has_audio && expect.intended_silence) {
 		const why = expect.silence_reason ?? "silent on purpose (no narration, no music)";
 		checks.push({
@@ -11248,7 +11464,9 @@ async function technicalQa(videoPath, expect, opts = {}) {
 			lra: det.lra,
 			true_peak_dbtp: det.true_peak_dbtp,
 			...probe.has_video ? { motion: det.motion } : {},
-			...loopSeam ? { loop_seam: loopSeam } : {}
+			...loopSeam ? { loop_seam: loopSeam } : {},
+			...probe.has_video ? { flash: det.flash } : {},
+			...avSync ? { av_sync: avSync } : {}
 		}
 	};
 }
@@ -11352,6 +11570,8 @@ function formatQaMarkdown(r) {
 		`- Black: ${r.metrics.black.length ? fmtRanges(r.metrics.black) : "none"}`,
 		`- Frozen: ${r.metrics.freeze.length ? fmtRanges(r.metrics.freeze) : "none"}`,
 		...r.metrics.motion ? [`- Motion: ${r.metrics.motion.changes} big changes (${r.metrics.motion.changes_per_sec}/s), ${r.metrics.motion.cuts} cuts (${r.metrics.motion.cuts_per_sec}/s), longest static ${r.metrics.motion.longest_static_s}s, frozen ${r.metrics.motion.frozen_pct}%`] : [],
+		...r.metrics.flash ? [`- Flashing: worst ${r.metrics.flash.flash_rate_max} flash(es) in 1 s, ${r.metrics.flash.transitions} luminance transitions, ${r.metrics.flash.spikes} single-frame spike(s) (mean luma; red flashes not measured)`] : [],
+		...r.metrics.av_sync ? [`- A/V sync: audio offset ${r.metrics.av_sync.offset_ms} ms, audio ${r.metrics.av_sync.audio_length_s}s vs video ${r.metrics.av_sync.video_length_s}s (${r.metrics.av_sync.video_frames ?? "?"} frames)`] : [],
 		...r.metrics.loop_seam ? [`- Loop seam: SSIM ${r.metrics.loop_seam.ssim ?? "n/a"}, audio jump ${r.metrics.loop_seam.audio_jump_db ?? "n/a"} dB`] : [],
 		`- Silence: ${r.metrics.silence.length ? fmtRanges(r.metrics.silence) : "none"}`,
 		""
@@ -14173,7 +14393,14 @@ const Series = strictObject({
 * file sits next to the episodes), no absolute paths or URLs, and a YAML or JSON file.
 */
 const SeriesRef = string().min(1).refine((p) => !/^([a-zA-Z]:)?[\\/]/.test(p), "must be relative to the project folder").refine((p) => !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p), "must be a file, not a URL").refine((p) => /\.(ya?ml|json)$/i.test(p), "must be a .yaml, .yml or .json file");
-strictObject({
+//#endregion
+//#region ../schema/dist/research-spec.js
+/**
+* research-specs/titles.yaml: title heuristics as dated data. They are heuristics, not platform
+* limits: lint reports them as warnings only, and `verified` stays false until someone checks
+* them against the user's own analytics (Phase 9).
+*/
+const TitleRules = strictObject({
 	schema_version: SchemaVersion,
 	id: literal$1("titles"),
 	title_length: strictObject({
@@ -14858,6 +15085,7 @@ const Cover = strictObject({
 }).describe("Cover (thumbnail) text and focal frame.");
 const Hashtag = string().regex(/^#[\p{L}\p{N}_]+$/u, "expected a hashtag like #devtools (no spaces)");
 const PublishSettings = strictObject({
+	title: string().min(1).max(200).optional().describe("Video title for platforms that have one (YouTube); defaults to the spec title."),
 	post_caption: string().describe("Text posted with the video on the platform; separate from speech captions."),
 	hashtags: array(Hashtag).optional(),
 	ai_disclosure: boolean().optional().describe("Mark the post as AI-generated where the platform supports it.")
@@ -40074,6 +40302,169 @@ async function renderLockHolder(lockPath, deps = {}) {
 	return isStale(held, deps.host ?? hostname(), (deps.now ?? (() => /* @__PURE__ */ new Date()))(), deps.alive ?? processAlive) ? void 0 : held;
 }
 //#endregion
+//#region src/hyperframes.ts
+const PACKAGE = "@hyperframes/producer";
+/** Manual setup command (documented in skills/render and the doctor fix). */
+const HYPERFRAMES_INSTALL_COMMAND = `cd "\${CLAUDE_PLUGIN_DATA}" && PUPPETEER_SKIP_DOWNLOAD=1 npm i ${PACKAGE}@${HYPERFRAMES_VERSION} --prefix deps`;
+/**
+* The plugin root: CLAUDE_PLUGIN_ROOT, else the nearest ancestor of this module that holds
+* `.claude-plugin/plugin.json` (works from `dist/mcp.mjs` and from `packages/mcp/{src,dist}`).
+*/
+function findPluginRoot(env = process.env, from = dirname(fileURLToPath(import.meta.url))) {
+	const explicit = env.CLAUDE_PLUGIN_ROOT?.trim();
+	if (explicit) return resolve(explicit);
+	let dir = from;
+	for (let i = 0; i < 8; i++) {
+		if (existsSync(join(dir, ".claude-plugin", "plugin.json"))) return dir;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+function entryOf(pkg) {
+	const exp = pkg.exports;
+	if (typeof exp === "string") return exp;
+	const dot = exp?.["."];
+	if (typeof dot === "string") return dot;
+	if (dot && typeof dot === "object") {
+		const d = dot;
+		for (const k of [
+			"import",
+			"default",
+			"node"
+		]) if (typeof d[k] === "string") return d[k];
+	}
+	return pkg.module ?? pkg.main;
+}
+function inspect(nodeModules) {
+	const dir = join(nodeModules, ...PACKAGE.split("/"));
+	const pj = join(dir, "package.json");
+	if (!existsSync(pj)) return null;
+	try {
+		const pkg = JSON.parse(readFileSync(pj, "utf8"));
+		if (pkg.version !== "0.8.78") return {
+			ok: false,
+			reason: `${PACKAGE} ${pkg.version ?? "?"} found in ${nodeModules}, but video-studio pins ${HYPERFRAMES_VERSION}`
+		};
+		const rel = entryOf(pkg);
+		if (!rel) return {
+			ok: false,
+			reason: `${PACKAGE} in ${nodeModules} has no ESM entry point`
+		};
+		const entry = resolve(dir, rel);
+		if (!existsSync(entry)) return {
+			ok: false,
+			reason: `${PACKAGE} in ${nodeModules} is incomplete (missing ${rel})`
+		};
+		return {
+			ok: true,
+			entry,
+			dir,
+			version: pkg.version
+		};
+	} catch (e) {
+		return {
+			ok: false,
+			reason: `${PACKAGE} in ${nodeModules} is unreadable: ${e instanceof Error ? e.message : String(e)}`
+		};
+	}
+}
+/**
+* Locate the pinned HyperFrames producer for the bundled engine, which cannot import it by
+* bare specifier (it is never bundled). Order:
+*  1. `${CLAUDE_PLUGIN_DATA}/deps/node_modules` (the documented manual install),
+*  2. the plugin/repo root's module path, via createRequire(pluginRoot).
+*/
+function resolveHyperframesProducer(env = process.env, opts = {}) {
+	const searched = [];
+	const problems = [];
+	const candidates = [];
+	try {
+		candidates.push({
+			dir: join(resolveDataDir(env).deps, "node_modules"),
+			source: "plugin-data"
+		});
+	} catch {}
+	const root = opts.pluginRoot === void 0 ? findPluginRoot(env) : opts.pluginRoot;
+	if (root) {
+		const req = createRequire(join(root, "package.json"));
+		const ancestors = /* @__PURE__ */ new Set();
+		for (let d = resolve(root);; d = dirname(d)) {
+			ancestors.add(d);
+			if (dirname(d) === d) break;
+		}
+		for (const p of req.resolve.paths(PACKAGE) ?? []) if (basename(p) === "node_modules" && ancestors.has(dirname(p))) candidates.push({
+			dir: p,
+			source: "plugin-root"
+		});
+	}
+	for (const c of candidates) {
+		if (searched.includes(c.dir)) continue;
+		searched.push(c.dir);
+		const r = inspect(c.dir);
+		if (!r) continue;
+		if (r.ok) return {
+			...r,
+			source: c.source
+		};
+		problems.push(r.reason);
+	}
+	return {
+		ok: false,
+		reason: problems[0] ?? `${PACKAGE} 0.8.78 is not installed; run doctor for setup`,
+		searched
+	};
+}
+/**
+* Renderer options wired to the resolved producer. When nothing is found, the renderer's own
+* defaults stay in place (in a dev checkout it resolves the workspace dependency; in the bundle
+* that fails and `available()` reports "not installed; run doctor for setup").
+*/
+function hyperframesOptions(env = process.env, extra = {}) {
+	const resolution = resolveHyperframesProducer(env);
+	if (!resolution.ok) return {
+		...extra,
+		resolution
+	};
+	const url = pathToFileURL(resolution.entry).href;
+	return {
+		...extra,
+		resolution,
+		producerInstalled: () => true,
+		producerEntry: resolution.entry,
+		loadProducer: async () => await import(url),
+		launchProbe: (chromePath, timeoutMs) => puppeteerLaunchProbe(chromePath, timeoutMs, resolution.entry)
+	};
+}
+/** Doctor check: is the producer installed, and does headless Chrome launch? */
+async function checkHyperframes(env = process.env) {
+	const { resolution, ...opts } = hyperframesOptions(env);
+	const renderer = createHyperframesRenderer(opts);
+	const where = resolution.ok ? ` from ${resolution.dir} (${resolution.source})` : "";
+	let a;
+	try {
+		a = await renderer.available(env);
+	} catch (e) {
+		a = {
+			ok: false,
+			reason: e instanceof Error ? e.message : String(e)
+		};
+	}
+	if (a.ok) return {
+		id: "hyperframes",
+		status: "ok",
+		detail: `${PACKAGE} ${HYPERFRAMES_VERSION}${where}; headless Chrome launch probe ok`
+	};
+	const notInstalled = /not installed|pins|incomplete|no ESM entry/.test(a.reason ?? "");
+	return {
+		id: "hyperframes",
+		status: "warn",
+		detail: `HyperFrames renderer unavailable: ${a.reason ?? "unknown"} (the ffmpeg renderer is used instead)`,
+		fix: notInstalled ? `Optional, for richer motion graphics: ${HYPERFRAMES_INSTALL_COMMAND} (needs Google Chrome installed).` : "Install Google Chrome or set CHROME_PATH to a Chrome/Chromium that can start headless; the ffmpeg renderer works meanwhile."
+	};
+}
+//#endregion
 //#region src/series.ts
 /**
 * The series bible (series.yaml) an episode points at with `spec.series`.
@@ -40527,6 +40918,246 @@ function formatSpecValidation(r) {
 	return lines.join("\n");
 }
 //#endregion
+//#region src/pipeline-core.ts
+/**
+* Shared pieces of the render pipeline: public option/result types, version constants, the
+* persisted render state, small path helpers, and spec/brand loading. Split out of pipeline.ts;
+* pipeline.ts re-exports the public names, so import them from there.
+*/
+/** Engine version recorded in manifests. Keep in sync with SERVER_VERSION. */
+const ENGINE_VERSION = "0.1.0";
+/** Spec failed validation: the render was refused. */
+var SpecInvalidError = class extends Error {
+	errors;
+	constructor(errors) {
+		super(`project/video-spec.json has ${errors.length} error(s); fix them (spec_validate) before rendering:\n` + errors.slice(0, 10).map((e) => `- ${e.path || "(root)"}: ${e.message} (fix: ${e.fix})`).join("\n"));
+		this.errors = errors;
+		this.name = "SpecInvalidError";
+	}
+};
+const toPosix$1 = (p) => p.split(sep).join("/");
+const rel$2 = (root, p) => toPosix$1(relative(root, p));
+const errMsg = (e) => e instanceof Error ? e.message : String(e);
+async function exists(p) {
+	try {
+		await stat(p);
+		return true;
+	} catch {
+		return false;
+	}
+}
+function renderDir(projectDir, quality) {
+	return join(projectPaths(projectDir).renders, quality);
+}
+async function loadBrand$1(projectDir, brandPath) {
+	const candidates = brandPath ? [brandPath] : [join(projectDir, "brand.yaml"), join(projectDir, "project", "brand.yaml")];
+	for (const p of candidates) {
+		if (!await exists(p)) {
+			if (brandPath) throw new Error(`brand file not found: ${brandPath}`);
+			continue;
+		}
+		const parsed = parseYamlOrJson(Brand, await readFile(p, "utf8"));
+		if (!parsed.ok) throw new Error(`invalid brand file ${p}: ${parsed.errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`);
+		return {
+			brand: parsed.data,
+			path: p
+		};
+	}
+}
+/** Font chains and weights the renderers, captions and cover ask for (see lockFonts). */
+function fontRequests(tokens, captionFamily, burnIn) {
+	const reqs = [
+		{
+			chain: tokens.font_heading,
+			weight: tokens.weight_heading ?? 700
+		},
+		{
+			chain: tokens.font_body,
+			weight: tokens.weight_body ?? 400
+		},
+		{
+			chain: tokens.font_mono,
+			weight: 400
+		}
+	];
+	if (burnIn && captionFamily) reqs.push({
+		chain: captionFamily,
+		weight: 400
+	}, {
+		chain: captionFamily,
+		weight: 700
+	});
+	return reqs;
+}
+/** Brand path as recorded in the render state: project-relative, or `external/<name>`. */
+function brandRel(root, p) {
+	const r = rel$2(root, p);
+	return r.startsWith("../") || r.startsWith("/") ? `external/${basename(p)}` : r;
+}
+async function loadBrief$1(projectDir) {
+	for (const name of [
+		"creative-brief.yaml",
+		"creative-brief.yml",
+		"creative-brief.json"
+	]) {
+		const p = join(projectDir, "project", name);
+		if (!await exists(p)) continue;
+		const parsed = parseYamlOrJson(CreativeBrief, await readFile(p, "utf8"));
+		return parsed.ok ? parsed.data : void 0;
+	}
+}
+/** Load and validate project/video-spec.json (schema + semantics + ContentIR cross-check). */
+async function loadValidSpec(projectDir) {
+	const { spec: specPath, contentIr } = projectSpecPaths(projectDir);
+	if (!await exists(specPath)) throw new Error(`no spec at ${specPath}; plan the video first (the plan skill writes project/video-spec.json)`);
+	const v = await validateSpecFile(specPath, contentIr);
+	if (!v.ok) throw new SpecInvalidError(v.errors);
+	const parsed = parseYamlOrJson(VideoSpec, await readFile(specPath, "utf8"));
+	if (!parsed.ok) throw new SpecInvalidError(parsed.errors.map((e) => ({
+		...e,
+		fix: "match the VideoSpec schema",
+		stage: "schema"
+	})));
+	return {
+		spec: parsed.data,
+		warnings: v.warnings,
+		specPath,
+		irPath: contentIr
+	};
+}
+/**
+* Contracts for the spec's targets that exist in platform-specs/. Unknown ids are skipped here:
+* spec_validate already reports them as errors once the registry has contracts.
+*/
+async function loadTargetContracts(spec, dir = findPlatformSpecsDir()) {
+	if (!dir) return [];
+	const wanted = new Set(resolveTargets(spec));
+	return (await loadContracts(dir)).filter((c) => wanted.has(c.id));
+}
+/** Frame size / fps for a quality. Final: the spec's master canvas. Preview: half resolution, 15 fps (24 when HyperFrames draws, it needs 24/30/60). */
+function targetFor(spec, quality, hyperframes, override = {}) {
+	const master = resolveMaster(spec);
+	const masterShort = Math.min(master.width, master.height);
+	const shortSide = override.shortSide ?? (quality === "preview" ? Math.round(masterShort / 2) : masterShort);
+	const fps = override.fps ?? (quality === "preview" ? hyperframes ? 24 : 15 : master.fps);
+	return targetForAspect(spec.aspect_ratio, {
+		shortSide,
+		fps
+	});
+}
+function defaultRenderers(env, quality, encodePreset) {
+	const { resolution: _r, ...hf } = hyperframesOptions(env, { quality: quality === "preview" ? "draft" : "standard" });
+	return [createHyperframesRenderer(hf), createFfmpegRenderer({ encodePreset: encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") })];
+}
+//#endregion
+//#region src/social-copy.ts
+/**
+* Deterministic social copy from the spec and brief: a title, a short description and hashtags.
+* Lives apart from the pipeline so lint (title checks) and export can both use it without an
+* import cycle.
+*/
+const STOPWORDS = new Set("a an and are as at be but by can do does for from how in into is it its of on or so that the their this to what when where which who why with without you your in 30s seconds explain explained actually".split(" "));
+const PLATFORM_TAGS = {
+	youtube_shorts: ["shorts"],
+	instagram_reels: ["reels"],
+	tiktok: ["fyp"],
+	linkedin: [],
+	youtube: [],
+	x: [],
+	generic: []
+};
+function hashtag(word) {
+	return word.replace(/[^A-Za-z0-9]+/g, " ").trim().split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("");
+}
+function firstSentence(text) {
+	return (text.split(/(?<=[.!?])\s/)[0] ?? text).trim();
+}
+/** Deterministic social copy (title, 2–3 line description, hashtags). Claude refines it in the skill. */
+function socialCopy(spec, brief) {
+	const { title, lines, hashtags } = socialCopyParts(spec, brief);
+	return [
+		"<!-- Generated deterministically from the spec and brief by video-studio. Refine the wording before posting; keep every claim grounded in the sources. -->",
+		`# ${title}`,
+		"",
+		...lines,
+		"",
+		hashtags.join(" "),
+		""
+	].join("\n");
+}
+/** The pieces of {@link socialCopy}: title, up to 3 description lines and up to 7 hashtags (with `#`). */
+function socialCopyParts(spec, brief) {
+	const title = spec.title?.trim() || brief?.chosen_hook || firstSentence(spec.scenes[0]?.voiceover ?? "") || "New video";
+	const lines = [];
+	const hook = spec.scenes.find((s) => s.purpose === "hook");
+	if (hook?.voiceover.trim()) lines.push(hook.voiceover.trim());
+	const messages = brief?.key_messages?.length ? brief.key_messages : spec.scenes.filter((s) => ![
+		"hook",
+		"cta",
+		"end_card"
+	].includes(s.purpose) && s.voiceover.trim()).map((s) => firstSentence(s.voiceover));
+	if (messages[0] && !lines.includes(messages[0])) lines.push(messages[0]);
+	const action = brief?.desired_action ?? spec.scenes.find((s) => s.purpose === "cta")?.voiceover.trim();
+	if (action) lines.push(action);
+	const contentWords = (text) => text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !STOPWORDS.has(w) && !/^\d+$/.test(w));
+	const freq = /* @__PURE__ */ new Map();
+	for (const sc of spec.scenes) for (const w of new Set(contentWords(sc.voiceover))) freq.set(w, (freq.get(w) ?? 0) + 1);
+	const repeated = [...freq].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([w]) => w);
+	const tags = [];
+	const add = (w) => {
+		const t = hashtag(w);
+		if (t && !tags.some((x) => x.toLowerCase() === t.toLowerCase() || x.toLowerCase() === `${t.toLowerCase()}s` || `${x.toLowerCase()}s` === t.toLowerCase())) tags.push(t);
+	};
+	for (const w of contentWords(title)) add(w);
+	for (const w of repeated.slice(0, 3)) add(w);
+	for (const w of [...PLATFORM_TAGS[spec.platform] ?? [], spec.goal === "explain" ? "explained" : spec.goal]) add(w);
+	return {
+		title,
+		lines: lines.slice(0, 3),
+		hashtags: tags.slice(0, 7).map((t) => `#${t}`)
+	};
+}
+//#endregion
+//#region src/research-specs.ts
+/**
+* `research-specs/`: heuristics kept as dated data (titles today; Phase 9 adds more). Unlike
+* `platform-specs/`, nothing here is a platform limit: lint reports them as warnings only.
+*/
+const TITLES = "titles.yaml";
+/**
+* Locate the bundled `research-specs/` directory: `${CLAUDE_PLUGIN_ROOT}/research-specs` first,
+* then walk up from this module (works from `packages/mcp/src`, `packages/mcp/dist` and `dist/mcp.mjs`).
+*/
+function findResearchSpecsDir(env = process.env, from) {
+	const root = env.CLAUDE_PLUGIN_ROOT;
+	if (root && existsSync(join(root, "research-specs", TITLES))) return join(root, "research-specs");
+	let dir = from ?? dirname(fileURLToPath(import.meta.url));
+	for (let i = 0; i < 6; i++) {
+		const candidate = join(dir, "research-specs");
+		if (existsSync(join(candidate, TITLES))) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+const titleCache = /* @__PURE__ */ new Map();
+/**
+* `<dir>/titles.yaml` validated as TitleRules, cached per directory. Undefined when the directory
+* or file is missing (the title lint is then skipped); throws when the file is invalid.
+*/
+async function loadTitleRules(dir) {
+	if (!dir) return void 0;
+	const file = join(dir, TITLES);
+	const cached = titleCache.get(file);
+	if (cached) return cached;
+	if (!existsSync(file)) return void 0;
+	const parsed = parseYamlOrJson(TitleRules, await readFile(file, "utf8"));
+	if (!parsed.ok) throw new Error(`invalid ${file}: ${parsed.errors.map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
+	titleCache.set(file, parsed.data);
+	return parsed.data;
+}
+//#endregion
 //#region src/lint.ts
 /**
 * Platform lint: checks a planned (and ideally rendered) project against the contracts of its
@@ -40569,6 +41200,7 @@ const CUTAWAY = {
 	max_sec: 10,
 	face_gap_sec: 2
 };
+const INSERT_TAIL_MAX_S = 2.5;
 /** Caption cues for sound events carry this scene_id prefix (pipeline SOUND_CUE_SCENE_PREFIX). */
 const SOUND_CUE_PREFIX = "sound:";
 /** Roles whose overflow or low contrast is an error (v2 design grid: hard failure for hook/caption). */
@@ -40587,7 +41219,7 @@ async function readOptionalJson$1(path) {
 		return;
 	}
 }
-async function loadBrand$1(root) {
+async function loadBrand(root) {
 	for (const p of [join(root, "brand.yaml"), join(root, "project", "brand.yaml")]) {
 		if (!existsSync(p)) continue;
 		const parsed = parseYamlOrJson(Brand, await readFile(p, "utf8"));
@@ -41582,6 +42214,257 @@ async function checkMotionUnsafe(root, spec, out) {
 		});
 	}
 }
+const NUMBER_WORDS = Object.freeze({
+	zero: 0,
+	one: 1,
+	two: 2,
+	three: 3,
+	four: 4,
+	five: 5,
+	six: 6,
+	seven: 7,
+	eight: 8,
+	nine: 9,
+	ten: 10,
+	eleven: 11,
+	twelve: 12,
+	thirteen: 13,
+	fourteen: 14,
+	fifteen: 15,
+	sixteen: 16,
+	seventeen: 17,
+	eighteen: 18,
+	nineteen: 19,
+	twenty: 20,
+	thirty: 30,
+	forty: 40,
+	fifty: 50,
+	sixty: 60,
+	seventy: 70,
+	eighty: 80,
+	ninety: 90
+});
+const NUMBER_RE = /\d+(?:,\d{3})*(?:\.\d+)?/g;
+const normNumber = (s) => String(Number(s.replace(/,/g, "")));
+/** The numbers in a text, normalised ("1,200" → "1200", "40%" → "40", "1.50" → "1.5"). */
+function numberTokens(text) {
+	return [...new Set([...text.matchAll(NUMBER_RE)].map((m) => normNumber(m[0])))];
+}
+/** The number a spoken word says ("40", "40%", "$1,200", "forty", "forty-two"), or undefined. */
+function spokenNumber(word) {
+	const t = cueToken(word);
+	const m = /^[$€£¥₹]?(\d+(?:,\d{3})*(?:\.\d+)?)/u.exec(t);
+	if (m) return normNumber(m[1]);
+	const parts = t.split("-");
+	if (!parts.every((p) => p in NUMBER_WORDS)) return void 0;
+	const [a, b] = parts.map((p) => NUMBER_WORDS[p]);
+	if (b === void 0) return String(a);
+	return parts.length === 2 && a >= 20 && a % 10 === 0 && b < 10 ? String(a + b) : void 0;
+}
+const KEYED_ITEMS = {
+	comparison: (p, n) => p[n],
+	split_screen: (p, n) => p[n],
+	cta: (p, n) => n === "action" ? [
+		p.action,
+		p.command,
+		p.url
+	] : p[n],
+	end_card: (p, n) => p[n],
+	quote: (p, n) => p[n],
+	lower_third: (p, n) => n === "name" ? [p.name, p.title] : p[n],
+	stat: (p, n) => n === "value" ? p.value : [p.label, p.context]
+};
+/**
+* The data inserts of a deterministic graphic: its reveal items (`cueItems`) that carry a number,
+* plus one item -1 for numbers elsewhere in the props (titles, units). Code blocks carry no data.
+*/
+function dataItems(kind, props) {
+	if (kind === "code") return [];
+	const labels = cueItems(kind, props);
+	const keyed = KEYED_ITEMS[kind];
+	const series = kind === "chart" && props.type !== "stat" && Array.isArray(props.series) ? props.series : void 0;
+	const out = labels.map((label, i) => {
+		if (keyed) return propsText(keyed(props, label) ?? "");
+		if (series) return propsText(series[i]);
+		if (kind === "chart") return propsText(props.value ?? "");
+		return label;
+	}).map((t, item) => ({
+		item,
+		numbers: numberTokens(t)
+	})).filter((d) => d.numbers.length);
+	const inItems = new Set(out.flatMap((d) => d.numbers));
+	const rest = numberTokens(propsText(props)).filter((n) => !inItems.has(n));
+	if (rest.length) out.push({
+		item: -1,
+		numbers: rest
+	});
+	return out;
+}
+/** Sentences of a scene's spoken words: split after sentence-final punctuation or a SENTENCE_GAP_MS pause. */
+function sentences(words) {
+	const out = [];
+	let first = 0;
+	words.forEach((w, i) => {
+		const next = words[i + 1];
+		if (next && !/[.!?…]["'”’)\]]*$/u.test(w.word.trim()) && next.start_ms - w.end_ms < 700) return;
+		out.push({
+			first,
+			last: i,
+			start: words[first].start_ms,
+			end: w.end_ms
+		});
+		first = i + 1;
+	});
+	return out;
+}
+const sentenceText = (words, s) => words.slice(s.first, s.last + 1).map((w) => w.word.trim()).join(" ");
+/**
+* Insert sync, from the voice-track word times (scene-local) and the placed word cues:
+* - `insert_early`: a data item enters more than INSERT_EARLY_MAX_S before the voice first says its
+*   number. A cued item enters CUE_LEAD_S before its word; an uncued one enters with the scene (its
+*   default stagger is renderer-specific and ignored, so this errs early); an uncued item after a
+*   cued one follows that cue and is not judged.
+* - `insert_overstays`: in a scene with one data item, the sentence saying it ends and a different
+*   sentence plays while the scene goes on more than INSERT_TAIL_MAX_S.
+* - `insert_crowded`: one sentence triggers more than one data item through placed cues.
+* Skipped without speech timing (no voice timing, or a scene without words): never guessed.
+*/
+function checkInserts(spec, state, tracks, out) {
+	if (!state?.voice?.timing_source || state.voice.timing_source === "none" || !tracks?.length) return;
+	for (const s of spec.scenes) {
+		if (!s.deterministic) continue;
+		const durMs = state.scenes?.find((x) => x.scene_id === s.id)?.duration_ms ?? s.duration_sec * 1e3;
+		const words = (tracks.find((t) => t.scene_id === s.id)?.words ?? []).filter((w) => w.word.trim() && w.start_ms < durMs);
+		if (!words.length) continue;
+		const items = dataItems(s.deterministic.kind, s.deterministic.props);
+		if (!items.length) continue;
+		const placed = (state.cues ?? []).filter((c) => c.scene_id === s.id && c.status === "placed" && c.at_ms !== void 0);
+		const cueAt = /* @__PURE__ */ new Map();
+		for (const c of placed) if (!cueAt.has(c.item)) cueAt.set(c.item, c.at_ms);
+		const said = (d) => {
+			const i = words.findIndex((w) => {
+				const n = spokenNumber(w.word);
+				return n !== void 0 && d.numbers.includes(n);
+			});
+			return i < 0 ? void 0 : {
+				index: i,
+				word: cueToken(words[i].word),
+				ms: words[i].start_ms
+			};
+		};
+		const sents = sentences(words);
+		const sentenceOf = (index) => sents.find((x) => x.first <= index && index <= x.last);
+		const sentenceAt = (ms) => sents.find((x) => x.start <= ms && ms <= x.end) ?? sents.filter((x) => x.start <= ms).pop();
+		const early = [];
+		for (const d of items) {
+			const heard = said(d);
+			if (!heard) continue;
+			let enter;
+			if (cueAt.has(d.item)) enter = Math.max(0, cueAt.get(d.item) / 1e3 - CUE_LEAD_S);
+			else if (d.item > 0 && [...cueAt.keys()].some((k) => k >= 0 && k < d.item)) continue;
+			else enter = 0;
+			const lead = heard.ms / 1e3 - enter;
+			if (lead > 1) early.push({
+				d,
+				word: heard.word,
+				lead,
+				enter,
+				at: heard.ms / 1e3
+			});
+		}
+		if (early.length) {
+			const worst = [...early].sort((a, b) => b.lead - a.lead)[0];
+			const how = cueAt.has(worst.d.item) ? `its cue brings it in at ${round2(worst.enter)}s` : worst.d.item < 0 ? "it is part of the scene's layout" : "it enters with the scene, default stagger ignored";
+			const fixes = early.map(({ d, word }) => {
+				if (d.item < 0) return `say "${word}" within 1s of scene ${s.id}'s start, or move it into a cued item`;
+				if (cueAt.has(d.item)) return `move scene ${s.id}'s cue for item ${d.item} to {word: "${word}"}`;
+			});
+			const add = early.filter((e, k) => !fixes[k]).map(({ d, word }) => d.item === 0 && !s.cues?.length ? `{word: "${word}"}` : `{word: "${word}", item: ${d.item}}`);
+			out.push({
+				id: "insert_early",
+				severity: "warning",
+				scene_id: s.id,
+				message: `${early.length} data insert(s) in ${s.id} appear before the voice says them; "${worst.word}" is on screen ${round2(worst.lead)}s before the voice says it at ${round2(worst.at)}s (${how}; limit 1s)`,
+				fix: [...add.length ? [`add cues: [${add.join(", ")}] to scene ${s.id}`] : [], ...fixes.filter(Boolean)].join("; ") + " so the insert lands on its word"
+			});
+		}
+		if (items.length === 1) {
+			const heard = said(items[0]);
+			if (heard) {
+				const own = sentenceOf(heard.index);
+				const next = sents[sents.indexOf(own) + 1];
+				const tail = durMs - own.end;
+				if (next && tail > 2500) {
+					const text = sentenceText(words, own);
+					const endWords = text.split(" ").slice(-3).join(" ");
+					out.push({
+						id: "insert_overstays",
+						severity: "warning",
+						scene_id: s.id,
+						message: `the "${heard.word}" insert in ${s.id} stays ${round2(tail / 1e3)}s after its sentence ("${snippet$1(text, 60)}") ends at ${round2(own.end / 1e3)}s, while "${snippet$1(sentenceText(words, next))}" is spoken (limit ${INSERT_TAIL_MAX_S}s)`,
+						fix: `split scene ${s.id} after "…${endWords}" (move "${snippet$1(sentenceText(words, next), 30)}" and what follows into a new scene with its own visual), or end it sooner (duration_sec about ${Math.ceil(own.end / 100 + 5) / 10}) and move the rest of the voiceover to the next scene`
+					});
+				}
+			}
+		}
+		const bySentence = /* @__PURE__ */ new Map();
+		for (const c of placed) {
+			const sent = items.find((x) => x.item === c.item) && sentenceAt(c.at_ms);
+			if (!sent) continue;
+			const list = bySentence.get(sent) ?? [];
+			if (!list.some((x) => x.item === c.item)) list.push({
+				item: c.item,
+				word: c.word
+			});
+			bySentence.set(sent, list);
+		}
+		for (const [sent, list] of bySentence) {
+			if (list.length < 2) continue;
+			const later = list[list.length - 1];
+			out.push({
+				id: "insert_crowded",
+				severity: "warning",
+				scene_id: s.id,
+				message: `one sentence ("${snippet$1(sentenceText(words, sent), 60)}") triggers ${list.length} data items (items ${list.map((x) => x.item).join(", ")}) in ${s.id}; viewers take in one insert per statement`,
+				fix: `one insert per statement: cue item ${later.item} ("${later.word}") on a word in a later sentence, or split scene ${s.id} so each number gets its own sentence and scene`
+			});
+		}
+	}
+}
+/**
+* Titles outside the research-specs/titles.yaml band: the generated social title (spec.title,
+* else the brief's chosen hook, else the first voiceover sentence) and, for publish copy with a
+* separate first line, that headline line. Warnings only: the band is a heuristic.
+*/
+function checkTitleLength(spec, brief, rules, out) {
+	if (!rules) return;
+	const { min_chars: min, max_chars: max } = rules.title_length;
+	const basis = `${rules.basis}${rules.verified ? "" : ", unverified"}; research-specs/titles.yaml`;
+	const check = (title, what, field, target) => {
+		const n = Array.from(title).length;
+		if (n >= min && n <= max) return;
+		const fix = field === "generated" ? `set spec.title to a title of ${min}–${max} characters (the generated one comes from the brief's chosen_hook or the first voiceover sentence)` : n < min ? `expand ${field} by at least ${min - n} characters with the concrete payoff (what the viewer learns or gets, a number), to ${min}–${max}` : `trim ${field} by at least ${n - max} characters (drop filler words and qualifiers, keep the concrete promise), to ${min}–${max}`;
+		out.push({
+			id: "title_length",
+			severity: "warning",
+			...target ? { target } : {},
+			message: `${what} "${snippet$1(title, 60)}" is ${n} characters; titles of ${min}–${max} characters tend to carry a concrete promise without being cut off (${basis})`,
+			fix
+		});
+	};
+	const title = socialCopyParts(spec, brief).title;
+	check(title, "title", spec.title?.trim() ? "spec.title" : "generated");
+	for (const [target, copy] of Object.entries(spec.publish ?? {})) {
+		if (copy.title?.trim()) {
+			check(copy.title.trim(), `publish.${target}.title`, `publish.${target}.title`, target);
+			continue;
+		}
+		const lines = copy.post_caption.split("\n");
+		if (lines.length < 2) continue;
+		const headline = lines[0].replace(/(^|\s)#[\p{L}\p{N}_]+/gu, " ").trim();
+		if (headline) check(headline, `publish.${target} headline`, `the first line of publish.${target}.post_caption`, target);
+	}
+}
 /**
 * Effects a `motion` scene declares in `props.effects` that the active style avoids
 * (`motion.avoid`) or brand.yaml forbids (`visual.forbidden`, matched like brand_forbidden).
@@ -41734,8 +42617,9 @@ async function lintProject(projectDir, opts = {}) {
 	checkContrast(boxes, H, findings);
 	checkDensity(spec, findings);
 	checkOnScreenBrief(spec, state, findings);
-	const brand = await loadBrand$1(paths.root);
+	const brand = await loadBrand(paths.root);
 	await checkTiming(paths.root, spec, state, brand, findings);
+	checkInserts(spec, state, state?.voice?.tracks_path ? await readOptionalJson$1(join(paths.root, state.voice.tracks_path)) : void 0, findings);
 	checkStory(spec, findings);
 	checkCutaways(spec, findings);
 	const irMedia = await readOptionalJson$1(join(paths.root, "source", "content-ir.json"));
@@ -41746,7 +42630,10 @@ async function lintProject(projectDir, opts = {}) {
 	checkBannedEffect(spec, await styleAvoid(spec, opts.stylesDir === void 0 ? findStylesDir() : opts.stylesDir, paths.root), brand, findings);
 	checkAcceptance(spec, state, findings);
 	checkLoopSeam(spec, state, findings);
+	checkFlashing(state, findings);
 	checkPostCopy(spec, contracts, findings);
+	const titleRules = await loadTitleRules(opts.researchSpecsDir === void 0 ? findResearchSpecsDir() : opts.researchSpecsDir);
+	if (titleRules) checkTitleLength(spec, await loadBrief$1(paths.root), titleRules, findings);
 	checkCover(spec, contracts, state?.cover ? {
 		...state.cover.headline_box ? { headline_box: state.cover.headline_box } : {},
 		crops: (state.cover.crops ?? []).map(({ id, targets, x, y, w, h }) => ({
@@ -41791,6 +42678,33 @@ async function lintProject(projectDir, opts = {}) {
 /** One-screen summary for the tool result. */
 function formatLint(r) {
 	return [`lint ${r.status}: ${r.counts.errors} error(s), ${r.counts.warnings} warning(s) for ${r.targets.join(", ") || "no targets"} (${r.rendered ? `${r.quality} render checked` : `no ${r.quality} render; spec-only checks`}); report ${r.report_md}`, ...r.findings.map((f) => `- ${f.severity} ${f.id}${f.target ? ` [${f.target}]` : ""}${f.scene_id ? ` ${f.scene_id}` : ""}: ${f.message} (fix: ${f.fix})`)].join("\n");
+}
+/**
+* flashing: QA's flash measurement on the reel (RenderState.qa.flash). More than
+* FLASH_MAX_PER_SEC flashes in one second is an error (WCAG 2.3.1 general flashes, approximated on
+* mean luma; red flashes are not measured) with no acceptance override; any single-frame luma spike
+* is a warning. Silent when QA has not measured it.
+*/
+function checkFlashing(state, out) {
+	const f = state?.qa?.flash;
+	if (!f) return;
+	if (f.flash_rate_max > 3) {
+		const at = f.flash_window ? ` at ${f.flash_window.start_s.toFixed(2)}–${f.flash_window.end_s.toFixed(2)}s` : "";
+		out.push({
+			id: "flashing",
+			severity: "error",
+			message: `the render flashes ${f.flash_rate_max} times in one second${at} (limit 3/s, WCAG 2.3.1; measured on mean luma, red flashes not covered)`,
+			fix: "slow the flashing to at most 3 per second, lower its contrast or shrink the flashing area, then re-render; this has no acceptance override"
+		});
+	} else if (f.spikes > 0) {
+		const times = f.spike_times_s.map((t) => `${t.toFixed(2)}s`).join(", ");
+		out.push({
+			id: "flashing",
+			severity: "warning",
+			message: `${f.spikes} single-frame luma spike(s) at ${times}${f.spikes > f.spike_times_s.length ? ", …" : ""}`,
+			fix: "check those frames (qa/report.md lists them): a lone white or black frame is usually a render glitch or a hard flash; replace it or ease it with a short fade"
+		});
+	}
 }
 /** Headroom under a bitrate or file-size ceiling (container overhead, VBV overshoot). */
 const LIMIT_HEADROOM = .9;
@@ -41922,6 +42836,7 @@ async function packageTargets(i, allTargetIds) {
 			route: c.route,
 			contract_version: c.contract_version,
 			source: publish ? "spec" : "generated",
+			...publish?.title?.trim() ? { title: publish.title.trim() } : {},
 			post_caption: caption,
 			hashtags,
 			full_text: fullText(caption, hashtags),
@@ -41986,301 +42901,6 @@ async function packageTargets(i, allTargetIds) {
 		});
 	}
 	return out;
-}
-//#endregion
-//#region src/hyperframes.ts
-const PACKAGE = "@hyperframes/producer";
-/** Manual setup command (documented in skills/render and the doctor fix). */
-const HYPERFRAMES_INSTALL_COMMAND = `cd "\${CLAUDE_PLUGIN_DATA}" && PUPPETEER_SKIP_DOWNLOAD=1 npm i ${PACKAGE}@${HYPERFRAMES_VERSION} --prefix deps`;
-/**
-* The plugin root: CLAUDE_PLUGIN_ROOT, else the nearest ancestor of this module that holds
-* `.claude-plugin/plugin.json` (works from `dist/mcp.mjs` and from `packages/mcp/{src,dist}`).
-*/
-function findPluginRoot(env = process.env, from = dirname(fileURLToPath(import.meta.url))) {
-	const explicit = env.CLAUDE_PLUGIN_ROOT?.trim();
-	if (explicit) return resolve(explicit);
-	let dir = from;
-	for (let i = 0; i < 8; i++) {
-		if (existsSync(join(dir, ".claude-plugin", "plugin.json"))) return dir;
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
-	}
-	return null;
-}
-function entryOf(pkg) {
-	const exp = pkg.exports;
-	if (typeof exp === "string") return exp;
-	const dot = exp?.["."];
-	if (typeof dot === "string") return dot;
-	if (dot && typeof dot === "object") {
-		const d = dot;
-		for (const k of [
-			"import",
-			"default",
-			"node"
-		]) if (typeof d[k] === "string") return d[k];
-	}
-	return pkg.module ?? pkg.main;
-}
-function inspect(nodeModules) {
-	const dir = join(nodeModules, ...PACKAGE.split("/"));
-	const pj = join(dir, "package.json");
-	if (!existsSync(pj)) return null;
-	try {
-		const pkg = JSON.parse(readFileSync(pj, "utf8"));
-		if (pkg.version !== "0.8.78") return {
-			ok: false,
-			reason: `${PACKAGE} ${pkg.version ?? "?"} found in ${nodeModules}, but video-studio pins ${HYPERFRAMES_VERSION}`
-		};
-		const rel = entryOf(pkg);
-		if (!rel) return {
-			ok: false,
-			reason: `${PACKAGE} in ${nodeModules} has no ESM entry point`
-		};
-		const entry = resolve(dir, rel);
-		if (!existsSync(entry)) return {
-			ok: false,
-			reason: `${PACKAGE} in ${nodeModules} is incomplete (missing ${rel})`
-		};
-		return {
-			ok: true,
-			entry,
-			dir,
-			version: pkg.version
-		};
-	} catch (e) {
-		return {
-			ok: false,
-			reason: `${PACKAGE} in ${nodeModules} is unreadable: ${e instanceof Error ? e.message : String(e)}`
-		};
-	}
-}
-/**
-* Locate the pinned HyperFrames producer for the bundled engine, which cannot import it by
-* bare specifier (it is never bundled). Order:
-*  1. `${CLAUDE_PLUGIN_DATA}/deps/node_modules` (the documented manual install),
-*  2. the plugin/repo root's module path, via createRequire(pluginRoot).
-*/
-function resolveHyperframesProducer(env = process.env, opts = {}) {
-	const searched = [];
-	const problems = [];
-	const candidates = [];
-	try {
-		candidates.push({
-			dir: join(resolveDataDir(env).deps, "node_modules"),
-			source: "plugin-data"
-		});
-	} catch {}
-	const root = opts.pluginRoot === void 0 ? findPluginRoot(env) : opts.pluginRoot;
-	if (root) {
-		const req = createRequire(join(root, "package.json"));
-		const ancestors = /* @__PURE__ */ new Set();
-		for (let d = resolve(root);; d = dirname(d)) {
-			ancestors.add(d);
-			if (dirname(d) === d) break;
-		}
-		for (const p of req.resolve.paths(PACKAGE) ?? []) if (basename(p) === "node_modules" && ancestors.has(dirname(p))) candidates.push({
-			dir: p,
-			source: "plugin-root"
-		});
-	}
-	for (const c of candidates) {
-		if (searched.includes(c.dir)) continue;
-		searched.push(c.dir);
-		const r = inspect(c.dir);
-		if (!r) continue;
-		if (r.ok) return {
-			...r,
-			source: c.source
-		};
-		problems.push(r.reason);
-	}
-	return {
-		ok: false,
-		reason: problems[0] ?? `${PACKAGE} 0.8.78 is not installed; run doctor for setup`,
-		searched
-	};
-}
-/**
-* Renderer options wired to the resolved producer. When nothing is found, the renderer's own
-* defaults stay in place (in a dev checkout it resolves the workspace dependency; in the bundle
-* that fails and `available()` reports "not installed; run doctor for setup").
-*/
-function hyperframesOptions(env = process.env, extra = {}) {
-	const resolution = resolveHyperframesProducer(env);
-	if (!resolution.ok) return {
-		...extra,
-		resolution
-	};
-	const url = pathToFileURL(resolution.entry).href;
-	return {
-		...extra,
-		resolution,
-		producerInstalled: () => true,
-		producerEntry: resolution.entry,
-		loadProducer: async () => await import(url),
-		launchProbe: (chromePath, timeoutMs) => puppeteerLaunchProbe(chromePath, timeoutMs, resolution.entry)
-	};
-}
-/** Doctor check: is the producer installed, and does headless Chrome launch? */
-async function checkHyperframes(env = process.env) {
-	const { resolution, ...opts } = hyperframesOptions(env);
-	const renderer = createHyperframesRenderer(opts);
-	const where = resolution.ok ? ` from ${resolution.dir} (${resolution.source})` : "";
-	let a;
-	try {
-		a = await renderer.available(env);
-	} catch (e) {
-		a = {
-			ok: false,
-			reason: e instanceof Error ? e.message : String(e)
-		};
-	}
-	if (a.ok) return {
-		id: "hyperframes",
-		status: "ok",
-		detail: `${PACKAGE} ${HYPERFRAMES_VERSION}${where}; headless Chrome launch probe ok`
-	};
-	const notInstalled = /not installed|pins|incomplete|no ESM entry/.test(a.reason ?? "");
-	return {
-		id: "hyperframes",
-		status: "warn",
-		detail: `HyperFrames renderer unavailable: ${a.reason ?? "unknown"} (the ffmpeg renderer is used instead)`,
-		fix: notInstalled ? `Optional, for richer motion graphics: ${HYPERFRAMES_INSTALL_COMMAND} (needs Google Chrome installed).` : "Install Google Chrome or set CHROME_PATH to a Chrome/Chromium that can start headless; the ffmpeg renderer works meanwhile."
-	};
-}
-//#endregion
-//#region src/pipeline-core.ts
-/**
-* Shared pieces of the render pipeline: public option/result types, version constants, the
-* persisted render state, small path helpers, and spec/brand loading. Split out of pipeline.ts;
-* pipeline.ts re-exports the public names, so import them from there.
-*/
-/** Engine version recorded in manifests. Keep in sync with SERVER_VERSION. */
-const ENGINE_VERSION = "0.1.0";
-/** Spec failed validation: the render was refused. */
-var SpecInvalidError = class extends Error {
-	errors;
-	constructor(errors) {
-		super(`project/video-spec.json has ${errors.length} error(s); fix them (spec_validate) before rendering:\n` + errors.slice(0, 10).map((e) => `- ${e.path || "(root)"}: ${e.message} (fix: ${e.fix})`).join("\n"));
-		this.errors = errors;
-		this.name = "SpecInvalidError";
-	}
-};
-const toPosix$1 = (p) => p.split(sep).join("/");
-const rel$2 = (root, p) => toPosix$1(relative(root, p));
-const errMsg = (e) => e instanceof Error ? e.message : String(e);
-async function exists(p) {
-	try {
-		await stat(p);
-		return true;
-	} catch {
-		return false;
-	}
-}
-function renderDir(projectDir, quality) {
-	return join(projectPaths(projectDir).renders, quality);
-}
-async function loadBrand(projectDir, brandPath) {
-	const candidates = brandPath ? [brandPath] : [join(projectDir, "brand.yaml"), join(projectDir, "project", "brand.yaml")];
-	for (const p of candidates) {
-		if (!await exists(p)) {
-			if (brandPath) throw new Error(`brand file not found: ${brandPath}`);
-			continue;
-		}
-		const parsed = parseYamlOrJson(Brand, await readFile(p, "utf8"));
-		if (!parsed.ok) throw new Error(`invalid brand file ${p}: ${parsed.errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`);
-		return {
-			brand: parsed.data,
-			path: p
-		};
-	}
-}
-/** Font chains and weights the renderers, captions and cover ask for (see lockFonts). */
-function fontRequests(tokens, captionFamily, burnIn) {
-	const reqs = [
-		{
-			chain: tokens.font_heading,
-			weight: tokens.weight_heading ?? 700
-		},
-		{
-			chain: tokens.font_body,
-			weight: tokens.weight_body ?? 400
-		},
-		{
-			chain: tokens.font_mono,
-			weight: 400
-		}
-	];
-	if (burnIn && captionFamily) reqs.push({
-		chain: captionFamily,
-		weight: 400
-	}, {
-		chain: captionFamily,
-		weight: 700
-	});
-	return reqs;
-}
-/** Brand path as recorded in the render state: project-relative, or `external/<name>`. */
-function brandRel(root, p) {
-	const r = rel$2(root, p);
-	return r.startsWith("../") || r.startsWith("/") ? `external/${basename(p)}` : r;
-}
-async function loadBrief$1(projectDir) {
-	for (const name of [
-		"creative-brief.yaml",
-		"creative-brief.yml",
-		"creative-brief.json"
-	]) {
-		const p = join(projectDir, "project", name);
-		if (!await exists(p)) continue;
-		const parsed = parseYamlOrJson(CreativeBrief, await readFile(p, "utf8"));
-		return parsed.ok ? parsed.data : void 0;
-	}
-}
-/** Load and validate project/video-spec.json (schema + semantics + ContentIR cross-check). */
-async function loadValidSpec(projectDir) {
-	const { spec: specPath, contentIr } = projectSpecPaths(projectDir);
-	if (!await exists(specPath)) throw new Error(`no spec at ${specPath}; plan the video first (the plan skill writes project/video-spec.json)`);
-	const v = await validateSpecFile(specPath, contentIr);
-	if (!v.ok) throw new SpecInvalidError(v.errors);
-	const parsed = parseYamlOrJson(VideoSpec, await readFile(specPath, "utf8"));
-	if (!parsed.ok) throw new SpecInvalidError(parsed.errors.map((e) => ({
-		...e,
-		fix: "match the VideoSpec schema",
-		stage: "schema"
-	})));
-	return {
-		spec: parsed.data,
-		warnings: v.warnings,
-		specPath,
-		irPath: contentIr
-	};
-}
-/**
-* Contracts for the spec's targets that exist in platform-specs/. Unknown ids are skipped here:
-* spec_validate already reports them as errors once the registry has contracts.
-*/
-async function loadTargetContracts(spec, dir = findPlatformSpecsDir()) {
-	if (!dir) return [];
-	const wanted = new Set(resolveTargets(spec));
-	return (await loadContracts(dir)).filter((c) => wanted.has(c.id));
-}
-/** Frame size / fps for a quality. Final: the spec's master canvas. Preview: half resolution, 15 fps (24 when HyperFrames draws, it needs 24/30/60). */
-function targetFor(spec, quality, hyperframes, override = {}) {
-	const master = resolveMaster(spec);
-	const masterShort = Math.min(master.width, master.height);
-	const shortSide = override.shortSide ?? (quality === "preview" ? Math.round(masterShort / 2) : masterShort);
-	const fps = override.fps ?? (quality === "preview" ? hyperframes ? 24 : 15 : master.fps);
-	return targetForAspect(spec.aspect_ratio, {
-		shortSide,
-		fps
-	});
-}
-function defaultRenderers(env, quality, encodePreset) {
-	const { resolution: _r, ...hf } = hyperframesOptions(env, { quality: quality === "preview" ? "draft" : "standard" });
-	return [createHyperframesRenderer(hf), createFfmpegRenderer({ encodePreset: encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") })];
 }
 //#endregion
 //#region src/consent.ts
@@ -246839,7 +247459,7 @@ async function stageInputs(run) {
 	});
 	const { spec, warnings: specWarnings, irPath } = await loadValidSpec(root);
 	for (const w of specWarnings) warnings.push(`spec: ${w.path || "(root)"}: ${w.message}`);
-	const brandFile = await loadBrand(root, o.brandPath);
+	const brandFile = await loadBrand$1(root, o.brandPath);
 	const brand = brandFile?.brand;
 	const seriesLoaded = spec.series ? await loadSeries(root, spec.series) : void 0;
 	const series = seriesLoaded ? {
@@ -247955,7 +248575,7 @@ async function stageQa(run, state, reel, statePath) {
 	const { root, paths, quality, signal, progress, now } = run;
 	const reelSha = await hashFile(reel);
 	let qa;
-	if (state.qa && state.qa.video_sha256 === reelSha && state.qa.version === 4 && state.qa.expect_key === qaExpectKey(state) && await exists(join(paths.qa, "report.json"))) qa = {
+	if (state.qa && state.qa.video_sha256 === reelSha && state.qa.version === 5 && state.qa.expect_key === qaExpectKey(state) && await exists(join(paths.qa, "report.json"))) qa = {
 		status: state.qa.status,
 		findings: state.qa.findings,
 		report_json: join(paths.qa, "report.json"),
@@ -248019,7 +248639,7 @@ async function runQaOn(root, state, reelSha) {
 	}));
 	const status = QA_MAP[report.status];
 	state.qa = {
-		version: 4,
+		version: 5,
 		status,
 		video_sha256: reelSha ?? await hashFile(reel),
 		checks: report.checks.map((c) => ({
@@ -248030,13 +248650,27 @@ async function runQaOn(root, state, reelSha) {
 		findings,
 		expect_key: qaExpectKey(state),
 		...report.metrics.motion ? { motion: motionView(report.metrics.motion) } : {},
-		...report.metrics.loop_seam ? { loop_seam: report.metrics.loop_seam } : {}
+		...report.metrics.loop_seam ? { loop_seam: report.metrics.loop_seam } : {},
+		...report.metrics.flash ? { flash: flashView(report.metrics.flash) } : {},
+		...report.metrics.av_sync ? { av_sync: {
+			offset_ms: report.metrics.av_sync.offset_ms,
+			length_diff_ms: report.metrics.av_sync.length_diff_ms
+		} } : {}
 	};
 	return {
 		status,
 		findings,
 		report_json: files.json,
 		report_md: files.md
+	};
+}
+/** The flash numbers render-state keeps: spike times capped at 20 (qa/report.json has them all). */
+function flashView(f) {
+	return {
+		spikes: f.spikes,
+		spike_times_s: f.spike_times_s.slice(0, 20),
+		flash_rate_max: f.flash_rate_max,
+		...f.flash_window ? { flash_window: f.flash_window } : {}
 	};
 }
 function motionView(m) {
@@ -248083,67 +248717,6 @@ async function exportProject(projectDir, opts = {}) {
 		quality: state.quality,
 		dist,
 		...state.qa ? { qa_status: state.qa.status } : {}
-	};
-}
-const STOPWORDS = new Set("a an and are as at be but by can do does for from how in into is it its of on or so that the their this to what when where which who why with without you your in 30s seconds explain explained actually".split(" "));
-const PLATFORM_TAGS = {
-	youtube_shorts: ["shorts"],
-	instagram_reels: ["reels"],
-	tiktok: ["fyp"],
-	linkedin: [],
-	youtube: [],
-	x: [],
-	generic: []
-};
-function hashtag(word) {
-	return word.replace(/[^A-Za-z0-9]+/g, " ").trim().split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("");
-}
-function firstSentence(text) {
-	return (text.split(/(?<=[.!?])\s/)[0] ?? text).trim();
-}
-/** Deterministic social copy (title, 2–3 line description, hashtags). Claude refines it in the skill. */
-function socialCopy(spec, brief) {
-	const { title, lines, hashtags } = socialCopyParts(spec, brief);
-	return [
-		"<!-- Generated deterministically from the spec and brief by video-studio. Refine the wording before posting; keep every claim grounded in the sources. -->",
-		`# ${title}`,
-		"",
-		...lines,
-		"",
-		hashtags.join(" "),
-		""
-	].join("\n");
-}
-/** The pieces of {@link socialCopy}: title, up to 3 description lines and up to 7 hashtags (with `#`). */
-function socialCopyParts(spec, brief) {
-	const title = spec.title?.trim() || brief?.chosen_hook || firstSentence(spec.scenes[0]?.voiceover ?? "") || "New video";
-	const lines = [];
-	const hook = spec.scenes.find((s) => s.purpose === "hook");
-	if (hook?.voiceover.trim()) lines.push(hook.voiceover.trim());
-	const messages = brief?.key_messages?.length ? brief.key_messages : spec.scenes.filter((s) => ![
-		"hook",
-		"cta",
-		"end_card"
-	].includes(s.purpose) && s.voiceover.trim()).map((s) => firstSentence(s.voiceover));
-	if (messages[0] && !lines.includes(messages[0])) lines.push(messages[0]);
-	const action = brief?.desired_action ?? spec.scenes.find((s) => s.purpose === "cta")?.voiceover.trim();
-	if (action) lines.push(action);
-	const contentWords = (text) => text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !STOPWORDS.has(w) && !/^\d+$/.test(w));
-	const freq = /* @__PURE__ */ new Map();
-	for (const sc of spec.scenes) for (const w of new Set(contentWords(sc.voiceover))) freq.set(w, (freq.get(w) ?? 0) + 1);
-	const repeated = [...freq].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([w]) => w);
-	const tags = [];
-	const add = (w) => {
-		const t = hashtag(w);
-		if (t && !tags.some((x) => x.toLowerCase() === t.toLowerCase() || x.toLowerCase() === `${t.toLowerCase()}s` || `${x.toLowerCase()}s` === t.toLowerCase())) tags.push(t);
-	};
-	for (const w of contentWords(title)) add(w);
-	for (const w of repeated.slice(0, 3)) add(w);
-	for (const w of [...PLATFORM_TAGS[spec.platform] ?? [], spec.goal === "explain" ? "explained" : spec.goal]) add(w);
-	return {
-		title,
-		lines: lines.slice(0, 3),
-		hashtags: tags.slice(0, 7).map((t) => `#${t}`)
 	};
 }
 async function exportFromState(root, state, now, opts = {}) {
@@ -248618,7 +249191,7 @@ async function lockFromState(root, state, projectId, outputs) {
 	];
 	let fonts = state.fonts;
 	if (!fonts) {
-		const brandFile = await loadBrand(root).catch(() => void 0);
+		const brandFile = await loadBrand$1(root).catch(() => void 0);
 		const styleId = state.style?.split("@")[0];
 		const style = styleId ? await getStyle(findStylesDir(process.env), styleId).catch(() => void 0) : void 0;
 		const language = await loadSpecLoose(root).then((r) => r.spec.language).catch(() => void 0);
@@ -268634,7 +269207,9 @@ function renderStoryboardMarkdown(spec, ir) {
 	spec.scenes.forEach((s, i) => {
 		const p = pacing[i];
 		const visual = s.deterministic ? `${s.visual_strategy} / ${s.deterministic.kind}` : s.visual_strategy;
-		lines.push(`| ${s.id} | ${p.start_sec.toFixed(1)}–${p.end_sec.toFixed(1)}s | ${s.purpose} | ${cell(s.voiceover)} | ${cell(s.on_screen_text)} | ${visual} | ${claimCell(s.claim_refs)} |`);
+		const motionText = s.deterministic?.kind === "motion" && Array.isArray(s.deterministic.props.text) ? s.deterministic.props.text.filter((t) => typeof t === "string").join(" / ") : "";
+		const onScreen = [s.on_screen_text ?? "", motionText].filter((t) => t.trim()).join(" · ");
+		lines.push(`| ${s.id} | ${p.start_sec.toFixed(1)}–${p.end_sec.toFixed(1)}s | ${s.purpose} | ${cell(s.voiceover)} | ${cell(onScreen)} | ${visual} | ${claimCell(s.claim_refs)} |`);
 	});
 	lines.push("", "## Pacing", "");
 	lines.push(`Voiceover words per second (flag above ${PACE.max_wps}; below ${PACE.min_wps} on scenes over ${PACE.dead_air_min_sec}s is dead air).`, "");
@@ -270082,7 +270657,7 @@ function createServer$1(options = {}) {
 		const voiceNotes = [];
 		if ((voiceChoice === "auto" || voiceChoice === "elevenlabs") && voiceMode(loaded.spec) === "narrated") {
 			const defaults = options.renderDefaults ?? {};
-			const brand = (await loadBrand(root, args.brand_path ? resolveInputPath(args.brand_path, cwd()) : void 0))?.brand;
+			const brand = (await loadBrand$1(root, args.brand_path ? resolveInputPath(args.brand_path, cwd()) : void 0))?.brand;
 			const vp = await resolveVoicePolicy({
 				root,
 				spec: loaded.spec,

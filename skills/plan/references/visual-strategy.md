@@ -175,3 +175,29 @@ kind reveals a fixed list of items, and cue k drives item k (or `item`):
 - Timing is only as good as the word timings: exact with a transcript or a
   provider voice, close (estimated) with the system voice, and ignored in
   silent renders (lint `cue_unmatched`).
+
+## Inserts
+
+A data insert is a graphic that carries a number or a claim: a `stat`, a
+`chart` value or series entry, a timeline step with a date, a line with a
+figure in it. It is there to show what the voice is saying, so time it to
+the voice:
+
+- **In when it is said.** The insert lands on the word that states it.
+  Cue that word: `"cues": [{"word": "40"}]` on the scene (write the number
+  the way the voiceover says it; with native audio, the way the transcript
+  spells it). An uncued insert enters with the scene, which is too early
+  when the number comes later in the sentence (lint `insert_early`, over
+  1 s early).
+- **Out when its thought ends.** Once the sentence that states it is over
+  and the voice moves on, the insert has done its job. Give the next
+  sentence its own scene and visual instead of leaving the number up
+  (lint `insert_overstays`, over 2.5 s into a different sentence).
+- **One insert per statement.** One sentence, one number. Two numbers
+  cued inside one sentence compete for the eye (lint `insert_crowded`):
+  split the sentence, or put the second number in the next scene.
+- A comparison of two numbers is one insert (a chart with two series),
+  not two stats: cue each series entry on its own sentence ("Last year it
+  was 12. This year, 40.").
+- These checks need word timings. Without a voice (`voice.mode: none`) or
+  in silent renders they are skipped, so pace inserts by `duration_sec`.

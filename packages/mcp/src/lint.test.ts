@@ -11,12 +11,18 @@ import {
   checkCues,
   checkCutaways,
   checkForbidden,
+  checkInserts,
   checkLogo,
   checkLoopSeam,
   checkTextRepeatsCaptions,
+  checkTitleLength,
   contrastRatio,
+  INSERT_EARLY_MAX_S,
+  INSERT_TAIL_MAX_S,
   lintProject,
+  SENTENCE_GAP_MS,
 } from "./lint.js";
+import { findResearchSpecsDir, loadTitleRules } from "./research-specs.js";
 
 const FIXTURE = join(import.meta.dirname, "__fixtures__", "lint", "tiktok-low-captions");
 
@@ -621,5 +627,153 @@ describe("taste guard, acceptance and loop seam", () => {
     const stale: LintFinding[] = [];
     checkLoopSeam(spec, { qa: {} }, stale);
     expect(stale).toEqual([expect.objectContaining({ id: "loop_seam", severity: "warning", fix: expect.stringMatching(/qa_run/) })]);
+  });
+});
+
+describe("insert sync", () => {
+  /** Voice-track words for `text`, one every 300 ms (250 ms long) from `from` ms. */
+  const words = (text: string, from = 0) => text.split(" ").map((word, i) => ({ word, start_ms: from + i * 300, end_ms: from + i * 300 + 250 }));
+  const scene = (id: string, duration_sec: number, voiceover: string, kind: string, props: Record<string, unknown>) =>
+    ({ id, duration_sec, voiceover, deterministic: { kind, props }, visual_requirements: {}, claim_refs: [] }) as unknown as VideoSpec["scenes"][number];
+  const run = (scenes: VideoSpec["scenes"], cues: Array<{ scene_id: string; word: string; item: number; at_ms?: number; status: string }> = [], timing = "estimated") => {
+    const out: LintFinding[] = [];
+    const state = { voice: { timing_source: timing }, scenes: scenes.map((s) => ({ scene_id: s.id, duration_ms: s.duration_sec * 1000 })), cues };
+    const tracks = scenes.map((s) => ({ scene_id: s.id, duration_ms: s.duration_sec * 1000, words: words(s.voiceover) }));
+    checkInserts({ scenes } as VideoSpec, state, tracks, out);
+    return out;
+  };
+  const STAT = { value: 40, unit: "%", label: "faster builds" };
+  const VO = "Builds used to crawl. Now they are 40 percent faster.";
+
+  it("insert_early: an uncued stat on screen from the scene start while the voice says its number at 2.1 s", () => {
+    const out = run([scene("s05", 3.5, VO, "stat", STAT)]);
+    expect(out).toEqual([
+      expect.objectContaining({
+        id: "insert_early",
+        severity: "warning",
+        scene_id: "s05",
+        message: expect.stringMatching(/"40".*2\.1s before the voice says it.*limit 1s/),
+        fix: 'add cues: [{word: "40"}] to scene s05 so the insert lands on its word',
+      }),
+    ]);
+    expect(INSERT_EARLY_MAX_S).toBe(1);
+  });
+
+  it("insert_early: quiet when a placed cue lands the value on its word, or the number is said early", () => {
+    expect(run([scene("s05", 3.5, VO, "stat", STAT)], [{ scene_id: "s05", word: "40", item: 0, at_ms: 2100, status: "placed" }])).toEqual([]);
+    expect(run([scene("s05", 3.5, "40 percent faster builds, every day.", "stat", STAT)])).toEqual([]);
+    // A number the voice never says is not guessed at.
+    expect(run([scene("s05", 3.5, "Builds got much faster.", "stat", STAT)])).toEqual([]);
+  });
+
+  it("insert_early: a cue on the wrong word is named, and numbers outside cue items enter with the scene", () => {
+    const cued = run([scene("s05", 3.5, VO, "stat", STAT)], [{ scene_id: "s05", word: "Builds", item: 0, at_ms: 0, status: "placed" }]);
+    expect(cued).toEqual([expect.objectContaining({ id: "insert_early", fix: 'move scene s05\'s cue for item 0 to {word: "40"} so the insert lands on its word' })]);
+    const map = run([scene("s06", 4, "It runs in more places than you think: 3 regions today.", "map", { title: "Live in 3 regions", points: [{ label: "EU", x: 0.2, y: 0.3 }] })]);
+    expect(map).toEqual([expect.objectContaining({ id: "insert_early", scene_id: "s06", fix: expect.stringMatching(/say "3" within 1s of scene s06's start, or move it into a cued item/) })]);
+  });
+
+  it("insert_overstays: a single insert whose sentence ends long before the scene does, while another sentence plays", () => {
+    const vo = `${VO} Here is how the cache makes that happen for every team.`;
+    const out = run([scene("s05", 8, vo, "stat", STAT)], [{ scene_id: "s05", word: "40", item: 0, at_ms: 2100, status: "placed" }]);
+    expect(out).toEqual([
+      expect.objectContaining({
+        id: "insert_overstays",
+        severity: "warning",
+        scene_id: "s05",
+        message: expect.stringMatching(/stays 5\.05s after its sentence \("Now they are 40 percent faster\."\) ends.*"Here is how the cache/),
+        fix: expect.stringMatching(/^split scene s05 after "…40 percent faster\." .*or end it sooner/),
+      }),
+    ]);
+    expect(INSERT_TAIL_MAX_S).toBe(2.5);
+    // The sentence ends the voiceover (a silent tail is a hold, not a new statement), or the tail is short.
+    expect(run([scene("s05", 8, VO, "stat", STAT)], [{ scene_id: "s05", word: "40", item: 0, at_ms: 2100, status: "placed" }])).toEqual([]);
+    expect(run([scene("s05", 5, `${VO} Nice.`, "stat", STAT)], [{ scene_id: "s05", word: "40", item: 0, at_ms: 2100, status: "placed" }])).toEqual([]);
+  });
+
+  it("sentences also break on long pauses when the transcript has no punctuation", () => {
+    const out: LintFinding[] = [];
+    const s = scene("s05", 8, "now they are 40 percent faster here is how", "stat", STAT);
+    const ws = [...words("now they are 40 percent faster"), ...words("here is how", 1800 + SENTENCE_GAP_MS)];
+    checkInserts({ scenes: [s] } as VideoSpec, { voice: { timing_source: "native" }, scenes: [{ scene_id: "s05", duration_ms: 8000 }], cues: [{ scene_id: "s05", word: "40", item: 0, at_ms: 900, status: "placed" }] }, [{ scene_id: "s05", duration_ms: 8000, words: ws }], out);
+    expect(out.map((f) => f.id)).toEqual(["insert_overstays"]);
+  });
+
+  it("insert_crowded: two data items cued inside one sentence; quiet when they land in separate sentences", () => {
+    const chart = { type: "bar", series: [{ label: "2024", value: 12 }, { label: "2025", value: 40 }] };
+    const one = "Revenue went from 12 to 40 million this year.";
+    const out = run([scene("s07", 4, one, "chart", chart)], [
+      { scene_id: "s07", word: "12", item: 0, at_ms: 900, status: "placed" },
+      { scene_id: "s07", word: "40", item: 1, at_ms: 1500, status: "placed" },
+    ]);
+    expect(out).toEqual([
+      expect.objectContaining({
+        id: "insert_crowded",
+        severity: "warning",
+        scene_id: "s07",
+        message: expect.stringMatching(/one sentence \("Revenue went from 12 to 40 million this year\."\) triggers 2 data items/),
+        fix: expect.stringMatching(/one insert per statement: cue item 1 \("40"\) on a word in a later sentence, or split scene s07/),
+      }),
+    ]);
+    const two = "Last year revenue was 12 million. This year it hit 40 million.";
+    expect(run([scene("s07", 5, two, "chart", chart)], [
+      { scene_id: "s07", word: "12", item: 0, at_ms: 1200, status: "placed" },
+      { scene_id: "s07", word: "40", item: 1, at_ms: 3000, status: "placed" },
+    ])).toEqual([]);
+  });
+
+  it("is skipped without speech timing: never guesses", () => {
+    expect(run([scene("s05", 8, `${VO} More words here after it.`, "stat", STAT)], [], "none")).toEqual([]);
+    const out: LintFinding[] = [];
+    checkInserts({ scenes: [scene("s05", 3.5, VO, "stat", STAT)] } as VideoSpec, { voice: { timing_source: "estimated" }, scenes: [{ scene_id: "s05", duration_ms: 3500 }] }, undefined, out);
+    checkInserts({ scenes: [scene("s05", 3.5, VO, "stat", STAT)] } as VideoSpec, undefined, [], out);
+    expect(out).toEqual([]);
+  });
+});
+
+describe("title_length", () => {
+  const rules = { schema_version: "1.0", id: "titles", title_length: { min_chars: 24, max_chars: 58 }, basis: "heuristic", verified: false } as const;
+  const base = { platform: "youtube_shorts", goal: "explain", scenes: [{ id: "s01", purpose: "hook", voiceover: "Hello there." }] } as unknown as VideoSpec;
+
+  it("loads research-specs/titles.yaml from the plugin root, and skips when it is missing", async () => {
+    const dir = findResearchSpecsDir();
+    expect(dir).toBeTruthy();
+    expect((await loadTitleRules(dir))?.title_length).toEqual({ min_chars: 24, max_chars: 58 });
+    expect(await loadTitleRules(null)).toBeUndefined();
+    expect(await loadTitleRules(mkdtempSync(join(tmpdir(), "vs-rs-")))).toBeUndefined();
+  });
+
+  it("warns on a short or long generated title, labelled a heuristic, with a direction", () => {
+    const out: LintFinding[] = [];
+    checkTitleLength({ ...base, title: "Fast builds" } as VideoSpec, undefined, rules, out);
+    checkTitleLength({ ...base, title: "Why every single one of your builds is slow and what to do about it today" } as VideoSpec, undefined, rules, out);
+    expect(out).toEqual([
+      expect.objectContaining({ id: "title_length", severity: "warning", message: expect.stringMatching(/"Fast builds" is 11 characters.*24–58.*heuristic.*unverified/), fix: expect.stringMatching(/^expand spec\.title by at least 13 characters/) }),
+      expect.objectContaining({ id: "title_length", severity: "warning", message: expect.stringMatching(/is 73 characters/), fix: expect.stringMatching(/^trim spec\.title by at least 15 characters/) }),
+    ]);
+  });
+
+  it("checks the brief's hook when the spec has no title, and multi-line publish headlines; quiet in band or without rules", () => {
+    const out: LintFinding[] = [];
+    checkTitleLength(base, { chosen_hook: "Builds" } as never, rules, out);
+    checkTitleLength({ ...base, title: "Why your builds are slow (and the fix)", publish: { youtube: { post_caption: "Slow?\nThe long description.", hashtags: [] }, instagram: { post_caption: "One line caption that is long enough anyway, fine for a caption and not a title at all." } } } as unknown as VideoSpec, undefined, rules, out);
+    checkTitleLength({ ...base, title: "Tiny" } as VideoSpec, undefined, undefined, out);
+    expect(out).toEqual([
+      expect.objectContaining({ id: "title_length", fix: expect.stringMatching(/^set spec\.title to a title of 24–58 characters/) }),
+      expect.objectContaining({ id: "title_length", target: "youtube", message: expect.stringMatching(/publish\.youtube headline "Slow\?" is 5 characters/), fix: expect.stringMatching(/first line of publish\.youtube\.post_caption/) }),
+    ]);
+  });
+
+  it("checks publish.<target>.title when it is set, instead of the caption's first line", () => {
+    const out: LintFinding[] = [];
+    checkTitleLength({ ...base, title: "Why your builds are slow (and the fix)", publish: { youtube: { title: "Slow", post_caption: "A fine first line of a long enough caption\nmore" } } } as unknown as VideoSpec, undefined, rules, out);
+    expect(out).toEqual([expect.objectContaining({ id: "title_length", target: "youtube", message: expect.stringMatching(/publish\.youtube\.title "Slow" is 4 characters/) })]);
+  });
+
+  it("lintProject reports it from the bundled research-specs, and skips it when there are none", async () => {
+    const long = (s: Record<string, any>) => (s.title = "A title that goes on and on well past the point where phones cut it off");
+    expect((await lintProject(project(long))).findings.filter((f) => f.id === "title_length")).toHaveLength(1);
+    expect((await lintProject(project(long), { researchSpecsDir: null })).findings.filter((f) => f.id === "title_length")).toEqual([]);
+    expect((await lintProject(project())).findings.filter((f) => f.id === "title_length")).toEqual([]);
   });
 });

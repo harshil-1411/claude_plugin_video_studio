@@ -86,6 +86,25 @@ export const LOOP_AUDIO_WINDOW_MS = 50;
 /** Floor for RMS levels (dB), so two silent ends compare as equal. */
 const SILENCE_DB = -90;
 
+/**
+ * A frame whose mean luma (8-bit code values, `signalstats` YAVG) differs from BOTH neighbours by at
+ * least this much, in the same direction, is a single-frame spike: a lone white or black frame, a
+ * render glitch or a hard one-frame flash. 40/255 is well above encoder noise and gradual fades
+ * (a 1 s fade at 30 fps moves about 7 per frame) and well below a black/white swap (~219).
+ */
+export const FLASH_SPIKE_Y = 40;
+/**
+ * A luminance transition counts toward flashes when it swings at least this much of the relative
+ * luminance range (WCAG 2.3.1: "10 percent or more of the maximum relative luminance").
+ */
+export const FLASH_DELTA = 0.1;
+/** WCAG: a transition only counts when the darker state is below 0.80 relative luminance. */
+export const FLASH_DARK_MAX = 0.8;
+/** More flashes than this in any one second fails QA (WCAG 2.3.1 general flash threshold). No override. */
+export const FLASH_MAX_PER_SEC = 3;
+/** Spike times kept in the metrics and the check detail. */
+const SPIKE_TIMES_MAX = 50;
+
 /** Default blackdetect pixel threshold (fraction of the luma range). */
 export const BLACK_PIX_TH = 0.1;
 
@@ -141,6 +160,48 @@ export interface LoopSeam {
   audio_jump_db: number | null;
 }
 
+/** One decoded video frame's mean luma (`signalstats` YAVG, scaled to 8-bit code values). */
+export interface LumaSample {
+  t: number;
+  y: number;
+}
+
+/**
+ * Flash and flicker measured on mean luma, per frame. Approximates WCAG 2.3.1 general flashes on
+ * the frame average: a flash confined to part of the frame moves the mean less, and saturated red
+ * flashes are not measured at all.
+ */
+export interface FlashStats {
+  /** Frames decoded (one luma sample each). */
+  frames: number;
+  /** Single-frame spikes (≥ FLASH_SPIKE_Y from both neighbours, same direction). */
+  spikes: number;
+  /** Their times (s, first 50). */
+  spike_times_s: number[];
+  /** Luminance transitions that count toward flashes (≥ FLASH_DELTA, darker state < FLASH_DARK_MAX). */
+  transitions: number;
+  /** Most flashes (pairs of opposing transitions) in any 1 s window. */
+  flash_rate_max: number;
+  /** Where that window starts and ends (s), when there is at least one flash. */
+  flash_window?: { start_s: number; end_s: number };
+}
+
+/** Audio against video, from the probe and the decoded frame count. */
+export interface AvSync {
+  fps: number | null;
+  video_start_s: number;
+  audio_start_s: number;
+  /** Audio start minus video start (ms): positive means the audio starts late. */
+  offset_ms: number;
+  /** Decoded video frames (else the container's count). */
+  video_frames: number | null;
+  /** video_frames / fps (else the stream duration). */
+  video_length_s: number;
+  audio_length_s: number;
+  /** Audio length minus video length (ms). */
+  length_diff_ms: number;
+}
+
 export interface QaMetrics extends LoudnessStats {
   probe: ProbeResult;
   black: TimeRange[];
@@ -150,6 +211,10 @@ export interface QaMetrics extends LoudnessStats {
   motion?: MotionStats;
   /** Loop seam measurement (when the video must loop). */
   loop_seam?: LoopSeam;
+  /** Flash and flicker (videos with a video stream). */
+  flash?: FlashStats;
+  /** Audio start and length against the video (videos with both streams). */
+  av_sync?: AvSync;
 }
 
 export interface QaReport {
@@ -244,6 +309,177 @@ export function motionStats(changes: readonly SceneChange[], durationS: number, 
   };
 }
 
+/**
+ * Per-frame mean luma from `signalstats` + `metadata=mode=print` log lines: a `frame:N pts:P
+ * pts_time:T` line followed by `lavfi.signalstats.YAVG=Y` from the same filter instance. Other
+ * filters' lines may interleave (the audio chain runs in its own thread), so the pending time is
+ * kept per instance. `bitDepth` scales YAVG to 8-bit code values.
+ */
+export function parseLuma(stderr: string, bitDepth = 8): LumaSample[] {
+  const scale = bitDepth > 8 ? 2 ** (bitDepth - 8) : 1;
+  const pending = new Map<string, number>();
+  const out: LumaSample[] = [];
+  for (const line of stderr.split(/\r?\n/)) {
+    if (!line.includes("pts_time:") && !line.includes("lavfi.signalstats.YAVG=")) continue;
+    const who = /\[Parsed_metadata_\d+ @ ([^\]]+)\]/.exec(line)?.[1] ?? "";
+    const pts = /\bpts_time:\s*(-?[\d.]+(?:e-?\d+)?)/.exec(line);
+    if (pts) {
+      const t = Number(pts[1]);
+      if (Number.isFinite(t)) pending.set(who, t);
+      continue;
+    }
+    const y = /lavfi\.signalstats\.YAVG=(-?[\d.]+)/.exec(line);
+    const t = pending.get(who);
+    if (!y || t === undefined) continue;
+    pending.delete(who);
+    const v = Number(y[1]);
+    if (Number.isFinite(v)) out.push({ t: r3(t), y: v / scale });
+  }
+  return out;
+}
+
+/** Limited-range 8-bit luma to approximate relative luminance (0–1): normalise, then the sRGB EOTF. */
+export function relativeLuminance(y8: number): number {
+  const l = Math.min(1, Math.max(0, (y8 - 16) / 219));
+  return l <= 0.04045 ? l / 12.92 : ((l + 0.055) / 1.055) ** 2.4;
+}
+
+/**
+ * Spikes, transitions and the worst 1 s flash window from per-frame luma. Transitions are the legs
+ * of a zig-zag over relative luminance with a {@link FLASH_DELTA} reversal threshold, so a slow fade
+ * is one transition and encoder noise none; a leg counts when its darker end is below
+ * {@link FLASH_DARK_MAX}. A flash is a pair of opposing transitions (WCAG 2.3.1), so the rate is
+ * floor(transitions in the window / 2), timed at each leg's end.
+ */
+export function flashStats(samples: readonly LumaSample[]): FlashStats {
+  const n = samples.length;
+  const spikeTimes: number[] = [];
+  let spikes = 0;
+  for (let i = 1; i < n - 1; i++) {
+    const a = samples[i]!.y - samples[i - 1]!.y;
+    const b = samples[i]!.y - samples[i + 1]!.y;
+    if (Math.abs(a) >= FLASH_SPIKE_Y && Math.abs(b) >= FLASH_SPIKE_Y && Math.sign(a) === Math.sign(b)) {
+      spikes++;
+      if (spikeTimes.length < SPIKE_TIMES_MAX) spikeTimes.push(samples[i]!.t);
+    }
+  }
+  const lum = samples.map((s) => relativeLuminance(s.y));
+  const legs: number[] = [];
+  const leg = (from: number, to: number) => {
+    if (Math.min(lum[from]!, lum[to]!) < FLASH_DARK_MAX) legs.push(samples[to]!.t);
+  };
+  let dir = 0;
+  let lo = 0;
+  let hi = 0;
+  let pivot = 0;
+  let ext = 0;
+  for (let i = 1; i < n; i++) {
+    const v = lum[i]!;
+    if (dir === 0) {
+      if (v > lum[hi]!) hi = i;
+      if (v < lum[lo]!) lo = i;
+      if (lum[hi]! - lum[lo]! >= FLASH_DELTA) {
+        dir = hi > lo ? 1 : -1;
+        [pivot, ext] = hi > lo ? [lo, hi] : [hi, lo];
+      }
+      continue;
+    }
+    if (dir * (v - lum[ext]!) >= 0) ext = i;
+    else if (dir * (lum[ext]! - v) >= FLASH_DELTA) {
+      leg(pivot, ext);
+      pivot = ext;
+      ext = i;
+      dir = -dir;
+    }
+  }
+  if (dir !== 0) leg(pivot, ext);
+  let best = 0;
+  let window: { start_s: number; end_s: number } | undefined;
+  for (let i = 0, j = 0; j < legs.length; j++) {
+    while (legs[j]! - legs[i]! >= 1) i++;
+    const flashes = Math.floor((j - i + 1) / 2);
+    if (flashes > best) {
+      best = flashes;
+      window = { start_s: legs[i]!, end_s: legs[j]! };
+    }
+  }
+  return { frames: n, spikes, spike_times_s: spikeTimes, transitions: legs.length, flash_rate_max: best, ...(window ? { flash_window: window } : {}) };
+}
+
+/** flashing: fail above {@link FLASH_MAX_PER_SEC} flashes in any second (no override), warn on any single-frame spike. */
+export function flashCheck(f: FlashStats): QaCheck {
+  const scope = "mean-luma approximation of WCAG 2.3.1 general flashes; red flashes are not measured";
+  if (f.flash_rate_max > FLASH_MAX_PER_SEC) {
+    const at = f.flash_window ? ` at ${f.flash_window.start_s.toFixed(2)}–${f.flash_window.end_s.toFixed(2)}s` : "";
+    return {
+      id: "flashing",
+      status: "fail",
+      detail: `${f.flash_rate_max} flashes in one second${at} (limit ${FLASH_MAX_PER_SEC}/s; ${scope})`,
+      fix: "Slow the flashing to at most 3 per second, lower its contrast, or shrink the flashing area; faster flashes can trigger seizures.",
+    };
+  }
+  if (f.spikes > 0) {
+    const times = f.spike_times_s.map((t) => `${t.toFixed(2)}s`).join(", ");
+    return {
+      id: "flashing",
+      status: "warn",
+      detail: `${f.spikes} single-frame luma spike(s) at ${times}${f.spikes > f.spike_times_s.length ? ", …" : ""}; worst ${f.flash_rate_max} flash(es)/s (${scope})`,
+      fix: "Check those frames: a lone white or black frame is usually a render glitch or a hard flash; replace it, or ease it with a short fade.",
+    };
+  }
+  return { id: "flashing", status: "ok", detail: `no single-frame spikes; worst ${f.flash_rate_max} flash(es) in one second (limit ${FLASH_MAX_PER_SEC}/s; ${scope})` };
+}
+
+/**
+ * Audio against video: starts (probe `start_time`, which honours the MP4 edit list) and lengths
+ * (decoded video frames / fps against the audio stream's duration). Null without both streams.
+ */
+export function measureAvSync(probe: ProbeResult, decodedFrames?: number): AvSync | null {
+  if (!probe.has_video || !probe.has_audio) return null;
+  const v = probe.video_timing;
+  const a = probe.audio_timing;
+  const fps = probe.fps;
+  const frames = decodedFrames || v?.nb_read_frames || v?.nb_frames || null;
+  const videoStart = v?.start_s ?? 0;
+  const audioStart = a?.start_s ?? 0;
+  const videoLength = frames && fps ? frames / fps : (v?.duration_s ?? probe.duration_s);
+  const audioLength = a?.duration_s ?? probe.duration_s;
+  return {
+    fps,
+    video_start_s: r3(videoStart),
+    audio_start_s: r3(audioStart),
+    offset_ms: Math.round((audioStart - videoStart) * 10000) / 10,
+    video_frames: frames,
+    video_length_s: r3(videoLength),
+    audio_length_s: r3(audioLength),
+    length_diff_ms: Math.round((audioLength - videoLength) * 10000) / 10,
+  };
+}
+
+/** Audio length may differ from the video's by one frame plus this much (AAC frames are ~21 ms, trimmed by the edit list). */
+export const AV_LENGTH_SLACK_MS = 10;
+
+/**
+ * av_sync: the audio must start within one frame of the video (fail: lip sync drifts by that much)
+ * and last as long as the video's frames within one frame + {@link AV_LENGTH_SLACK_MS} (warn: a tail
+ * mismatch is cut or padded by platforms, not heard as drift). Not applicable without audio.
+ */
+export function avSyncCheck(s: AvSync | null): QaCheck {
+  if (!s) return { id: "av_sync", status: "ok", detail: "not applicable: needs both an audio and a video stream" };
+  const frameMs = s.fps ? 1000 / s.fps : 1000 / 30;
+  const startOk = Math.abs(s.offset_ms) <= frameMs + 0.5;
+  const lengthOk = Math.abs(s.length_diff_ms) <= frameMs + AV_LENGTH_SLACK_MS;
+  const detail = [
+    `audio starts ${s.offset_ms} ms after the video (${s.audio_start_s}s vs ${s.video_start_s}s; limit one frame, ${Math.round(frameMs * 10) / 10} ms)`,
+    `audio ${s.audio_length_s}s vs video ${s.video_length_s}s (${s.video_frames ?? "?"} frames at ${s.fps ?? "?"} fps; difference ${s.length_diff_ms} ms)`,
+  ].join("; ");
+  const fixes = [
+    ...(startOk ? [] : ["re-mux the audio so it starts with the video (AAC priming needs an edit list: mux to MP4/MOV with ffmpeg, not a raw .aac)"]),
+    ...(lengthOk ? [] : ["pad or trim the audio to the video's frame count (muxAudio does)"]),
+  ];
+  return { id: "av_sync", status: !startOk ? "fail" : lengthOk ? "ok" : "warn", detail, ...(fixes.length ? { fix: `${fixes.join("; ")}.` } : {}) };
+}
+
 /** RMS level (dB full scale) of mono PCM, floored at -90 dB. */
 export function rmsDb(pcm: Float32Array): number {
   if (!pcm.length) return SILENCE_DB;
@@ -260,25 +496,29 @@ export interface VideoAnalysis extends LoudnessStats {
   freeze: TimeRange[];
   silence: TimeRange[];
   motion: MotionStats;
+  /** Flash and flicker from per-frame mean luma (zero frames without video). */
+  flash: FlashStats;
   /** blackdetect threshold used for `background`. */
   black_threshold: { pix_th: number; nearBlack: boolean };
 }
 
 /**
- * One ffprobe plus one decode pass: blackdetect, freezedetect and scdet on the video, silencedetect
- * and ebur128 on the audio. Shared by technical QA and `compare` (a reference video).
+ * One ffprobe plus one decode pass: blackdetect, freezedetect, scdet and per-frame mean luma
+ * (signalstats) on the video, silencedetect and ebur128 on the audio. Shared by technical QA and
+ * `compare` (a reference video).
  */
 export async function analyzeVideo(videoPath: string, o: { background?: string; probe?: ProbeResult } = {}, opts: RunOptions = {}): Promise<VideoAnalysis> {
   const probe = o.probe ?? (await ffprobe(videoPath, opts));
   const args = ["-i", videoPath];
   const black = blackThreshold(o.background);
-  if (probe.has_video) args.push("-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=${black.pix_th},freezedetect=n=-60dB:d=1.0,scdet=t=${BIG_CHANGE_SCORE}`);
+  if (probe.has_video) args.push("-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=${black.pix_th},freezedetect=n=-60dB:d=1.0,scdet=t=${BIG_CHANGE_SCORE},signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG`);
   if (probe.has_audio) args.push("-map", "0:a:0", "-af", "silencedetect=n=-50dB:d=1.0,ebur128=peak=true:framelog=quiet");
   args.push("-f", "null", "-");
   const { stderr } = await runFfmpeg(args, { ...opts, keepStderr: true });
   const det = parseDetections(stderr, probe.duration_s);
   const motion = motionStats(probe.has_video ? parseSceneChanges(stderr) : [], probe.duration_s, det.freeze);
-  return { probe, ...det, motion, black_threshold: black };
+  const flash = flashStats(probe.has_video ? parseLuma(stderr, probe.bit_depth ?? 8) : []);
+  return { probe, ...det, motion, flash, black_threshold: black };
 }
 
 /**
@@ -397,12 +637,15 @@ export async function technicalQa(videoPath: string, expect: QaExpectations, opt
             fix: "Check the scene(s) at those times rendered correctly; re-render them if blank.",
           },
     );
+    checks.push(flashCheck(det.flash));
     checks.push(...motionChecks(det.motion, det.freeze, acc));
     if (expect.loop) {
       loopSeam = await measureLoopSeam(videoPath, probe, opts);
       checks.push(loopSeamCheck(loopSeam));
     }
   }
+  const avSync = measureAvSync(probe, det.flash.frames);
+  if (probe.has_audio) checks.push(avSyncCheck(avSync));
   if (probe.has_audio && expect.intended_silence) {
     const why = expect.silence_reason ?? "silent on purpose (no narration, no music)";
     checks.push({ id: "silence", status: "ok", detail: why });
@@ -445,6 +688,8 @@ export async function technicalQa(videoPath: string, expect: QaExpectations, opt
       true_peak_dbtp: det.true_peak_dbtp,
       ...(probe.has_video ? { motion: det.motion } : {}),
       ...(loopSeam ? { loop_seam: loopSeam } : {}),
+      ...(probe.has_video ? { flash: det.flash } : {}),
+      ...(avSync ? { av_sync: avSync } : {}),
     },
   };
 }
@@ -541,6 +786,12 @@ export function formatQaMarkdown(r: QaReport): string {
           `- Motion: ${r.metrics.motion.changes} big changes (${r.metrics.motion.changes_per_sec}/s), ${r.metrics.motion.cuts} cuts (${r.metrics.motion.cuts_per_sec}/s), longest static ${r.metrics.motion.longest_static_s}s, frozen ${r.metrics.motion.frozen_pct}%`,
         ]
       : []),
+    ...(r.metrics.flash
+      ? [
+          `- Flashing: worst ${r.metrics.flash.flash_rate_max} flash(es) in 1 s, ${r.metrics.flash.transitions} luminance transitions, ${r.metrics.flash.spikes} single-frame spike(s) (mean luma; red flashes not measured)`,
+        ]
+      : []),
+    ...(r.metrics.av_sync ? [`- A/V sync: audio offset ${r.metrics.av_sync.offset_ms} ms, audio ${r.metrics.av_sync.audio_length_s}s vs video ${r.metrics.av_sync.video_length_s}s (${r.metrics.av_sync.video_frames ?? "?"} frames)`] : []),
     ...(r.metrics.loop_seam ? [`- Loop seam: SSIM ${r.metrics.loop_seam.ssim ?? "n/a"}, audio jump ${r.metrics.loop_seam.audio_jump_db ?? "n/a"} dB`] : []),
     `- Silence: ${r.metrics.silence.length ? fmtRanges(r.metrics.silence) : "none"}`,
     "",
