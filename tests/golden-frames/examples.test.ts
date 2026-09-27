@@ -135,7 +135,8 @@ describe.skipIf(!RUN_RENDER)("golden frames of the motion examples (HyperFrames)
           quality: QUALITY,
           voice: "silent",
           renderer: "hyperframes",
-          target: { shortSide: 180, fps: 15 },
+          // HyperFrames renders at 24, 30 or 60 fps only (the ffmpeg goldens above use 15).
+          target: { shortSide: 180, fps: 24 },
           encodePreset: "ultrafast",
           // Chrome and HyperFrames are found through the user's environment.
           env: { ...process.env, CLAUDE_PLUGIN_DATA: join(tmp, "data") },
