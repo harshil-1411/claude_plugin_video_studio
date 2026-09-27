@@ -126,6 +126,7 @@ describe("MCP server (in-memory)", () => {
       "lint",
       "localize",
       "project_init",
+      "prompt_pack",
       "qa_run",
       "render_cancel",
       "render_submit",

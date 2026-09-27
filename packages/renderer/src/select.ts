@@ -213,6 +213,8 @@ export interface RenderScenesOptions {
   cues?: ReadonlyMap<string, ResolvedCue[]>;
   /** The music beat grid per scene id (scene-local seconds), passed to `motion` pages (see `SceneRenderRequest.beats`). */
   beats?: ReadonlyMap<string, SceneBeats>;
+  /** Series bible key input per scene id (only scenes with `series_refs`); part of their cache keys. */
+  series?: ReadonlyMap<string, SeriesKeyInput>;
 }
 
 export type ResolvedFootage = NonNullable<SceneRenderRequest["footage"]>;
@@ -236,7 +238,7 @@ export interface SceneSidecar {
 
 export const PENDING_REASON = "video providers (generated video, avatars) arrive in Phase 7; until then this is a placeholder card";
 
-/** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version. */
+/** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version (+ footage, cues, images, motion page, series entries). */
 export function sceneCacheKey(
   scene: Scene,
   tokens: VisualTokens,
@@ -248,6 +250,7 @@ export function sceneCacheKey(
   cues?: readonly ResolvedCue[],
   images?: readonly SceneImage[],
   motion?: MotionKeyInput,
+  series?: SeriesKeyInput,
 ): string {
   return sha256Hex(
     canonicalJson({
@@ -269,8 +272,17 @@ export function sceneCacheKey(
       // A motion page is keyed by its bytes, every local file it uses, the kit version and the
       // beat grid it reads, so editing the HTML (or an asset) re-renders the scene.
       ...(motion ? { motion } : {}),
+      // The series bible entries the scene shows (series_refs) and their reference files, so
+      // editing one character re-renders only its scenes; scenes without series_refs keep their keys.
+      ...(series ? { series } : {}),
     }),
   );
+}
+
+/** What a scene takes from its series bible: the hash of the entries it names (canonical JSON) and their reference files' hashes. */
+export interface SeriesKeyInput {
+  entries: string;
+  files: Array<{ ref: string; sha256: string }>;
 }
 
 /** What a `motion` scene's clip depends on besides the spec (part of its cache key). */
@@ -450,7 +462,7 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
     const images = await sceneImages(scene, o.tokens, o.project_dir, refs.assets.length ? await irAssets : undefined);
     const beats = placeholder || footage ? undefined : o.beats?.get(orig.id);
     const motion = placeholder || footage ? undefined : await motionKeyInput(scene, o.project_dir, beats);
-    const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? { sha256: footage.sha256, duration_sec: footage.media.duration_sec, ...(footage.media.content_box ? { content_box: footage.media.content_box } : {}) } : undefined, cues, images, motion);
+    const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? { sha256: footage.sha256, duration_sec: footage.media.duration_sec, ...(footage.media.content_box ? { content_box: footage.media.content_box } : {}) } : undefined, cues, images, motion, o.series?.get(orig.id));
     const out = join(dir, `${orig.id}.mp4`);
     const sidecarPath = join(dir, `${orig.id}.json`);
     const base = { scene_id: orig.id, renderer: r.id, renderer_version: r.version, cache_key: key, ...(placeholder ? { placeholder: true, reason: pendingReason } : {}) };

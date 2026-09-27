@@ -24,6 +24,7 @@ Load references only when you reach the step that needs them:
 - `references/code-motion.md`: writing a `motion` page (contract, kit,
   lint, craft rules, banned effects, the stills loop). Load it only when
   the spec gets a `motion` scene.
+- `references/series.md`: a series bible (`series.yaml`) for episodic content, a recurring host or motif, or one look across videos.
 
 ## Safety rules (always)
 

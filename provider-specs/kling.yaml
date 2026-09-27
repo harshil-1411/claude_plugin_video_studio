@@ -1,0 +1,52 @@
+# Kling 3.0. Facts are hypotheses read on verified_on; re-check before use.
+schema_version: "1.0"
+id: kling
+name: Kling 3.0
+models:
+  - id: kling-v3
+    label: Kling 3.0
+    modes: [text_to_video, image_to_video, first_last_frame, reference_to_video]
+    notes:
+      - "reference_to_video = Elements: one element from a video or from 2-4 images, named @Element1, @Element2."
+      - "cfg_scale 0-1."
+duration:
+  min_sec: 3
+  max_sec: 15
+aspect_ratios: ["16:9", "9:16", "1:1"]
+resolutions: ["720p", "1080p"]
+references:
+  max_images: 4
+  max_videos: 1
+  syntax: "@Element{n}"
+audio:
+  native: true
+  syntax: >-
+    Put the action before the speech; write who says what in quotes, with a stable character
+    label for each speaker.
+negatives: supported
+multi_shot:
+  max_shots: 6
+  syntax: >-
+    Automatic, or a custom storyboard of up to 6 shots (multi_prompt, shot_type customize or
+    intelligent); label each shot with framing, subject and motion; join them with temporal
+    connectives.
+prompt_formula: >-
+  directions, not object lists: framing + subject (stable label) + motion, then speech after the
+  action, with temporal connectives between beats.
+access:
+  - via: direct
+    env: KLINGAI_API_KEY
+    docs_url: https://app.klingai.com/global/dev/document-api
+  - via: fal
+    env: FAL_KEY
+    docs_url: https://fal.ai/models?keywords=kling
+source_urls:
+  - https://app.klingai.com/global/dev/document-api
+  - https://fal.ai/models?keywords=kling
+verified_on: "2026-09-27"
+verified: false
+notes:
+  - "Conflict: Kling lists native speech in zh, en, ja, ko and es; fal lists zh and en only."
+  - "Hosts apply a default negative prompt (e.g. 'blur, distort, and low quality')."
+  - "max_images 4 is per element (2-4 images); the number of elements per clip is unverified."
+  - "Start and end frames are both supported."

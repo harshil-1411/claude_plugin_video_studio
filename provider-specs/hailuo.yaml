@@ -1,0 +1,50 @@
+# MiniMax Hailuo. Facts are hypotheses read on verified_on; re-check before use.
+schema_version: "1.0"
+id: hailuo
+name: MiniMax Hailuo 2.3 / 02 / I2V-01-Director
+models:
+  - id: MiniMax-Hailuo-2.3
+    label: Hailuo 2.3
+    modes: [text_to_video, image_to_video]
+  - id: MiniMax-Hailuo-2.3-Fast
+    label: Hailuo 2.3 Fast
+    modes: [image_to_video]
+  - id: MiniMax-Hailuo-02
+    label: Hailuo 02
+    modes: [text_to_video, image_to_video]
+  - id: I2V-01-Director
+    label: I2V-01-Director
+    modes: [image_to_video]
+duration:
+  min_sec: 6
+  max_sec: 10
+  allowed_sec: [6, 10]
+aspect_ratios: ["16:9"]
+resolutions: ["512p", "768p", "1080p"]
+audio:
+  native: false
+negatives: unsupported
+camera_syntax: >-
+  Bracketed commands: [Truck left] [Truck right] [Pan left] [Pan right] [Push in] [Pull out]
+  [Pedestal up] [Pedestal down] [Tilt up] [Tilt down] [Zoom in] [Zoom out] [Shake]
+  [Tracking shot] [Static shot]. Commands in one bracket run together; consecutive brackets run
+  in sequence.
+prompt_max_chars: 2000
+prompt_formula: "[camera command] subject + action + scene + style"
+access:
+  - via: direct
+    env: MINIMAX_API_KEY
+    docs_url: https://platform.minimax.io/docs/guides/video-generation
+  - via: fal
+    env: FAL_KEY
+    docs_url: https://fal.ai/models?keywords=hailuo
+source_urls:
+  - https://platform.minimax.io/docs/guides/video-generation
+  - https://fal.ai/models?keywords=hailuo
+verified_on: "2026-09-27"
+verified: false
+notes:
+  - "6 or 10 s; resolution 512p-1080p depending on the model (10 s may not be offered at 1080p)."
+  - "First frame only (no last frame, no reference binding)."
+  - "Aspect ratio: text-to-video output is assumed 16:9; image-to-video follows the first frame. Unverified."
+  - "No native audio documented for these models: add sound in the edit."

@@ -41,6 +41,7 @@ import {
   type RenderTarget,
   type ResolvedCue,
   type SceneBeats,
+  type SeriesKeyInput,
   createFootageRenderer,
   type SceneRenderEntry,
   type SceneRenderer,
@@ -77,6 +78,7 @@ import { type PolicySummary, recordSpend, resolveVoicePolicy, summarizePolicy } 
 import { COVER_VERSION, renderCover } from "./cover.js";
 import { type ResolvedMusic, resolveMusic } from "./music.js";
 import { lockFonts } from "./lock.js";
+import { type LoadedSeries, type SeriesUsage, effectiveStyleId, loadSeries, seriesLook, seriesRecord, seriesUsage } from "./series.js";
 import { alignVoiceTracks } from "./voice-align.js";
 import {
   ASSEMBLY_VERSION,
@@ -159,6 +161,8 @@ export interface RenderInputs {
   brandCaptions: (NonNullable<Style["captions"]> & NonNullable<Brand["captions"]>) | undefined;
   fontsDir: ReturnType<typeof findFontsDir>;
   fonts: ReturnType<typeof bundledFontsStatus>;
+  /** The series bible (spec.series) and what the scenes take from it; absent without one. */
+  series?: { loaded: LoadedSeries; usage: SeriesUsage };
 }
 
 /** a. Validate the spec, then load what styles the render: brand, style pack, tokens, caption settings, bundled fonts. */
@@ -169,10 +173,15 @@ export async function stageInputs(run: RenderRun): Promise<RenderInputs> {
   for (const w of specWarnings) warnings.push(`spec: ${w.path || "(root)"}: ${w.message}`);
   const brandFile = await loadBrand(root, o.brandPath);
   const brand = brandFile?.brand;
-  // Style pack (styles/<id>.yaml): defaults < style < brand. Unknown ids fail with the available ones.
-  const style: Style | undefined = spec.style ? await getStyle(findStylesDir(env), spec.style) : undefined;
+  // Series bible (spec.series): read as data, its entries and reference files hashed per scene.
+  const seriesLoaded = spec.series ? await loadSeries(root, spec.series) : undefined;
+  const series = seriesLoaded ? { loaded: seriesLoaded, usage: await seriesUsage(seriesLoaded, spec.scenes) } : undefined;
+  // Style pack (styles/<id>.yaml): defaults < series < style < brand. Unknown ids fail with the available ones.
+  const styleId = effectiveStyleId(spec.style, seriesLoaded?.series);
+  const look = seriesLook(seriesLoaded?.series, spec.style, styleId ? await getStyle(findStylesDir(env), styleId) : undefined);
+  const style: Style | undefined = look.style;
   // The spec language picks script fonts (Noto JP/Devanagari/Arabic) ahead of the Latin chain.
-  const tokens: VisualTokens = resolveTokens(brand, {}, style, { language: spec.language });
+  const tokens: VisualTokens = resolveTokens(brand, look.defaults, style, { language: spec.language });
   // brand logo_placement "none": no logo anywhere, not even on the end card.
   if (brand?.visual?.logo_placement?.position === "none") delete tokens.logo_path;
   const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
@@ -187,7 +196,7 @@ export async function stageInputs(run: RenderRun): Promise<RenderInputs> {
       `fonts: bundled fonts missing (${fonts.missing.join(", ")}${fontsDir ? ` in ${fontsDir}` : "; no fonts/ directory found"}); using host fonts, so text may look different on other machines`,
     );
   }
-  return { spec, irPath, brandFile, brand, style, tokens, burnIn, captionPreset, brandCaptions, fontsDir, fonts };
+  return { spec, irPath, brandFile, brand, style, tokens, burnIn, captionPreset, brandCaptions, fontsDir, fonts, ...(series ? { series } : {}) };
 }
 
 // ------------------------------------------------------------------------------------ b. target
@@ -564,6 +573,8 @@ export async function stageScenes(
     sceneCues: Map<string, ResolvedCue[]>;
     /** The render plan's beat grid (stagePlanTiming); `motion` scenes get their slice of it. */
     beatSync?: RenderState["beat_sync"];
+    /** Series bible key input per scene id (scenes with series_refs). */
+    seriesKeys?: ReadonlyMap<string, SeriesKeyInput>;
   },
 ): Promise<ScenesStage> {
   const { o, env, root, quality, preference, placeholder, signal, now, progress, warnings } = run;
@@ -604,6 +615,7 @@ export async function stageScenes(
     footageRenderer: o.footageRenderer ?? createFootageRenderer({ encodePreset: o.encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") }),
     ...(sceneCues.size ? { cues: sceneCues } : {}),
     ...(sceneBeats.size ? { beats: sceneBeats } : {}),
+    ...(input.seriesKeys?.size ? { series: input.seriesKeys } : {}),
   };
   const first = await renderScenes({ scenes: planScenes }, { ...baseOpts, preference, concurrency, onScene });
   const entries = new Map(first.scenes.map((e) => [e.scene_id, e]));
@@ -1114,5 +1126,6 @@ export async function stageRenderState(
     fonts: lockedFonts,
     ...(style ? { style: styleRef(style) } : {}),
     ...(cues.length ? { sound_events: cues.length } : {}),
+    ...(input.inputs.series ? { series: seriesRecord(input.inputs.series.loaded, input.inputs.series.usage) } : {}),
   };
 }

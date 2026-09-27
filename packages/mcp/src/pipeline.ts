@@ -7,7 +7,7 @@ import { CreativeBrief, RenderManifest, type SceneRender, VideoSpec, parseYamlOr
 import { ZONES_VERSION, findPlatformSpecsDir, loadContracts } from "@video-studio/platforms";
 import { type C2paDeps, type SourceFacts, classifySource, signVideos } from "./c2pa.js";
 import { COVER_VERSION } from "./cover.js";
-import { LOCK_FILE, buildLock, listFiles, lockAssets, lockFonts, serializeLock } from "./lock.js";
+import { LOCK_FILE, buildLock, listFiles, lockAssets, lockFonts, serializeLock, withSeriesAssets } from "./lock.js";
 import { acquireRenderLock } from "./render-lock.js";
 import { type LintResult, lintProject } from "./lint.js";
 import { TARGET_PACKAGE_VERSION, packageTargets } from "./targets.js";
@@ -129,7 +129,7 @@ async function renderProjectLocked(projectDir: string, o: RenderProjectOptions):
   const { sceneCues, cueLog } = resolveWordCues(run, planScenes, nativeTracks, trackById, timeline.slotMs);
 
   // d. scene clips
-  const scenes = await stageScenes(run, { spec, planScenes, tokens: inputs.tokens, target, tp, footage, sceneCues, beatSync: timing.beatSync });
+  const scenes = await stageScenes(run, { spec, planScenes, tokens: inputs.tokens, target, tp, footage, sceneCues, beatSync: timing.beatSync, ...(inputs.series ? { seriesKeys: inputs.series.usage.keys } : {}) });
   const { ordered, used, placeholders, reasons, zones, contracts } = scenes;
 
   // e. captions; e'. music ducking and per-scene audio
@@ -523,6 +523,7 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
         ? { sfx: state.sfx.map((x) => ({ file: x.file, sha256: x.sha256, scenes: x.scenes, license: x.license ?? null, ...(x.peak_ms !== undefined ? { peak_ms: x.peak_ms } : {}) })) }
         : {}),
       ...(state.timing_adjustments.length ? { timing_adjustments: state.timing_adjustments } : {}),
+      ...(state.series ? { series: state.series } : {}),
       ...(state.sound_events ? { captions: { sound_events: state.sound_events } } : {}),
       ...(c2pa && c2paSource ? { c2pa: { ...c2pa, digital_source_type: c2paSource.digital_source_type, reasons: c2paSource.reasons } } : {}),
       scenes: state.scenes.map((s) => ({
@@ -732,10 +733,13 @@ async function lockFromState(root: string, state: RenderState, projectId: string
     targets: contracts.filter((c) => targetIds.has(c.id)).map((c) => ({ id: c.id, contract_version: c.contract_version, verified: c.verified })),
     scenes: state.scenes.map((s) => ({ scene_id: s.scene_id, renderer: s.renderer, renderer_version: s.renderer_version, cache_key: s.cache_key, clip_sha256: s.clip_sha256 })),
     // A user music file outside assets/ is an input too; a bundled bed or synthesized score is recorded by its ref.
-    assets: [
-      ...(await lockAssets(root, [...new Set(state.music && !byRef(state.music.ref) ? [...inputs, state.music.ref] : inputs)])),
-      ...(state.music && byRef(state.music.ref) ? [{ path: state.music.ref, sha256: state.music.sha256 }] : []),
-    ],
+    assets: withSeriesAssets(
+      [
+        ...(await lockAssets(root, [...new Set(state.music && !byRef(state.music.ref) ? [...inputs, state.music.ref] : inputs)])),
+        ...(state.music && byRef(state.music.ref) ? [{ path: state.music.ref, sha256: state.music.sha256 }] : []),
+      ],
+      state.series,
+    ),
     outputs: outputs.map((o) => ({ path: o.path, sha256: o.sha256, ...(o.target ? { target: o.target } : {}) })),
   });
 }

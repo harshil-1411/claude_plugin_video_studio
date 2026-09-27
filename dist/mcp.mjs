@@ -14045,7 +14045,7 @@ const ProviderAccess = strictObject({
 	env: string().regex(/^[A-Z][A-Z0-9_]*$/).describe("Env var holding the credential; must be in the credential registry."),
 	docs_url: Url
 }).describe("One way to reach the models; the credential is a placeholder until Phase 7 wires it.");
-strictObject({
+const ProviderSpec = strictObject({
 	schema_version: SchemaVersion,
 	id: ProviderFamily.describe("Must equal the file name: provider-specs/<id>.yaml."),
 	name: NonEmptyString,
@@ -14117,7 +14117,7 @@ const SeriesMotif = strictObject({
 	description: NonEmptyString.describe("A recurring visual or sound, e.g. a toggle switch that flips in every episode."),
 	asset: ProjectRelativePath.optional()
 });
-strictObject({
+const Series = strictObject({
 	schema_version: SchemaVersion,
 	id: Id,
 	name: NonEmptyString,
@@ -34070,8 +34070,8 @@ function serialQueue() {
 * both go through this gate, so a still sheet never launches Chrome beside a render.
 */
 const chromeGate = serialQueue();
-/** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version. */
-function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage, cues, images, motion) {
+/** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version (+ footage, cues, images, motion page, series entries). */
+function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage, cues, images, motion, series) {
 	return sha256Hex(canonicalJson({
 		v: 1,
 		layout: 10,
@@ -34087,7 +34087,8 @@ function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zon
 		...footage ? { footage } : {},
 		...cues?.length ? { cues } : {},
 		...images?.length ? { images } : {},
-		...motion ? { motion } : {}
+		...motion ? { motion } : {},
+		...series ? { series } : {}
 	}));
 }
 /** The cache-key input of a `motion` scene: page and file hashes, kit version and its beat grid. Undefined for other kinds. */
@@ -34260,7 +34261,7 @@ async function renderScenes(spec, o) {
 			sha256: footage.sha256,
 			duration_sec: footage.media.duration_sec,
 			...footage.media.content_box ? { content_box: footage.media.content_box } : {}
-		} : void 0, cues, images, motion);
+		} : void 0, cues, images, motion, o.series?.get(orig.id));
 		const out = join(dir, `${orig.id}.mp4`);
 		const sidecarPath = join(dir, `${orig.id}.json`);
 		const base = {
@@ -36414,16 +36415,16 @@ function resolveTokens(tokens, warnings) {
 	};
 }
 /** True when `child` is inside `parent` (both absolute). */
-function inside$1(parent, child) {
+function inside$2(parent, child) {
 	const rel = relative(parent, child);
 	return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 /** `abs` if it is inside `root` after resolving symlinks (a link inside the project may point anywhere). */
 function realInside(root, abs) {
-	if (!inside$1(root, abs)) return void 0;
+	if (!inside$2(root, abs)) return void 0;
 	try {
 		const real = realpathSync(abs);
-		return inside$1(realpathSync(root), real) ? real : void 0;
+		return inside$2(realpathSync(root), real) ? real : void 0;
 	} catch {
 		return abs;
 	}
@@ -38856,7 +38857,7 @@ async function selectBackend(choice, env, backends = defaultBackends(), opts = {
 		reason: `auto: ${skipped.join("; ")}; falling back to silent (no audio)`
 	};
 }
-const toPosix$3 = (p) => p.split(sep).join("/");
+const toPosix$4 = (p) => p.split(sep).join("/");
 /** Cache key of one scene's synthesized narration (shared by synthesizeSpec and planSynthesis). */
 function voiceCacheKey(spec, voiceover, speech, backend, voice) {
 	return cacheKey({
@@ -38976,7 +38977,7 @@ async function synthesizeSpec(spec, options) {
 			const key = voiceCacheKey(spec, scene.voiceover, prepared.speech, backend, voice);
 			const indexFile = join(indexDir, `${key}.json`);
 			const dest = join(voiceDir, `${scene.id}.wav`);
-			const relAudio = toPosix$3(relative(paths.root, dest));
+			const relAudio = toPosix$4(relative(paths.root, dest));
 			const cached = await readJson(indexFile).catch(() => void 0);
 			if (cached?.version === "1" && cached.audio_sha256 && await store.has(cached.audio_sha256)) {
 				await store.materialize(cached.audio_sha256, dest);
@@ -39044,7 +39045,7 @@ async function synthesizeSpec(spec, options) {
 		backend: backend.id,
 		reason,
 		tracks,
-		tracks_path: toPosix$3(relative(paths.root, tracksFile)),
+		tracks_path: toPosix$4(relative(paths.root, tracksFile)),
 		overruns,
 		cache_hits: cacheHits
 	};
@@ -39527,7 +39528,7 @@ async function renderCover(o) {
 * unchanged render writes a byte-identical file.
 */
 const LOCK_FILE = "video.lock";
-const toPosix$2 = (p) => p.split(sep).join("/");
+const toPosix$3 = (p) => p.split(sep).join("/");
 const byKey = (key) => (a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0;
 const GENERIC_FAMILIES = /* @__PURE__ */ new Set([
 	"sans-serif",
@@ -39570,7 +39571,7 @@ async function lockFonts(requests, opts) {
 			continue;
 		}
 		const weight = r.weight >= 600 ? 700 : 400;
-		const inBundle = opts.fontsDir ? toPosix$2(relative(opts.fontsDir, file)) : "";
+		const inBundle = opts.fontsDir ? toPosix$3(relative(opts.fontsDir, file)) : "";
 		const bundled = inBundle && !inBundle.startsWith("..") && !isAbsolute(inBundle) ? BUNDLED_FONTS.find((f) => f.file === inBundle) : void 0;
 		const entry = {
 			family: bundled?.family ?? parseFontChain(r.chain).find((n) => !GENERIC_FAMILIES.has(n.toLowerCase())) ?? basename(file, extname(file)),
@@ -39586,12 +39587,29 @@ async function lockFonts(requests, opts) {
 async function lockAssets(root, relPaths) {
 	const out = /* @__PURE__ */ new Map();
 	for (const p of relPaths) try {
-		out.set(toPosix$2(p), await hashFile(join(root, p)));
+		out.set(toPosix$3(p), await hashFile(join(root, p)));
 	} catch {}
 	return [...out].map(([path, sha256]) => ({
 		path,
 		sha256
 	}));
+}
+/**
+* Add the series bible and the reference files the scenes used as lock assets (hashes from the
+* render, paths from the project folder, e.g. `../series.yaml`); they replace a same-path entry.
+* Without a series the assets are returned unchanged.
+*/
+function withSeriesAssets(assets, series) {
+	if (!series) return assets;
+	const out = new Map(assets.map((a) => [a.path, a]));
+	for (const f of [{
+		path: series.path,
+		sha256: series.sha256
+	}, ...series.files]) out.set(f.path, {
+		path: f.path,
+		sha256: f.sha256
+	});
+	return [...out.values()];
 }
 /** Files under `dir` (project-relative, posix), recursively, skipping dotfiles and `skip` subtrees. */
 async function listFiles(root, dir, skip = []) {
@@ -39611,7 +39629,7 @@ async function listFiles(root, dir, skip = []) {
 			else if (e.isFile()) out.push(child);
 		}
 	};
-	await walk(toPosix$2(dir));
+	await walk(toPosix$3(dir));
 	return out.sort();
 }
 /**
@@ -39866,6 +39884,215 @@ async function renderLockHolder(lockPath, deps = {}) {
 	return isStale(held, deps.host ?? hostname(), (deps.now ?? (() => /* @__PURE__ */ new Date()))(), deps.alive ?? processAlive) ? void 0 : held;
 }
 //#endregion
+//#region src/series.ts
+/**
+* The series bible (series.yaml) an episode points at with `spec.series`.
+*
+* The file may sit outside the project (next to the episode folders), so it is read as data
+* only: parsed as YAML/JSON and validated against `Series`, never executed. Symlinks are
+* resolved, and every file the bible references must stay inside the bible's own folder.
+* Everything a render takes from it is hashed (the file, the entries a scene shows, their
+* reference files), so the cache keys and video.lock describe it.
+*/
+/** Largest series file read (a bible is a short YAML document). */
+const SERIES_MAX_BYTES = 1e6;
+var SeriesLoadError = class extends Error {
+	issues;
+	constructor(issues) {
+		super(issues.map((i) => `${i.path || "series"}: ${i.message} (fix: ${i.fix})`).join("; "));
+		this.issues = issues;
+		this.name = "SeriesLoadError";
+	}
+};
+const toPosix$2 = (p) => p.split(sep).join("/");
+const inside$1 = (dir, p) => {
+	const r = relative(dir, p);
+	return r !== "" && !r.startsWith("..") && !isAbsolute(r);
+};
+/** Read and validate the series file `ref` (relative to `projectDir`). Throws SeriesLoadError with actionable issues. */
+async function loadSeries(projectDir, ref) {
+	const fail = (message, fix, path = "series") => {
+		throw new SeriesLoadError([{
+			path,
+			message,
+			fix
+		}]);
+	};
+	if (isAbsolute(ref) || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(ref)) fail(`"${ref}" must be a path relative to the project folder`, "set series to e.g. ../series.yaml");
+	const given = resolve(projectDir, ref);
+	let real;
+	try {
+		real = await realpath(given);
+	} catch {
+		return fail(`series file not found: ${ref} (looked at ${given})`, "create the series bible there (see skills/plan/references/series.md), or fix the series path");
+	}
+	const st = await stat(real);
+	if (!st.isFile()) fail(`${ref} is not a file`, "point series at the series.yaml file");
+	if (st.size > 1e6) fail(`${ref} is ${st.size} bytes (limit ${SERIES_MAX_BYTES})`, "keep the bible to characters, locations, motifs and look; put media in reference files");
+	const text = await readFile(real, "utf8");
+	const parsed = parseYamlOrJson(Series, text);
+	if (!parsed.ok) throw new SeriesLoadError(parsed.errors.map((e) => {
+		const syntax = e.message.startsWith("syntax error");
+		return {
+			path: e.path ? `series:${e.path}` : "series",
+			message: `${ref}: ${e.message}`,
+			fix: syntax ? "fix the YAML/JSON syntax at the reported line" : `correct ${e.path || "the document"} to match the Series schema (schema_get name=series)`
+		};
+	}));
+	return {
+		series: parsed.data,
+		ref,
+		path: real,
+		dir: dirname(real),
+		sha256: await hashFile(real)
+	};
+}
+/** Every bible entry by id. */
+function seriesEntries(series) {
+	const out = /* @__PURE__ */ new Map();
+	for (const e of series.characters ?? []) out.set(e.id, {
+		kind: "character",
+		entry: e
+	});
+	for (const e of series.locations ?? []) out.set(e.id, {
+		kind: "location",
+		entry: e
+	});
+	for (const e of series.motifs ?? []) out.set(e.id, {
+		kind: "motif",
+		entry: e
+	});
+	return out;
+}
+/** The files an entry references (series-relative). */
+function entryFiles(e) {
+	if (e.kind === "motif") return e.entry.asset ? [e.entry.asset] : [];
+	return e.entry.references ?? [];
+}
+/**
+* A series-relative reference resolved inside the bible's folder (symlinks resolved).
+* Returns the absolute path, or why it can't be used.
+*/
+async function resolveSeriesFile(loaded, ref) {
+	if (isAbsolute(ref) || ref.split(/[\\/]/).includes("..")) return { error: `"${ref}" must stay inside the series folder` };
+	const p = resolve(loaded.dir, ref);
+	if (!inside$1(loaded.dir, p)) return { error: `"${ref}" must stay inside the series folder` };
+	let real;
+	try {
+		real = await realpath(p);
+	} catch {
+		return { error: `"${ref}" not found in ${loaded.dir}` };
+	}
+	if (!inside$1(loaded.dir, real)) return { error: `"${ref}" is a symlink that leaves the series folder` };
+	if (!(await stat(real)).isFile()) return { error: `"${ref}" is not a file` };
+	return { abs: real };
+}
+/**
+* What each scene takes from the bible: the canonical JSON hash of the entries it names and the
+* hashes of their reference files. Scenes without series_refs get no key input, so their keys
+* do not move. Unknown ids and unusable files fail (spec_validate reports both first).
+*/
+async function seriesUsage(loaded, scenes) {
+	const entries = seriesEntries(loaded.series);
+	const hashes = /* @__PURE__ */ new Map();
+	const keys = /* @__PURE__ */ new Map();
+	const issues = [];
+	for (const [i, s] of scenes.entries()) {
+		const ids = [...new Set(s.series_refs ?? [])].sort();
+		if (!ids.length) continue;
+		const used = [];
+		for (const id of ids) {
+			const e = entries.get(id);
+			if (e) used.push(e);
+			else issues.push({
+				path: `scenes.${i}.series_refs`,
+				message: `scene ${s.id}: no entry "${id}" in ${loaded.ref}`,
+				fix: "run spec_validate"
+			});
+		}
+		const files = [];
+		for (const ref of [...new Set(used.flatMap(entryFiles))].sort()) {
+			let h = hashes.get(ref);
+			if (h === void 0) {
+				const r = await resolveSeriesFile(loaded, ref);
+				if ("error" in r) {
+					issues.push({
+						path: `scenes.${i}.series_refs`,
+						message: `scene ${s.id}: ${r.error}`,
+						fix: "run spec_validate"
+					});
+					continue;
+				}
+				h = await hashFile(r.abs);
+				hashes.set(ref, h);
+			}
+			files.push({
+				ref,
+				sha256: h
+			});
+		}
+		keys.set(s.id, {
+			entries: sha256Hex(canonicalJson(used)),
+			files
+		});
+	}
+	if (issues.length) throw new SeriesLoadError(issues);
+	const base = posix.dirname(toPosix$2(loaded.ref));
+	return {
+		keys,
+		files: [...hashes].map(([ref, sha256]) => ({
+			path: posix.join(base, toPosix$2(ref)),
+			sha256
+		})).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+	};
+}
+/**
+* The look inputs for resolveTokens when a spec has a series. Precedence:
+* renderer defaults < series (`style` pack, then `palette`) < spec `style` < brand.
+* - Style pack: the spec's, else the series'.
+* - Series palette: over the series' own style pack; under a style the spec picks (as defaults).
+* Brand stays last because resolveTokens applies it after the style.
+*/
+function seriesLook(series, specStyle, style) {
+	const pal = series?.palette;
+	if (!pal) return {
+		style,
+		defaults: {}
+	};
+	const defaults = {
+		...pal.background ? { color_background: pal.background } : {},
+		...pal.text ? { color_text: pal.text } : {},
+		...pal.primary ? { color_primary: pal.primary } : {},
+		...pal.secondary ? { color_secondary: pal.secondary } : {}
+	};
+	if (style && !specStyle) return {
+		style: {
+			...style,
+			palette: {
+				...style.palette,
+				...pal
+			}
+		},
+		defaults: {}
+	};
+	return {
+		style,
+		defaults
+	};
+}
+/** The style pack id a spec renders with: its own, else its series'. */
+function effectiveStyleId(specStyle, series) {
+	return specStyle ?? series?.style;
+}
+function seriesRecord(loaded, usage) {
+	return {
+		id: loaded.series.id,
+		path: posix.normalize(toPosix$2(loaded.ref)),
+		sha256: loaded.sha256,
+		files: usage.files
+	};
+}
+//#endregion
 //#region src/spec-validate.ts
 async function readIfExists$2(path) {
 	try {
@@ -39956,6 +40183,9 @@ async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = find
 		const style = await checkSpecStyle(parsed.data.style, stylesDir);
 		if (style) result.errors.push(style);
 	}
+	const series = await checkSeries(parsed.data, projectDir, stylesDir);
+	result.errors.push(...series.errors);
+	result.warnings.push(...series.warnings);
 	const motion = await checkMotionPages(parsed.data, projectDir);
 	result.errors.push(...motion.errors);
 	result.warnings.push(...motion.warnings);
@@ -39984,6 +40214,91 @@ async function checkMotionPages(spec, projectDir) {
 			};
 			(f.severity === "error" ? errors : warnings).push(issue);
 		}
+	}
+	return {
+		errors,
+		warnings
+	};
+}
+/**
+* The series bible a spec points at (`series`): the file loads and matches the schema; every
+* `series_refs` id names an entry (the fix lists the closest ids); the reference files of the
+* entries scenes show exist inside the bible's folder; the bible's style pack exists when the spec
+* picks none. Warnings: a narrated scene shows a character whose `voice_id` differs from the
+* narration voice, and a bible that no scene draws from (its edits would re-render nothing).
+*/
+async function checkSeries(spec, projectDir, stylesDir = findStylesDir()) {
+	const errors = [];
+	const warnings = [];
+	if (!spec.series) return {
+		errors,
+		warnings
+	};
+	let loaded;
+	try {
+		loaded = await loadSeries(projectDir, spec.series);
+	} catch (e) {
+		if (!(e instanceof SeriesLoadError)) throw e;
+		return {
+			errors: e.issues.map((i) => ({
+				...i,
+				stage: "series"
+			})),
+			warnings
+		};
+	}
+	const entries = seriesEntries(loaded.series);
+	const checkedFiles = /* @__PURE__ */ new Set();
+	const voiced = /* @__PURE__ */ new Set();
+	const narrated = voiceMode(spec) === "narrated";
+	for (const [i, s] of spec.scenes.entries()) for (const id of s.series_refs ?? []) {
+		const e = entries.get(id);
+		if (!e) {
+			const near = closestMatches(id, entries.keys());
+			errors.push({
+				path: `scenes.${i}.series_refs`,
+				stage: "series",
+				message: `scene ${s.id} names "${id}", which is not a character, location or motif in ${spec.series}`,
+				fix: near.length ? `use one of ${near.map((n) => `"${n}"`).join(", ")}, or add "${id}" to the series bible` : `add "${id}" to the series bible, or remove it from series_refs`
+			});
+			continue;
+		}
+		for (const ref of entryFiles(e)) {
+			if (checkedFiles.has(ref)) continue;
+			checkedFiles.add(ref);
+			const r = await resolveSeriesFile(loaded, ref);
+			if ("error" in r) errors.push({
+				path: `scenes.${i}.series_refs`,
+				stage: "series",
+				message: `series entry "${id}": ${r.error}`,
+				fix: "put the file in the series folder (next to the bible, or below it) and reference it by its relative path"
+			});
+		}
+		if (e.kind === "character" && e.entry.voice_id && narrated && s.voiceover.trim() && e.entry.voice_id !== spec.voice.voice_id && !voiced.has(id)) {
+			voiced.add(id);
+			warnings.push({
+				path: `scenes.${i}.series_refs`,
+				stage: "series",
+				message: `scene ${s.id} shows ${e.entry.name}, whose series voice is "${e.entry.voice_id}", but the narration uses ${spec.voice.voice_id ? `"${spec.voice.voice_id}"` : "the default voice"} (one narrator voice per video)`,
+				fix: `if ${e.entry.name} narrates, set voice.voice_id to "${e.entry.voice_id}"; otherwise ignore this`
+			});
+		}
+	}
+	if (entries.size && !spec.scenes.some((s) => s.series_refs?.length)) warnings.push({
+		path: "series",
+		stage: "series",
+		message: `no scene names an entry of ${spec.series} in series_refs, so editing a character, location or motif re-renders nothing`,
+		fix: "list the entries each scene shows in its series_refs"
+	});
+	if (!spec.style && loaded.series.style) {
+		const style = await checkSpecStyle(loaded.series.style, stylesDir);
+		if (style) errors.push({
+			...style,
+			path: "series",
+			stage: "series",
+			message: `the series style: ${style.message}`,
+			fix: `${style.fix.replace(/, or remove style$/, "")} in ${spec.series}, or set style in the spec`
+		});
 	}
 	return {
 		errors,
@@ -41153,10 +41468,15 @@ function checkLoopSeam(spec, state, out) {
 		fix: [...frameBad ? ["make the last frame return to the first (cyclic motion periods must divide the loop length)"] : [], ...audioBad ? ["end the music and sound where they started (loop the bed on a bar, no fades at the seam)"] : []].join("; ")
 	});
 }
-/** The active style's avoid list (none when the spec names no style or the pack can't be read). */
-async function styleAvoid(spec, stylesDir) {
-	if (!spec.style) return void 0;
-	const style = await getStyle(stylesDir, spec.style).catch(() => void 0);
+/**
+* The active style's avoid list: the spec's style, else its series bible's (none when neither
+* names one or the pack can't be read).
+*/
+async function styleAvoid(spec, stylesDir, projectDir) {
+	const series = !spec.style && spec.series ? await loadSeries(projectDir, spec.series).catch(() => void 0) : void 0;
+	const id = spec.style ?? series?.series.style;
+	if (!id) return void 0;
+	const style = await getStyle(stylesDir, id).catch(() => void 0);
 	return style ? {
 		id: style.id,
 		...style.motion.avoid ? { avoid: style.motion.avoid } : {}
@@ -41233,7 +41553,7 @@ async function lintProject(projectDir, opts = {}) {
 	checkFootageQuality(spec, irMedia, findings);
 	checkLogo(state, boxes, findings);
 	checkForbidden(spec, brand, findings);
-	checkBannedEffect(spec, await styleAvoid(spec, opts.stylesDir === void 0 ? findStylesDir() : opts.stylesDir), brand, findings);
+	checkBannedEffect(spec, await styleAvoid(spec, opts.stylesDir === void 0 ? findStylesDir() : opts.stylesDir, paths.root), brand, findings);
 	checkAcceptance(spec, state, findings);
 	checkLoopSeam(spec, state, findings);
 	checkPostCopy(spec, contracts, findings);
@@ -135404,7 +135724,7 @@ var init_aliases = __esmMin((() => {
 * check(6); // `true`
 * ```
 */
-function compile$1(parsed) {
+function compile$2(parsed) {
 	const a = parsed[0];
 	const b = parsed[1] - 1;
 	if (b < 0 && a <= 0) return falseFunc;
@@ -135508,7 +135828,7 @@ var init_parse = __esmMin((() => {
 * check(6); // `true`
 */
 function nthCheck(formula) {
-	return compile$1(parse$2(formula));
+	return compile$2(parse$2(formula));
 }
 var init_dist$1 = __esmMin((() => {
 	init_compile$1();
@@ -136083,7 +136403,7 @@ var init_compile = __esmMin((() => {
 //#region ../../node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/index.js
 var dist_exports = /* @__PURE__ */ __exportAll({
 	_compileUnsafe: () => _compileUnsafe,
-	compile: () => compile,
+	compile: () => compile$1,
 	default: () => selectAll,
 	is: () => is,
 	prepareContext: () => prepareContext,
@@ -136105,7 +136425,7 @@ function convertOptionFormats(options) {
 * @param options Compilation options.
 * @param context Optional context for the selector.
 */
-function compile(selector, options, context) {
+function compile$1(selector, options, context) {
 	const convertedOptions = convertOptionFormats(options);
 	const next = _compileUnsafe(selector, convertedOptions, context);
 	return next === falseFunc ? falseFunc : (element) => convertedOptions.adapter.isTag(element) && next(element);
@@ -136157,7 +136477,7 @@ function appendNextSiblings(element, adapter) {
 * @returns Whether the element matches the query.
 */
 function is(element, query, options) {
-	return (typeof query === "function" ? query : compile(query, options))(element);
+	return (typeof query === "function" ? query : compile$1(query, options))(element);
 }
 var defaultEquals, defaultOptions$1, selectAll, selectOne;
 var init_dist = __esmMin((() => {
@@ -136245,7 +136565,7 @@ const adapter = {
 	findAll,
 	findOne
 };
-const prepareMatch = (element, selectors) => compile(selectors, {
+const prepareMatch = (element, selectors) => compile$1(selectors, {
 	context: selectors.includes(":scope") ? element : void 0,
 	xmlMode: !ignoreCase(element),
 	adapter
@@ -243621,7 +243941,7 @@ function runYtDlp(bin, args, opts) {
 	});
 }
 /** A short, single-line string from untrusted metadata (control characters dropped). */
-function clean(v, max = 300) {
+function clean$1(v, max = 300) {
 	if (typeof v !== "string") return void 0;
 	const s = v.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
 	return s ? s.length > max ? `${s.slice(0, max - 1)}…` : s : void 0;
@@ -243768,7 +244088,7 @@ function refLocation(url) {
 }
 function titleFromUrl(url) {
 	const u = new URL(url);
-	return clean(safeDecode(u.pathname.split("/").filter(Boolean).pop() ?? "").replace(/\.[^.]+$/, ""), 120) ?? u.hostname;
+	return clean$1(safeDecode(u.pathname.split("/").filter(Boolean).pop() ?? "").replace(/\.[^.]+$/, ""), 120) ?? u.hostname;
 }
 /** Stage folder inside the project (never the system temp: the file is renamed into assets). */
 async function stageDir(projectDir) {
@@ -243924,7 +244244,7 @@ function createVideoUrlExtractor(options = {}) {
 				if (info._type === "playlist") throw new Error(`${url} is a playlist; ingest the videos one URL at a time`);
 				if (info.is_live === true || info.live_status === "is_live" || info.live_status === "is_upcoming") throw new Error(`${url} is a live or upcoming stream; ingest it after it has ended`);
 				const est = estimatedBytes(info);
-				if (est !== void 0 && est > maxBytes) throw tooLarge(clean(info.title) ?? url, est, maxBytes);
+				if (est !== void 0 && est > maxBytes) throw tooLarge(clean$1(info.title) ?? url, est, maxBytes);
 				const run = await runYtDlp(bin, ytDlpDownloadArgs(url, {
 					lang,
 					maxBytes
@@ -243934,17 +244254,17 @@ function createVideoUrlExtractor(options = {}) {
 					timeoutMs: options.timeoutMs ?? 36e5,
 					...input.signal ? { signal: input.signal } : {}
 				}).catch((err) => {
-					if (/max-filesize/i.test(err.message)) throw tooLarge(clean(info.title) ?? url, est, maxBytes);
+					if (/max-filesize/i.test(err.message)) throw tooLarge(clean$1(info.title) ?? url, est, maxBytes);
 					throw err;
 				});
 				const got = await collectDownload(dir, info);
 				if (!got.media) {
-					if (/max-filesize/i.test(`${run.stdout}\n${run.stderr}`)) throw tooLarge(clean(info.title) ?? url, est, maxBytes);
+					if (/max-filesize/i.test(`${run.stdout}\n${run.stderr}`)) throw tooLarge(clean$1(info.title) ?? url, est, maxBytes);
 					throw new Error(`yt-dlp finished but produced no media file for ${url}`);
 				}
 				const size = (await stat(got.media)).size;
-				if (size > maxBytes) throw tooLarge(clean(info.title) ?? url, size, maxBytes);
-				const title = clean(info.title) ?? titleFromUrl(url);
+				if (size > maxBytes) throw tooLarge(clean$1(info.title) ?? url, size, maxBytes);
+				const title = clean$1(info.title) ?? titleFromUrl(url);
 				const part = await extractMediaFile(got.media, {
 					projectDir: input.projectDir,
 					uri: url,
@@ -243961,13 +244281,13 @@ function createVideoUrlExtractor(options = {}) {
 				const put = (k, v) => {
 					if (v !== void 0) remote[k] = v;
 				};
-				put("webpage_url", clean(info.webpage_url, 2e3));
-				put("extractor", clean(info.extractor_key, 60));
-				put("video_id", clean(info.id, 120));
-				put("uploader", clean(info.uploader ?? info.channel, 200));
+				put("webpage_url", clean$1(info.webpage_url, 2e3));
+				put("extractor", clean$1(info.extractor_key, 60));
+				put("video_id", clean$1(info.id, 120));
+				put("uploader", clean$1(info.uploader ?? info.channel, 200));
 				put("duration_sec", typeof info.duration === "number" && info.duration >= 0 ? info.duration : void 0);
-				put("license", clean(info.license, 200));
-				put("downloader_version", clean(info._version?.version, 40));
+				put("license", clean$1(info.license, 200));
+				put("downloader_version", clean$1(info._version?.version, 40));
 				return await finishPart(part, input.projectDir, remote, got.subs, lang);
 			} finally {
 				await cleanup(dir);
@@ -246331,8 +246651,15 @@ async function stageInputs(run) {
 	for (const w of specWarnings) warnings.push(`spec: ${w.path || "(root)"}: ${w.message}`);
 	const brandFile = await loadBrand(root, o.brandPath);
 	const brand = brandFile?.brand;
-	const style = spec.style ? await getStyle(findStylesDir(env), spec.style) : void 0;
-	const tokens = resolveTokens$1(brand, {}, style, { language: spec.language });
+	const seriesLoaded = spec.series ? await loadSeries(root, spec.series) : void 0;
+	const series = seriesLoaded ? {
+		loaded: seriesLoaded,
+		usage: await seriesUsage(seriesLoaded, spec.scenes)
+	} : void 0;
+	const styleId = effectiveStyleId(spec.style, seriesLoaded?.series);
+	const look = seriesLook(seriesLoaded?.series, spec.style, styleId ? await getStyle(findStylesDir(env), styleId) : void 0);
+	const style = look.style;
+	const tokens = resolveTokens$1(brand, look.defaults, style, { language: spec.language });
 	if (brand?.visual?.logo_placement?.position === "none") delete tokens.logo_path;
 	const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
 	const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
@@ -246354,7 +246681,8 @@ async function stageInputs(run) {
 		captionPreset,
 		brandCaptions,
 		fontsDir,
-		fonts
+		fonts,
+		...series ? { series } : {}
 	};
 }
 /** b. Probe the preferred renderer (HyperFrames needs 24/30/60 fps), then fix the frame size and fps. */
@@ -246761,7 +247089,8 @@ async function stageScenes(run, input) {
 		footage: footage.byScene,
 		footageRenderer: o.footageRenderer ?? createFootageRenderer({ encodePreset: o.encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") }),
 		...sceneCues.size ? { cues: sceneCues } : {},
-		...sceneBeats.size ? { beats: sceneBeats } : {}
+		...sceneBeats.size ? { beats: sceneBeats } : {},
+		...input.seriesKeys?.size ? { series: input.seriesKeys } : {}
 	};
 	const first = await renderScenes({ scenes: planScenes }, {
 		...baseOpts,
@@ -247277,7 +247606,8 @@ async function stageRenderState(run, input) {
 		...brandFile ? { brand_path: brandRel(root, brandFile.path) } : {},
 		fonts: lockedFonts,
 		...style ? { style: styleRef(style) } : {},
-		...cues.length ? { sound_events: cues.length } : {}
+		...cues.length ? { sound_events: cues.length } : {},
+		...input.inputs.series ? { series: seriesRecord(input.inputs.series.loaded, input.inputs.series.usage) } : {}
 	};
 }
 //#endregion
@@ -247320,7 +247650,8 @@ async function renderProjectLocked(projectDir, o) {
 		tp,
 		footage,
 		sceneCues,
-		beatSync: timing.beatSync
+		beatSync: timing.beatSync,
+		...inputs.series ? { seriesKeys: inputs.series.usage.keys } : {}
 	});
 	const { ordered, used, placeholders, reasons, zones, contracts } = scenes;
 	const captions = await stageCaptions(run, {
@@ -247803,6 +248134,7 @@ async function exportFromState(root, state, now, opts = {}) {
 				...x.peak_ms !== void 0 ? { peak_ms: x.peak_ms } : {}
 			})) } : {},
 			...state.timing_adjustments.length ? { timing_adjustments: state.timing_adjustments } : {},
+			...state.series ? { series: state.series } : {},
 			...state.sound_events ? { captions: { sound_events: state.sound_events } } : {},
 			...c2pa && c2paSource ? { c2pa: {
 				...c2pa,
@@ -248139,10 +248471,10 @@ async function lockFromState(root, state, projectId, outputs) {
 			cache_key: s.cache_key,
 			clip_sha256: s.clip_sha256
 		})),
-		assets: [...await lockAssets(root, [...new Set(state.music && !byRef(state.music.ref) ? [...inputs, state.music.ref] : inputs)]), ...state.music && byRef(state.music.ref) ? [{
+		assets: withSeriesAssets([...await lockAssets(root, [...new Set(state.music && !byRef(state.music.ref) ? [...inputs, state.music.ref] : inputs)]), ...state.music && byRef(state.music.ref) ? [{
 			path: state.music.ref,
 			sha256: state.music.sha256
-		}] : []],
+		}] : []], state.series),
 		outputs: outputs.map((o) => ({
 			path: o.path,
 			sha256: o.sha256,
@@ -266916,6 +267248,742 @@ ${metricsTable(d)}
 `;
 }
 //#endregion
+//#region ../prompts/dist/registry.js
+function isSpecsDir(dir) {
+	try {
+		return existsSync(dir) && readdirSync(dir).some((n) => n.endsWith(".yaml"));
+	} catch {
+		return false;
+	}
+}
+/**
+* Locate the bundled `provider-specs/` directory: `${CLAUDE_PLUGIN_ROOT}/provider-specs` first, then
+* walk up from this module (works from `packages/*\/src`, `packages/*\/dist` and `dist/mcp.mjs`).
+*/
+function findProviderSpecsDir(env = process.env, from) {
+	const root = env.CLAUDE_PLUGIN_ROOT;
+	if (root && isSpecsDir(join(root, "provider-specs"))) return join(root, "provider-specs");
+	let dir = from ?? dirname(fileURLToPath(import.meta.url));
+	for (let i = 0; i < 6; i++) {
+		const candidate = join(dir, "provider-specs");
+		if (isSpecsDir(candidate)) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+function parseSpec(text, file, fileId) {
+	const parsed = parseYamlOrJson(ProviderSpec, text);
+	if (!parsed.ok) throw new Error(`invalid provider spec ${file}: ${parsed.errors.map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
+	if (parsed.data.id !== fileId) throw new Error(`provider spec ${file} has id "${parsed.data.id}" but is named "${fileId}.yaml"`);
+	return parsed.data;
+}
+/** Load and validate every `<dir>/<family>.yaml`, sorted by id. Throws on any invalid spec. */
+async function loadProviderSpecs(dir) {
+	const names = (await readdir(dir)).filter((n) => n.endsWith(".yaml")).sort();
+	const out = [];
+	for (const name of names) {
+		const file = join(dir, name);
+		out.push(parseSpec(await readFile(file, "utf8"), file, name.slice(0, -5)));
+	}
+	return out;
+}
+//#endregion
+//#region ../prompts/dist/lint.js
+/** Camera move vocabulary, each alternative a distinct move (synonyms share a group). */
+const CAMERA_MOVES = [
+	["pan", /\bpan(s|ning|ned)?\b/i],
+	["tilt", /\btilt(s|ing|ed)?\b/i],
+	["push", /\b(push(es|ing)?|dolly|dollies|dollying)\b(?![- ](out|back))/i],
+	["pull", /\b(pull(s|ing)?[- ]?(out|back)|dolly[- ](out|back))\b/i],
+	["truck", /\btruck(s|ing)?\b/i],
+	["zoom", /\bzoom(s|ing)?\b/i],
+	["orbit", /\b(orbit(s|ing)?|arc(s|ing)?)\b/i],
+	["crane", /\b(crane|boom|pedestal)(s|ing)?\b/i],
+	["track", /\b(track(s|ing)?|follow(s|ing)?)\b/i],
+	["roll", /\b(roll(s|ing)?|dutch)\b/i],
+	["whip", /\bwhip\b/i],
+	["handheld", /\b(handheld|shake|shaky)\b/i]
+];
+const SEQUENCE = /\b(and then|then|followed by|after that|afterwards|before (it|she|he|they|the camera)|next,)\b/i;
+/** Text, brand marks or prices that belong in the edit, not in generated pixels. */
+const BRAND_TEXT = /(\b(logos?|wordmarks?|prices?|price tags?|pricing|text overlays?|captions?|subtitles?|title cards?|headlines?|lettering|typography|on-screen text|UI|watermarks?)\b|[$€£₹]\s?\d)/i;
+/**
+* Director checks on one shot card (provider-independent): one camera move, one action, at most
+* 3 SFX, brand text and prices composited in post, dialogue by a known subject. Heuristic: every
+* finding is a warning with a fix, never a hard error.
+*/
+function directorChecks(card, at = "shot") {
+	const out = [];
+	const moves = CAMERA_MOVES.filter(([, re]) => re.test(card.camera)).map(([name]) => name);
+	if (moves.length > 1 || moves.length === 1 && SEQUENCE.test(card.camera)) out.push({
+		code: "camera_compound",
+		path: `${at}.camera`,
+		message: `"${card.camera}" reads as more than one camera move (${moves.join(", ")})`,
+		fix: "keep one camera move per shot (or \"locked\"); give the second move its own shot"
+	});
+	if (SEQUENCE.test(card.action)) out.push({
+		code: "action_compound",
+		path: `${at}.action`,
+		message: `"${card.action}" chains several actions`,
+		fix: "keep one clear action per shot; split the rest into the next shot (chain it with first_frame_from)"
+	});
+	const sfx = card.audio?.sfx ?? [];
+	if (sfx.length > 3) out.push({
+		code: "sfx_count",
+		path: `${at}.audio.sfx`,
+		message: `${sfx.length} sound effects; at most 3 read clearly`,
+		fix: "keep the 3 tied to the most visible events"
+	});
+	if ((card.on_screen_text ?? "post") === "generated") out.push({
+		code: "generated_text",
+		path: `${at}.on_screen_text`,
+		message: "generated text, logos and prices are unreliable (misspelt, warped, off-brand)",
+		fix: "set on_screen_text: \"post\" and composite the text in the edit"
+	});
+	else for (const field of [
+		"action",
+		"environment",
+		"look"
+	]) {
+		const value = card[field];
+		const m = value ? BRAND_TEXT.exec(value) : null;
+		if (m) out.push({
+			code: "brand_text_in_post",
+			path: `${at}.${field}`,
+			message: `mentions "${m[0].trim()}", but on-screen text, logos and prices are composited in post`,
+			fix: "describe a clean surface where the text or logo goes and add it in the edit (on_screen_text: post)"
+		});
+	}
+	const ids = new Set((card.subjects ?? []).map((s) => s.id));
+	if (ids.size) {
+		for (const [i, d] of (card.audio?.dialogue ?? []).entries()) if (!ids.has(d.speaker)) out.push({
+			code: "unknown_speaker",
+			path: `${at}.audio.dialogue.${i}.speaker`,
+			message: `speaker "${d.speaker}" is not one of the shot's subjects`,
+			fix: `use one of ${[...ids].join(", ")} or add the speaker to subjects`
+		});
+	}
+	return out;
+}
+//#endregion
+//#region ../prompts/dist/compile.js
+/** Where the approved last frame of `sceneId` is expected (a placeholder until it is exported). */
+function lastFramePath(sceneId) {
+	return `prompts/frames/${sceneId}-last.png`;
+}
+function clean(s) {
+	return s.trim().replace(/\s+/g, " ").replace(/[.;,:\s]+$/, "");
+}
+function capitalize(s) {
+	return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+/** One sentence: trimmed, capitalized, ending in a period (unless it already ends in ! ? or a quote). */
+function sentence(s) {
+	const c = clean(s ?? "");
+	if (!c) return "";
+	return /[!?"'”]$/.test(c) ? capitalize(c) : `${capitalize(c)}.`;
+}
+function joinText(parts, sep = " ") {
+	return parts.filter((p) => Boolean(p && p.trim())).join(sep);
+}
+function unquote(s) {
+	return s.trim().replace(/\s+/g, " ").replace(/^["'“”]+|["'“”]+$/g, "").trim();
+}
+function escapeRe(s) {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+const LOCKED = /^(locked|locked[- ]off|static|still|fixed|no movement)( camera| shot)?$/i;
+function isLockedCamera(camera) {
+	return LOCKED.test(clean(camera));
+}
+/** Fit a duration to the provider: nearest allowed step (ties go up), else clamp and round to whole seconds. */
+function fitDuration(sec, d) {
+	if (d.allowed_sec?.length) {
+		const steps = [...d.allowed_sec].sort((a, b) => a - b);
+		let best = steps[0];
+		for (const v of steps) if (Math.abs(v - sec) <= Math.abs(best - sec)) best = v;
+		return best;
+	}
+	return Math.min(d.max_sec, Math.max(d.min_sec, Math.round(Math.min(d.max_sec, Math.max(d.min_sec, sec)))));
+}
+function ratioValue(r) {
+	const [w, h] = r.split(":").map(Number);
+	return w / h;
+}
+/** The supported ratio closest in shape (log distance; the first listed wins a tie). */
+function nearestAspect(ratio, supported) {
+	if (supported.includes(ratio)) return ratio;
+	const v = ratioValue(ratio);
+	let best = supported[0];
+	for (const r of supported) if (Math.abs(Math.log(ratioValue(r) / v)) < Math.abs(Math.log(ratioValue(best) / v))) best = r;
+	return best;
+}
+/** Draft-grade default: the smallest listed resolution of at least 720 lines, else the largest. */
+function defaultResolution(ps) {
+	const r = ps.resolutions ?? [];
+	const lines = (x) => /^(\d+)p$/i.test(x) ? Number(x.slice(0, -1)) : /^(\d+)k$/i.test(x) ? Number(x.slice(0, -1)) * 540 : 0;
+	const sorted = [...r].sort((a, b) => lines(a) - lines(b));
+	return sorted.find((x) => lines(x) >= 720) ?? sorted.at(-1);
+}
+function stripNegation(s) {
+	return clean(s).replace(/^(no|not|don't|do not|never|without|avoid)\s+/i, "");
+}
+/** Positive rewrites for providers that misread negatives (runway). */
+const POSITIVE = [
+	[/camera (movement|motion|moves?)|moving camera/i, "The camera remains still."],
+	[/handheld|shak(e|y|ing)|jitter/i, "Smooth, steady camera movement."],
+	[/\b(text|logos?|letters|lettering|captions?|subtitles?|watermarks?|signage|words)\b/i, "Surfaces are plain and free of lettering."],
+	[/\bcuts?\b|scene changes?|\bedits?\b/i, "One continuous take."],
+	[/\b(extra|other|additional|more) (people|characters|persons|figures)\b|\bcrowds?\b/i, "Only the described subjects are in frame."],
+	[/\bblur(ry)?\b|out of focus/i, "Crisp, sharp focus throughout."],
+	[/\bmorph(ing)?\b|distort(ed|ion)?|warp(ed|ing)?/i, "Faces, hands and shapes stay stable and natural."]
+];
+function hasAudio(card) {
+	const a = card.audio;
+	return Boolean(a && ((a.dialogue?.length ?? 0) > 0 || (a.sfx?.length ?? 0) > 0 || a.ambience?.trim() || a.music?.trim()));
+}
+const PLAIN_AUDIO = {
+	line: (sp, l) => `Dialogue: ${sp} says "${l}"`,
+	sfx: (l) => sentence(`Sound effects: ${l.map(clean).join(", ")}`),
+	ambience: (s) => sentence(`Ambience: ${s}`),
+	music: (s) => sentence(`Music: ${s}`)
+};
+function audioText(card, style) {
+	const a = card.audio;
+	if (!a) return "";
+	return joinText([
+		...(a.dialogue ?? []).map((d) => style.line(d.speaker, unquote(d.line))),
+		a.sfx?.length ? style.sfx(a.sfx) : "",
+		a.ambience?.trim() ? style.ambience(a.ambience) : "",
+		a.music?.trim() ? style.music(a.music) : ""
+	]);
+}
+/** The action with each bound subject's reference name after its first mention. */
+function actionWithRefs(ctx) {
+	let text = clean(ctx.card.action);
+	for (const r of ctx.refs) {
+		const re = new RegExp(`\\b${escapeRe(r.subject)}\\b`, "i");
+		if (re.test(text)) text = text.replace(re, (m) => `${m} (${r.name})`);
+	}
+	return sentence(text);
+}
+function refLines(ctx) {
+	return joinText(ctx.refs.map((r) => sentence(`${r.name} is ${r.subject} (${clean(r.role)})`)));
+}
+function continuityText(card) {
+	return joinText([card.continuity?.length ? sentence(`Keep identical to the previous shot: ${card.continuity.map(clean).join(", ")}`) : "", card.end_state?.trim() ? sentence(`The shot ends on ${clean(card.end_state)}`) : ""]);
+}
+/** image_to_video: the frame already shows the scene, so some providers want motion only. */
+function motionOnly(ctx) {
+	return ctx.mode === "image_to_video" && (ctx.ps.id === "runway" || ctx.ps.id === "wan");
+}
+function sceneText(ctx) {
+	if (motionOnly(ctx)) {
+		if (ctx.card.environment || ctx.card.look) ctx.fixes.push(`${ctx.ps.id} image-to-video: environment and look left out (the first frame shows them); the prompt describes motion and camera only`);
+		return "";
+	}
+	return joinText([sentence(ctx.card.environment), sentence(ctx.card.look)]);
+}
+function isSeedance25(model) {
+	return /2[.-]5/.test(model.id);
+}
+const FORMATTERS = {
+	seedance: (ctx) => {
+		const camera = ctx.locked ? "Static camera." : sentence(`Camera: ${ctx.card.camera}`);
+		const audio = isSeedance25(ctx.model) ? audioText(ctx.card, {
+			line: (sp, l) => `{${sp}: ${l}}`,
+			sfx: (l) => l.map((s) => `<${clean(s)}>`).join(" "),
+			ambience: (s) => `(${clean(s)})`,
+			music: (s) => `(${clean(s)})`
+		}) : audioText(ctx.card, PLAIN_AUDIO);
+		return { text: joinText([
+			actionWithRefs(ctx),
+			sceneText(ctx),
+			camera,
+			audio,
+			continuityText(ctx.card),
+			refLines(ctx)
+		]) };
+	},
+	veo: (ctx) => {
+		const camera = ctx.locked ? "Static locked-off shot." : sentence(ctx.card.camera);
+		const audio = audioText(ctx.card, {
+			line: (sp, l) => `${capitalize(sp)} says, "${l}"`,
+			sfx: (l) => sentence(`SFX: ${l.map(clean).join(", ")}`),
+			ambience: (s) => sentence(`Ambient noise: ${s}`),
+			music: (s) => sentence(`Music: ${s}`)
+		});
+		return { text: joinText([
+			camera,
+			actionWithRefs(ctx),
+			sceneText(ctx),
+			audio,
+			continuityText(ctx.card),
+			refLines(ctx)
+		]) };
+	},
+	kling: (ctx) => {
+		const camera = ctx.locked ? "Locked-off static shot." : sentence(`Camera: ${ctx.card.camera}`);
+		const audio = audioText(ctx.card, {
+			line: (sp, l) => `Then ${sp} says: "${l}"`,
+			sfx: (l) => sentence(`Sound: ${l.map(clean).join(", ")}`),
+			ambience: (s) => sentence(`Ambience: ${s}`),
+			music: (s) => sentence(`Music: ${s}`)
+		});
+		return {
+			text: joinText([
+				camera,
+				actionWithRefs(ctx),
+				sceneText(ctx),
+				audio,
+				continuityText(ctx.card),
+				refLines(ctx)
+			]),
+			params: { cfg_scale: .5 }
+		};
+	},
+	wan: (ctx) => {
+		const camera = ctx.locked ? "The camera stays still." : sentence(`Camera: ${ctx.card.camera}`);
+		const audio = audioText(ctx.card, {
+			line: (sp, l) => `Voice: ${sp} says "${l}"`,
+			sfx: (l) => sentence(`Sound effects: ${l.map(clean).join(", ")}`),
+			ambience: (s) => sentence(`Ambient sound: ${s}`),
+			music: (s) => sentence(`Background music: ${s}`)
+		});
+		const scene = motionOnly(ctx) ? sceneText(ctx) : joinText([
+			sentence(ctx.card.environment),
+			camera,
+			sentence(ctx.card.look)
+		]);
+		return { text: joinText([
+			actionWithRefs(ctx),
+			scene,
+			motionOnly(ctx) ? camera : "",
+			audio,
+			continuityText(ctx.card),
+			refLines(ctx)
+		]) };
+	},
+	runway: (ctx) => {
+		return { text: joinText([
+			ctx.locked ? "Locked camera. The camera remains still." : sentence(`${clean(ctx.card.camera)} shot`),
+			actionWithRefs(ctx),
+			sceneText(ctx),
+			continuityText(ctx.card),
+			...ctx.positives
+		]) };
+	},
+	hailuo: (ctx) => {
+		return {
+			text: joinText([
+				hailuoCamera(ctx),
+				actionWithRefs(ctx),
+				sceneText(ctx),
+				continuityText(ctx.card)
+			]),
+			params: { prompt_optimizer: false }
+		};
+	}
+};
+const CAMERA_SYNONYMS = [
+	[/\b(dolly|move|push(es|ing)?)[- ]?(in|forward)\b/i, "push in"],
+	[/\b(dolly|move)[- ]?(out|back)\b|\bpull(s|ing)?[- ]?back\b/i, "pull out"],
+	[/\b(crane|boom|jib)[- ]?up\b/i, "pedestal up"],
+	[/\b(crane|boom|jib)[- ]?down\b/i, "pedestal down"],
+	[/\bfollow(s|ing)?\b|\btracking\b/i, "tracking shot"],
+	[/\bhandheld\b|\bshak(y|e)\b/i, "shake"]
+];
+/** The camera move as the provider's bracketed commands (commands parsed from `camera_syntax`). */
+function hailuoCamera(ctx) {
+	const commands = [...(ctx.ps.camera_syntax ?? "").matchAll(/\[([^\]]+)\]/g)].map((m) => m[1].trim());
+	if (!commands.length) return sentence(`Camera: ${ctx.card.camera}`);
+	const locked = commands.find((c) => /static/i.test(c));
+	if (ctx.locked && locked) return `[${locked}]`;
+	let text = ` ${clean(ctx.card.camera).toLowerCase()} `;
+	for (const [re, canonical] of CAMERA_SYNONYMS) text = text.replace(re, canonical);
+	const hits = commands.map((c) => ({
+		c,
+		at: text.indexOf(` ${c.toLowerCase()} `) >= 0 ? text.indexOf(` ${c.toLowerCase()} `) : text.indexOf(c.toLowerCase())
+	})).filter((h) => h.at >= 0).sort((a, b) => a.at - b.at).map((h) => h.c).filter((c, i, all) => all.indexOf(c) === i);
+	if (!hits.length) {
+		ctx.warnings.push({
+			code: "camera_unmapped",
+			path: "shot.camera",
+			message: `"${ctx.card.camera}" matches none of ${ctx.ps.name}'s camera commands; it is written as plain text`,
+			fix: `use one of ${commands.map((c) => `[${c}]`).join(" ")}`
+		});
+		return sentence(`Camera: ${ctx.card.camera}`);
+	}
+	return `[${hits.join(",")}]`;
+}
+function pickModel(ps, mode, requested) {
+	return (requested ? [requested] : ps.models).find((m) => m.modes.includes(mode));
+}
+/** Compile one shot card for one provider family. */
+function compile(card, scene, spec, ps, opts = {}) {
+	const warnings = [...directorChecks(card)];
+	const fixes = [];
+	const duration = fitDuration(scene.duration_sec, ps.duration);
+	if (duration !== scene.duration_sec) {
+		const d = ps.duration;
+		const range = d.allowed_sec?.length ? d.allowed_sec.join(", ") + " s" : `${d.min_sec}-${d.max_sec} s`;
+		warnings.push({
+			code: "duration",
+			path: "duration_sec",
+			message: `${ps.name} takes ${range}; ${scene.duration_sec}s compiles as ${duration}s`,
+			fix: scene.duration_sec > d.max_sec ? `split the scene into shots of at most ${d.max_sec}s (chain them with first_frame_from)` : `trim or hold in the edit, or set duration_sec to ${duration}`
+		});
+		fixes.push(`duration ${scene.duration_sec}s → ${duration}s`);
+	}
+	let requested;
+	if (opts.model) {
+		requested = ps.models.find((m) => m.id === opts.model);
+		if (!requested) warnings.push({
+			code: "model_unknown",
+			path: "model",
+			message: `${ps.name} has no model "${opts.model}"`,
+			fix: `use one of ${ps.models.map((m) => m.id).join(", ")}`
+		});
+	}
+	const bound = (card.subjects ?? []).filter((s) => Boolean(s.asset));
+	const refLimit = ps.references ? (ps.references.max_images ?? 0) + (ps.references.max_videos ?? 0) : 0;
+	const firstFrame = card.first_frame_from ? lastFramePath(card.first_frame_from) : void 0;
+	let mode = firstFrame ? "image_to_video" : bound.length && refLimit > 0 ? "reference_to_video" : "text_to_video";
+	let model = pickModel(ps, mode, requested);
+	if (!model && mode !== "text_to_video") {
+		warnings.push({
+			code: "mode_unsupported",
+			path: firstFrame ? "shot.first_frame_from" : "shot.subjects",
+			message: `${requested ? requested.id : ps.name} has no ${mode}; compiled as text_to_video${firstFrame ? " (the shot is not chained to the previous frame)" : ""}`,
+			fix: requested ? `use a model with ${mode}: ${ps.models.filter((m) => m.modes.includes(mode)).map((m) => m.id).join(", ") || "(none)"}` : "describe the continuity in words, or pick another provider for this shot"
+		});
+		mode = "text_to_video";
+		model = pickModel(ps, mode, requested);
+	}
+	if (!model) {
+		model = requested ?? ps.models[0];
+		warnings.push({
+			code: "mode_unsupported",
+			path: "model",
+			message: `${model.id} needs one of ${model.modes.join(", ")}; this shot has no first frame or references`,
+			fix: "set first_frame_from, or pick a text-to-video model"
+		});
+		mode = model.modes[0];
+	}
+	let refs = [];
+	if (bound.length) {
+		if (refLimit === 0) warnings.push({
+			code: "cast_unbound",
+			path: "shot.subjects",
+			message: `${ps.name} cannot bind subject references (${bound.map((s) => s.id).join(", ")})`,
+			fix: "chain the shot from an approved identity keyframe (first_frame_from) and describe the subjects in words"
+		});
+		else if (mode !== "reference_to_video") {
+			if (!firstFrame) warnings.push({
+				code: "cast_unbound",
+				path: "shot.subjects",
+				message: `references are not sent in ${mode}`,
+				fix: "identity comes from the prompt text; bind references with a reference-to-video model"
+			});
+		} else {
+			if (bound.length > refLimit) {
+				warnings.push({
+					code: "cast_limit",
+					path: "shot.subjects",
+					message: `${bound.length} bound subjects; ${ps.name} takes at most ${refLimit} references`,
+					fix: `keep the ${refLimit} that matter most in this shot; ${bound.slice(refLimit).map((s) => s.id).join(", ")} dropped`
+				});
+				fixes.push(`references cut to ${refLimit}`);
+			}
+			const syntax = ps.references.syntax;
+			refs = bound.slice(0, refLimit).map((s, i) => ({
+				name: syntax.includes("{n}") ? syntax.replaceAll("{n}", String(i + 1)) : `${syntax} ${i + 1}`,
+				subject: s.id,
+				asset: s.asset,
+				role: s.role
+			}));
+		}
+	}
+	let aspect = nearestAspect(spec.aspect_ratio, ps.aspect_ratios);
+	if (ps.id === "runway" && mode === "text_to_video" && aspect !== "16:9") aspect = "16:9";
+	if (aspect !== spec.aspect_ratio) {
+		warnings.push({
+			code: "aspect_ratio",
+			path: "aspect_ratio",
+			message: `${ps.name}${ps.id === "runway" && mode === "text_to_video" ? " text-to-video" : ""} does not offer ${spec.aspect_ratio}; compiled as ${aspect}`,
+			fix: `reframe ${aspect} → ${spec.aspect_ratio} in the edit (crop or pad), or pick a provider with ${spec.aspect_ratio}`
+		});
+		fixes.push(`aspect ratio ${spec.aspect_ratio} → ${aspect}`);
+	}
+	const resolution = defaultResolution(ps);
+	if (ps.id === "veo" && refs.length && duration !== 8) warnings.push({
+		code: "duration",
+		path: "duration_sec",
+		message: "Veo reference images force 8 s clips",
+		fix: "set duration_sec to 8 or drop the references"
+	});
+	const audio = hasAudio(card);
+	if (audio && !ps.audio.native) warnings.push({
+		code: "audio_not_native",
+		path: "shot.audio",
+		message: `${ps.name} generates no sound`,
+		fix: "add the dialogue, sound effects and music in the edit (scene audio and sfx)"
+	});
+	const exclusions = (card.exclusions ?? []).map(clean).filter(Boolean);
+	const postText = (card.on_screen_text ?? "post") === "post";
+	let negative;
+	const positives = [];
+	if (ps.negatives === "supported") {
+		const items = [...exclusions.map(stripNegation), ...postText ? [
+			"on-screen text",
+			"logos",
+			"watermarks"
+		] : []];
+		negative = [...new Set(items.filter(Boolean))].join(", ") || void 0;
+	} else if (ps.negatives === "positive_only") for (const ex of exclusions) {
+		const hit = POSITIVE.find(([re]) => re.test(ex));
+		if (hit && isLockedCamera(card.camera) && /camera/.test(hit[1])) fixes.push(`exclusion "${ex}" covered by the locked camera`);
+		else if (hit) {
+			if (!positives.includes(hit[1])) positives.push(hit[1]);
+			fixes.push(`exclusion "${ex}" rephrased positively: "${hit[1]}"`);
+		} else warnings.push({
+			code: "exclusion_dropped",
+			path: "shot.exclusions",
+			message: `${ps.name} needs positive phrasing; "${ex}" has no positive rewrite and was left out`,
+			fix: "describe the state you want instead (e.g. \"the camera remains still\")"
+		});
+	}
+	else if (exclusions.length) warnings.push({
+		code: "exclusion_dropped",
+		path: "shot.exclusions",
+		message: `${ps.name} takes no negative prompt; ${exclusions.length} exclusion(s) left out`,
+		fix: "describe the wanted state positively in the action or look"
+	});
+	const ctx = {
+		card,
+		ps,
+		model,
+		mode,
+		refs,
+		locked: isLockedCamera(card.camera),
+		positives,
+		warnings,
+		fixes
+	};
+	const formatted = FORMATTERS[ps.id](ctx);
+	const text = formatted.text;
+	if (ps.prompt_max_chars && text.length > ps.prompt_max_chars) warnings.push({
+		code: "prompt_too_long",
+		path: "shot",
+		message: `prompt is ${text.length} characters; ${ps.name} takes at most ${ps.prompt_max_chars}`,
+		fix: "shorten the environment and look"
+	});
+	const params = {
+		model: model.id,
+		mode,
+		duration_sec: duration,
+		aspect_ratio: aspect,
+		...resolution ? { resolution } : {},
+		...ps.audio.native ? { audio } : {},
+		...negative ? { negative_prompt: negative } : {},
+		...firstFrame && mode === "image_to_video" ? { first_frame: firstFrame } : {},
+		...refs.length ? { references: refs } : {},
+		...formatted.params
+	};
+	if (firstFrame && mode === "image_to_video") fixes.push(`first frame: ${firstFrame} (placeholder: export ${card.first_frame_from}'s approved last frame there)`);
+	const notes = [
+		ps.verified ? `provider spec verified on ${ps.verified_on}` : `unverified provider spec (verified: false, read ${ps.verified_on}): re-check the live docs before generating`,
+		...ps.notes ?? [],
+		...(model.notes ?? []).map((n) => `${model.id}: ${n}`)
+	];
+	return {
+		provider: ps.id,
+		model: model.id,
+		mode,
+		text,
+		params,
+		warnings,
+		fixes,
+		notes,
+		verified: ps.verified,
+		verified_on: ps.verified_on
+	};
+}
+//#endregion
+//#region src/prompt-pack.ts
+/**
+* prompt_pack: compile every shot card of a project into each provider family's prompt syntax and
+* write a prompt package under <project>/prompts/. Offline and free: no provider is called, nothing
+* is generated, no credential value is read (only whether one is set). Paid generation is Phase 7.
+*/
+const PROMPT_PACK_BANNER = "Prompt package (no generation, no spend)";
+function shotScenes(scenes, only) {
+	const withShot = scenes.filter((s) => s.shot && (s.visual_strategy === "generated_video" || s.visual_strategy === "avatar"));
+	if (only?.length) {
+		const known = new Set(withShot.map((s) => s.id));
+		const unknown = only.filter((id) => !known.has(id));
+		if (unknown.length) throw new Error(`no shot card on scene(s) ${unknown.join(", ")}; scenes with a shot: ${[...known].join(", ") || "(none)"}`);
+		return withShot.filter((s) => only.includes(s.id));
+	}
+	return withShot;
+}
+function credentialsFor(ps, env) {
+	return ps.access.map((a) => ({
+		via: a.via,
+		env: a.env,
+		set: hasCredential(env, a.env)
+	}));
+}
+function sceneMarkdown(scene, ps, c) {
+	const lines = [
+		`# ${scene.id} · ${ps.name}`,
+		"",
+		`${PROMPT_PACK_BANNER}. Nothing was generated or sent anywhere; this is text to review and paste.`,
+		"",
+		`- model: \`${c.model ?? "(none)"}\``,
+		`- mode: ${c.mode}`,
+		`- shot purpose: ${scene.shot.purpose}`,
+		`- provider spec: ${c.verified ? `verified ${c.verified_on}` : `**unverified** (read ${c.verified_on}; re-check the live docs first)`}`,
+		"",
+		"## Prompt",
+		"",
+		"```text",
+		c.text,
+		"```",
+		"",
+		"## Parameters",
+		"",
+		"Provider-neutral; the Phase 7 adapter maps them to the API's field names.",
+		"",
+		"```json",
+		JSON.stringify(c.params, null, 2),
+		"```",
+		""
+	];
+	if (c.warnings.length) lines.push("## Warnings", "", ...c.warnings.map((w) => `- [${w.code}] ${w.path}: ${w.message}${w.fix ? ` → ${w.fix}` : ""}`), "");
+	if (c.fixes.length) lines.push("## Applied by the compiler", "", ...c.fixes.map((f) => `- ${f}`), "");
+	lines.push("## Notes", "", ...c.notes.map((n) => `- ${n}`), "");
+	return lines.join("\n");
+}
+function readme(result, specs) {
+	const lines = [
+		`# ${PROMPT_PACK_BANNER}`,
+		"",
+		"Compiled from the shot cards in `project/video-spec.json` by `prompt_pack`. No provider was",
+		"called, nothing was generated and nothing was spent. Paid generation is Phase 7 and runs only",
+		"through the engine's policy, spend and consent gates.",
+		"",
+		"Every provider spec is a dated hypothesis (`verified: false`): re-check the provider's live",
+		"docs before you generate, and see `provider-specs/` for the sources.",
+		"",
+		"## Consistency plan",
+		"",
+		"1. Approve an identity keyframe (the hero, product or place) before any clip.",
+		"2. Generate the riskiest shot first and inspect it before the batch.",
+		"3. Chain shots: export each approved shot's last frame to `prompts/frames/<scene>-last.png`;",
+		"   a shot with `first_frame_from` starts from it (its params point there).",
+		"4. Composite logos, prices, UI and copy in the edit, never in the generated pixels.",
+		"",
+		"## Packs",
+		"",
+		"| family | scene | model | mode | warnings | files |",
+		"| --- | --- | --- | --- | --- | --- |"
+	];
+	for (const f of result.families) for (const s of f.scenes) lines.push(`| ${f.family} | ${s.scene_id} | \`${s.model ?? "-"}\` | ${s.mode} | ${s.warnings} | [md](${f.family}/${s.scene_id}.md) · [json](${f.family}/${s.scene_id}.json) |`);
+	lines.push("", "## Credentials (placeholders until Phase 7)", "", "Only whether each is set is recorded, never its value.", "");
+	for (const f of result.families) {
+		const spec = specs.find((s) => s.id === f.family);
+		lines.push(`- **${spec.name}** (${f.verified ? `verified ${f.verified_on}` : "unverified"}): ${f.credentials.map((c) => `${c.env} via ${c.via}: ${c.set ? "set" : "not set"}`).join("; ")}`);
+	}
+	lines.push("");
+	return lines.join("\n");
+}
+async function promptPack(projectDir, opts = {}) {
+	const specPath = projectSpecPaths(projectDir).spec;
+	if (!existsSync(specPath)) throw new Error(`no ${specPath}; write the spec first (plan / spec_scaffold)`);
+	const parsed = parseYamlOrJson(VideoSpec, await readFile(specPath, "utf8"));
+	if (!parsed.ok) throw new Error(`invalid video spec (run spec_validate): ${parsed.message}`);
+	const spec = parsed.data;
+	const scenes = shotScenes(spec.scenes, opts.scenes);
+	if (!scenes.length) throw new Error("no scene has a shot card: add `shot` to generated_video or avatar scenes (see the prompt-pack skill)");
+	const dir = opts.providerSpecsDir === void 0 ? findProviderSpecsDir() : opts.providerSpecsDir;
+	if (!dir) throw new Error("provider-specs/ not found (reinstall the plugin)");
+	const families = opts.families?.length ? [...new Set(opts.families)] : [...ProviderFamily.options];
+	const all = await loadProviderSpecs(dir);
+	const specs = families.map((f) => {
+		const ps = all.find((s) => s.id === f);
+		if (!ps) throw new Error(`no provider spec for "${f}" in ${dir}`);
+		return ps;
+	});
+	const env = opts.env ?? {};
+	const outDir = join(projectDir, "prompts");
+	const packFamilies = [];
+	let warnings = 0;
+	for (const ps of specs) {
+		const famDir = join(outDir, ps.id);
+		await mkdir(famDir, { recursive: true });
+		const entries = [];
+		for (const scene of scenes) {
+			const c = compile(scene.shot, scene, spec, ps);
+			const md = `prompts/${ps.id}/${scene.id}.md`;
+			const json = `prompts/${ps.id}/${scene.id}.json`;
+			await writeFile(join(projectDir, md), sceneMarkdown(scene, ps, c));
+			await writeFile(join(projectDir, json), `${JSON.stringify({
+				kind: "prompt_package",
+				generated: false,
+				scene_id: scene.id,
+				...c
+			}, null, 2)}\n`);
+			entries.push({
+				scene_id: scene.id,
+				...c.model ? { model: c.model } : {},
+				mode: c.mode,
+				md,
+				json,
+				warnings: c.warnings.length
+			});
+			warnings += c.warnings.length;
+		}
+		packFamilies.push({
+			family: ps.id,
+			name: ps.name,
+			verified: ps.verified,
+			verified_on: ps.verified_on,
+			credentials: credentialsFor(ps, env),
+			scenes: entries
+		});
+	}
+	const base = {
+		ok: true,
+		kind: "prompt_package",
+		generated: false,
+		spend_usd: 0,
+		project_dir: projectDir,
+		dir: outDir,
+		families: packFamilies,
+		scenes: scenes.map((s) => s.id),
+		warnings
+	};
+	const readmePath = join(outDir, "README.md");
+	await writeFile(readmePath, readme(base, specs));
+	return {
+		...base,
+		readme: readmePath
+	};
+}
+function formatPromptPack(r) {
+	const lines = [`${PROMPT_PACK_BANNER}: ${r.scenes.length} shot(s) × ${r.families.length} famil${r.families.length === 1 ? "y" : "ies"} → ${r.dir}`, `index: ${r.readme}`];
+	for (const f of r.families) {
+		const creds = f.credentials.map((c) => `${c.env} ${c.set ? "set" : "not set"}`).join(", ");
+		const w = f.scenes.reduce((n, s) => n + s.warnings, 0);
+		lines.push(`${f.family}: ${f.scenes.length} prompt(s), ${w} warning(s), ${f.verified ? "verified" : "unverified spec"}; credentials (Phase 7): ${creds}`);
+	}
+	lines.push("Nothing was generated or spent. Review the warnings in each .md; paid generation is Phase 7 (policy, spend and consent gated).");
+	return lines.join("\n");
+}
+//#endregion
 //#region src/templates.ts
 const MARKER = join("explain", "template.yaml");
 /**
@@ -269481,6 +270549,28 @@ function createServer$1(options = {}) {
 		const { project_dir, asset, ...opts } = args;
 		const r = await tightenAsset(resolveInputPath(project_dir, cwd()), asset, opts);
 		return jsonResult(formatTighten(r), r);
+	}));
+	server.registerTool("prompt_pack", {
+		title: "Compile shot cards into provider prompts",
+		description: "Prompt package for <project_dir> (no generation, no spend, no network): compile the `shot` card of every generated_video/avatar scene into each provider family's prompt syntax (seedance, veo, kling, wan, runway, hailuo; default all) from provider-specs/*.yaml, with director checks (one action, one camera move, brand text in post, reference limits, duration and aspect fitting). Writes prompts/<family>/<scene>.md (prompt, params, warnings) and .json, plus prompts/README.md (index, consistency plan, and per family which credential Phase 7 would need and whether it is set: a boolean, never the value). Provider specs are unverified hypotheses until re-checked; every pack says so.",
+		inputSchema: {
+			project_dir: string().min(1),
+			families: array(ProviderFamily).min(1).optional().describe("Default: all six families"),
+			scenes: array(string().min(1)).min(1).optional().describe("Only these scene ids (each must have a shot card)")
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async (args) => {
+		const r = await promptPack(resolveInputPath(args.project_dir, cwd()), {
+			...args.families ? { families: args.families } : {},
+			...args.scenes ? { scenes: args.scenes } : {},
+			env
+		});
+		return jsonResult(formatPromptPack(r), r);
 	}));
 	return server;
 }

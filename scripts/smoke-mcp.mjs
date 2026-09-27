@@ -31,6 +31,7 @@ const expected = [
   "lint",
   "localize",
   "project_init",
+  "prompt_pack",
   "qa_run",
   "render_cancel",
   "render_submit",

@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { initProject, projectPaths } from "@video-studio/core";
 import { type IngestOptions, formatIngestSummary, ingest } from "@video-studio/ingestion";
-import { AspectRatio, LanguageTag, Platform, PlatformTargetId, voiceMode } from "@video-studio/schema";
+import { AspectRatio, LanguageTag, Platform, PlatformTargetId, ProviderFamily, voiceMode } from "@video-studio/schema";
 import { z } from "zod";
 import { type DoctorDeps, defaultDoctorDeps, formatDoctorReport, runDoctor } from "./doctor.js";
 import { SCHEMA_NAMES, findSchemasDir, resolveInputPath } from "./paths.js";
@@ -28,6 +28,7 @@ import { type ReviewOptions, formatReview, reviewRender } from "./review.js";
 import { type StillsOptions, formatStills, stillsProject } from "./stills.js";
 import { type CompareSide, compareVideos, formatCompare } from "./compare.js";
 import { formatLint, lintProject } from "./lint.js";
+import { formatPromptPack, promptPack } from "./prompt-pack.js";
 import { formatIssues, renderStoryboard, scaffoldSpec, validateBrief } from "./plan.js";
 import { type RenderProjectOptions, type RenderProjectResult, SpecInvalidError, exportProject, loadValidSpec, runQa } from "./pipeline.js";
 import { type ErrorCode, type RenderJobView, RenderJobManager, errorCode, isActiveJob } from "./render-jobs.js";
@@ -1121,6 +1122,29 @@ export function createServer(options: ServerOptions = {}): McpServer {
         return jsonResult(formatTighten(r), r as unknown as Record<string, unknown>);
       },
     ),
+  );
+
+  server.registerTool(
+    "prompt_pack",
+    {
+      title: "Compile shot cards into provider prompts",
+      description:
+        "Prompt package for <project_dir> (no generation, no spend, no network): compile the `shot` card of every generated_video/avatar scene into each provider family's prompt syntax (seedance, veo, kling, wan, runway, hailuo; default all) from provider-specs/*.yaml, with director checks (one action, one camera move, brand text in post, reference limits, duration and aspect fitting). Writes prompts/<family>/<scene>.md (prompt, params, warnings) and .json, plus prompts/README.md (index, consistency plan, and per family which credential Phase 7 would need and whether it is set: a boolean, never the value). Provider specs are unverified hypotheses until re-checked; every pack says so.",
+      inputSchema: {
+        project_dir: z.string().min(1),
+        families: z.array(ProviderFamily).min(1).optional().describe("Default: all six families"),
+        scenes: z.array(z.string().min(1)).min(1).optional().describe("Only these scene ids (each must have a shot card)"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async (args: { project_dir: string; families?: ProviderFamily[]; scenes?: string[] }) => {
+      const r = await promptPack(resolveInputPath(args.project_dir, cwd()), {
+        ...(args.families ? { families: args.families } : {}),
+        ...(args.scenes ? { scenes: args.scenes } : {}),
+        env,
+      });
+      return jsonResult(formatPromptPack(r), r as unknown as Record<string, unknown>);
+    }),
   );
 
   return server;

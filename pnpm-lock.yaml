@@ -95,6 +95,9 @@ importers:
       '@video-studio/platforms':
         specifier: workspace:*
         version: link:../platforms
+      '@video-studio/prompts':
+        specifier: workspace:*
+        version: link:../prompts
       '@video-studio/renderer':
         specifier: workspace:*
         version: link:../renderer
@@ -118,6 +121,12 @@ importers:
         version: link:../schema
 
   packages/platforms:
+    dependencies:
+      '@video-studio/schema':
+        specifier: workspace:*
+        version: link:../schema
+
+  packages/prompts:
     dependencies:
       '@video-studio/schema':
         specifier: workspace:*

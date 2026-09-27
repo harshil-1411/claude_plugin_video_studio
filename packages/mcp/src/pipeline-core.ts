@@ -34,6 +34,7 @@ import {
 import { findPlatformSpecsDir, loadContracts } from "@video-studio/platforms";
 import type { BackendChoice, BackendSet } from "@video-studio/voice";
 import type { FontRequest, LockFont } from "./lock.js";
+import type { SeriesRecord } from "./series.js";
 import { hyperframesOptions } from "./hyperframes.js";
 import type { TargetDist } from "./targets.js";
 import { type ValidationIssue, projectSpecPaths, validateSpecFile } from "./spec-validate.js";
@@ -316,6 +317,8 @@ export interface RenderState {
   policy?: import("./policy.js").PolicySummary;
   /** Estimated paid-voice charge of this render (also appended to project/spend.json). */
   paid_voice?: { backend: string; chars: number; estimated_usd: number | null; scenes: string[] };
+  /** The series bible the render drew from (spec.series): file hash and the reference files the scenes used. */
+  series?: SeriesRecord;
 }
 
 export const toPosix = (p: string) => p.split(sep).join("/");

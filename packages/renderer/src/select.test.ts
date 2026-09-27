@@ -270,3 +270,53 @@ describe("renderScenes: motion pages", () => {
     expect(sceneCacheKey(s, tokens, target, r)).toBe(sceneCacheKey(s, tokens, target, r, false, undefined, undefined, undefined, undefined, undefined));
   });
 });
+
+describe("renderScenes: series bible entries", () => {
+  const target = targetForAspect("9:16", { shortSide: 180, fps: 12 });
+  const tokens = resolveTokens();
+  function writer(): SceneRenderer & { renders: string[] } {
+    const r = {
+      id: "ffmpeg-drawtext",
+      version: "1",
+      kinds: ["typography"] as DeterministicKind[],
+      renders: [] as string[],
+      available: async () => ({ ok: true }),
+      render: async (req: SceneRenderRequest) => {
+        r.renders.push(req.scene.id);
+        await writeFile(req.out_path, "mp4");
+        return { scene_id: req.scene.id, out_path: req.out_path, duration_ms: 1000, renderer: r.id, renderer_version: "1", warnings: [] };
+      },
+    };
+    return r;
+  }
+
+  it("keys only the scenes that carry a series input, and re-renders just those when it changes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vs-rs-series-"));
+    try {
+      const scenes = [mg("s01", "typography", { lines: ["Host"] }), mg("s02", "typography", { lines: ["Plain"] })];
+      const r = writer();
+      const run = (entries: string) =>
+        renderScenes({ scenes }, { project_dir: root, renderers: [r], tokens, target, series: new Map([["s01", { entries, files: [{ ref: "refs/host.png", sha256: "a".repeat(64) }] }]]) });
+      const first = await run("e1");
+      expect(r.renders).toEqual(["s01", "s02"]);
+      // s02 carries no series input: its key is the plain key.
+      expect(first.scenes[1]!.cache_key).toBe(sceneCacheKey(scenes[1]!, tokens, target, r));
+      expect(first.scenes[0]!.cache_key).not.toBe(sceneCacheKey(scenes[0]!, tokens, target, r));
+      await run("e1");
+      expect(r.renders).toEqual(["s01", "s02"]);
+      await run("e2");
+      expect(r.renders).toEqual(["s01", "s02", "s01"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("an absent series input leaves the key unchanged", () => {
+    const s = mg("s01", "typography", { lines: ["a"] });
+    const r = { id: "x", version: "1" };
+    const plain = sceneCacheKey(s, tokens, target, r);
+    expect(sceneCacheKey(s, tokens, target, r, false, undefined, undefined, undefined, undefined, undefined, undefined)).toBe(plain);
+    const withRef = sceneCacheKey(s, tokens, target, r, false, undefined, undefined, undefined, undefined, undefined, { entries: "e", files: [] });
+    expect(withRef).not.toBe(plain);
+  });
+});

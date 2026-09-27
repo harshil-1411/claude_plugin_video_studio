@@ -1,0 +1,40 @@
+# Runway Gen-4 / Gen-4.5. Facts are hypotheses read on verified_on; re-check before use.
+schema_version: "1.0"
+id: runway
+name: Runway Gen-4 / Gen-4.5
+models:
+  - id: gen4.5
+    label: Gen-4.5
+    modes: [text_to_video, image_to_video]
+    notes:
+      - "Text-to-video is 16:9 only; image-to-video takes every listed ratio."
+  - id: gen4_turbo
+    label: Gen-4 Turbo
+    modes: [image_to_video]
+duration:
+  min_sec: 2
+  max_sec: 10
+aspect_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]
+resolutions: ["720p"]
+audio:
+  native: false
+  syntax: "No documented native audio: add voice, sound effects and music in the edit."
+negatives: positive_only
+camera_syntax: 'Plain camera phrases; a still camera is written positively: "Locked camera. The camera remains still."'
+prompt_max_chars: 1000
+prompt_formula: "[Camera] shot of [subject] [action] in [environment]. [Details]"
+access:
+  - via: direct
+    env: RUNWAYML_API_SECRET
+    docs_url: https://docs.dev.runwayml.com/
+source_urls:
+  - https://docs.dev.runwayml.com/
+  - https://help.runwayml.com/hc/en-us
+verified_on: "2026-09-27"
+verified: false
+notes:
+  - "720p at 24 or 25 fps."
+  - "Phrase everything positively; negative phrasing can produce the opposite."
+  - "Image-to-video: describe the motion only, not what the image already shows."
+  - "Start simple and add one element per iteration."
+  - "prompt_max_chars 1000 is unverified."

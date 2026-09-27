@@ -416,6 +416,52 @@ describe("style packs", () => {
   });
 });
 
+describe("series bible", () => {
+  const bible = (sidekick: string) => `schema_version: "1.0"
+id: show
+name: Show
+palette:
+  background: "#101820"
+characters:
+  - id: host
+    name: Ava
+    description: Round glasses, teal jacket.
+    references: [refs/host.png]
+  - id: sidekick
+    name: Bit
+    description: ${sidekick}
+`;
+  it(
+    "takes the look from the bible, records it in the state, provenance and video.lock, and re-renders only the scenes of an edited character",
+    async () => {
+      const show = join(tmp, "show");
+      await mkdir(join(show, "refs"), { recursive: true });
+      await writeFile(join(show, "series.yaml"), bible("A cube robot."));
+      await writeFile(join(show, "refs", "host.png"), "host");
+      const scenes = spec.scenes.map((x, i) => (i === 0 ? { ...x, series_refs: ["host"] } : i === 1 ? { ...x, series_refs: ["sidekick"] } : x));
+      const dir = await makeProject("show/ep1", { ...spec, series: "../series.yaml", scenes });
+      const r = await renderProject(dir, opts({ voice: "silent" }));
+      const state = JSON.parse(await readFile(join(dir, "renders", "preview", "render-state.json"), "utf8"));
+      expect(state.background).toBe("#101820");
+      expect(state.series).toMatchObject({ id: "show", path: "../series.yaml", files: [{ path: "../refs/host.png" }] });
+      const lock = (await readLock(r.dist.lock))!;
+      expect(lock.assets.map((a) => a.path)).toEqual(expect.arrayContaining(["../series.yaml", "../refs/host.png"]));
+      const prov = JSON.parse(await readFile(join(dir, "dist", "provenance.json"), "utf8"));
+      expect(prov.render.series.sha256).toBe(state.series.sha256);
+
+      await writeFile(join(show, "series.yaml"), bible("A round robot."));
+      const again = await renderProject(dir, opts({ voice: "silent" }));
+      const lock2 = (await readLock(again.dist.lock))!;
+      const keys = (l: VideoLock) => Object.fromEntries(l.scenes.map((x) => [x.scene_id, x.cache_key]));
+      expect(keys(lock2).s01).toBe(keys(lock).s01);
+      expect(keys(lock2).s03).toBe(keys(lock).s03);
+      expect(keys(lock2).s02).not.toBe(keys(lock).s02);
+      expect(diffLocks(lock, lock2).find((c) => c.path.startsWith("assets.../series.yaml"))?.class).toBe("asset");
+    },
+    T,
+  );
+});
+
 describe("music bed and voice.mode none", () => {
   it(
     "renders a text-over-music reel: bundled bed, no speech, rights recorded, no silence warnings",

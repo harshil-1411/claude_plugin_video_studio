@@ -1,0 +1,67 @@
+# Alibaba Wan 2.6 / 2.7 / 3.0. Facts are hypotheses read on verified_on; re-check before use.
+schema_version: "1.0"
+id: wan
+name: Alibaba Wan 2.6 / 2.7 / 3.0
+models:
+  - id: wan2.6-t2v
+    label: Wan 2.6 text-to-video
+    modes: [text_to_video]
+  - id: wan2.6-i2v
+    label: Wan 2.6 image-to-video
+    modes: [image_to_video]
+  - id: wan2.6-r2v
+    label: Wan 2.6 reference-to-video
+    modes: [reference_to_video]
+    notes:
+      - "1-3 reference videos, named character1..character3; output 5 or 10 s only."
+  - id: wan2.7
+    label: Wan 2.7
+    modes: [text_to_video, image_to_video, reference_to_video]
+    notes:
+      - "References are named 'Image n' / 'Video n'. Model id to be confirmed."
+  - id: wan3.0
+    label: Wan 3.0
+    modes: [text_to_video, image_to_video, reference_to_video]
+    notes:
+      - "References are named 'Image n' / 'Video n'. Model id to be confirmed."
+duration:
+  min_sec: 5
+  max_sec: 15
+  allowed_sec: [5, 10, 15]
+aspect_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4"]
+resolutions: ["720p", "1080p"]
+references:
+  max_videos: 3
+  syntax: "character{n}"
+audio:
+  native: true
+  syntax: >-
+    Wan 2.5+: describe voice (who says what), sound effects and background music in the prompt.
+    Audio input: WAV or MP3, 3-30 s, up to 15 MB.
+negatives: supported
+multi_shot:
+  max_shots: 4
+  syntax: "An overall description first, then one line per shot: Shot n [a-bs] content."
+prompt_formula: >-
+  entity + scene + motion; advanced prompts add aesthetic control and stylisation. For
+  image-to-video describe the motion and camera only.
+access:
+  - via: direct
+    env: DASHSCOPE_API_KEY
+    docs_url: https://www.alibabacloud.com/help/en/model-studio/use-video-generation
+  - via: fal
+    env: FAL_KEY
+    docs_url: https://fal.ai/models?keywords=wan
+source_urls:
+  - https://www.alibabacloud.com/help/en/model-studio/text-to-video-prompt
+  - https://www.alibabacloud.com/help/en/model-studio/use-video-generation
+  - https://github.com/Wan-Video
+  - https://fal.ai/models?keywords=wan
+verified_on: "2026-09-27"
+verified: false
+notes:
+  - "Limits are the Wan 2.6 ones (5/10/15 s, 720p/1080p); reference-to-video is 5 or 10 s only."
+  - "Reference naming differs by version: character1..3 (2.6), 'Image n' / 'Video n' (2.7, 3.0)."
+  - "Multi-shot is 2.6+; sound is 2.5+."
+  - "Some Wan versions have open weights (local generation possible); the hosted APIs are the paid route."
+  - "max_shots 4 is a working assumption."

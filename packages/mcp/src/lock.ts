@@ -82,6 +82,21 @@ export async function lockAssets(root: string, relPaths: readonly string[]): Pro
   return [...out].map(([path, sha256]) => ({ path, sha256 }));
 }
 
+/**
+ * Add the series bible and the reference files the scenes used as lock assets (hashes from the
+ * render, paths from the project folder, e.g. `../series.yaml`); they replace a same-path entry.
+ * Without a series the assets are returned unchanged.
+ */
+export function withSeriesAssets(
+  assets: VideoLock["assets"],
+  series: { path: string; sha256: string; files: ReadonlyArray<{ path: string; sha256: string }> } | undefined,
+): VideoLock["assets"] {
+  if (!series) return assets;
+  const out = new Map(assets.map((a) => [a.path, a]));
+  for (const f of [{ path: series.path, sha256: series.sha256 }, ...series.files]) out.set(f.path, { path: f.path, sha256: f.sha256 });
+  return [...out.values()];
+}
+
 /** Files under `dir` (project-relative, posix), recursively, skipping dotfiles and `skip` subtrees. */
 export async function listFiles(root: string, dir: string, skip: readonly string[] = []): Promise<string[]> {
   const out: string[] = [];

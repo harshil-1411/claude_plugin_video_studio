@@ -114,9 +114,34 @@ Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and th
      - **Lead:**
        - `ExperimentVariant.duration_sec` in the schema, set by `variants`;
        - personal intro and showreel pieces map to `kinetic-type` with `motion` scenes, not `product-hero`.
-   - **Next: W4.**
-     - Lane A: Phase 7 step 0 (`packages/prompts`, `provider-specs/*.yaml`, `prompt_pack` tool and skill).
-     - Lane B: the series bible.
+   - **W4 done (2026-09-27).**
+     - **Lead contracts (`e8cf791`):**
+       - `CREDENTIALS` registry (`packages/schema/src/credentials.ts`) with placeholder keys for:
+         - direct Veo (`GEMINI_API_KEY`), Seedance (`ARK_API_KEY`), Wan (`DASHSCOPE_API_KEY`) and Hailuo (`MINIMAX_API_KEY`);
+         - Phase 9 publishing: YouTube, Meta/Instagram, LinkedIn, TikTok.
+       - All keys are optional and have no effect until their integration ships. `plugin.json` userConfig and `.mcp.json` env are tested against the registry, and `doctor` reports in-use keys versus placeholders.
+       - `ProviderSpec` and `Series` schemas, `spec.series` and `scene.series_refs`.
+     - **Lane A: Phase 7 step 0.**
+       - `provider-specs/{seedance,veo,kling,wan,runway,hailuo}.yaml`: all `verified: false`, sourced, conflicts noted.
+       - `packages/prompts`: registry, director-checks lint, one compiler per family.
+       - `prompt_pack` tool and skill: `prompts/<family>/<scene>.{md,json}` plus a README index. No network, no spend; keys reported as set or not set only.
+       - Verified through the bundle on a scratch project: 6 families, warnings with fixes.
+     - **Lane B: series bible.**
+       - `packages/mcp/src/series.ts`: load, confine, validate, hash. `spec_validate` stage `series`.
+       - Look precedence: defaults < series < spec style < brand.
+       - Cache keys isolate each scene's series entries: editing one character re-renders only its scenes.
+       - Lock and provenance record the bible and its reference files.
+     - **Lead:** `pnpm-lock.yaml` updated for `packages/prompts`, using `pnpm install --lockfile-only` with registry access.
+     - **Deferred to the Phase 7 re-verification:**
+       - per-model limits in `ProviderModel`: Seedance 2.5 allows 4–30 s and bigger reference sets; Runway text-to-video is 16:9 only (hardcoded for now);
+       - per-mode aspect ratios: Hailuo image-to-video follows the first frame;
+       - an optional `prompt_packages[]` entry in the render manifest. Packs are self-describing today: `kind: prompt_package`, `generated: false`, `spend_usd: 0`.
+   - **Next: W5, the exit (with the user; needs Chrome):**
+     - run the Chrome-gated tests;
+     - wire motion blur (`master.motion_blur`, producer `motionBlur`);
+     - `examples/code-motion-loop/` with golden frames;
+     - rebuild the self-intro reel in a new project and `compare` it with the reference, tuning `motion_density` if needed;
+     - `CHANGELOG` 0.3.0.
 4. **Phase 7**, paid providers, ElevenLabs first (needs the user's API key). Step 0 comes first and is local: shot cards, `provider-specs/`, and `prompt_pack` (no keys, no network). The `policy.yaml`, spend and consent machinery it needs is now in place.
 5. **Phase 9**, publishing (needs platform developer accounts). Default targets are Instagram and YouTube Shorts: the user is in India, where TikTok is banned.
 

@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { checkSpecTargets, findPlatformSpecsDir, loadContracts } from "@video-studio/platforms";
 import { findStylesDir, formatMotionFinding, getStyle, loadMotionPage, styleIds } from "@video-studio/renderer";
-import { ContentIR, VideoSpec, closestMatches, parseYamlOrJson, validateVideoSpecSemantics } from "@video-studio/schema";
+import { ContentIR, VideoSpec, closestMatches, parseYamlOrJson, validateVideoSpecSemantics, voiceMode } from "@video-studio/schema";
+import { SeriesLoadError, entryFiles, loadSeries, resolveSeriesFile, seriesEntries } from "./series.js";
 
 export interface ValidationIssue {
   path: string;
@@ -10,7 +11,7 @@ export interface ValidationIssue {
   /** Concrete instruction for resolving the issue. */
   fix: string;
   /** Which stage found it. */
-  stage: "syntax" | "schema" | "semantic" | "content-ir" | "platform" | "style" | "motion";
+  stage: "syntax" | "schema" | "semantic" | "content-ir" | "platform" | "style" | "motion" | "series";
 }
 
 export interface SpecValidationResult {
@@ -119,6 +120,9 @@ export async function validateSpecFile(
     const style = await checkSpecStyle(parsed.data.style, stylesDir);
     if (style) result.errors.push(style);
   }
+  const series = await checkSeries(parsed.data, projectDir, stylesDir);
+  result.errors.push(...series.errors);
+  result.warnings.push(...series.warnings);
   const motion = await checkMotionPages(parsed.data, projectDir);
   result.errors.push(...motion.errors);
   result.warnings.push(...motion.warnings);
@@ -143,6 +147,75 @@ export async function checkMotionPages(spec: VideoSpec, projectDir: string): Pro
       const issue: ValidationIssue = { path: `scenes.${i}.deterministic.props.html`, stage: "motion", message: `${s.id}: ${html}: ${formatMotionFinding(f)}`, fix: f.fix };
       (f.severity === "error" ? errors : warnings).push(issue);
     }
+  }
+  return { errors, warnings };
+}
+
+/**
+ * The series bible a spec points at (`series`): the file loads and matches the schema; every
+ * `series_refs` id names an entry (the fix lists the closest ids); the reference files of the
+ * entries scenes show exist inside the bible's folder; the bible's style pack exists when the spec
+ * picks none. Warnings: a narrated scene shows a character whose `voice_id` differs from the
+ * narration voice, and a bible that no scene draws from (its edits would re-render nothing).
+ */
+export async function checkSeries(spec: VideoSpec, projectDir: string, stylesDir: string | null = findStylesDir()): Promise<{ errors: ValidationIssue[]; warnings: ValidationIssue[] }> {
+  const errors: ValidationIssue[] = [];
+  const warnings: ValidationIssue[] = [];
+  if (!spec.series) return { errors, warnings };
+  let loaded;
+  try {
+    loaded = await loadSeries(projectDir, spec.series);
+  } catch (e) {
+    if (!(e instanceof SeriesLoadError)) throw e;
+    return { errors: e.issues.map((i) => ({ ...i, stage: "series" as const })), warnings };
+  }
+  const entries = seriesEntries(loaded.series);
+  const checkedFiles = new Set<string>();
+  const voiced = new Set<string>();
+  const narrated = voiceMode(spec) === "narrated";
+  for (const [i, s] of spec.scenes.entries()) {
+    for (const id of s.series_refs ?? []) {
+      const e = entries.get(id);
+      if (!e) {
+        const near = closestMatches(id, entries.keys());
+        errors.push({
+          path: `scenes.${i}.series_refs`,
+          stage: "series",
+          message: `scene ${s.id} names "${id}", which is not a character, location or motif in ${spec.series}`,
+          fix: near.length ? `use one of ${near.map((n) => `"${n}"`).join(", ")}, or add "${id}" to the series bible` : `add "${id}" to the series bible, or remove it from series_refs`,
+        });
+        continue;
+      }
+      for (const ref of entryFiles(e)) {
+        if (checkedFiles.has(ref)) continue;
+        checkedFiles.add(ref);
+        const r = await resolveSeriesFile(loaded, ref);
+        if ("error" in r) {
+          errors.push({ path: `scenes.${i}.series_refs`, stage: "series", message: `series entry "${id}": ${r.error}`, fix: "put the file in the series folder (next to the bible, or below it) and reference it by its relative path" });
+        }
+      }
+      if (e.kind === "character" && e.entry.voice_id && narrated && s.voiceover.trim() && e.entry.voice_id !== spec.voice.voice_id && !voiced.has(id)) {
+        voiced.add(id);
+        warnings.push({
+          path: `scenes.${i}.series_refs`,
+          stage: "series",
+          message: `scene ${s.id} shows ${e.entry.name}, whose series voice is "${e.entry.voice_id}", but the narration uses ${spec.voice.voice_id ? `"${spec.voice.voice_id}"` : "the default voice"} (one narrator voice per video)`,
+          fix: `if ${e.entry.name} narrates, set voice.voice_id to "${e.entry.voice_id}"; otherwise ignore this`,
+        });
+      }
+    }
+  }
+  if (entries.size && !spec.scenes.some((s) => s.series_refs?.length)) {
+    warnings.push({
+      path: "series",
+      stage: "series",
+      message: `no scene names an entry of ${spec.series} in series_refs, so editing a character, location or motif re-renders nothing`,
+      fix: "list the entries each scene shows in its series_refs",
+    });
+  }
+  if (!spec.style && loaded.series.style) {
+    const style = await checkSpecStyle(loaded.series.style, stylesDir);
+    if (style) errors.push({ ...style, path: "series", stage: "series", message: `the series style: ${style.message}`, fix: `${style.fix.replace(/, or remove style$/, "")} in ${spec.series}, or set style in the spec` });
   }
   return { errors, warnings };
 }

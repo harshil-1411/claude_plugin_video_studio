@@ -31,6 +31,7 @@ import {
   scriptsIn,
   subjectEdgeHits,
 } from "@video-studio/renderer";
+import { loadSeries } from "./series.js";
 import { projectSpecPaths } from "./spec-validate.js";
 
 /**
@@ -1346,10 +1347,15 @@ export function checkLoopSeam(spec: Pick<VideoSpec, "master" | "acceptance">, st
   });
 }
 
-/** The active style's avoid list (none when the spec names no style or the pack can't be read). */
-async function styleAvoid(spec: VideoSpec, stylesDir: string | null): Promise<{ id: string; avoid?: string[] } | undefined> {
-  if (!spec.style) return undefined;
-  const style = await getStyle(stylesDir, spec.style).catch(() => undefined);
+/**
+ * The active style's avoid list: the spec's style, else its series bible's (none when neither
+ * names one or the pack can't be read).
+ */
+async function styleAvoid(spec: VideoSpec, stylesDir: string | null, projectDir: string): Promise<{ id: string; avoid?: string[] } | undefined> {
+  const series = !spec.style && spec.series ? await loadSeries(projectDir, spec.series).catch(() => undefined) : undefined;
+  const id = spec.style ?? series?.series.style;
+  if (!id) return undefined;
+  const style = await getStyle(stylesDir, id).catch(() => undefined);
   return style ? { id: style.id, ...(style.motion.avoid ? { avoid: style.motion.avoid } : {}) } : undefined;
 }
 
@@ -1428,7 +1434,7 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   checkFootageQuality(spec, irMedia, findings);
   checkLogo(state, boxes, findings);
   checkForbidden(spec, brand, findings);
-  checkBannedEffect(spec, await styleAvoid(spec, opts.stylesDir === undefined ? findStylesDir() : opts.stylesDir), brand, findings);
+  checkBannedEffect(spec, await styleAvoid(spec, opts.stylesDir === undefined ? findStylesDir() : opts.stylesDir, paths.root), brand, findings);
   checkAcceptance(spec, state, findings);
   checkLoopSeam(spec, state, findings);
   checkPostCopy(spec, contracts, findings);

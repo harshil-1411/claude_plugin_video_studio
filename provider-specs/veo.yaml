@@ -1,0 +1,56 @@
+# Google Veo 3.1. Facts are hypotheses read on verified_on; re-check before use.
+schema_version: "1.0"
+id: veo
+name: Google Veo 3.1
+models:
+  - id: veo-3.1-generate-preview
+    label: Veo 3.1
+    modes: [text_to_video, image_to_video, reference_to_video, first_last_frame, extend]
+    notes:
+      - "The only variant with 4K output."
+  - id: veo-3.1-fast-generate-preview
+    label: Veo 3.1 Fast
+    modes: [text_to_video, image_to_video, first_last_frame, extend]
+  - id: veo-3.1-lite-generate-preview
+    label: Veo 3.1 Lite
+    modes: [text_to_video, image_to_video]
+duration:
+  min_sec: 4
+  max_sec: 8
+  allowed_sec: [4, 6, 8]
+aspect_ratios: ["16:9", "9:16"]
+resolutions: ["720p", "1080p", "4k"]
+references:
+  max_images: 3
+  syntax: "reference image {n}"
+audio:
+  native: true
+  syntax: >-
+    Dialogue in quotes (A woman says, "..."); sound effects as `SFX: ...`; background as
+    `Ambient noise: ...`.
+negatives: supported
+multi_shot:
+  max_shots: 4
+  syntax: "Timestamp blocks inside one clip: [00:00-00:02] shot one, [00:02-00:04] shot two."
+prompt_formula: cinematography + subject + action + context + style & ambiance
+access:
+  - via: direct
+    env: GEMINI_API_KEY
+    docs_url: https://ai.google.dev/gemini-api/docs/video
+  - via: fal
+    env: FAL_KEY
+    docs_url: https://fal.ai/models?keywords=veo
+source_urls:
+  - https://ai.google.dev/gemini-api/docs/video
+  - https://cloud.google.com/vertex-ai/generative-ai/docs/video/video-gen-prompt-guide
+  - https://fal.ai/models?keywords=veo
+verified_on: "2026-09-27"
+verified: false
+notes:
+  - "1080p, 4K and reference images force 8 s clips; 4K is the full model only."
+  - "lastFrame gives first-to-last-frame interpolation."
+  - "Extension adds 7 s per call, up to 20 calls, at 720p only, and only on Veo-generated input."
+  - "negativePrompt lists what to leave out as plain nouns (not 'no ...' or 'don't ...')."
+  - "Every output carries a SynthID watermark."
+  - "Preview model ids change; re-check them before use."
+  - "max_shots 4 is a working assumption (2 s timestamp blocks in an 8 s clip)."

@@ -23,6 +23,9 @@
       "path": "packages/renderer"
     },
     {
+      "path": "packages/prompts"
+    },
+    {
       "path": "packages/mcp"
     }
   ]

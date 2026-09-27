@@ -56,3 +56,55 @@ page is the contract they must meet. Only the schemas below exist in code so far
 - Verify every endpoint, status name and price against first-party docs before you write an
   adapter (`reports/Video studio implementation specs.md` lists what is still unverified).
   Put unverified fields behind a feature flag.
+
+## Provider specs and prompt packs (Phase 7 step 0)
+
+Before any adapter exists, each model family's prompt rules are data:
+`provider-specs/<family>.yaml`, validated by `ProviderSpec`
+(`packages/schema/src/provider-spec.ts`, JSON Schema in `schemas/provider-spec.schema.json`).
+The families are seedance, veo, kling, wan, runway and hailuo (`ProviderFamily`). The
+`prompt_pack` tool compiles every shot card (`scene.shot`) into each family's syntax with
+`packages/prompts` (`compile`, `directorChecks`) and writes `prompts/<family>/<scene>.{md,json}`.
+It makes no network call and spends nothing.
+
+### Add a family
+
+1. Add the family to `ProviderFamily` (a schema change, landed by the lead), then write
+   `provider-specs/<family>.yaml`. `id` must equal the file name.
+2. Fill in the fields from the provider's own docs. Use the host's model page too (for
+   example fal.ai) when that is how users reach the model:
+   - `models[]`: the ids as documented and the `modes` each supports. Preview ids change, so
+     say so in `notes`.
+   - `duration`: the `min_sec`/`max_sec` range and `allowed_sec` when the provider only takes
+     fixed steps.
+   - `aspect_ratios`, `resolutions`.
+   - `references`: the limits and the in-prompt `syntax`, where `{n}` is replaced by the
+     number (`@Image{n}` → `@Image1`).
+   - `audio.native`, `audio.syntax`, `negatives` (`supported`, `unsupported` or
+     `positive_only`), `multi_shot`, `camera_syntax` (bracketed commands are parsed from it),
+     `prompt_max_chars`, `prompt_formula`.
+   - `access[]`: `via` (direct, fal or replicate), the `env` var and its docs URL. Every `env`
+     must exist in `CREDENTIALS` (`packages/schema/src/credentials.ts`). Adding one is a
+     schema change, and `plugin.json` and `.mcp.json` must list it too.
+3. Record where each fact came from in `source_urls` (https only), set `verified_on` to the
+   date you read them, and keep `verified: false`.
+4. Write every disagreement between hosts, and every number you could not confirm, into
+   `notes`. The compiler copies the notes into each pack.
+5. Add a family formatter in `packages/prompts/src/compile.ts` (`FORMATTERS`) only for
+   phrasing the spec cannot express. Limits, reference names and negatives stay in the YAML.
+6. Run `npx vitest run packages/prompts`. The registry test checks that every YAML parses,
+   that `id` matches the file name, and that every `access[].env` is registered.
+
+### Re-verify a spec
+
+Re-check a spec when Phase 7 starts, before any adapter uses it, and whenever a provider
+ships a new model:
+
+1. Open every URL in `source_urls` and the provider's current API reference. Check the model
+   ids, modes, durations, ratios, resolutions, reference limits, audio and negative-prompt
+   support.
+2. Fix what changed, update or replace the sources, and set `verified_on` to today.
+3. Set `verified: true` only after you have checked every field against the live docs, not
+   against this file, a blog post or a model's memory. If any field is still a guess, leave
+   `verified: false` and say which field in `notes`.
+4. Never add Sora. Its API was shut down on 2026-09-24.
