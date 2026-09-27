@@ -12,7 +12,7 @@
 
 **Turn a README, a paper, a web page or a folder of clips into a finished, captioned short video, one package per platform, without leaving Claude Code.**
 
-[See what it makes](#see-what-it-makes) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Commands](#commands) · [Limits](#what-it-does-not-do-yet)
+[Features](#features) · [See what it makes](#see-what-it-makes) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Commands](#commands) · [Limits](#what-it-does-not-do-yet)
 
 </div>
 
@@ -30,6 +30,32 @@ Turning knowledge into short videos usually means a timeline editor, a caption t
 - **Reproducible:** `video.lock` pins every tool, font, renderer and asset hash. Re-renders are cached scene by scene, and `diff` and `test` catch regressions.
 - **Local-first:** ffmpeg, system text-to-speech and local whisper.cpp. Claude writes the plan, so the plugin needs **no LLM API key**, and none of the features below need a paid service.
 
+## Features
+
+**Highlights**
+
+- 🎬 **Motion written as code.** Claude can write a scene as an HTML page drawn by a pure `seek(t)` function: springs, morphs, match cuts and kinetic type at the level of hand-made motion design. Every page runs under a strict security policy, is checked for unsafe code before it renders, and is proven deterministic (the same time always draws the same frame).
+- 📏 **Pacing you can measure.** QA counts big visual changes per second, the longest still stretch and frozen time, and fails a slideshow-paced reel. Vague asks like "make it pop" become acceptance numbers the render must meet, and `compare` scores your render against a reference video you like.
+- 🎵 **Music that drives the cut.** Beat analysis finds beats, downbeats and the drop; cuts snap to them and sound effects land on their peak. No track? `synth:` scores are composed locally, CC0, with an exact beat grid.
+- 📱 **One source, every platform.** Per-platform packages (video, cover, captions, post copy, QA) for Instagram Reels, YouTube Shorts, TikTok, LinkedIn and Facebook, with text and captions kept clear of each app's UI.
+- ✅ **Grounded and reproducible.** Every on-screen claim cites your sources (`verify`), `video.lock` pins every tool and asset, and scenes re-render only when something they use changes.
+- 🔒 **Local-first, no keys needed.** ffmpeg, system voices and local whisper. Claude writes the plan, so there is no LLM API key; paid providers are optional placeholders until you add keys.
+
+**Everything it does**
+
+| Area | Features |
+|---|---|
+| **Sources** | Markdown, text, PDF, DOCX, PPTX, web pages, local repos, video/audio files, clip folders, video URLs (YouTube, Vimeo, Loom via your `yt-dlp`) |
+| **Planning** | Story-arc plans with hooks and a hook-strength check, 24 templates that ask for the inputs they need first, a beat-level plan at the approval step, series bibles for recurring characters and looks, A/B `variants` (hooks, covers, 15 s / 30 s cuts) |
+| **Visuals** | 16 scene kinds including Claude-written `motion` pages, 4 style packs with banned-effect lists, brand kits, camera moves, transitions, word cues that land graphics on spoken words, count-ups, optional motion blur |
+| **Review before render** | `stills` sheets at chosen times, beats or downbeats; a determinism and loop-seam check for every `motion` page |
+| **Audio** | System TTS or ElevenLabs, 4 CC0 beds plus locally synthesized scores, beat and downbeat snapping, sound effects on their peak, ducking, −14 LUFS |
+| **Footage** | Local transcription (~99 languages, speaker turns), best-clip `shorts`, subject tracking for vertical reframes, cutaways, `tighten` for pauses and filler words, redaction, letterbox removal |
+| **Captions and languages** | Phrase captions clear of platform UI, keyword emphasis, sound-event captions, `localize` with Devanagari, Japanese and Arabic fonts, RTL and CJK line breaking |
+| **Checks** | 30+ lint rules (UI zones, contrast, reading speed, caption sync, cuts on the beat, story arc, brand rules, banned effects, acceptance numbers, loop seams, unsafe motion pages), technical QA (loudness, black, frozen, motion density, loop seam), `review` contact sheets, `compare` against a reference |
+| **Trust and control** | Claim `verify`, `video.lock`, golden-frame `test`, `diff`, provenance, optional C2PA signing, `policy.yaml` spend limits and consent, `render_cancel` |
+| **Generative (prep)** | Shot cards compiled into ready-to-paste prompt packs for Seedance, Veo, Kling, Wan, Runway and Hailuo, offline with no spend; provider and publishing keys are optional placeholders until Phase 7/9 |
+
 ## See what it makes
 
 Everything below was made by the plugin itself: no hand editing.
@@ -40,7 +66,7 @@ Everything below was made by the plugin itself: no hand editing.
 
 The strips below are frames from preview renders (built-in ffmpeg renderer) made during development.
 
-**15 scene kinds.** The strip shows kinetic text, a stat, a timeline, before/after, a quote, a map and a lower third, from a text-over-music reel with no voiceover:
+**Built-in scene kinds.** The strip shows kinetic text, a stat, a timeline, before/after, a quote, a map and a lower third, from a text-over-music reel with no voiceover:
 
 <img src="docs/media/scene-kinds.png" width="100%" alt="Seven vertical frames: kinetic text 'Docs in. Video out.', '0 keys' stat, pipeline timeline, before/after split screen, a quote, a route map and a lower-third name bar">
 

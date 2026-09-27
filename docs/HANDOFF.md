@@ -143,9 +143,22 @@ Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and th
      - ✅ **`examples/code-motion-loop/`:** a 6 s 1:1 ui-morph loop on `synth:pulse` with downbeat snap and acceptance. Validate and lint are 0/0.
        - Its golden frames and loop-seam check are gated behind `VS_TEST_RENDER=1`. The user records them once:
          - `VS_TEST_RENDER=1 VS_UPDATE_GOLDEN=1 npx vitest run tests/golden-frames`
-       - Its 0.8 changes/s target is unconfirmed until that real render.
-     - ✅ **Release notes:** `CHANGELOG` 0.3.0, `plugin.json` 0.3.0 and the README. The `v0.3.0` git tag waits for the user's real render of the example.
+       - **Real render on the user's Mac (2026-09-27), QA all OK:**
+         - 0.833 changes/s (minimum 0.8), 1,042 ms hold;
+         - loop seam SSIM 0.9995 with a 0.42 dB audio jump;
+         - −13.4 LUFS.
+       - Goldens recorded in `tests/golden-frames/code-motion-loop/`. The golden test first failed because it asked HyperFrames for 15 fps; it is fixed to 24 fps.
+     - ✅ **Release notes:** `CHANGELOG` 0.3.0, `plugin.json` 0.3.0 and the README. Tagged `v0.3.0` after the real render passed.
      - **Remaining:** rebuild the self-intro reel in a new project with the user's reference and photo, then `compare`; tune `motion_density` if needed.
+   - **Next, after W5: craft and hygiene ideas from the tubeai-skills review** (MIT; ideas re-expressed, nothing copied). Being planned now:
+     - flash/flicker QA;
+     - insert-sync lint;
+     - motion timing measured from a reference into a style pack;
+     - AAC priming and frame-count lengths;
+     - channel glossary and measured pacing;
+     - verify every `tighten` join;
+     - Phase 9 research vocabulary;
+     - NLE timeline export.
      - **Note:** `pnpm` scripts now want to reinstall, because `packages/prompts` was linked by hand. Run `pnpm install` on the Mac. Meanwhile use `node scripts/check.mjs`, or `npx tsc -b && (cd packages/schema && node dist/emit.js)` for schemas.
 4. **Phase 7**, paid providers, ElevenLabs first (needs the user's API key). Step 0 comes first and is local: shot cards, `provider-specs/`, and `prompt_pack` (no keys, no network). The `policy.yaml`, spend and consent machinery it needs is now in place.
 5. **Phase 9**, publishing (needs platform developer accounts). Default targets are Instagram and YouTube Shorts: the user is in India, where TikTok is banned.

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "quality": "preview",
+  "width": 160,
+  "threshold": 0.97,
+  "reel_sha256": "4a5db7ab44c712f62e9e0cff040ee57cbfa798d6a316b291ced730035dc4e522",
+  "spec_sha256": "0f908b0708d79cedd00f941f2ed587d74c61b1d550a87fd0ad4b6e8338609481",
+  "target": {
+    "width": 180,
+    "height": 180,
+    "fps": 24
+  },
+  "duration_ms": 6000,
+  "frames": [
+    {
+      "label": "first",
+      "at_sec": 0.021,
+      "file": "00-first.png"
+    },
+    {
+      "label": "s01",
+      "scene_id": "s01",
+      "at_sec": 3.021,
+      "file": "01-s01.png"
+    },
+    {
+      "label": "last",
+      "at_sec": 5.938,
+      "file": "02-last.png"
+    }
+  ]
+}
