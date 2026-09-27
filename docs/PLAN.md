@@ -295,6 +295,55 @@ The work is split into waves for at most 2 agents; see "Agent execution model".
   - **Security fixture:** a `motion` page that calls `fetch`, loads a remote image and reads `Date.now` is rejected by lint and blocked by CSP at render time.
   - **Release:** `node scripts/check.mjs --push` is green, and `CHANGELOG` `0.3.0` is written.
 
+### Phase 6.6: Craft and hygiene (local, no keys; planned 2026-09-27)
+Why: a read-only review of the MIT-licensed tubeai-skills repo found eight ideas worth re-expressing in our own design. Nothing is copied: no text, no code, no Remotion, no paid service, no yt-dlp workarounds. Each idea fills a gap we confirmed in our code. The waves follow the "Agent execution model" below.
+
+- **1. Flash and flicker QA:**
+  - **Measurement:** per-frame luma (`signalstats` YAVG) in the existing single decode pass (`packages/media/src/qa.ts`).
+  - **Detects:** single-frame spikes (a frame that differs from both neighbours by ≥ ~40/255, including all-white or all-black frames mid-clip) and the most flashes in any 1 s window. The window count approximates WCAG 2.3.1 general flashes; red flashes are not covered, and the docs say so.
+  - **Result:** QA check and lint rule `flashing`. It fails above 3 flashes/s (no override) and warns on any spike. `QA_VERSION` goes to 5.
+- **2. Insert-sync lint:**
+  - `insert_early`: a data item is on screen well before the voice says its number or claim. Fix: a word cue.
+  - `insert_overstays`: an insert stays more than ~2.5 s after its sentence ends while another statement is spoken.
+  - `insert_crowded`: one spoken sentence triggers several data items.
+  - These use voice-track word times and the quantitative-token matcher, are skipped when there is no speech timing, and are documented in `visual-strategy.md`.
+- **3. Motion timing from a reference reel:**
+  - **`analyze` gains `motion_timing`:** entrance durations (median and p75), an easing class (`ease_out`, `ease_in_out`, `spring`, `snap`) read from the difference-energy curve around each change, stagger and holds. It is structure only; no frames are kept.
+  - **Style pack:** `write_style` turns the measurement into `<project>/styles/<id>.yaml`.
+  - **Project-local styles:** styles resolve from the project before the bundled `styles/`, and the file hash is part of the cache key.
+- **4. A/V sync hygiene:**
+  - **Measurement:** the probe reads each stream's `start_time`, `duration` and `nb_frames`.
+  - **New QA check `av_sync`:** audio starts within 1 frame of the video, and the lengths match the frame count.
+  - **Fix only what the measurement shows:** handle AAC priming in the mux if needed, take lengths from frame counts, and bump `ASSEMBLY_VERSION`.
+- **5. Channel glossary and measured pacing:**
+  - **Glossary:** `glossary [{term, variants, case_sensitive}]` on the brand and the series bible. It corrects whisper words (timings kept), seeds the whisper `--prompt`, and applies to every caption source. The TTS `terminology` stays separate.
+  - **Pacing:** `analyze` keeps the pause list and reports silence share and median/p95 pause.
+  - **`tighten pacing_from`:** derives the pause limits from the user's own edits.
+- **6. Verify every `tighten` join:**
+  - **Always, no ASR:** detect `partial_word` (a cut inside a word) and `repeated_word` across a join.
+  - **With whisper installed:** re-transcribe ±2 s around each join (a new time-range option).
+  - **Apply:** `apply` refuses partial words unless forced. Without whisper, the ASR part reports `not_run`.
+- **7. Phase 9 research groundwork:**
+  - `research-specs/titles.yaml` holds a title-length band of 24–58 characters, labelled heuristic and unverified.
+  - A `title_length` lint warning on generated and `publish` titles.
+  - `outlier_multiplier` and `outlier_rate` are defined for Phase 9 below.
+- **8. NLE timeline export:**
+  - **`export timeline: ["fcpxml", "otio"]`:** writes `dist/timeline/` with the scene clips, the audio mix, captions, `project.fcpxml` (1.10) and `project.otio`. Offsets are frame-accurate and paths relative.
+  - **Status:** marked unverified until imported into Resolve or Final Cut.
+- **Waves** (at most 2 agents; the lead owns schemas):
+  - **W0 (lead):** glossary, `FormatGrammar.motion_timing` + pacing, `research-specs/titles.yaml`.
+  - **W1:** A = items 1 and 4 (media/QA) · B = item 2 plus the title lint.
+  - **W2:** A = item 3 · B = items 5 and 6.
+  - **W3:** A = item 8 · B = docs, skills, `CHANGELOG` 0.4.0.
+- **Exit:**
+  - **Tests and checks:** unit and fixture tests for every item, and `node scripts/check.mjs --push` green.
+  - **Sandbox renders:** show `flashing` and `av_sync` passing, the insert lints on the explainer example, and `export timeline` writing both files.
+  - **On the user's Mac:**
+    - the loop example still passes QA;
+    - `analyze` with `write_style` on the user's reference produces a style pack that moves `compare` measurably toward the reference;
+    - the timeline imports into Resolve or Final Cut with clips on the right frames;
+    - `tighten` on a real talking-head clip leaves no partial words.
+
 ### Phase 7: Providers, policy and provenance (keys required)
 - **Step 0: shot cards and prompt packs (local, no keys; before any adapter):**
   - **`ShotCard` schema** (`packages/schema/src/shot-card.ts`), attached to `visual_strategy: generative` scenes:
@@ -350,6 +399,11 @@ The work is split into waves for at most 2 agents; see "Agent execution model".
 
 ### Phase 9: Distribution and learning (go/no-go)
 - **Publishers** (dry-run first, explicit approval, capability query before posting): TikTok Direct Post, YouTube, LinkedIn, Meta.
+- **Research vocabulary** (from Phase 6.6 item 7):
+  - `outlier_multiplier` = a video's views ÷ the channel's median views over the same window;
+  - `outlier_rate` = the share of a channel's recent videos with `outlier_multiplier` ≥ 2;
+  - title patterns and length bands are dated data in `research-specs/`.
+  - All of it comes from the YouTube Data/Analytics API with the user's own OAuth (the `youtube_client_*` placeholders), never a third-party service.
 - **Analytics:** normalized metrics that keep each platform's raw numbers; no universal virality score.
 - **Experiment loop** feeding the next brief.
 - **Hosted:** Docker render worker.

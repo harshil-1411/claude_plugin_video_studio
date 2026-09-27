@@ -150,7 +150,7 @@ Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and th
        - Goldens recorded in `tests/golden-frames/code-motion-loop/`. The golden test first failed because it asked HyperFrames for 15 fps; it is fixed to 24 fps.
      - ✅ **Release notes:** `CHANGELOG` 0.3.0, `plugin.json` 0.3.0 and the README. Tagged `v0.3.0` after the real render passed.
      - **Remaining:** rebuild the self-intro reel in a new project with the user's reference and photo, then `compare`; tune `motion_density` if needed.
-   - **Next, after W5: craft and hygiene ideas from the tubeai-skills review** (MIT; ideas re-expressed, nothing copied). Being planned now:
+   - **Next: Phase 6.6, craft and hygiene** (planned and approved 2026-09-27 in `docs/PLAN.md`, from the tubeai-skills (MIT) review; ideas re-expressed, nothing copied). Implementation waits for the user's go. The eight items:
      - flash/flicker QA;
      - insert-sync lint;
      - motion timing measured from a reference into a style pack;
@@ -234,6 +234,7 @@ Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixe
 | 5 Reel grammar | Done: 15 scene kinds, style packs, CC0 music beds, `voice.mode: none`, variants/adapt |
 | 6 Footage | Done: transcribe (whisper.cpp), analyze, shorts, beat sync, scene audio, demo capture, redaction, letterbox crop, tighten |
 | 6.5 Directed motion | **Not started** (planned 2026-09-27; local) |
+| 6.6 Craft and hygiene | **Planned** (2026-09-27; local) |
 | 7 Paid providers | **Not started** (needs keys) |
 | 8 Localization/launch (local) | Done: script fonts, `localize`, sound-event captions, C2PA, contributor docs, README hero video |
 | 9 Publishing | **Not started** (needs accounts) |
