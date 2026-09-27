@@ -1,6 +1,6 @@
 ---
 name: export
-description: Rebuild a rendered video-studio project's dist/ folder (one package per target platform with video, cover, captions, post copy and QA, plus the reel, clean master, spec, storyboard, render manifest and provenance) from existing renders without re-rendering, and polish the post copy. Use when the user runs /video-studio:export, deleted or edited dist/, wants the final package and posting copy, or wants the videos signed with C2PA content credentials.
+description: Rebuild a rendered video-studio project's dist/ folder (one package per target platform with video, cover, captions, post copy and QA, plus the reel, clean master, spec, storyboard, render manifest and provenance) from existing renders without re-rendering, and polish the post copy. Use when the user runs /video-studio:export, deleted or edited dist/, wants the final package and posting copy, wants the videos signed with C2PA content credentials, or wants to finish the edit in DaVinci Resolve, Final Cut Pro or another editor (FCPXML / OpenTimelineIO timeline).
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+).
 allowed-tools: mcp__plugin_video-studio_engine__export Read Edit
@@ -29,6 +29,22 @@ allowed-tools: mcp__plugin_video-studio_engine__export Read Edit
      `result.dist.warnings` says how to install it.
    - Signing changes the files, so an export without `sign` produces
      unsigned files again.
+
+   Add `timeline: ["fcpxml", "otio"]` (or just one) when the user wants to
+   keep editing in an editor (DaVinci Resolve, Final Cut Pro, anything that
+   reads OpenTimelineIO).
+   - It recreates `dist/timeline/`: `media/` (the scene clips, `audio.wav` =
+     the final mix, `captions.srt`), `project.fcpxml` (FCPXML 1.10),
+     `project.otio` and a `README.md` with the import steps.
+   - Scenes sit back to back at the reel's exact frame bounds. Transitions
+     are markers on the incoming clip (the blend itself is not rebuilt).
+     Captions are an SRT sidecar to import separately.
+   - `result.timeline.warnings` names clips that were conformed (a clip
+     shorter than its slot gets its last frame held, as in the reel).
+   - Say plainly that the timeline is **unverified until imported into an
+     editor**, and point the user at `dist/timeline/README.md`.
+   - An export without `timeline` leaves an older `dist/timeline/` in place;
+     re-export with `timeline` after a re-render.
 3. List the packages in one short block: for each `result.dist.targets[]`,
    `dist/<id>/` with its files, the video size and fps, whether it was
    re-encoded (`transcode_reasons`), and its `qa.json` status. Then the shared

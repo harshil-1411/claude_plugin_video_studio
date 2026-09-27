@@ -3,6 +3,67 @@
 All notable changes to video-studio. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versions may change behaviour).
 
+## [Unreleased]
+
+Planned as 0.4.0, "Craft and hygiene" (Phase 6.6): checks for flashing, A/V sync, insert timing
+and titles; a style pack measured from a reference reel; a names glossary and measured pacing for
+footage; verified `tighten` joins; and a timeline for editing in Resolve or Final Cut.
+
+### Added
+- **Checks**
+  - QA and lint `flashing`: single-frame luma spikes (warning) and more than 3 flashes in any
+    1 s window (failure, no override). It approximates WCAG 2.3.1 general flashes on the mean
+    luma of each frame: a flash in part of the frame moves the mean less, and red flashes are
+    not measured.
+  - QA `av_sync`: the audio must start within one frame of the video (failure) and last as long
+    as the video's frames, within one frame plus 10 ms (warning). The probe now reads each
+    stream's start, duration and frame count. Our own output measured a 0 ms offset (ffmpeg's
+    edit list handles AAC priming), so the mux is unchanged.
+  - Lint `insert_early` (a number or claim is on screen over 1 s before the voice says it),
+    `insert_overstays` (a scene's only insert stays over 2.5 s into a different sentence) and
+    `insert_crowded` (one sentence cues two or more data items). They use the voice's word
+    timings and are skipped without them.
+  - Lint `title_length`: the social title, `publish.<target>.title` and a multi-line post
+    caption's first line should be 24–58 characters. The band is a heuristic in
+    `research-specs/titles.yaml`, unverified, and only ever a warning.
+- **Reference-driven style**
+  - `analyze` measures a reference's motion timing (`motion_timing`): median and p75 entrance
+    time, an easing class (`ease_out`, `ease_in_out`, `spring`, `linear`, `snap`), stagger and
+    holds, from frame-difference energy. Structure only: no frames are kept.
+  - `analyze write_style: "<id>"` writes that timing as a style pack,
+    `<project>/styles/<id>.yaml` (motion only; palette and fonts stay yours).
+  - Project-local styles: `<project>/styles/<id>.yaml` resolves before the bundled `styles/`,
+    and its file hash is part of the cache key, so editing it re-renders. Shadowing a bundled id
+    needs `overwrite: true` and is reported as a warning.
+- **Footage**
+  - Glossary: `glossary [{term, variants, case_sensitive}]` on the brand
+    (`language.glossary`) and the series bible. It seeds the whisper prompt, corrects misheard
+    names in transcripts and imported captions (timings kept) and applies to every caption
+    source. TTS pronunciation stays in `language.terminology`.
+  - `analyze` reports `speech_pacing`: pauses inside speech, silence share, median and p95
+    pause.
+  - `tighten pacing_from`: takes the pause limits from a video the user edited (its `analyze`
+    result or asset id): `max_pause_ms` from the p95 pause, `keep_pause_ms` from the median.
+  - `tighten` checks every join for `partial_word` (a cut inside a word) and `repeated_word`;
+    `apply` refuses a partial word unless `force: true`. With whisper installed, apply
+    re-transcribes ±2 s around each join and reports mismatches (untested without a model;
+    `not_run` otherwise).
+- **Publishing**
+  - `publish.<target>.title`: a video title for platforms that have one (YouTube), carried into
+    `post.json`.
+- **Export**
+  - NLE timeline export: `export timeline: ["fcpxml", "otio"]` writes `dist/timeline/` with the
+    scene clips, the audio mix (48 kHz WAV), captions (SRT sidecar), `project.fcpxml` (1.10) and
+    `project.otio`, frame-exact, for Resolve or Final Cut. Transitions become markers (clips sit at
+    their exact frame bounds). Unverified until imported into an editor.
+
+### Changed
+- `QA_VERSION` is 5 (flashing and A/V sync), so cached QA results are re-run.
+- Social copy moved to its own module (`social-copy.ts`), which removes an import cycle between
+  lint and the pipeline.
+- `motion` page copy now shows in the storyboard.
+- The vitest timeout is 20 s: real-ffmpeg tests took over 5 s under full load.
+
 ## [0.3.0] - 2026-09-27
 
 The directed-motion release (Phase 6.5): Claude can now write a scene as code, and the engine

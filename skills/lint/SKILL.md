@@ -1,6 +1,6 @@
 ---
 name: lint
-description: Lint a video-studio project against its platform targets (TikTok, Instagram, YouTube Shorts, LinkedIn, Facebook Page API) - duration/fps/size envelopes, text cut off, text or captions under the app UI, contrast, caption reading speed and timing (captions too brief or out of sync with the voice, flicker), cuts off the beat, on-screen text too brief to read, story arc, post caption and hashtag limits, cover, brand banned phrases, banned motion effects, acceptance numbers and the loop seam - and fix what it finds by editing the spec and re-rendering. Use when the user runs /video-studio:lint, asks whether a video is ready for a platform, or after a render before publishing.
+description: Lint a video-studio project against its platform targets (TikTok, Instagram, YouTube Shorts, LinkedIn, Facebook Page API) - duration/fps/size envelopes, text cut off, text or captions under the app UI, contrast, caption reading speed and timing (captions too brief or out of sync with the voice, flicker), cuts off the beat, data inserts out of step with the voice, flashing, on-screen text too brief to read, story arc, title length, post caption and hashtag limits, cover, brand banned phrases, banned motion effects, acceptance numbers and the loop seam - and fix what it finds by editing the spec and re-rendering. Use when the user runs /video-studio:lint, asks whether a video is ready for a platform, or after a render before publishing.
 allowed-tools: mcp__plugin_video-studio_engine__lint mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status Read Edit
 ---
 
@@ -59,6 +59,11 @@ Run this loop when lint returns errors, or warnings the user wants cleared:
      - `loop_seam` (error, with `master.loop`): the last frame does not
        return to the first, or the audio jumps across the seam. Make cyclic
        motion periods divide the loop length and loop the bed on a bar.
+     - `flashing`: from QA's flash measurement of the render. An error
+       above 3 flashes in any 1 s (no acceptance override) and a warning
+       for single-frame luma spikes. Measured on mean luma (approximates
+       WCAG 2.3.1; red flashes are not measured). Slow or soften the
+       flashing, or replace or fade the spike frames, then re-render.
      - `onscreen_too_brief`: on-screen text (`on_screen_text` + props) the
        voiceover does not say needs more reading time than the scene has
        (3 words/s after a 1 s settle). Cut the text, say it, or lengthen
@@ -101,7 +106,8 @@ Run this loop when lint returns errors, or warnings the user wants cleared:
      hook's first second, lasts outside 3–10 s, or leaves under 2 s of the
      speaker since the previous one. Move, lengthen, split or merge it.
    - `title_length`: the social title (`spec.title`, else the brief's
-     hook) or a multi-line publish caption's first line is outside 24–58
+     hook or the first voiceover sentence), a `publish.<target>.title`, or
+     a multi-line publish caption's first line is outside 24–58
      characters. The band is a heuristic from `research-specs/titles.yaml`,
      not a platform limit, and unverified: trim filler or add the concrete
      payoff as the fix says, and ignore it when the user prefers the title.

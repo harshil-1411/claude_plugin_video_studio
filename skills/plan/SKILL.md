@@ -65,6 +65,12 @@ Load references only when you reach the step that needs them:
 4. If there is a `brand.yaml` (the user named one, or `<project_dir>/brand.yaml`),
    read it: `voice.avoid`, `claims.prohibited`, `cta.allowed`,
    `video.caption_preset` and terminology all constrain the script.
+   If the video names people, products or series terms that speech
+   recognition or captions could misspell, suggest a glossary:
+   `language.glossary: [{term, variants, case_sensitive}]` in `brand.yaml`
+   (or `glossary` in the series bible) with the misheard forms as
+   variants. It corrects transcripts and every caption source; TTS
+   pronunciation stays in `language.terminology`.
 
 ### 2. Brief values: infer first, ask last
 
@@ -183,7 +189,11 @@ points; `inputs` and `acceptance` from steps 2-3). Call `brief_validate
    beat split or merged; keep ids `s01`, `s02`, ... in order.
    - `style`: `minimal` (quiet, clean), `editorial` (story and quotes),
      `technical` (code, diagrams), `energetic` (bold, fast cuts). Pass the
-     user's choice; otherwise keep the template default.
+     user's choice; otherwise keep the template default. If the user has a
+     reference reel whose movement they like, offer to seed a project style
+     from it: `analyze {path, project_dir, write_style: "<id>"}` writes
+     `<project>/styles/<id>.yaml` (measured motion timing only), then set
+     `style: "<id>"`.
    - `music`: `bundled:ambient` (calm), `bundled:lofi` (relaxed),
      `bundled:upbeat` (energetic), `bundled:minimal`, or a synthesized
      score `synth:pulse|lofi|ambient|drive` (override e.g. `synth: {bpm:

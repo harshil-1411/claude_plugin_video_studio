@@ -11,6 +11,23 @@ templates may set `default_style`. The file name must equal `id`.
 | `technical` | Dark editor palette, terminal-green accent, left-aligned semibold headings, JetBrains Mono for code; snap entrances (160 ms), no exit fade, hard cuts. | Developer tools, code, architecture. |
 | `energetic` | Deep purple, yellow accent, extra-bold UPPER-CASE headings a size larger, centred; spring entrances with a fast 70 ms stagger. | Launches, listicles, scroll-stopping hooks. |
 
+## Project styles
+
+A project can keep its own packs in `<project>/styles/<id>.yaml`, validated by the same schema.
+
+- **Lookup:** `style: <id>` resolves the project's `styles/` first, then the bundled packs here.
+- **Cache:** a project pack's ref is `<id>@<version>+sha256:<file hash>`, so editing the file
+  re-renders without a version bump. Bundled refs are unchanged.
+- **Shadowing:** a project pack with a bundled id (`minimal`, ...) replaces it in that project.
+  `analyze write_style` refuses a bundled id or an existing file unless `overwrite: true`, and
+  warns when it shadows a bundled pack.
+- **From a reference reel:** `analyze {path, project_dir, write_style: "<id>"}` measures the
+  reference's motion timing and writes a motion-only pack: `easing` from the measured easing
+  class, `enter_ms` from the median entrance, `stagger_ms` from the measured stagger,
+  `personality` and `exit_ms` derived from those, and a `cut` or `crossfade` transition from
+  the cut rate. It has no palette or fonts (those come from the renderer defaults and your
+  brand) and an empty `avoid` list. Nothing from the reference is kept.
+
 ## Taste guard (`motion.avoid`)
 
 Each pack bans stock effects that make motion look templated (`EffectId` in

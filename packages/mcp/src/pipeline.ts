@@ -1,7 +1,7 @@
 import { copyFile, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { ensureDir, hashFile, projectPaths, readJson, writeJsonAtomic } from "@video-studio/core";
-import { type FlashStats, type MotionStats, type QaReport, technicalQa, writeQaReport } from "@video-studio/media";
+import { type FlashStats, type MotionStats, type QaReport, technicalQa, transitionSeconds, writeQaReport } from "@video-studio/media";
 import { type SceneRenderEntry, findFontsDir, findStylesDir, getStyle, LAYOUT_VERSION, parseFontChain, resolveTokens } from "@video-studio/renderer";
 import { CreativeBrief, RenderManifest, type SceneRender, VideoSpec, parseYamlOrJson, resolveTargets, type C2paRecord } from "@video-studio/schema";
 import { ZONES_VERSION, findPlatformSpecsDir, loadContracts } from "@video-studio/platforms";
@@ -14,9 +14,11 @@ import { socialCopy, socialCopyParts } from "./social-copy.js";
 
 export { socialCopy, socialCopyParts };
 import { TARGET_PACKAGE_VERSION, packageTargets } from "./targets.js";
+import { type TimelineExport, type TimelineFormat, type TimelineSceneInput, writeTimeline } from "./timeline-export.js";
 import { projectSpecPaths } from "./spec-validate.js";
 import {
   ASSEMBLY_VERSION,
+  DEFAULT_TRANSITION_MS,
   ENGINE_VERSION,
   QA_VERSION,
   type DistFiles,
@@ -305,18 +307,51 @@ export async function exportProject(
     sign?: boolean;
     /** c2patool lookup/runner overrides (tests). */
     c2pa?: C2paDeps;
+    /** Also write an editor timeline to dist/timeline/ (FCPXML 1.10 and/or OpenTimelineIO) with the scene clips, the mix and the captions. */
+    timeline?: readonly TimelineFormat[];
   } = {},
-): Promise<{ quality: Quality; dist: DistFiles; qa_status?: string }> {
+): Promise<{ quality: Quality; dist: DistFiles; qa_status?: string; timeline?: TimelineExport }> {
   const root = projectPaths(projectDir).root;
   const state = await loadState(root, opts.quality);
-  const dist = await exportFromState(root, state, opts.now ?? (() => new Date()), { ...(opts.sign ? { sign: true } : {}), ...(opts.c2pa ? { c2pa: opts.c2pa } : {}) });
-  return { quality: state.quality, dist, ...(state.qa ? { qa_status: state.qa.status } : {}) };
+  const { timeline, ...dist } = await exportFromState(root, state, opts.now ?? (() => new Date()), {
+    ...(opts.sign ? { sign: true } : {}),
+    ...(opts.c2pa ? { c2pa: opts.c2pa } : {}),
+    ...(opts.timeline?.length ? { timeline: opts.timeline } : {}),
+  });
+  return { quality: state.quality, dist, ...(state.qa ? { qa_status: state.qa.status } : {}), ...(timeline ? { timeline } : {}) };
+}
+
+/**
+ * The transition the reel drew into each scene, as the assembly computed it: the scene's own
+ * `transition`, else the render's style pack default (brand motion overrides), clamped by
+ * transitionSeconds. Taken from the current spec, so scenes are matched by id.
+ */
+async function renderedTransitions(root: string, state: RenderState, spec: VideoSpec): Promise<Map<string, { kind: string; ms: number }>> {
+  const out = new Map<string, { kind: string; ms: number }>();
+  const brandFile = await loadBrand(root).catch(() => undefined);
+  const styleId = state.style?.split("@")[0];
+  const style = styleId ? await getStyle(findStylesDir(process.env), styleId, root).catch(() => undefined) : undefined;
+  const tokens = resolveTokens(brandFile?.brand, {}, style, spec.language ? { language: spec.language } : {});
+  const byId = new Map(spec.scenes.map((s) => [s.id, s]));
+  state.scenes.forEach((s, i) => {
+    if (i === 0) return;
+    const kind = byId.get(s.scene_id)?.transition ?? tokens.motion?.transition;
+    if (!kind || kind === "cut") return;
+    const d = transitionSeconds(tokens.motion?.transition_ms ?? DEFAULT_TRANSITION_MS, s.duration_ms, state.target.fps);
+    if (d > 0) out.set(s.scene_id, { kind, ms: Math.round(d * 1000) });
+  });
+  return out;
 }
 
 // ------------------------------------------------------------------------------------ export
 
 
-async function exportFromState(root: string, state: RenderState, now: () => Date, opts: { sign?: boolean; c2pa?: C2paDeps } = {}): Promise<DistFiles> {
+async function exportFromState(
+  root: string,
+  state: RenderState,
+  now: () => Date,
+  opts: { sign?: boolean; c2pa?: C2paDeps; timeline?: readonly TimelineFormat[] } = {},
+): Promise<DistFiles & { timeline?: TimelineExport }> {
   const paths = projectPaths(root);
   const distDir = paths.dist;
   await ensureDir(distDir);
@@ -478,6 +513,31 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
   };
   await writeJsonAtomic(out.provenance, provenance);
 
+  // Editor timeline (dist/timeline/): scene clips, the mix from the (unsigned) clean master, captions.
+  let timeline: TimelineExport | undefined;
+  if (opts.timeline?.length) {
+    const transitions = await renderedTransitions(root, state, spec);
+    const scenes: TimelineSceneInput[] = state.scenes.map((s) => ({
+      scene_id: s.scene_id,
+      clip: join(root, s.clip),
+      duration_ms: s.duration_ms,
+      ...(s.placeholder ? { placeholder: true } : {}),
+      ...(transitions.has(s.scene_id) ? { transition_in: transitions.get(s.scene_id)! } : {}),
+    }));
+    timeline = await writeTimeline({
+      dir: join(distDir, "timeline"),
+      formats: opts.timeline,
+      title: spec.title?.trim() || socialCopyParts(spec, brief).title,
+      generator: { name: "video-studio", version: ENGINE_VERSION },
+      target: state.target,
+      scenes,
+      mixSource: join(root, state.master),
+      ...(state.captions.srt ? { captionsSrt: join(root, state.captions.srt) } : {}),
+    });
+    exportWarnings.push(...timeline.warnings.map((w) => `timeline: ${w}`));
+    if (exportWarnings.length) out.warnings = exportWarnings;
+  }
+
   // manifest
   const sha = (p: string) => hashFile(p);
   const reelProbe = { width: state.target.width, height: state.target.height, duration_sec: state.duration_ms / 1000 };
@@ -495,6 +555,7 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
     outputs.push({ kind: "other", path: rel(root, out.cover_square_preview), sha256: await sha(out.cover_square_preview), ...(sq ? { width: sq.w, height: sq.h } : {}) });
   }
   outputs.push({ kind: "social_copy", path: rel(root, out.social_copy), sha256: await sha(out.social_copy) });
+  for (const p of timeline ? [timeline.fcpxml, timeline.otio] : []) if (p) outputs.push({ kind: "other", path: rel(root, p), sha256: await sha(p) });
   outputs.push({ kind: "provenance", path: rel(root, out.provenance), sha256: await sha(out.provenance) });
   outputs.push({ kind: "spec", path: rel(root, out.video_spec), sha256: await sha(out.video_spec) });
   if (out.storyboard) outputs.push({ kind: "other", path: rel(root, out.storyboard), sha256: await sha(out.storyboard) });
@@ -615,7 +676,7 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
   const parsed = RenderManifest.safeParse(manifest);
   if (!parsed.success) throw new Error(`internal: render manifest failed schema validation: ${parsed.error.message}`);
   await writeJsonAtomic(out.render_manifest, parsed.data);
-  return out;
+  return timeline ? { ...out, timeline } : out;
 }
 
 /**

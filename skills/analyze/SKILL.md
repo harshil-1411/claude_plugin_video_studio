@@ -1,6 +1,6 @@
 ---
 name: analyze
-description: Analyze a reference video's format (shot lengths, cuts per 10 s, first-shot length, pacing, speech share, loudness, and where burned-in captions sit) without copying anything from it, then apply that structure to the user's own video. Use when the user runs /video-studio:analyze, shares a reel they want to imitate ("make it like this one"), or asks how fast a video cuts or where its captions are.
+description: Analyze a reference video's format (shot lengths, cuts per 10 s, first-shot length, pacing, speech share and pauses, loudness, motion timing, and where burned-in captions sit) without copying anything from it, then apply that structure to the user's own video, optionally as a project style pack (write_style). Use when the user runs /video-studio:analyze, shares a reel they want to imitate ("make it like this one"), or asks how fast a video cuts or where its captions are.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+) and a system ffmpeg.
 allowed-tools: mcp__plugin_video-studio_engine__analyze Read
@@ -24,6 +24,11 @@ identity. Use it only for pacing and layout.
      (fast < 2 s per shot, slow > 5 s)
    - length of the hook shot
    - speech share: voice-band sound, so music can inflate it
+   - speech pacing (`speech_pacing`): pauses inside speech (voice-band
+     silences of 100 ms or more, lead-in and tail excluded), their share of
+     the speech span, and the median and p95 pause. For a video the user
+     edited themselves, offer `tighten pacing_from` with this analysis so
+     their footage is cut to the same pauses.
    - loudness in LUFS
    - caption band, as a percentage of the frame height, or "none found"
    - motion timing (`motion_timing`): how long elements take to settle after

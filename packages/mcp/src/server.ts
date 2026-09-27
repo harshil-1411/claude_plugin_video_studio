@@ -31,6 +31,7 @@ import { formatLint, lintProject } from "./lint.js";
 import { formatPromptPack, promptPack } from "./prompt-pack.js";
 import { formatIssues, renderStoryboard, scaffoldSpec, validateBrief } from "./plan.js";
 import { type RenderProjectOptions, type RenderProjectResult, SpecInvalidError, exportProject, loadValidSpec, runQa } from "./pipeline.js";
+import { TIMELINE_FORMATS, type TimelineFormat } from "./timeline-export.js";
 import { type ErrorCode, type RenderJobView, RenderJobManager, errorCode, isActiveJob } from "./render-jobs.js";
 import { formatSpecValidation, projectSpecPaths, validateSpecFile } from "./spec-validate.js";
 import { findTemplatesDir, getTemplate, loadTemplates, requireTemplatesDir, summarizeTemplate } from "./templates.js";
@@ -638,17 +639,22 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Re-export dist/",
       description:
-        "Rebuild <project_dir>/dist/ from the latest existing render (or the given quality) without rendering: reel.mp4, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target: video.mp4 (copied, or re-encoded only when the target's contract needs lower fps/size/bitrate), cover.jpg, captions.srt/.vtt, post.json (from spec publish.<target>, else a generated draft) and qa.json (lint findings for that target; lint is re-run). Packages of targets no longer in the spec are removed. Returns dist.targets[] {id, transcoded, transcode_reasons, width, height, fps, ...}.",
+        "Rebuild <project_dir>/dist/ from the latest existing render (or the given quality) without rendering: reel.mp4, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target: video.mp4 (copied, or re-encoded only when the target's contract needs lower fps/size/bitrate), cover.jpg, captions.srt/.vtt, post.json (from spec publish.<target>, else a generated draft) and qa.json (lint findings for that target; lint is re-run). Packages of targets no longer in the spec are removed. With timeline: [\"fcpxml\", \"otio\"] (either or both) it also writes an editor timeline to dist/timeline/ (recreated): media/ (the scene clips, audio.wav = the final mix, captions.srt), project.fcpxml (FCPXML 1.10 for Final Cut Pro and DaVinci Resolve), project.otio (OpenTimelineIO) and README.md with import steps; scenes sit back to back on the reel's frame grid, transitions become markers, captions are an SRT sidecar. The timeline is unverified until imported into an editor. Returns dist.targets[] {id, transcoded, transcode_reasons, width, height, fps, ...} and, with timeline, timeline {dir, status, formats, fcpxml, otio, media[], total_frames, warnings}.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Rendered project folder"),
         quality: QUALITY.optional().describe("Which render to export (default: the latest)"),
         sign: z.boolean().optional().describe("Add C2PA content credentials (provenance, AI disclosure) to the exported videos with the local c2patool"),
+        timeline: z
+          .array(z.enum(TIMELINE_FORMATS))
+          .optional()
+          .describe("Also write an editor timeline to dist/timeline/: fcpxml (Final Cut Pro, DaVinci Resolve) and/or otio (OpenTimelineIO). Default: none"),
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
-    safe(async ({ project_dir, quality, sign }: { project_dir: string; quality?: "preview" | "final"; sign?: boolean }) => {
-      const r = await exportProject(resolveInputPath(project_dir, cwd()), { ...(quality ? { quality } : {}), ...(sign ? { sign } : {}) });
-      return jsonResult(`exported the ${r.quality} render to ${r.dist.dir}${r.qa_status ? ` (QA ${r.qa_status})` : ""}`, r as unknown as Record<string, unknown>);
+    safe(async ({ project_dir, quality, sign, timeline }: { project_dir: string; quality?: "preview" | "final"; sign?: boolean; timeline?: TimelineFormat[] }) => {
+      const r = await exportProject(resolveInputPath(project_dir, cwd()), { ...(quality ? { quality } : {}), ...(sign ? { sign } : {}), ...(timeline?.length ? { timeline } : {}) });
+      const tl = r.timeline ? `; editor timeline (${r.timeline.formats.join(", ")}) in ${r.timeline.dir}, ${r.timeline.status}` : "";
+      return jsonResult(`exported the ${r.quality} render to ${r.dist.dir}${r.qa_status ? ` (QA ${r.qa_status})` : ""}${tl}`, r as unknown as Record<string, unknown>);
     }),
   );
 

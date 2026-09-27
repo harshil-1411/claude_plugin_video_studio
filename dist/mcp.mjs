@@ -43131,6 +43131,471 @@ async function packageTargets(i, allTargetIds) {
 	return out;
 }
 //#endregion
+//#region src/timeline-export.ts
+/**
+* NLE timeline export (Phase 6.6 item 8): `dist/timeline/` with the scene clips, the final audio
+* mix and the captions under `media/`, plus `project.fcpxml` (FCPXML 1.10, Final Cut Pro and
+* DaVinci Resolve) and `project.otio` (OpenTimelineIO JSON) that lay them out frame-accurately.
+*
+* Choices (documented in the generated README too):
+* - **Placement:** scenes sit back to back on the frame grid the assembly used: scene i has
+*   `round(duration_ms * fps / 1000)` frames (at least 1) and starts where scene i-1 ends. The
+*   assembly keeps every scene on its slot boundary even with a transition (the outgoing picture
+*   holds its last frame and is blended into the incoming scene's first frames), so plain cuts at
+*   those bounds reproduce the reel's timing exactly; only the blend itself is not rebuilt.
+*   Each transition is recorded as a marker on the incoming clip (kind and length) so the editor
+*   can re-apply it; an NLE transition would need clip handles the scene renders do not have.
+* - **Audio:** the delivered mix (voice, music, scene audio, loudness-normalized), decoded from the
+*   clean master to 48 kHz stereo PCM and padded/trimmed to the exact sequence length, as one
+*   connected clip (FCPXML lane -1) / one audio track spanning the sequence. Scene clips that
+*   carry their own audio are placed video-only so nothing plays twice.
+* - **Captions:** a sidecar `media/captions.srt` named in a sequence note (FCPXML) and in the
+*   timeline metadata (OTIO). Both Final Cut Pro (File > Import > Captions) and Resolve
+*   (File > Import > Subtitle) import SRT; FCPXML `<caption>` elements are Final Cut-specific and
+*   Resolve's FCPXML import handles them unreliably, so the sidecar is the more robust choice.
+*
+* Everything written is deterministic: the same render gives the same bytes. The export is
+* unverified until someone imports it into an editor.
+*/
+const TIMELINE_FORMATS = ["fcpxml", "otio"];
+const TIMELINE_STATUS = "unverified until imported into an editor";
+const TIMELINE_AUDIO_RATE = 48e3;
+function frameRational(fps) {
+	if (!(fps > 0)) throw new Error(`timeline: fps must be > 0 (got ${fps})`);
+	if (Number.isInteger(fps)) return {
+		num: 1,
+		den: fps
+	};
+	const k = Math.round(fps * 1001 / 1e3);
+	if (Math.abs(k * 1e3 / 1001 - fps) < .01) return {
+		num: 1001,
+		den: k * 1e3
+	};
+	throw new Error(`timeline: unsupported frame rate ${fps} (integer or NTSC 1000/1001 rates only)`);
+}
+/** Frames on the assembly's grid for a slot of `ms` (same rounding as the concat). */
+const slotFrames = (ms, fps) => Math.max(1, Math.round(ms * fps / 1e3));
+function xmlEscape(s) {
+	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "");
+}
+/** A relative URL for a timeline-relative path: each segment percent-encoded. */
+function relUrl(path) {
+	return path.split("/").map(encodeURIComponent).join("/");
+}
+/** `n` frames as an FCPXML rational time: `0s`, or `<n*num>/<den>s`. */
+function fcpTime(frames, f) {
+	if (!Number.isInteger(frames) || frames < 0) throw new Error(`timeline: frame count must be a non-negative integer (got ${frames})`);
+	return frames === 0 ? "0s" : `${frames * f.num}/${f.den}s`;
+}
+const attrs = (a) => Object.entries(a).filter(([, v]) => v !== void 0).map(([k, v]) => ` ${k}="${xmlEscape(String(v))}"`).join("");
+const transitionNote = (t, fps) => `transition: ${t.kind}, ${t.frames} frame(s) (${(t.frames / fps * 1e3).toFixed(0)} ms) blended over the start of this clip in reel.mp4; re-apply it in the editor`;
+function buildFcpxml(m) {
+	const f = m.frame;
+	const t = (n) => fcpTime(n, f);
+	const L = [];
+	L.push(`<?xml version="1.0" encoding="UTF-8"?>`);
+	L.push(`<!DOCTYPE fcpxml>`);
+	L.push(`<fcpxml version="1.10">`);
+	L.push(`  <resources>`);
+	L.push(`    <format${attrs({
+		id: "r1",
+		frameDuration: `${f.num}/${f.den}s`,
+		width: m.width,
+		height: m.height,
+		colorSpace: "1-1-1 (Rec. 709)"
+	})}/>`);
+	const assetId = (i) => `r${i + 2}`;
+	m.clips.forEach((c, i) => {
+		L.push(`    <asset${attrs({
+			id: assetId(i),
+			name: c.id,
+			start: "0s",
+			duration: t(c.media_frames),
+			hasVideo: 1,
+			format: "r1",
+			videoSources: 1,
+			hasAudio: c.has_audio ? 1 : 0,
+			...c.has_audio ? {
+				audioSources: 1,
+				audioChannels: 2,
+				audioRate: TIMELINE_AUDIO_RATE
+			} : {}
+		})}>`);
+		L.push(`      <media-rep${attrs({
+			kind: "original-media",
+			src: relUrl(c.media)
+		})}/>`);
+		L.push(`    </asset>`);
+	});
+	const audioId = assetId(m.clips.length);
+	if (m.audio) {
+		L.push(`    <asset${attrs({
+			id: audioId,
+			name: "audio mix",
+			start: "0s",
+			duration: `${m.audio.samples}/${TIMELINE_AUDIO_RATE}s`,
+			hasVideo: 0,
+			hasAudio: 1,
+			audioSources: 1,
+			audioChannels: m.audio.channels,
+			audioRate: TIMELINE_AUDIO_RATE
+		})}>`);
+		L.push(`      <media-rep${attrs({
+			kind: "original-media",
+			src: relUrl(m.audio.media)
+		})}/>`);
+		L.push(`    </asset>`);
+	}
+	L.push(`  </resources>`);
+	L.push(`  <library>`);
+	L.push(`    <event${attrs({ name: m.title })}>`);
+	L.push(`      <project${attrs({ name: m.title })}>`);
+	L.push(`        <sequence${attrs({
+		format: "r1",
+		duration: t(m.total_frames),
+		tcStart: "0s",
+		tcFormat: "NDF",
+		audioLayout: "stereo",
+		audioRate: "48k"
+	})}>`);
+	const notes = [`Exported by ${m.generator.name} ${m.generator.version}; ${TIMELINE_STATUS}.`, ...m.captions ? [`Captions: ${m.captions.media} (SRT sidecar; import it with File > Import > Captions in Final Cut Pro or File > Import > Subtitle in DaVinci Resolve).`] : []];
+	L.push(`          <note>${xmlEscape(notes.join(" "))}</note>`);
+	L.push(`          <spine>`);
+	m.clips.forEach((c, i) => {
+		L.push(`            <asset-clip${attrs({
+			ref: assetId(i),
+			offset: t(c.offset),
+			name: c.id,
+			start: "0s",
+			duration: t(c.duration),
+			format: "r1",
+			tcFormat: "NDF",
+			...c.has_audio ? { srcEnable: "video" } : {}
+		})}>`);
+		if (c.placeholder) L.push(`              <note>${xmlEscape("placeholder card: replace with the real shot")}</note>`);
+		if (i === 0 && m.audio) L.push(`              <asset-clip${attrs({
+			ref: audioId,
+			lane: -1,
+			offset: "0s",
+			name: "audio mix",
+			start: "0s",
+			duration: t(m.total_frames),
+			audioRole: "dialogue"
+		})}/>`);
+		if (c.transition_in) L.push(`              <marker${attrs({
+			start: "0s",
+			duration: t(Math.min(c.transition_in.frames, c.duration)),
+			value: transitionNote(c.transition_in, m.fps)
+		})}/>`);
+		L.push(`            </asset-clip>`);
+	});
+	L.push(`          </spine>`);
+	L.push(`        </sequence>`);
+	L.push(`      </project>`);
+	L.push(`    </event>`);
+	L.push(`  </library>`);
+	L.push(`</fcpxml>`);
+	return L.join("\n") + "\n";
+}
+/** A JSON number that must be written as a float (`15.0`): OTIO's RationalTime fields are doubles. */
+var F$1 = class {
+	v;
+	constructor(v) {
+		this.v = v;
+	}
+};
+function stringifyJson(v, indent = "") {
+	const next = indent + "    ";
+	if (v instanceof F$1) return Number.isInteger(v.v) ? v.v.toFixed(1) : String(v.v);
+	if (v === null || typeof v === "boolean" || typeof v === "number" || typeof v === "string") return JSON.stringify(v);
+	if (Array.isArray(v)) return v.length ? `[\n${v.map((x) => next + stringifyJson(x, next)).join(",\n")}\n${indent}]` : "[]";
+	const keys = Object.keys(v);
+	return keys.length ? `{\n${keys.map((k) => `${next}${JSON.stringify(k)}: ${stringifyJson(v[k], next)}`).join(",\n")}\n${indent}}` : "{}";
+}
+function buildOtio(m) {
+	const rate = m.frame.den / m.frame.num;
+	const rt = (frames) => ({
+		OTIO_SCHEMA: "RationalTime.1",
+		rate: new F$1(rate),
+		value: new F$1(frames)
+	});
+	const range = (start, dur) => ({
+		OTIO_SCHEMA: "TimeRange.1",
+		duration: rt(dur),
+		start_time: rt(start)
+	});
+	const ref = (url, frames) => ({
+		OTIO_SCHEMA: "ExternalReference.1",
+		available_range: range(0, frames),
+		metadata: {},
+		name: "",
+		target_url: relUrl(url)
+	});
+	const clip = (name, url, mediaFrames, dur, markers, meta) => ({
+		OTIO_SCHEMA: "Clip.1",
+		effects: [],
+		enabled: true,
+		markers,
+		media_reference: ref(url, mediaFrames),
+		metadata: meta,
+		name,
+		source_range: range(0, dur)
+	});
+	const track = (name, kind, children) => ({
+		OTIO_SCHEMA: "Track.1",
+		children,
+		effects: [],
+		enabled: true,
+		kind,
+		markers: [],
+		metadata: {},
+		name,
+		source_range: null
+	});
+	const video = m.clips.map((c) => clip(c.id, c.media, c.media_frames, c.duration, c.transition_in ? [{
+		OTIO_SCHEMA: "Marker.2",
+		color: "RED",
+		marked_range: range(0, Math.min(c.transition_in.frames, c.duration)),
+		metadata: { "video-studio": {
+			transition: c.transition_in.kind,
+			frames: c.transition_in.frames
+		} },
+		name: transitionNote(c.transition_in, m.fps)
+	}] : [], { "video-studio": {
+		scene_id: c.id,
+		sequence_offset_frames: c.offset,
+		...c.has_audio ? { clip_audio: "muted: the mix on the audio track has it" } : {},
+		...c.placeholder ? { placeholder: true } : {}
+	} }));
+	const audio = m.audio ? [clip("audio mix", m.audio.media, m.total_frames, m.total_frames, [], { "video-studio": {
+		role: "final mix",
+		sample_rate: TIMELINE_AUDIO_RATE,
+		samples: m.audio.samples
+	} })] : [];
+	return stringifyJson({
+		OTIO_SCHEMA: "Timeline.1",
+		global_start_time: rt(0),
+		metadata: { "video-studio": {
+			generator: m.generator.name,
+			version: m.generator.version,
+			status: TIMELINE_STATUS,
+			width: m.width,
+			height: m.height,
+			fps: m.fps,
+			total_frames: m.total_frames,
+			...m.captions ? { captions: relUrl(m.captions.media) } : {}
+		} },
+		name: m.title,
+		tracks: {
+			OTIO_SCHEMA: "Stack.1",
+			children: [track("Video 1", "Video", video), track("Audio 1", "Audio", audio)],
+			effects: [],
+			enabled: true,
+			markers: [],
+			metadata: {},
+			name: "tracks",
+			source_range: null
+		}
+	}) + "\n";
+}
+function buildTimelineReadme(m, formats) {
+	const secs = (m.total_frames * m.frame.num / m.frame.den).toFixed(3);
+	return [
+		`# ${m.title}: editor timeline`,
+		"",
+		`Exported by ${m.generator.name} ${m.generator.version}. **Status: ${TIMELINE_STATUS}.** Nobody has opened this timeline in an editor yet; if an import fails or looks wrong, report what the editor said.`,
+		"",
+		`- Sequence: ${m.width}x${m.height}, ${m.fps} fps, ${m.total_frames} frames (${secs} s).`,
+		`- Files: ${formats.map((f) => `\`project.${f}\``).join(", ")}; media in \`media/\` (${m.clips.length} scene clip(s)${m.audio ? ", `audio.wav` (the final mix)" : ""}${m.captions ? ", `captions.srt`" : ""}).`,
+		"- Scenes are placed back to back at the frame bounds the reel uses. Transitions the reel draws are listed as markers on the incoming clip; re-apply them in the editor if you want them.",
+		"- Media paths are relative to this folder: keep `media/` next to the project files. If the editor shows media offline, relink it to this `media/` folder.",
+		"",
+		"## DaVinci Resolve (free)",
+		"",
+		"1. File > Import > Timeline… and pick `project.fcpxml` (or `project.otio` on Resolve 18.5+).",
+		"2. When asked, leave \"Automatically import source clips into media pool\" on; if clips are offline, right-click them in the media pool > Relink Selected Clips… > this `media/` folder.",
+		`3. Check the timeline is ${m.width}x${m.height} at ${m.fps} fps and ${m.total_frames} frames long, each scene starts on its cut, and the audio track lines up with the picture.`,
+		...m.captions ? ["4. Captions: File > Import > Subtitle… > `media/captions.srt`, then drag it onto the timeline at 00:00:00:00."] : [],
+		"",
+		"## Final Cut Pro",
+		"",
+		"1. File > Import > XML… and pick `project.fcpxml` (Final Cut Pro 10.6 or later reads FCPXML 1.10). It creates an event and a project with the same name.",
+		"2. If clips are offline: select them > File > Relink Files… > this `media/` folder.",
+		`3. Check the project is ${m.width}x${m.height} at ${m.fps} fps, the scenes sit on the primary storyline back to back, and the audio mix is a connected clip under them for the whole length.`,
+		...m.captions ? ["4. Captions: File > Import > Captions… > `media/captions.srt`."] : [],
+		""
+	].join("\n");
+}
+const safeName = (id) => id.replace(/[^A-Za-z0-9._-]/g, "_");
+async function writeTimeline(input) {
+	const formats = TIMELINE_FORMATS.filter((f) => input.formats.includes(f));
+	if (!formats.length) throw new Error(`timeline: no known format in [${input.formats.join(", ")}] (use ${TIMELINE_FORMATS.join(", ")})`);
+	if (!input.scenes.length) throw new Error("timeline: the render has no scenes");
+	const { fps, width, height } = input.target;
+	const frame = frameRational(fps);
+	const run = {
+		...input.tools ? { tools: input.tools } : {},
+		...input.signal ? { signal: input.signal } : {}
+	};
+	const warnings = [];
+	await rm(input.dir, {
+		recursive: true,
+		force: true
+	});
+	const mediaDir = join(input.dir, "media");
+	await mkdir(mediaDir, { recursive: true });
+	const media = [];
+	const clips = [];
+	let offset = 0;
+	for (const s of input.scenes) {
+		const duration = slotFrames(s.duration_ms, fps);
+		const rel = `media/${safeName(s.scene_id)}.mp4`;
+		const out = join(input.dir, rel);
+		const probe = await ffprobe(s.clip, run);
+		let conformed = false;
+		let mediaFrames = Math.floor(probe.duration_s * fps + .001);
+		if (probe.width !== width || probe.height !== height) warnings.push(`${s.scene_id}: clip is ${probe.width}x${probe.height}, the sequence ${width}x${height}; the editor scales it (the reel pads to fit)`);
+		if (mediaFrames < duration) {
+			await runFfmpeg([
+				"-y",
+				"-i",
+				s.clip,
+				"-map",
+				"0:v:0",
+				"-vf",
+				`fps=${fps},tpad=stop_mode=clone:stop_duration=${(duration / fps + 1).toFixed(3)},trim=end_frame=${duration},setpts=PTS-STARTPTS`,
+				"-an",
+				"-c:v",
+				"libx264",
+				"-preset",
+				"veryfast",
+				"-crf",
+				"16",
+				"-pix_fmt",
+				"yuv420p",
+				"-map_metadata",
+				"-1",
+				"-fflags",
+				"+bitexact",
+				"-flags:v",
+				"+bitexact",
+				out
+			], run);
+			warnings.push(`${s.scene_id}: clip has ${mediaFrames} frame(s), its slot ${duration}; exported a conformed copy that holds the last frame (as the reel does)`);
+			mediaFrames = duration;
+			conformed = true;
+		} else await copyFile(s.clip, out);
+		media.push(out);
+		const tf = s.transition_in ? Math.round(s.transition_in.ms * fps / 1e3) : 0;
+		clips.push({
+			id: s.scene_id,
+			media: rel,
+			offset,
+			duration,
+			media_frames: mediaFrames,
+			has_audio: probe.has_audio && !conformed,
+			...s.placeholder ? { placeholder: true } : {},
+			...s.transition_in && tf > 0 ? { transition_in: {
+				kind: s.transition_in.kind,
+				frames: tf
+			} } : {}
+		});
+		offset += duration;
+	}
+	const total = offset;
+	const samples = Math.round(total * frame.num * TIMELINE_AUDIO_RATE / frame.den);
+	const audioRel = "media/audio.wav";
+	const audioOut = join(input.dir, audioRel);
+	if ((await ffprobe(input.mixSource, run)).has_audio) await runFfmpeg([
+		"-y",
+		"-i",
+		input.mixSource,
+		"-map",
+		"0:a:0",
+		"-vn",
+		"-af",
+		`aresample=${TIMELINE_AUDIO_RATE},apad,atrim=end_sample=${samples}`,
+		"-ac",
+		"2",
+		"-c:a",
+		"pcm_s16le",
+		"-map_metadata",
+		"-1",
+		"-fflags",
+		"+bitexact",
+		"-flags:a",
+		"+bitexact",
+		audioOut
+	], run);
+	else {
+		warnings.push("the clean master has no audio stream; audio.wav is silence");
+		await runFfmpeg([
+			"-y",
+			"-f",
+			"lavfi",
+			"-i",
+			`anullsrc=r=${TIMELINE_AUDIO_RATE}:cl=stereo`,
+			"-af",
+			`atrim=end_sample=${samples}`,
+			"-c:a",
+			"pcm_s16le",
+			"-map_metadata",
+			"-1",
+			"-fflags",
+			"+bitexact",
+			"-flags:a",
+			"+bitexact",
+			audioOut
+		], run);
+	}
+	media.push(audioOut);
+	let captions;
+	if (input.captionsSrt) {
+		const rel = "media/captions.srt";
+		await copyFile(input.captionsSrt, join(input.dir, rel));
+		media.push(join(input.dir, rel));
+		captions = { media: rel };
+	}
+	const model = {
+		title: input.title,
+		generator: input.generator,
+		width,
+		height,
+		fps,
+		frame,
+		total_frames: total,
+		clips,
+		audio: {
+			media: audioRel,
+			samples,
+			channels: 2
+		},
+		...captions ? { captions } : {}
+	};
+	const result = {
+		dir: input.dir,
+		status: TIMELINE_STATUS,
+		formats: [...formats],
+		readme: join(input.dir, "README.md"),
+		media,
+		total_frames: total,
+		fps,
+		transitions: "markers on the incoming clip (the reel's blends are not rebuilt; clips sit at their exact frame bounds)",
+		captions: captions ? "sidecar SRT (media/captions.srt), named in the FCPXML sequence note and the OTIO metadata" : "none",
+		warnings
+	};
+	if (formats.includes("fcpxml")) {
+		result.fcpxml = join(input.dir, "project.fcpxml");
+		await writeFile(result.fcpxml, buildFcpxml(model));
+	}
+	if (formats.includes("otio")) {
+		result.otio = join(input.dir, "project.otio");
+		await writeFile(result.otio, buildOtio(model));
+	}
+	await writeFile(result.readme, buildTimelineReadme(model, formats));
+	return result;
+}
+//#endregion
 //#region src/consent.ts
 const CONSENT_FILE = "consent.json";
 function consentPath(projectDir) {
@@ -248989,15 +249454,41 @@ async function runQa(projectDir, opts = {}) {
 async function exportProject(projectDir, opts = {}) {
 	const root = projectPaths(projectDir).root;
 	const state = await loadState(root, opts.quality);
-	const dist = await exportFromState(root, state, opts.now ?? (() => /* @__PURE__ */ new Date()), {
+	const { timeline, ...dist } = await exportFromState(root, state, opts.now ?? (() => /* @__PURE__ */ new Date()), {
 		...opts.sign ? { sign: true } : {},
-		...opts.c2pa ? { c2pa: opts.c2pa } : {}
+		...opts.c2pa ? { c2pa: opts.c2pa } : {},
+		...opts.timeline?.length ? { timeline: opts.timeline } : {}
 	});
 	return {
 		quality: state.quality,
 		dist,
-		...state.qa ? { qa_status: state.qa.status } : {}
+		...state.qa ? { qa_status: state.qa.status } : {},
+		...timeline ? { timeline } : {}
 	};
+}
+/**
+* The transition the reel drew into each scene, as the assembly computed it: the scene's own
+* `transition`, else the render's style pack default (brand motion overrides), clamped by
+* transitionSeconds. Taken from the current spec, so scenes are matched by id.
+*/
+async function renderedTransitions(root, state, spec) {
+	const out = /* @__PURE__ */ new Map();
+	const brandFile = await loadBrand$1(root).catch(() => void 0);
+	const styleId = state.style?.split("@")[0];
+	const style = styleId ? await getStyle(findStylesDir(process.env), styleId, root).catch(() => void 0) : void 0;
+	const tokens = resolveTokens$1(brandFile?.brand, {}, style, spec.language ? { language: spec.language } : {});
+	const byId = new Map(spec.scenes.map((s) => [s.id, s]));
+	state.scenes.forEach((s, i) => {
+		if (i === 0) return;
+		const kind = byId.get(s.scene_id)?.transition ?? tokens.motion?.transition;
+		if (!kind || kind === "cut") return;
+		const d = transitionSeconds(tokens.motion?.transition_ms ?? 400, s.duration_ms, state.target.fps);
+		if (d > 0) out.set(s.scene_id, {
+			kind,
+			ms: Math.round(d * 1e3)
+		});
+	});
+	return out;
 }
 async function exportFromState(root, state, now, opts = {}) {
 	const paths = projectPaths(root);
@@ -249195,6 +249686,32 @@ async function exportFromState(root, state, now, opts = {}) {
 		}
 	};
 	await writeJsonAtomic(out.provenance, provenance);
+	let timeline;
+	if (opts.timeline?.length) {
+		const transitions = await renderedTransitions(root, state, spec);
+		const scenes = state.scenes.map((s) => ({
+			scene_id: s.scene_id,
+			clip: join(root, s.clip),
+			duration_ms: s.duration_ms,
+			...s.placeholder ? { placeholder: true } : {},
+			...transitions.has(s.scene_id) ? { transition_in: transitions.get(s.scene_id) } : {}
+		}));
+		timeline = await writeTimeline({
+			dir: join(distDir, "timeline"),
+			formats: opts.timeline,
+			title: spec.title?.trim() || socialCopyParts(spec, brief).title,
+			generator: {
+				name: "video-studio",
+				version: ENGINE_VERSION
+			},
+			target: state.target,
+			scenes,
+			mixSource: join(root, state.master),
+			...state.captions.srt ? { captionsSrt: join(root, state.captions.srt) } : {}
+		});
+		exportWarnings.push(...timeline.warnings.map((w) => `timeline: ${w}`));
+		if (exportWarnings.length) out.warnings = exportWarnings;
+	}
 	const sha = (p) => hashFile(p);
 	const reelProbe = {
 		width: state.target.width,
@@ -249259,6 +249776,11 @@ async function exportFromState(root, state, now, opts = {}) {
 		kind: "social_copy",
 		path: rel$2(root, out.social_copy),
 		sha256: await sha(out.social_copy)
+	});
+	for (const p of timeline ? [timeline.fcpxml, timeline.otio] : []) if (p) outputs.push({
+		kind: "other",
+		path: rel$2(root, p),
+		sha256: await sha(p)
 	});
 	outputs.push({
 		kind: "provenance",
@@ -249443,7 +249965,10 @@ async function exportFromState(root, state, now, opts = {}) {
 	const parsed = RenderManifest.safeParse(manifest);
 	if (!parsed.success) throw new Error(`internal: render manifest failed schema validation: ${parsed.error.message}`);
 	await writeJsonAtomic(out.render_manifest, parsed.data);
-	return out;
+	return timeline ? {
+		...out,
+		timeline
+	} : out;
 }
 /**
 * The lock for an exported render. Assets are the project inputs the render and export read:
@@ -271698,11 +272223,12 @@ function createServer$1(options = {}) {
 	}));
 	server.registerTool("export", {
 		title: "Re-export dist/",
-		description: "Rebuild <project_dir>/dist/ from the latest existing render (or the given quality) without rendering: reel.mp4, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target: video.mp4 (copied, or re-encoded only when the target's contract needs lower fps/size/bitrate), cover.jpg, captions.srt/.vtt, post.json (from spec publish.<target>, else a generated draft) and qa.json (lint findings for that target; lint is re-run). Packages of targets no longer in the spec are removed. Returns dist.targets[] {id, transcoded, transcode_reasons, width, height, fps, ...}.",
+		description: "Rebuild <project_dir>/dist/ from the latest existing render (or the given quality) without rendering: reel.mp4, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target: video.mp4 (copied, or re-encoded only when the target's contract needs lower fps/size/bitrate), cover.jpg, captions.srt/.vtt, post.json (from spec publish.<target>, else a generated draft) and qa.json (lint findings for that target; lint is re-run). Packages of targets no longer in the spec are removed. With timeline: [\"fcpxml\", \"otio\"] (either or both) it also writes an editor timeline to dist/timeline/ (recreated): media/ (the scene clips, audio.wav = the final mix, captions.srt), project.fcpxml (FCPXML 1.10 for Final Cut Pro and DaVinci Resolve), project.otio (OpenTimelineIO) and README.md with import steps; scenes sit back to back on the reel's frame grid, transitions become markers, captions are an SRT sidecar. The timeline is unverified until imported into an editor. Returns dist.targets[] {id, transcoded, transcode_reasons, width, height, fps, ...} and, with timeline, timeline {dir, status, formats, fcpxml, otio, media[], total_frames, warnings}.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Rendered project folder"),
 			quality: QUALITY.optional().describe("Which render to export (default: the latest)"),
-			sign: boolean().optional().describe("Add C2PA content credentials (provenance, AI disclosure) to the exported videos with the local c2patool")
+			sign: boolean().optional().describe("Add C2PA content credentials (provenance, AI disclosure) to the exported videos with the local c2patool"),
+			timeline: array(_enum(TIMELINE_FORMATS)).optional().describe("Also write an editor timeline to dist/timeline/: fcpxml (Final Cut Pro, DaVinci Resolve) and/or otio (OpenTimelineIO). Default: none")
 		},
 		annotations: {
 			readOnlyHint: false,
@@ -271710,12 +272236,14 @@ function createServer$1(options = {}) {
 			idempotentHint: true,
 			openWorldHint: false
 		}
-	}, safe(async ({ project_dir, quality, sign }) => {
+	}, safe(async ({ project_dir, quality, sign, timeline }) => {
 		const r = await exportProject(resolveInputPath(project_dir, cwd()), {
 			...quality ? { quality } : {},
-			...sign ? { sign } : {}
+			...sign ? { sign } : {},
+			...timeline?.length ? { timeline } : {}
 		});
-		return jsonResult(`exported the ${r.quality} render to ${r.dist.dir}${r.qa_status ? ` (QA ${r.qa_status})` : ""}`, r);
+		const tl = r.timeline ? `; editor timeline (${r.timeline.formats.join(", ")}) in ${r.timeline.dir}, ${r.timeline.status}` : "";
+		return jsonResult(`exported the ${r.quality} render to ${r.dist.dir}${r.qa_status ? ` (QA ${r.qa_status})` : ""}${tl}`, r);
 	}));
 	server.registerTool("verify", {
 		title: "Verify claim coverage",

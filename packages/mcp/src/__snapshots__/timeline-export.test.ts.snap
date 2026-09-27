@@ -1,0 +1,38 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`timeline helpers > FCPXML for a 2-scene fixture is well-formed 1.10, on the frame grid, and stable 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.10">
+  <resources>
+    <format id="r1" frameDuration="1/15s" width="180" height="320" colorSpace="1-1-1 (Rec. 709)"/>
+    <asset id="r2" name="s01" start="0s" duration="15/15s" hasVideo="1" format="r1" videoSources="1" hasAudio="0">
+      <media-rep kind="original-media" src="media/s01.mp4"/>
+    </asset>
+    <asset id="r3" name="s02" start="0s" duration="18/15s" hasVideo="1" format="r1" videoSources="1" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">
+      <media-rep kind="original-media" src="media/s02%20clip.mp4"/>
+    </asset>
+    <asset id="r4" name="audio mix" start="0s" duration="105600/48000s" hasVideo="0" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">
+      <media-rep kind="original-media" src="media/audio.wav"/>
+    </asset>
+  </resources>
+  <library>
+    <event name="Tiny &quot;A &amp; B&quot; &lt;reel&gt;">
+      <project name="Tiny &quot;A &amp; B&quot; &lt;reel&gt;">
+        <sequence format="r1" duration="33/15s" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
+          <note>Exported by video-studio 0.0.0-test; unverified until imported into an editor. Captions: media/captions.srt (SRT sidecar; import it with File &gt; Import &gt; Captions in Final Cut Pro or File &gt; Import &gt; Subtitle in DaVinci Resolve).</note>
+          <spine>
+            <asset-clip ref="r2" offset="0s" name="s01" start="0s" duration="15/15s" format="r1" tcFormat="NDF">
+              <asset-clip ref="r4" lane="-1" offset="0s" name="audio mix" start="0s" duration="33/15s" audioRole="dialogue"/>
+            </asset-clip>
+            <asset-clip ref="r3" offset="15/15s" name="s02" start="0s" duration="18/15s" format="r1" tcFormat="NDF" srcEnable="video">
+              <marker start="0s" duration="6/15s" value="transition: crossfade, 6 frame(s) (400 ms) blended over the start of this clip in reel.mp4; re-apply it in the editor"/>
+            </asset-clip>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>
+"
+`;

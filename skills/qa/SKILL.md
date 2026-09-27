@@ -1,6 +1,6 @@
 ---
 name: qa
-description: Re-run technical QA on a rendered video-studio project - resolution, aspect, duration, codecs, black and frozen frames, motion density, the loop seam, silence and loudness against -14 LUFS - and explain each finding with its fix. Use when the user runs /video-studio:qa or asks whether a rendered reel is ready to post.
+description: Re-run technical QA on a rendered video-studio project - resolution, aspect, duration, codecs, black and frozen frames, motion density, the loop seam, flashing, audio/video sync, silence and loudness against -14 LUFS - and explain each finding with its fix. Use when the user runs /video-studio:qa or asks whether a rendered reel is ready to post.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+) and ffmpeg.
 allowed-tools: mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__review Read
@@ -29,6 +29,19 @@ allowed-tools: mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_
    - `loop_seam` (with `master.loop`): the last frame must match the first
      (SSIM ≥ 0.99) and the audio level must not jump across the seam
      (under 6 dB).
+   - `flashing`: fails above 3 flashes in any 1 s window (no acceptance
+     override; flashes that fast can trigger seizures) and warns on
+     single-frame luma spikes (a lone white or black frame mid-clip). It is
+     measured on each frame's mean luma, an approximation of WCAG 2.3.1
+     general flashes: a flash in part of the frame counts less, and red
+     flashes are not measured, so say so when the reel has strobing red.
+     Fix: slow the flashing to 3/s or less, lower its contrast or shrink it;
+     replace or fade a lone spike frame (`qa/report.md` lists the times).
+   - `av_sync`: the audio must start within one frame of the video (fail)
+     and last as long as the video's frames, within one frame plus 10 ms
+     (warn). Not applicable without an audio track. Renders so far measured
+     a 0 ms offset; on a failure, report the measured offset, re-render and,
+     if it persists, run `/video-studio:doctor` (the ffmpeg build).
    - `duration`, `resolution`, `aspect`, `black_frames` or `audio_stream`
      failures mean the reel is not ready: suggest re-rendering (cached work is
      reused) and, if it persists, `/video-studio:doctor`.

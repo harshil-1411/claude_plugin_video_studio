@@ -169,7 +169,15 @@ Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and th
        - `speech_pacing`, and `tighten pacing_from`.
        - `tighten` join checks: `partial_word` and `repeated_word`, `apply` refuses unless `force`, plus a whisper recheck of each join (gated, and untested here without a model).
        - On the user's reference: 17 changes, snap 35%, entrances median 167 ms / p75 317 ms, stagger 250 ms (half a beat at 120 BPM), 10 holds.
-     - **Next: W3**, with item 8 (timeline export) and the docs and `CHANGELOG` 0.4.0.
+     - **W3:**
+       - `timeline-export.ts`: `export timeline: [fcpxml, otio]` writes `dist/timeline/` with the clips, a 48 kHz mix, an SRT sidecar, FCPXML 1.10 and OTIO. It is frame-exact, transitions become markers, output is deterministic, and a snapshot test covers it. Verified through the bundle on a real render.
+       - Docs pass: README, CHANGELOG `[Unreleased]` for 0.4.0, project styles docs, and the qa, lint and analyze skills.
+     - **Exit, on the user's Mac:**
+       - import `dist/timeline/project.fcpxml` or `.otio` into Resolve or Final Cut. Relative media paths are the most likely failure;
+       - `analyze write_style` on the reference, then re-render the intro v2 with it;
+       - a real `tighten` with whisper installed;
+       - the loop example's QA under QA_VERSION 5.
+       - Then tag `v0.4.0`.
      - The eight items:
      - flash/flicker QA;
      - insert-sync lint;

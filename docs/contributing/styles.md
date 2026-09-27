@@ -25,6 +25,20 @@ packs that ship with the plugin.
 - `captions` (optional), with the same fields as the brand's `captions`: `family`, `weight`,
   `active_word`, `plate_opacity` and `max_lines`.
 
+## Project-local styles
+
+A pack does not have to ship with the plugin. `<project>/styles/<id>.yaml` is resolved before
+the bundled `styles/` (`getStyle` in `packages/renderer/src/styles.ts`) and validated by the same
+schema. Its `styleRef` adds the file's sha256 (`<id>@<version>+sha256:<hex>`), so editing the
+file invalidates cached scenes without a version bump. A project pack with a bundled id shadows
+the bundled one in that project.
+
+`analyze write_style: "<id>"` writes such a pack from a reference reel's measured motion timing
+(`styleFromMotion` in `packages/mcp/src/motion-timing.ts`): motion fields only, `version: 1`,
+an empty `avoid` list. It refuses an existing file or a bundled id unless `overwrite: true`, and
+reports a warning when it shadows a bundled pack. A pack that should ship to every user still
+belongs in `styles/`, with the rules below.
+
 ## Precedence
 
 `renderer defaults < style < brand.yaml`, applied field by field (`resolveTokens` in
