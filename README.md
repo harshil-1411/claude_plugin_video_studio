@@ -54,7 +54,7 @@ Turning knowledge into short videos usually means a timeline editor, a caption t
 | **Footage** | Local transcription (~99 languages, speaker turns) with a glossary for names, best-clip `shorts`, subject tracking for vertical reframes, cutaways, `tighten` for pauses and filler words (paced like your own edits, every join checked for clipped words), redaction, letterbox removal |
 | **Captions and languages** | Phrase captions clear of platform UI, keyword emphasis, sound-event captions, `localize` with Devanagari, Japanese and Arabic fonts, RTL and CJK line breaking |
 | **Checks** | 30+ lint rules (UI zones, contrast, reading speed, caption sync, insert timing, cuts on the beat, story arc, title length, brand rules, banned effects, acceptance numbers, loop seams, unsafe motion pages), technical QA (loudness, black, frozen, motion density, loop seam, flashing, A/V sync), `review` contact sheets, `compare` against a reference |
-| **Export** | Per-platform packages, C2PA signing, and an editable timeline (unverified until imported) for DaVinci Resolve or Final Cut (FCPXML and OTIO) |
+| **Export** | Per-platform packages, C2PA signing, and an editable timeline (import-tested) for DaVinci Resolve or Final Cut (FCPXML and OTIO) |
 | **Trust and control** | Claim `verify`, `video.lock`, golden-frame `test`, `diff`, provenance, optional C2PA signing, `policy.yaml` spend limits and consent, `render_cancel` |
 | **Generative (prep)** | Shot cards compiled into ready-to-paste prompt packs for Seedance, Veo, Kling, Wan, Runway and Hailuo, offline with no spend; provider and publishing keys are optional placeholders until Phase 7/9 |
 

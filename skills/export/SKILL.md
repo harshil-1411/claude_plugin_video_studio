@@ -41,8 +41,9 @@ allowed-tools: mcp__plugin_video-studio_engine__export Read Edit
      Captions are an SRT sidecar to import separately.
    - `result.timeline.warnings` names clips that were conformed (a clip
      shorter than its slot gets its last frame held, as in the reel).
-   - Say plainly that the timeline is **unverified until imported into an
-     editor**, and point the user at `dist/timeline/README.md`.
+   - The format is import-tested (a real import succeeded on 2026-09-27);
+     still ask the user to check clips and audio after importing, and point
+     them at `dist/timeline/README.md`.
    - An export without `timeline` leaves an older `dist/timeline/` in place;
      re-export with `timeline` after a re-render.
 3. List the packages in one short block: for each `result.dist.targets[]`,

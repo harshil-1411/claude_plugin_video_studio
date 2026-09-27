@@ -172,12 +172,12 @@ Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and th
      - **W3:**
        - `timeline-export.ts`: `export timeline: [fcpxml, otio]` writes `dist/timeline/` with the clips, a 48 kHz mix, an SRT sidecar, FCPXML 1.10 and OTIO. It is frame-exact, transitions become markers, output is deterministic, and a snapshot test covers it. Verified through the bundle on a real render.
        - Docs pass: README, CHANGELOG `[Unreleased]` for 0.4.0, project styles docs, and the qa, lint and analyze skills.
-     - **Exit, on the user's Mac:**
-       - import `dist/timeline/project.fcpxml` or `.otio` into Resolve or Final Cut. Relative media paths are the most likely failure;
-       - `analyze write_style` on the reference, then re-render the intro v2 with it;
-       - a real `tighten` with whisper installed;
-       - the loop example's QA under QA_VERSION 5.
-       - Then tag `v0.4.0`.
+     - **Exit (2026-09-27): released as `v0.4.0`.**
+       - The user imported the exported timeline into an editor, and it worked. The status is now "import-tested".
+       - Intro v2 approved by the user. Final render 1080×1920 @ 30, 20 s. QA passes all checks, including flashing and av_sync, at 0.90 changes/s. The acceptance target was set to the reference's measured 0.8.
+       - Still open (optional):
+         - a real `tighten` with whisper installed (the join recheck has only run against simulated output);
+         - the loop example re-rendered under QA_VERSION 5.
      - The eight items:
      - flash/flicker QA;
      - insert-sync lint;
@@ -261,8 +261,8 @@ Plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`. It fixe
 | 4 Platform compiler | Done: per-platform `dist/<target>/`, `video.lock`, lint, verify/test/diff, covers (CI removed by the user) |
 | 5 Reel grammar | Done: 15 scene kinds, style packs, CC0 music beds, `voice.mode: none`, variants/adapt |
 | 6 Footage | Done: transcribe (whisper.cpp), analyze, shorts, beat sync, scene audio, demo capture, redaction, letterbox crop, tighten |
-| 6.5 Directed motion | **Not started** (planned 2026-09-27; local) |
-| 6.6 Craft and hygiene | **Planned** (2026-09-27; local) |
+| 6.5 Directed motion | Done (v0.3.0, 2026-09-27; intro v2 approved) |
+| 6.6 Craft and hygiene | Done (v0.4.0, 2026-09-27) |
 | 7 Paid providers | **Not started** (needs keys) |
 | 8 Localization/launch (local) | Done: script fonts, `localize`, sound-event captions, C2PA, contributor docs, README hero video |
 | 9 Publishing | **Not started** (needs accounts) |

@@ -21,7 +21,7 @@
  *   Resolve's FCPXML import handles them unreliably, so the sidecar is the more robust choice.
  *
  * Everything written is deterministic: the same render gives the same bytes. The export is
- * unverified until someone imports it into an editor.
+ * import-tested: a real import succeeded on 2026-09-27; each export is still worth a quick check.
  */
 import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -29,7 +29,7 @@ import { ffprobe, runFfmpeg, type FfmpegTools } from "@video-studio/media";
 
 export const TIMELINE_FORMATS = ["fcpxml", "otio"] as const;
 export type TimelineFormat = (typeof TIMELINE_FORMATS)[number];
-export const TIMELINE_STATUS = "unverified until imported into an editor";
+export const TIMELINE_STATUS = "import-tested (a real import on 2026-09-27); check clips and audio after importing";
 export const TIMELINE_AUDIO_RATE = 48_000;
 
 /** Frame duration as a rational number of seconds: `num/den` s (1/30 for 30 fps, 1001/30000 for 29.97). */

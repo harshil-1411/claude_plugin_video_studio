@@ -20,7 +20,7 @@ exports[`timeline helpers > FCPXML for a 2-scene fixture is well-formed 1.10, on
     <event name="Tiny &quot;A &amp; B&quot; &lt;reel&gt;">
       <project name="Tiny &quot;A &amp; B&quot; &lt;reel&gt;">
         <sequence format="r1" duration="33/15s" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
-          <note>Exported by video-studio 0.0.0-test; unverified until imported into an editor. Captions: media/captions.srt (SRT sidecar; import it with File &gt; Import &gt; Captions in Final Cut Pro or File &gt; Import &gt; Subtitle in DaVinci Resolve).</note>
+          <note>Exported by video-studio 0.0.0-test; import-tested (a real import on 2026-09-27); check clips and audio after importing. Captions: media/captions.srt (SRT sidecar; import it with File &gt; Import &gt; Captions in Final Cut Pro or File &gt; Import &gt; Subtitle in DaVinci Resolve).</note>
           <spine>
             <asset-clip ref="r2" offset="0s" name="s01" start="0s" duration="15/15s" format="r1" tcFormat="NDF">
               <asset-clip ref="r4" lane="-1" offset="0s" name="audio mix" start="0s" duration="33/15s" audioRole="dialogue"/>

@@ -43155,10 +43155,10 @@ async function packageTargets(i, allTargetIds) {
 *   Resolve's FCPXML import handles them unreliably, so the sidecar is the more robust choice.
 *
 * Everything written is deterministic: the same render gives the same bytes. The export is
-* unverified until someone imports it into an editor.
+* import-tested: a real import succeeded on 2026-09-27; each export is still worth a quick check.
 */
 const TIMELINE_FORMATS = ["fcpxml", "otio"];
-const TIMELINE_STATUS = "unverified until imported into an editor";
+const TIMELINE_STATUS = "import-tested (a real import on 2026-09-27); check clips and audio after importing";
 const TIMELINE_AUDIO_RATE = 48e3;
 function frameRational(fps) {
 	if (!(fps > 0)) throw new Error(`timeline: fps must be > 0 (got ${fps})`);
@@ -272223,7 +272223,7 @@ function createServer$1(options = {}) {
 	}));
 	server.registerTool("export", {
 		title: "Re-export dist/",
-		description: "Rebuild <project_dir>/dist/ from the latest existing render (or the given quality) without rendering: reel.mp4, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target: video.mp4 (copied, or re-encoded only when the target's contract needs lower fps/size/bitrate), cover.jpg, captions.srt/.vtt, post.json (from spec publish.<target>, else a generated draft) and qa.json (lint findings for that target; lint is re-run). Packages of targets no longer in the spec are removed. With timeline: [\"fcpxml\", \"otio\"] (either or both) it also writes an editor timeline to dist/timeline/ (recreated): media/ (the scene clips, audio.wav = the final mix, captions.srt), project.fcpxml (FCPXML 1.10 for Final Cut Pro and DaVinci Resolve), project.otio (OpenTimelineIO) and README.md with import steps; scenes sit back to back on the reel's frame grid, transitions become markers, captions are an SRT sidecar. The timeline is unverified until imported into an editor. Returns dist.targets[] {id, transcoded, transcode_reasons, width, height, fps, ...} and, with timeline, timeline {dir, status, formats, fcpxml, otio, media[], total_frames, warnings}.",
+		description: "Rebuild <project_dir>/dist/ from the latest existing render (or the given quality) without rendering: reel.mp4, clean-master.mp4, captions.srt/.vtt, transcript.txt, thumbnail.png, social-copy.md, video-spec.json, storyboard.md, render-manifest.json, provenance.json, and one dist/<target>/ package per target: video.mp4 (copied, or re-encoded only when the target's contract needs lower fps/size/bitrate), cover.jpg, captions.srt/.vtt, post.json (from spec publish.<target>, else a generated draft) and qa.json (lint findings for that target; lint is re-run). Packages of targets no longer in the spec are removed. With timeline: [\"fcpxml\", \"otio\"] (either or both) it also writes an editor timeline to dist/timeline/ (recreated): media/ (the scene clips, audio.wav = the final mix, captions.srt), project.fcpxml (FCPXML 1.10 for Final Cut Pro and DaVinci Resolve), project.otio (OpenTimelineIO) and README.md with import steps; scenes sit back to back on the reel's frame grid, transitions become markers, captions are an SRT sidecar. The timeline format is import-tested (2026-09-27); still check clips and audio after importing. Returns dist.targets[] {id, transcoded, transcode_reasons, width, height, fps, ...} and, with timeline, timeline {dir, status, formats, fcpxml, otio, media[], total_frames, warnings}.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Rendered project folder"),
 			quality: QUALITY.optional().describe("Which render to export (default: the latest)"),

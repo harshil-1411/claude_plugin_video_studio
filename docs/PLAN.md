@@ -329,7 +329,7 @@ Why: a read-only review of the MIT-licensed tubeai-skills repo found eight ideas
   - `outlier_multiplier` and `outlier_rate` are defined for Phase 9 below.
 - **8. NLE timeline export:**
   - **`export timeline: ["fcpxml", "otio"]`:** writes `dist/timeline/` with the scene clips, the audio mix, captions, `project.fcpxml` (1.10) and `project.otio`. Offsets are frame-accurate and paths relative.
-  - **Status:** marked unverified until imported into Resolve or Final Cut.
+  - **Status:** import-tested by the user on 2026-09-27.
 - **Waves** (at most 2 agents; the lead owns schemas):
   - **W0 (lead):** glossary, `FormatGrammar.motion_timing` + pacing, `research-specs/titles.yaml`.
   - **W1:** A = items 1 and 4 (media/QA) · B = item 2 plus the title lint.

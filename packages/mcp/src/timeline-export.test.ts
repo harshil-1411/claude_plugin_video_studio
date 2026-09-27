@@ -8,7 +8,7 @@ import { ffprobe, runFfmpeg } from "@video-studio/media";
 import { createFfmpegRenderer } from "@video-studio/renderer";
 import type { VideoSpec } from "@video-studio/schema";
 import { exportProject, renderProject } from "./pipeline.js";
-import { type TimelineModel, buildFcpxml, buildOtio, fcpTime, frameRational, relUrl, slotFrames, writeTimeline, xmlEscape } from "./timeline-export.js";
+import { TIMELINE_STATUS, type TimelineModel, buildFcpxml, buildOtio, fcpTime, frameRational, relUrl, slotFrames, writeTimeline, xmlEscape } from "./timeline-export.js";
 
 // Tiny fixtures only: 180x320, 15 fps, ≤ 1.2 s clips, x264 ultrafast.
 const T = 60_000;
@@ -215,7 +215,7 @@ describe("writeTimeline (tiny real clips)", () => {
     async () => {
       const dir = join(tmp, "a", "timeline");
       const r = await run(dir);
-      expect(r.status).toBe("unverified until imported into an editor");
+      expect(r.status).toBe(TIMELINE_STATUS);
       expect(r.formats).toEqual(["fcpxml", "otio"]);
       expect(r.total_frames).toBe(33);
       expect(r.warnings.join("\n")).toMatch(/s02: clip has 9 frame\(s\), its slot 18; exported a conformed copy/);
@@ -324,11 +324,11 @@ describe("export timeline on a real tiny render (ffmpeg renderer, silent voice)"
   });
 
   it(
-    "exportProject({timeline}) writes dist/timeline/ matching the reel, lists it in the manifest, and says it is unverified",
+    "exportProject({timeline}) writes dist/timeline/ matching the reel, lists it in the manifest, and states its import status",
     async () => {
       const r = await exportProject(dir, { timeline: ["fcpxml", "otio"] });
       const tl = r.timeline!;
-      expect(tl.status).toBe("unverified until imported into an editor");
+      expect(tl.status).toBe(TIMELINE_STATUS);
       expect(tl.dir).toBe(join(dir, "dist", "timeline"));
       const reel = await ffprobe(join(dir, "dist", "clean-master.mp4"), { countFrames: true });
       expect(tl.total_frames).toBe(Math.round(reel.duration_s * 15));
@@ -344,7 +344,7 @@ describe("export timeline on a real tiny render (ffmpeg renderer, silent voice)"
       expect(all(doc, "marker")[0]!.attrs.value).toMatch(/^transition: crossfade, 6 frame/);
       expect(all(doc, "note")[0]!.text).toContain("media/captions.srt");
       const otio = JSON.parse(await readFile(tl.otio!, "utf8"));
-      expect(otio.metadata["video-studio"].status).toBe("unverified until imported into an editor");
+      expect(otio.metadata["video-studio"].status).toBe(TIMELINE_STATUS);
       const manifest = JSON.parse(await readFile(join(dir, "dist", "render-manifest.json"), "utf8"));
       expect(manifest.outputs.map((o: { path: string }) => o.path)).toEqual(expect.arrayContaining(["dist/timeline/project.fcpxml", "dist/timeline/project.otio"]));
       // Without timeline, a plain export leaves the result without one.

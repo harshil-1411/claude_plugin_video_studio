@@ -3,9 +3,9 @@
 All notable changes to video-studio. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versions may change behaviour).
 
-## [Unreleased]
+## [0.4.0] - 2026-09-27
 
-Planned as 0.4.0, "Craft and hygiene" (Phase 6.6): checks for flashing, A/V sync, insert timing
+The craft and hygiene release (Phase 6.6): checks for flashing, A/V sync, insert timing
 and titles; a style pack measured from a reference reel; a names glossary and measured pacing for
 footage; verified `tighten` joins; and a timeline for editing in Resolve or Final Cut.
 
@@ -55,7 +55,7 @@ footage; verified `tighten` joins; and a timeline for editing in Resolve or Fina
   - NLE timeline export: `export timeline: ["fcpxml", "otio"]` writes `dist/timeline/` with the
     scene clips, the audio mix (48 kHz WAV), captions (SRT sidecar), `project.fcpxml` (1.10) and
     `project.otio`, frame-exact, for Resolve or Final Cut. Transitions become markers (clips sit at
-    their exact frame bounds). Unverified until imported into an editor.
+    their exact frame bounds). Import-tested on 2026-09-27.
 
 ### Changed
 - `QA_VERSION` is 5 (flashing and A/V sync), so cached QA results are re-run.
