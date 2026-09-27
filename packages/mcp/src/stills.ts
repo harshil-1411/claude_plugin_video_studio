@@ -11,6 +11,7 @@ import {
   HYPERFRAMES_KINDS,
   type ResolvedCue,
   type SceneBeats,
+  captureTrace,
   chromeGate,
   composeScene,
   cutawayPicture,
@@ -66,6 +67,8 @@ export interface StillsDeps {
   openCapture?: (o: CaptureSessionOptions & { width: number; height: number }) => Promise<CaptureSession>;
   /** Chrome executable (default: CHROME_PATH, then platform locations). */
   chromePath?: string;
+  /** Deadline per capture step in ms (default 60 000). */
+  captureTimeoutMs?: number;
 }
 
 export interface StillTile {
@@ -274,9 +277,17 @@ export async function stillsProject(projectDir: string, opts: StillsOptions = {}
   const pageErrors: string[] = [];
 
   // One Chrome at a time: the same gate the renderer's HyperFrames scenes go through.
+  captureTrace(`stills: ${planned.tiles.length} frame(s) in ${drawn.length} scene(s); waiting for the Chrome gate`);
   await chromeGate(async () => {
+    captureTrace("stills: Chrome gate acquired");
     const release = guardStdout();
-    const session = await open({ chromePath: chrome.path, width: target.width, height: target.height, ...(producer.ok ? { producerEntry: producer.entry } : {}) });
+    const session = await open({
+      chromePath: chrome.path,
+      width: target.width,
+      height: target.height,
+      ...(producer.ok ? { producerEntry: producer.entry } : {}),
+      ...(deps.captureTimeoutMs ? { timeoutMs: deps.captureTimeoutMs } : {}),
+    });
     try {
       for (const s of drawn) {
         const mine = planned.tiles.filter((t) => t.scene_id === s.id);
@@ -293,6 +304,7 @@ export async function stillsProject(projectDir: string, opts: StillsOptions = {}
           ...(motionGrids.get(s.id) ? { beats: motionGrids.get(s.id)! } : {}),
         };
         let page;
+        captureTrace(`stills: ${s.id}: composing the page`);
         try {
           page = await composeScene(req);
         } catch (e) {
@@ -302,6 +314,7 @@ export async function stillsProject(projectDir: string, opts: StillsOptions = {}
         const dir = await mkdtemp(join(tmpdir(), `vs-stills-${s.id}-`));
         try {
           for (const w of [...page.warnings, ...(await writeComposition(dir, page))]) notes.push(`${s.id}: ${w}`);
+          captureTrace(`stills: ${s.id}: opening ${page.composition_id}`);
           const pc = await session.open(dir, page.composition_id, target.width, target.height);
           try {
             for (const t of mine) {
@@ -319,10 +332,12 @@ export async function stillsProject(projectDir: string, opts: StillsOptions = {}
         }
       }
     } finally {
+      captureTrace("stills: closing Chrome");
       await session.close();
       release();
     }
   });
+  captureTrace(`stills: ${tiles.length} frame(s) captured; tiling the sheet`);
   if (pageErrors.length) notes.push(...pageErrors.slice(0, 10).map((e) => `page error: ${e}`));
   if (!tiles.length) throw new Error(`no frame could be drawn: ${skipped.map((x) => `${x.scene_id}: ${x.reason}`).join("; ")}`);
 

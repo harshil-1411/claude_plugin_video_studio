@@ -427,6 +427,11 @@ export function serveDirectory(root: string): Promise<{ url: string; close: () =
       res.writeHead(405).end();
       return;
     }
+    // Browsers ask for a favicon on their own; answer it so it isn't a 404 page error.
+    if ((req.url ?? "").split("?")[0] === "/favicon.ico") {
+      res.writeHead(204).end();
+      return;
+    }
     const file = servedFile(root, req.url ?? "/");
     if (!file) {
       res.writeHead(404, { "content-type": "text/plain" }).end("not found");
@@ -541,9 +546,16 @@ export interface CaptureSessionOptions {
   launch?: Launch;
 }
 
+/** Trace a capture phase to stderr when VS_DEBUG_CAPTURE=1 (diagnosing a Chrome that hangs). */
+export function captureTrace(message: string): void {
+  if (process.env.VS_DEBUG_CAPTURE === "1") process.stderr.write(`[capture ${new Date().toISOString().slice(11, 23)}] ${message}\n`);
+}
+
 /** Bound one capture step: a hang becomes an error that names the step, not a protocol timeout. */
 export async function captureStep<T>(label: string, work: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const t0 = Date.now();
+  captureTrace(`${label}: start`);
   try {
     return await Promise.race([
       work,
@@ -553,6 +565,7 @@ export async function captureStep<T>(label: string, work: Promise<T>, ms: number
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+    captureTrace(`${label}: ended after ${Date.now() - t0} ms`);
   }
 }
 

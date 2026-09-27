@@ -176,7 +176,9 @@ describe.skipIf(process.env.VS_TEST_RENDER !== "1")("stills in real Chrome (VS_T
     const spec = JSON.parse(readFileSync(p, "utf8"));
     spec.scenes[0].deterministic = { kind: "motion", props: { html: "motion/morph.html", text: ["Docs in.", "Video out."] } };
     writeFileSync(p, JSON.stringify(spec, null, 2));
-    const r = await stillsProject(dir, { count: 3 });
+    // Trace every phase to stderr, with short step deadlines, so a hang names itself well inside the test timeout.
+    process.env.VS_DEBUG_CAPTURE = "1";
+    const r = await stillsProject(dir, { count: 3 }, { captureTimeoutMs: 20_000 });
     expect(r.tiles).toHaveLength(6);
     const frames = r.tiles.map((t) => readFileSync(join(dir, t.frame)));
     // The motion page moves: its in and out frames differ.

@@ -37001,6 +37001,10 @@ function serveDirectory(root) {
 			res.writeHead(405).end();
 			return;
 		}
+		if ((req.url ?? "").split("?")[0] === "/favicon.ico") {
+			res.writeHead(204).end();
+			return;
+		}
 		const file = servedFile(root, req.url ?? "/");
 		if (!file) {
 			res.writeHead(404, { "content-type": "text/plain" }).end("not found");
@@ -37086,15 +37090,22 @@ function seekScript(compositionId, t) {
   return true;
 })()`;
 }
+/** Trace a capture phase to stderr when VS_DEBUG_CAPTURE=1 (diagnosing a Chrome that hangs). */
+function captureTrace(message) {
+	if (process.env.VS_DEBUG_CAPTURE === "1") process.stderr.write(`[capture ${(/* @__PURE__ */ new Date()).toISOString().slice(11, 23)}] ${message}\n`);
+}
 /** Bound one capture step: a hang becomes an error that names the step, not a protocol timeout. */
 async function captureStep(label, work, ms) {
 	let timer;
+	const t0 = Date.now();
+	captureTrace(`${label}: start`);
 	try {
 		return await Promise.race([work, new Promise((_, reject) => {
 			timer = setTimeout(() => reject(/* @__PURE__ */ new Error(`capture step "${label}" did not finish within ${ms} ms`)), ms);
 		})]);
 	} finally {
 		if (timer) clearTimeout(timer);
+		captureTrace(`${label}: ended after ${Date.now() - t0} ms`);
 	}
 }
 /**
@@ -266576,13 +266587,16 @@ async function stillsProject(projectDir, opts = {}, deps = {}) {
 	const zones = layoutZones(target, await loadTargetContracts(spec));
 	const tiles = [];
 	const pageErrors = [];
+	captureTrace(`stills: ${planned.tiles.length} frame(s) in ${drawn.length} scene(s); waiting for the Chrome gate`);
 	await chromeGate(async () => {
+		captureTrace("stills: Chrome gate acquired");
 		const release = guardStdout();
 		const session = await open({
 			chromePath: chrome.path,
 			width: target.width,
 			height: target.height,
-			...producer.ok ? { producerEntry: producer.entry } : {}
+			...producer.ok ? { producerEntry: producer.entry } : {},
+			...deps.captureTimeoutMs ? { timeoutMs: deps.captureTimeoutMs } : {}
 		});
 		try {
 			for (const s of drawn) {
@@ -266600,6 +266614,7 @@ async function stillsProject(projectDir, opts = {}, deps = {}) {
 					...motionGrids.get(s.id) ? { beats: motionGrids.get(s.id) } : {}
 				};
 				let page;
+				captureTrace(`stills: ${s.id}: composing the page`);
 				try {
 					page = await composeScene(req);
 				} catch (e) {
@@ -266612,6 +266627,7 @@ async function stillsProject(projectDir, opts = {}, deps = {}) {
 				const dir = await mkdtemp(join(tmpdir(), `vs-stills-${s.id}-`));
 				try {
 					for (const w of [...page.warnings, ...await writeComposition(dir, page)]) notes.push(`${s.id}: ${w}`);
+					captureTrace(`stills: ${s.id}: opening ${page.composition_id}`);
 					const pc = await session.open(dir, page.composition_id, target.width, target.height);
 					try {
 						for (const t of mine) {
@@ -266639,10 +266655,12 @@ async function stillsProject(projectDir, opts = {}, deps = {}) {
 				}
 			}
 		} finally {
+			captureTrace("stills: closing Chrome");
 			await session.close();
 			release();
 		}
 	});
+	captureTrace(`stills: ${tiles.length} frame(s) captured; tiling the sheet`);
 	if (pageErrors.length) notes.push(...pageErrors.slice(0, 10).map((e) => `page error: ${e}`));
 	if (!tiles.length) throw new Error(`no frame could be drawn: ${skipped.map((x) => `${x.scene_id}: ${x.reason}`).join("; ")}`);
 	const tagsPerScene = /* @__PURE__ */ new Map();
