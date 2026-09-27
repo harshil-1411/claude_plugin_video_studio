@@ -78,3 +78,70 @@ describe("styles/ packs", () => {
     expect(styleRef(await getStyle(dir, "minimal"))).toBe("minimal@2");
   });
 });
+
+describe("project-local styles (<project>/styles/<id>.yaml)", () => {
+  const dir = findStylesDir({});
+  const PACK = (id: string, enter = 420) =>
+    `id: ${id}\nname: Measured\nversion: 1\ndescription: measured from a reference; structure only\nmotion:\n  personality: friendly\n  easing: ease_out\n  enter_ms: ${enter}\n  exit_ms: 290\n  stagger_ms: 120\n  transition: crossfade\n  transition_ms: 340\n  avoid: []\n`;
+  const project = () => {
+    const root = mkdtempSync(join(tmpdir(), "vs-proj-styles-"));
+    mkdirSync(join(root, "styles"));
+    return root;
+  };
+
+  it("resolves from the project first, then the bundled packs; ids list both", async () => {
+    const root = project();
+    writeFileSync(join(root, "styles", "measured.yaml"), PACK("measured"));
+    const s = await getStyle(dir, "measured", root);
+    expect(s.motion.enter_ms).toBe(420);
+    await expect(getStyle(dir, "measured")).rejects.toThrow(/unknown style "measured"/);
+    expect((await getStyle(dir, "minimal", root)).id).toBe("minimal");
+    expect(await styleIds(dir, root)).toEqual(expect.arrayContaining([...CORE, "measured"]));
+    expect((await loadStyles(dir, root)).map((x) => x.id)).toContain("measured");
+    await expect(getStyle(dir, "nope", root)).rejects.toThrow(/available: .*measured/);
+    // Parsed as data with the Style schema; the id must equal the file name.
+    writeFileSync(join(root, "styles", "other.yaml"), PACK("measured"));
+    await expect(getStyle(dir, "other", root)).rejects.toThrow(/has id "measured" but is named "other.yaml"/);
+    writeFileSync(join(root, "styles", "bad.yaml"), "id: bad\nname: B\nversion: 1\ndescription: x\nmotion: {}\n");
+    await expect(getStyle(dir, "bad", root)).rejects.toThrow(/invalid style/);
+  });
+
+  it("a project pack shadows a bundled pack of the same id", async () => {
+    const root = project();
+    writeFileSync(join(root, "styles", "minimal.yaml"), PACK("minimal", 900));
+    expect((await getStyle(dir, "minimal", root)).motion.enter_ms).toBe(900);
+    expect((await loadStyles(dir, root)).find((x) => x.id === "minimal")!.motion.enter_ms).toBe(900);
+    expect((await getStyle(dir, "minimal")).motion.enter_ms).toBe(600);
+  });
+
+  it("the ref carries the project file's sha256, so an edit changes tokens (the scene cache key)", async () => {
+    const root = project();
+    const file = join(root, "styles", "measured.yaml");
+    writeFileSync(file, PACK("measured"));
+    const a = await getStyle(dir, "measured", root);
+    expect(styleRef(a)).toMatch(/^measured@1\+sha256:[0-9a-f]{64}$/);
+    // Spreads (series palettes) keep the hash; JSON never sees it.
+    expect(styleRef({ ...a, palette: { background: "#000000" } })).toBe(styleRef(a));
+    expect(JSON.stringify(a)).not.toContain("sha256");
+    const t1 = resolveTokens(undefined, {}, a).style;
+    writeFileSync(file, PACK("measured", 430));
+    const b = await getStyle(dir, "measured", root);
+    expect(styleRef(b)).not.toBe(styleRef(a));
+    expect(resolveTokens(undefined, {}, b).style).not.toBe(t1);
+    expect(resolveTokens(undefined, {}, b).style).toBe(styleRef(b));
+  });
+
+  it("bundled packs keep their refs and tokens, with or without a project dir", async () => {
+    const root = project();
+    for (const id of CORE) {
+      const plain = await getStyle(dir, id);
+      const viaProject = await getStyle(dir, id, root);
+      expect(styleRef(viaProject)).toBe(styleRef(plain));
+      expect(styleRef(plain)).toBe(`${id}@${plain.version}`);
+      expect(resolveTokens(undefined, {}, viaProject)).toEqual(resolveTokens(undefined, {}, plain));
+    }
+    expect(resolveTokens(undefined, {}, await getStyle(dir, "minimal", root)).style).toBe("minimal@2");
+    // A project without styles/ changes nothing.
+    expect(await styleIds(dir, mkdtempSync(join(tmpdir(), "vs-no-styles-")))).toEqual(await styleIds(dir));
+  });
+});

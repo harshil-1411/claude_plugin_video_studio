@@ -405,6 +405,30 @@ describe("style packs", () => {
     T,
   );
 
+  it(
+    "a project-local style (<project>/styles/<id>.yaml) renders, and editing it changes the ref and the cache keys",
+    async () => {
+      const pack = (enter: number) =>
+        `id: measured\nname: Measured\nversion: 1\ndescription: measured from a reference; structure only\nmotion:\n  personality: friendly\n  easing: ease_out\n  enter_ms: ${enter}\n  exit_ms: 200\n  stagger_ms: 120\n  transition: crossfade\n  transition_ms: 300\n  avoid: []\n`;
+      const dir = await makeProject("project-style", { ...spec, style: "measured" });
+      await mkdir(join(dir, "styles"), { recursive: true });
+      await writeFile(join(dir, "styles", "measured.yaml"), pack(300));
+      expect((await validateSpecFile(join(dir, "project", "video-spec.json"), null)).errors.filter((e) => e.stage === "style")).toEqual([]);
+      const r = await renderProject(dir, opts({ voice: "silent" }));
+      const state = JSON.parse(await readFile(join(dir, "renders", "preview", "render-state.json"), "utf8"));
+      expect(state.style).toMatch(/^measured@1\+sha256:[0-9a-f]{64}$/);
+      const lock = (await readLock(r.dist.lock))!;
+      expect(lock.tools.style).toBe(state.style);
+      await writeFile(join(dir, "styles", "measured.yaml"), pack(420));
+      const r2 = await renderProject(dir, opts({ voice: "silent" }));
+      const state2 = JSON.parse(await readFile(join(dir, "renders", "preview", "render-state.json"), "utf8"));
+      expect(state2.style).not.toBe(state.style);
+      const lock2 = (await readLock(r2.dist.lock))!;
+      expect(lock2.scenes.map((x) => x.cache_key)).not.toEqual(lock.scenes.map((x) => x.cache_key));
+    },
+    T,
+  );
+
   it("refuses an unknown style with the available ids", async () => {
     const bad = await makeProject("bad-style", { ...spec, style: "energtic" });
     const err = await renderProject(bad, opts({ voice: "silent" })).catch((e: unknown) => e);

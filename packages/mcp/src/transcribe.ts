@@ -6,8 +6,9 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { projectPaths, resolveDataDir, resolveInsideProject, writeJsonAtomic } from "@video-studio/core";
 import { classifyText, deriveClaims, maxDataClass } from "@video-studio/ingestion";
-import { type TimedSentence, type TimedWord, groupSentences, isEnglishOnlyModel, isVtt, parseCaptionFile, whisperLanguage, whisperTranscribeDetailed } from "@video-studio/media";
+import { type GlossaryCorrection, type TimedSentence, type TimedWord, applyGlossary, glossaryPrompt, groupSentences, isEnglishOnlyModel, isVtt, parseCaptionFile, whisperLanguage, whisperTranscribeDetailed } from "@video-studio/media";
 import { ContentIR, type EvidenceSpan, type IrAsset, formatIssues } from "@video-studio/schema";
+import { loadProjectGlossary } from "./glossary.js";
 
 /**
  * transcribe: local ASR (whisper.cpp) for a project's video/audio asset, or import of a user
@@ -110,6 +111,11 @@ export interface TranscribeResult {
   speaker_turns?: number;
   warnings?: string[];
   model_downloaded?: { path: string; sha256: string; bytes: number };
+  /**
+   * Glossary (series + brand) applied to the words: how many terms, and the corrections made
+   * (also stored in the transcript file as `glossary_corrections`). Absent without a glossary.
+   */
+  glossary?: { terms: number; prompt?: string; corrections: GlossaryCorrection[] };
 }
 
 export class TranscribeError extends Error {
@@ -439,6 +445,10 @@ export async function transcribeAsset(projectDir: string, assetId: string, opts:
   let downloaded: TranscribeResult["model_downloaded"];
   let speakerTurns: number | undefined;
   const warnings: string[] = [];
+  // Glossary: seeds the whisper prompt and corrects the words (every transcript source).
+  const gl = await loadProjectGlossary(root);
+  warnings.push(...gl.warnings);
+  const prompt = glossaryPrompt(gl.glossary);
   if (opts.captions_file) {
     // Inside the project only (symlinks resolved): a caption path never reads files from elsewhere.
     let file: string;
@@ -479,6 +489,7 @@ export async function transcribeAsset(projectDir: string, assetId: string, opts:
       ...(language ? { language } : {}),
       ...(speakers ? { speakers: true } : {}),
       ...(opts.whisperBin ? { bin: opts.whisperBin } : {}),
+      ...(prompt ? { prompt } : {}),
     });
     words = r.words;
     speakerTurns = r.speaker_turns;
@@ -500,7 +511,10 @@ export async function transcribeAsset(projectDir: string, assetId: string, opts:
   const abs = join(root, rel);
   const relCheck = relative(root, abs);
   if (relCheck.startsWith("..") || isAbsolute(relCheck)) throw new TranscribeError("transcript path escaped the project");
-  await writeJsonAtomic(abs, words);
+  const corrected = applyGlossary(words, gl.glossary);
+  words = corrected.words;
+  // A plain word list, or {words, glossary_corrections} when the glossary changed something (readers take both).
+  await writeJsonAtomic(abs, corrected.corrections.length ? { words, glossary_corrections: corrected.corrections } : words);
   const applied = applyTranscript(ir, asset.id, words, { path: rel, ...meta });
   await writeJsonAtomic(irPath, applied.ir);
 
@@ -517,6 +531,7 @@ export async function transcribeAsset(projectDir: string, assetId: string, opts:
     ...(meta.speakers ? { speakers: true, speaker_turns: speakerTurns ?? 0 } : {}),
     ...(warnings.length ? { warnings } : {}),
     ...(downloaded ? { model_downloaded: downloaded } : {}),
+    ...(gl.glossary.length ? { glossary: { terms: gl.glossary.length, ...(prompt && meta.source === "whisper" ? { prompt } : {}), corrections: corrected.corrections } } : {}),
   };
 }
 

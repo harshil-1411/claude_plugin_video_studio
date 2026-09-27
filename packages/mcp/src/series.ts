@@ -217,3 +217,8 @@ export interface SeriesRecord {
 export function seriesRecord(loaded: LoadedSeries, usage: Pick<SeriesUsage, "files">): SeriesRecord {
   return { id: loaded.series.id, path: posix.normalize(toPosix(loaded.ref)), sha256: loaded.sha256, files: usage.files };
 }
+
+/** The series bible's glossary (names and terms that correct transcripts and captions); empty without one. */
+export function seriesGlossary(loaded: Pick<LoadedSeries, "series"> | undefined): NonNullable<Series["glossary"]> {
+  return loaded?.series.glossary ?? [];
+}

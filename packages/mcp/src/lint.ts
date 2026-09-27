@@ -1621,7 +1621,7 @@ async function styleAvoid(spec: VideoSpec, stylesDir: string | null, projectDir:
   const series = !spec.style && spec.series ? await loadSeries(projectDir, spec.series).catch(() => undefined) : undefined;
   const id = spec.style ?? series?.series.style;
   if (!id) return undefined;
-  const style = await getStyle(stylesDir, id).catch(() => undefined);
+  const style = await getStyle(stylesDir, id, projectDir).catch(() => undefined);
   return style ? { id: style.id, ...(style.motion.avoid ? { avoid: style.motion.avoid } : {}) } : undefined;
 }
 

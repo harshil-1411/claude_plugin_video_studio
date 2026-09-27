@@ -117,7 +117,7 @@ export async function validateSpecFile(
   }
   // The style pack must exist in styles/ (and be a valid pack).
   if (parsed.data.style) {
-    const style = await checkSpecStyle(parsed.data.style, stylesDir);
+    const style = await checkSpecStyle(parsed.data.style, stylesDir, projectDir);
     if (style) result.errors.push(style);
   }
   const series = await checkSeries(parsed.data, projectDir, stylesDir);
@@ -214,15 +214,18 @@ export async function checkSeries(spec: VideoSpec, projectDir: string, stylesDir
     });
   }
   if (!spec.style && loaded.series.style) {
-    const style = await checkSpecStyle(loaded.series.style, stylesDir);
+    const style = await checkSpecStyle(loaded.series.style, stylesDir, projectDir);
     if (style) errors.push({ ...style, path: "series", stage: "series", message: `the series style: ${style.message}`, fix: `${style.fix.replace(/, or remove style$/, "")} in ${spec.series}, or set style in the spec` });
   }
   return { errors, warnings };
 }
 
-/** An error when `id` is not a loadable style pack in `dir`, listing the available ids. */
-export async function checkSpecStyle(id: string, dir: string | null): Promise<ValidationIssue | null> {
-  const ids = await styleIds(dir).catch(() => [] as string[]);
+/**
+ * An error when `id` is not a loadable style pack in the project's `styles/` (when `projectDir` is
+ * given) or the bundled `dir`, listing the available ids.
+ */
+export async function checkSpecStyle(id: string, dir: string | null, projectDir?: string): Promise<ValidationIssue | null> {
+  const ids = await styleIds(dir, projectDir).catch(() => [] as string[]);
   if (!ids.includes(id)) {
     const near = closestMatches(id, ids);
     return {
@@ -233,7 +236,7 @@ export async function checkSpecStyle(id: string, dir: string | null): Promise<Va
     };
   }
   try {
-    await getStyle(dir, id);
+    await getStyle(dir, id, projectDir);
     return null;
   } catch (e) {
     return { path: "style", stage: "style", message: e instanceof Error ? e.message : String(e), fix: `fix styles/${id}.yaml or pick another style` };

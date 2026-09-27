@@ -6,6 +6,8 @@ import { writeFileAtomic, writeJsonAtomic } from "@video-studio/core";
 import { detectShots } from "@video-studio/ingestion";
 import { ffprobe, measureLoudness, runFfmpeg } from "@video-studio/media";
 import { FormatGrammar, SCHEMA_VERSION } from "@video-studio/schema";
+import { measureSilences, soundShareOf, speechPacing } from "./speech-pacing.js";
+import { formatMotionTiming, measureMotionTiming, styleFromMotion, styleTarget, writeProjectStyle } from "./motion-timing.js";
 
 export { findShorts, formatShorts } from "./shorts.js";
 
@@ -116,22 +118,47 @@ async function sampleEdgeRows(path: string, duration: number, w: number, h: numb
   }
 }
 
-/** Share of the file where the voice band (200–3500 Hz) is above -35 dBFS. */
-async function soundShare(path: string, duration: number): Promise<number> {
-  const r = await runFfmpeg(["-i", path, "-map", "0:a:0", "-vn", "-af", "highpass=f=200,lowpass=f=3500,silencedetect=n=-35dB:d=0.3", "-f", "null", "-"], {
-    keepStderr: true,
-    timeoutMs: 30 * 60 * 1000,
-  });
-  const starts = [...r.stderr.matchAll(/silence_start:\s*(-?[\d.]+)/g)].map((m) => Math.max(0, Number(m[1])));
-  const ends = [...r.stderr.matchAll(/silence_end:\s*(-?[\d.]+)/g)].map((m) => Number(m[1]));
-  let silent = 0;
-  starts.forEach((s, i) => {
-    silent += Math.max(0, Math.min(ends[i] ?? duration, duration) - s);
-  });
-  return Math.max(0, Math.min(1, 1 - silent / Math.max(duration, 0.001)));
+/**
+ * Share of the file where the voice band (200–3500 Hz) is above -35 dBFS, and the pauses inside
+ * speech (speech-pacing.ts), from one silencedetect pass.
+ */
+async function speechMeasures(path: string, duration: number): Promise<{ share: number; pacing: NonNullable<FormatGrammar["speech_pacing"]> }> {
+  const ms = Math.round(duration * 1000);
+  const silences = await measureSilences(path, ms);
+  return { share: soundShareOf(silences, ms), pacing: speechPacing(silences, ms) };
 }
 
-export async function analyzeVideo(path: string, opts: { projectDir?: string } = {}): Promise<FormatGrammar & { report_md?: string }> {
+/** Motion timing (motion-timing.ts) for the grammar, with a note; undefined when it can't be measured. */
+async function motionTimingFor(path: string, notes: string[]): Promise<FormatGrammar["motion_timing"]> {
+  try {
+    const m = await measureMotionTiming(path);
+    if (m.continuous) notes.push(`${m.continuous} long continuous motion stretch(es) (over 2 s: camera moves or live footage) were left out of the motion timing.`);
+    notes.push("motion_timing reads entrances from frame-to-frame difference energy: crossfades read as linear changes, cuts as snaps.");
+    return m.timing;
+  } catch (e) {
+    notes.push(`motion timing not measured: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
+    return undefined;
+  }
+}
+
+export interface AnalyzeOptions {
+  projectDir?: string;
+  /** Also write the measured motion timing as `<project>/styles/<id>.yaml` (needs projectDir). */
+  writeStyle?: string;
+  /** Replace an existing project style, or shadow a bundled one. */
+  overwrite?: boolean;
+  /** Bundled styles directory (default: findStylesDir()); for tests. */
+  stylesDir?: string | null;
+}
+
+export async function analyzeVideo(
+  path: string,
+  opts: AnalyzeOptions = {},
+): Promise<FormatGrammar & { report_md?: string; style_path?: string; style_warnings?: string[] }> {
+  if (opts.writeStyle !== undefined && !opts.projectDir) throw new Error("write_style needs project_dir (the style is written to <project>/styles/<id>.yaml)");
+  const styleOpts = { ...(opts.overwrite ? { overwrite: true } : {}), ...(opts.stylesDir !== undefined ? { stylesDir: opts.stylesDir } : {}) };
+  // Refuse a bad write_style id before the (slow) measurement.
+  if (opts.writeStyle !== undefined && opts.projectDir) await styleTarget(opts.projectDir, opts.writeStyle, styleOpts);
   if (!existsSync(path)) throw new Error(`video not found: ${path}`);
   const p = await ffprobe(path);
   if (!p.has_video) throw new Error("analyze needs a video with a picture track (this file has none)");
@@ -153,11 +180,15 @@ export async function analyzeVideo(path: string, opts: { projectDir?: string } =
   else notes.push("No consistent burned-in text band found in the lower two-thirds.");
 
   let speech_ratio: number | undefined;
+  let speech_pacing: FormatGrammar["speech_pacing"];
   let loudness: number | undefined;
   if (p.has_audio) {
     try {
-      speech_ratio = r3(await soundShare(path, duration));
+      const sm = await speechMeasures(path, duration);
+      speech_ratio = r3(sm.share);
+      speech_pacing = sm.pacing;
       notes.push("speech_ratio is the share of time with voice-band sound (200–3500 Hz above -35 dBFS); music can count as speech.");
+      notes.push("speech_pacing: pauses are voice-band silences of 100 ms or more inside speech (lead-in and tail excluded); tighten pacing_from uses them.");
     } catch {
       /* optional */
     }
@@ -171,6 +202,8 @@ export async function analyzeVideo(path: string, opts: { projectDir?: string } =
     notes.push("No audio track.");
   }
 
+  const motion_timing = await motionTimingFor(path, notes);
+
   const g: FormatGrammar = {
     schema_version: SCHEMA_VERSION,
     duration_sec: r3(duration),
@@ -181,18 +214,21 @@ export async function analyzeVideo(path: string, opts: { projectDir?: string } =
     hook_shot_sec: r3(shots[0] ? shots[0].end_sec - shots[0].start_sec : duration),
     has_speech: p.has_audio && (speech_ratio ?? 0) >= 0.2,
     ...(speech_ratio !== undefined ? { speech_ratio } : {}),
+    ...(speech_pacing ? { speech_pacing } : {}),
     ...(loudness !== undefined ? { loudness_lufs: loudness } : {}),
     caption_band,
     pacing: pacingFor(avg),
+    ...(motion_timing ? { motion_timing } : {}),
     notes,
   };
   const parsed = FormatGrammar.parse(g);
-  const report_md = formatGrammar(parsed);
+  const written = opts.writeStyle !== undefined && opts.projectDir ? await writeProjectStyle(opts.projectDir, styleFromMotion(opts.writeStyle, parsed), styleOpts) : undefined;
+  const report_md = formatGrammar(parsed) + (written ? `\n\nStyle pack written: styles/${opts.writeStyle}.yaml${written.warnings.map((w) => `\n- ${w}`).join("")}` : "");
   if (opts.projectDir) {
     await writeJsonAtomic(join(opts.projectDir, "qa", "analysis.json"), parsed);
     await writeFileAtomic(join(opts.projectDir, "qa", "analysis.md"), `${report_md}\n`);
   }
-  return { ...parsed, report_md };
+  return { ...parsed, report_md, ...(written ? { style_path: written.path, style_warnings: written.warnings } : {}) };
 }
 
 export function formatGrammar(g: FormatGrammar): string {
@@ -204,11 +240,13 @@ export function formatGrammar(g: FormatGrammar): string {
     `- Shots: ${g.shots.length} (avg ${g.avg_shot_sec.toFixed(1)} s, ${g.cuts_per_10s.toFixed(1)} cuts per 10 s), pacing **${g.pacing}**`,
     `- Hook shot: ${g.hook_shot_sec.toFixed(1)} s`,
     `- Speech: ${g.has_speech === undefined ? "n/a" : g.has_speech ? "yes" : "no"}${g.speech_ratio !== undefined ? ` (${Math.round(g.speech_ratio * 100)}% voice-band sound)` : ""}`,
+    ...(g.speech_pacing ? [`- Pauses: ${g.speech_pacing.pauses_analyzed} inside speech (${Math.round(g.speech_pacing.silence_share * 100)}% of the speech span)${g.speech_pacing.pause_median_ms !== null ? `, median ${g.speech_pacing.pause_median_ms} ms, p95 ${g.speech_pacing.pause_p95_ms} ms` : ""}`] : []),
     `- Loudness: ${g.loudness_lufs !== undefined ? `${g.loudness_lufs} LUFS` : "n/a"}`,
     `- Caption band: ${band}`,
     "",
     "Shot lengths (s): " + g.shots.map((s) => (s.end_sec - s.start_sec).toFixed(1)).join(", "),
   ];
+  if (g.motion_timing) lines.push("", ...formatMotionTiming(g.motion_timing));
   if (g.notes.length) lines.push("", ...g.notes.map((n) => `- ${n}`));
   return lines.join("\n");
 }

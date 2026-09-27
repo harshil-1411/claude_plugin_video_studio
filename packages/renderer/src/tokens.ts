@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { runProcess } from "@video-studio/media";
 import type { AspectRatio, Brand, Style } from "@video-studio/schema";
 import { type Script, languageScript, scriptFontFamilies } from "./script.js";
+import { styleRef } from "./styles.js";
 import type { MotionTokens, RenderTarget, VisualTokens } from "./types.js";
 
 /**
@@ -140,7 +141,7 @@ export function scriptFirstChain(chain: string, script: Script, language?: strin
 function resolveTokensBase(brand?: Brand, defaults: Partial<VisualTokens> = {}, style?: Style): VisualTokens {
   const base: VisualTokens = { ...DEFAULT_TOKENS, ...defaults };
   if (style) {
-    base.style = `${style.id}@${style.version}`;
+    base.style = styleRef(style);
     const sp = style.palette ?? {};
     if (sp.background) base.color_background = sp.background;
     if (sp.text) base.color_text = sp.text;

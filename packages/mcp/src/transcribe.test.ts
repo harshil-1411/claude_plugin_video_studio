@@ -93,6 +93,38 @@ describe("transcribeAsset with a caption file", () => {
   });
 });
 
+describe("transcribe glossary (brand + series)", () => {
+  it("corrects imported captions and whisper words, seeds the whisper prompt and records the corrections", async () => {
+    const p = join(dir, "gloss-proj");
+    const { ir } = await ingest([join(dir, "talk.mp4")], { projectDir: p, noCache: true });
+    const id = ir.assets.find((a) => a.kind === "video")!.id;
+    await mkdir(join(p, "project"), { recursive: true });
+    await writeFile(join(p, "project", "video-spec.json"), JSON.stringify({ series: "series.yaml" }));
+    await writeFile(join(p, "series.yaml"), "schema_version: '1.0'\nid: s\nname: S\nglossary:\n  - { term: speed, variants: [spud] }\n");
+    await writeFile(join(p, "brand.yaml"), "version: 2\nbrand: { name: Acme }\nlanguage: { locale: en-US, glossary: [{ term: MSB Docs, variants: [msp docs] }] }\n");
+    await writeFile(join(p, "talk.srt"), "1\n00:00:00,200 --> 00:00:02,000\nWe love msp docs and spud.\n");
+    const r = await transcribeAsset(p, id, { captions_file: "talk.srt", env: {} });
+    expect(r.text).toBe("We love MSB Docs and speed.");
+    expect(r.glossary).toMatchObject({ terms: 2, corrections: [{ from: "msp docs", to: "MSB Docs" }, { from: "spud.", to: "speed." }] });
+    const file = JSON.parse(await readFile(join(p, r.path), "utf8"));
+    expect(file.glossary_corrections).toHaveLength(2);
+    expect(file.words.map((w: { word: string }) => w.word)).toEqual(["We", "love", "MSB", "Docs", "and", "speed."]);
+
+    // whisper path with a stand-in whisper-cli: the prompt carries the glossary terms.
+    const bin = join(dir, "fake-whisper.sh");
+    const argsLog = join(dir, "fake-whisper-args.txt");
+    const json = JSON.stringify({ result: { language: "en" }, transcription: [{ offsets: { from: 0, to: 400 }, text: " msp" }, { offsets: { from: 400, to: 800 }, text: " docs" }] });
+    await writeFile(bin, `#!/bin/sh\nprintf '%s\\n' "$@" > '${argsLog}'\nwhile [ $# -gt 0 ]; do if [ "$1" = "-of" ]; then out="$2"; fi; shift; done\ncat > "$out.json" <<'JSON'\n${json}\nJSON\n`, { mode: 0o755 });
+    const model = join(dir, "fake-ggml-base.en.bin");
+    await writeFile(model, "x");
+    const w = await transcribeAsset(p, id, { env: { VS_WHISPER_MODEL: model }, whisperBin: bin });
+    expect(w.text).toBe("MSB Docs");
+    const args = (await readFile(argsLog, "utf8")).split("\n");
+    expect(args[args.indexOf("--prompt") + 1]).toBe("speed, MSB Docs.");
+    expect(w.glossary?.prompt).toBe("speed, MSB Docs.");
+  });
+});
+
 describe("whisper model consent", () => {
   it("refuses to run without a model and without consent, naming size, URL and the ask", async () => {
     const env = { CLAUDE_PLUGIN_DATA: join(dir, "data-none") };

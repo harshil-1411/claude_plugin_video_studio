@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { groupSentences, isEnglishOnlyModel, parseCaptionFile, parseWhisperJson, parseWhisperOutput, whisperLanguage, whisperTranscribe, whisperTranscribeDetailed } from "./asr.js";
+import { groupSentences, isEnglishOnlyModel, offsetWords, whisperCliArgs, whisperExtractArgs, parseCaptionFile, parseWhisperJson, parseWhisperOutput, whisperLanguage, whisperTranscribe, whisperTranscribeDetailed } from "./asr.js";
 
 const SRT = `1
 00:00:01,000 --> 00:00:03,000
@@ -93,6 +93,28 @@ describe.skipIf(!MODEL || !existsSync(MODEL))("whisperTranscribe (VS_TEST_WHISPE
     }
     expect(words[words.length - 1]!.end_ms).toBeGreaterThan(8000);
   }, 120_000);
+
+  it("transcribes only a time range, with words on the file's timeline", async () => {
+    const wav = process.env.VS_TEST_WHISPER_AUDIO ?? join(MODEL!, "..", "jfk.wav");
+    const words = await whisperTranscribe(wav, { model: MODEL!, range: { start_ms: 5000, end_ms: 9000 }, prompt: "Americans." });
+    expect(words.length).toBeGreaterThan(0);
+    expect(words[0]!.start_ms).toBeGreaterThanOrEqual(5000);
+    expect(words[words.length - 1]!.end_ms).toBeLessThanOrEqual(9500);
+  }, 120_000);
+});
+
+describe("whisper arguments", () => {
+  it("passes a prompt only when there is one, and trims the audio for a range", () => {
+    const base = whisperCliArgs({ model: "m/ggml-base.en.bin" }, "a.wav", "out", false);
+    expect(base).not.toContain("--prompt");
+    const withPrompt = whisperCliArgs({ model: "m/ggml-base.en.bin", prompt: " MSB Docs, eBMR. " }, "a.wav", "out", true);
+    expect(withPrompt.slice(withPrompt.indexOf("--prompt"), withPrompt.indexOf("--prompt") + 2)).toEqual(["--prompt", "MSB Docs, eBMR."]);
+    expect(withPrompt).toContain("-ng");
+    expect(whisperExtractArgs("in.mp4", "a.wav")).not.toContain("-ss");
+    const ranged = whisperExtractArgs("in.mp4", "a.wav", { start_ms: 1500, end_ms: 5500 });
+    expect(ranged.slice(0, 6)).toEqual(["-y", "-ss", "1.500", "-t", "4.000", "-i"]);
+    expect(offsetWords([{ word: "a", start_ms: 10, end_ms: 20 }], 1500)).toEqual([{ word: "a", start_ms: 1510, end_ms: 1520 }]);
+  });
 });
 
 describe("parseWhisperOutput", () => {

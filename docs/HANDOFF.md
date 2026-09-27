@@ -161,7 +161,15 @@ Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and th
        - Social copy moved to `social-copy.ts`, which removes the lint → pipeline import cycle.
        - Motion page copy now shows in the storyboard.
        - Vitest `testTimeout` raised to 20 s: under full load, real-ffmpeg tests passed 5 s.
-     - **Next: W2**, with items 3, 5 and 6.
+     - **W2:**
+       - `motion-timing.ts`: entrances, easing class, stagger and holds from frame-difference energy. On synthetic clips it is within ±2 frames, and the classes are right.
+       - `analyze write_style`: writes `<project>/styles/<id>.yaml`.
+       - Project-local styles resolve first; `styleRef` gains the file hash, and bundled refs are unchanged.
+       - Glossary (`packages/media/src/glossary.ts`): corrects transcripts and captions with timings kept, and seeds the whisper `--prompt`.
+       - `speech_pacing`, and `tighten pacing_from`.
+       - `tighten` join checks: `partial_word` and `repeated_word`, `apply` refuses unless `force`, plus a whisper recheck of each join (gated, and untested here without a model).
+       - On the user's reference: 17 changes, snap 35%, entrances median 167 ms / p75 317 ms, stagger 250 ms (half a beat at 120 BPM), 10 holds.
+     - **Next: W3**, with item 8 (timeline export) and the docs and `CHANGELOG` 0.4.0.
      - The eight items:
      - flash/flicker QA;
      - insert-sync lint;

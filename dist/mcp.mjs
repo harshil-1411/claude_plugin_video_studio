@@ -11592,6 +11592,53 @@ async function writeQaReport(dir, report) {
 }
 //#endregion
 //#region ../media/dist/asr.js
+/** ffmpeg arguments that decode `mediaPath` (or only `range`) to 16 kHz mono PCM in `wav`. */
+function whisperExtractArgs(mediaPath, wav, range) {
+	const seek = [];
+	if (range) {
+		const start = Math.max(0, range.start_ms);
+		const end = Math.max(start, range.end_ms);
+		seek.push("-ss", (start / 1e3).toFixed(3), "-t", ((end - start) / 1e3).toFixed(3));
+	}
+	return [
+		"-y",
+		...seek,
+		"-i",
+		mediaPath,
+		"-vn",
+		"-map",
+		"0:a:0",
+		"-ac",
+		"1",
+		"-ar",
+		"16000",
+		"-c:a",
+		"pcm_s16le",
+		wav
+	];
+}
+/** whisper-cli arguments (`-ml 1 -sow -oj`: one JSON segment per word). */
+function whisperCliArgs(opts, wav, outBase, cpu) {
+	const prompt = opts.prompt?.trim();
+	return [
+		"-m",
+		opts.model,
+		"-f",
+		wav,
+		"-l",
+		whisperLanguage(opts.model, opts.language),
+		"-ml",
+		"1",
+		"-sow",
+		...opts.speakers ? ["-tdrz"] : [],
+		...prompt ? ["--prompt", prompt] : [],
+		"-oj",
+		"-of",
+		outBase,
+		"-np",
+		...cpu ? ["-ng"] : []
+	];
+}
 /** Language passed to whisper-cli: explicit, else `en` for English-only (`*.en`) models, else auto-detect. */
 function whisperLanguage(model, language) {
 	if (language) return language;
@@ -11617,43 +11664,13 @@ async function whisperTranscribeDetailed(mediaPath, opts) {
 	const work = await mkdtemp(join(tmpdir(), "vs-asr-"));
 	try {
 		const wav = join(work, "audio.wav");
-		await runFfmpeg([
-			"-y",
-			"-i",
-			mediaPath,
-			"-vn",
-			"-map",
-			"0:a:0",
-			"-ac",
-			"1",
-			"-ar",
-			"16000",
-			"-c:a",
-			"pcm_s16le",
-			wav
-		], {
+		await runFfmpeg(whisperExtractArgs(mediaPath, wav, opts.range), {
 			...opts.signal ? { signal: opts.signal } : {},
 			timeoutMs: 18e5
 		});
 		const outBase = join(work, "out");
 		const bin = opts.bin ?? "whisper-cli";
-		const args = (cpu) => [
-			"-m",
-			opts.model,
-			"-f",
-			wav,
-			"-l",
-			whisperLanguage(opts.model, opts.language),
-			"-ml",
-			"1",
-			"-sow",
-			...opts.speakers ? ["-tdrz"] : [],
-			"-oj",
-			"-of",
-			outBase,
-			"-np",
-			...cpu ? ["-ng"] : []
-		];
+		const args = (cpu) => whisperCliArgs(opts, wav, outBase, cpu);
 		const run = (cpu) => runProcess(bin, args(cpu), {
 			...opts.signal ? { signal: opts.signal } : {},
 			timeoutMs: opts.timeoutMs ?? 36e5
@@ -11668,13 +11685,25 @@ async function whisperTranscribeDetailed(mediaPath, opts) {
 				throw whisperError(err2, bin);
 			}
 		}
-		return parseWhisperOutput(await readFile(`${outBase}.json`, "utf8"), { speakers: opts.speakers === true });
+		const result = parseWhisperOutput(await readFile(`${outBase}.json`, "utf8"), { speakers: opts.speakers === true });
+		return opts.range ? {
+			...result,
+			words: offsetWords(result.words, Math.max(0, opts.range.start_ms))
+		} : result;
 	} finally {
 		await rm(work, {
 			recursive: true,
 			force: true
 		});
 	}
+}
+/** Shift words by `offsetMs` (a range transcript back onto the file's timeline). */
+function offsetWords(words, offsetMs) {
+	return words.map((w) => ({
+		...w,
+		start_ms: w.start_ms + offsetMs,
+		end_ms: w.end_ms + offsetMs
+	}));
 }
 function whisperError(err, bin) {
 	const msg = err instanceof Error ? err.message : String(err);
@@ -12905,6 +12934,152 @@ async function synthScore(params, outPath, opts = {}) {
 	};
 }
 //#endregion
+//#region ../media/dist/glossary.js
+/**
+* Channel glossary: the correct spelling of names and terms, and the ways speech recognition
+* mishears them. It corrects transcript and caption words (timings kept) and seeds the whisper
+* prompt. TTS pronunciation (brand `terminology`) is separate and never changed here.
+*/
+/**
+* Brand glossary added to the series glossary: one entry per term (compared ignoring case);
+* when both define a term, the brand's spelling and case rule win and the variants are merged.
+*/
+function mergeGlossary(...lists) {
+	const byTerm = /* @__PURE__ */ new Map();
+	for (const list of lists) for (const e of list ?? []) {
+		const term = e.term.trim();
+		if (!term) continue;
+		const key = term.toLowerCase();
+		const prev = byTerm.get(key);
+		const variants = [...new Set([...prev?.variants ?? [], ...e.variants ?? []].map((v) => v.trim()).filter(Boolean))];
+		const cs = e.case_sensitive ?? prev?.case_sensitive;
+		byTerm.set(key, {
+			term,
+			...variants.length ? { variants } : {},
+			...cs !== void 0 ? { case_sensitive: cs } : {}
+		});
+	}
+	return [...byTerm.values()];
+}
+const EDGE_PUNCT = /^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/su;
+function splitPunct(word) {
+	const m = EDGE_PUNCT.exec(word);
+	return {
+		lead: m[1] ?? "",
+		core: m[2] ?? "",
+		trail: m[3] ?? ""
+	};
+}
+function patterns(glossary) {
+	const out = [];
+	for (const entry of glossary) {
+		const cs = entry.case_sensitive === true;
+		for (const v of entry.variants ?? []) {
+			const tokens = v.trim().split(/\s+/).map((t) => splitPunct(t).core).filter(Boolean).map((t) => cs ? t : t.toLowerCase());
+			if (tokens.length) out.push({
+				tokens,
+				caseSensitive: cs,
+				entry
+			});
+		}
+	}
+	return out.sort((a, b) => b.tokens.length - a.tokens.length);
+}
+/**
+* Replace mishearings (`variants`) with the glossary `term`. Matching compares words without
+* their leading/trailing punctuation, ignores case unless `case_sensitive`, and may span
+* consecutive words ("M S B docks" → "MSB Docs"); the first word's leading and the last word's
+* trailing punctuation are kept. Only variants are matched, never the term itself (a term like
+* "RAG" would otherwise rewrite the everyday word "rag"); list a casing mishearing as a variant.
+*
+* Timings: when the term has as many words as the match, each word keeps its own timing;
+* otherwise the term's words are spread evenly over the matched span (first start to last end),
+* so the span, and every word outside it, keep their timings exactly. Words from different
+* scenes (`scene_id`) are never joined into one match.
+*/
+function applyGlossary(words, glossary) {
+	const pats = patterns(glossary ?? []);
+	if (!pats.length) return {
+		words: [...words],
+		corrections: []
+	};
+	const cores = words.map((w) => splitPunct(w.word).core);
+	const lower = cores.map((c) => c.toLowerCase());
+	const out = [];
+	const corrections = [];
+	let i = 0;
+	while (i < words.length) {
+		const hit = pats.find((p) => {
+			if (i + p.tokens.length > words.length) return false;
+			const scene = words[i].scene_id;
+			return p.tokens.every((t, k) => (p.caseSensitive ? cores[i + k] : lower[i + k]) === t && words[i + k].scene_id === scene);
+		});
+		if (!hit) {
+			out.push(words[i]);
+			i++;
+			continue;
+		}
+		const n = hit.tokens.length;
+		const first = words[i];
+		const last = words[i + n - 1];
+		const lead = splitPunct(first.word).lead;
+		const trail = splitPunct(last.word).trail;
+		const termWords = hit.entry.term.trim().split(/\s+/);
+		const k = termWords.length;
+		const from = words.slice(i, i + n).map((w) => w.word).join(" ");
+		const replaced = termWords.map((tw, j) => {
+			const src = k === n ? words[i + j] : first;
+			const start = k === n ? src.start_ms : Math.round(first.start_ms + (last.end_ms - first.start_ms) * j / k);
+			const end = k === n ? src.end_ms : j === k - 1 ? last.end_ms : Math.round(first.start_ms + (last.end_ms - first.start_ms) * (j + 1) / k);
+			const text = `${j === 0 ? lead : ""}${tw}${j === k - 1 ? trail : ""}`;
+			return {
+				...src,
+				word: text,
+				start_ms: start,
+				end_ms: end
+			};
+		});
+		const to = replaced.map((w) => w.word).join(" ");
+		if (to !== from) corrections.push({
+			from,
+			to,
+			term: hit.entry.term,
+			start_ms: first.start_ms,
+			end_ms: last.end_ms,
+			index: i,
+			words: n
+		});
+		out.push(...to !== from ? replaced : words.slice(i, i + n));
+		i += n;
+	}
+	return {
+		words: out,
+		corrections
+	};
+}
+/**
+* A whisper `--prompt` from glossary terms: deduplicated ignoring case, in glossary order,
+* joined with commas and cut at the last whole term that fits `maxChars`. Undefined when empty.
+* The prompt nudges spelling; it is a hint, the glossary pass still corrects what whisper writes.
+*/
+function glossaryPrompt(glossary, maxChars = 400) {
+	const seen = /* @__PURE__ */ new Set();
+	const terms = [];
+	for (const e of glossary ?? []) {
+		const t = e.term.trim().replace(/\s+/g, " ");
+		if (!t || seen.has(t.toLowerCase())) continue;
+		seen.add(t.toLowerCase());
+		terms.push(t);
+	}
+	let prompt = "";
+	for (const t of terms) {
+		const next = prompt ? `${prompt}, ${t}` : t;
+		if (next.length + 1 > maxChars) break;
+		prompt = next;
+	}
+	return prompt ? `${prompt}.` : void 0;
+}
+//#endregion
 //#region ../renderer/dist/script.js
 /**
 * Writing-system detection for layout, fonts, direction and timing.
@@ -13238,599 +13413,6 @@ function breakUnits(text) {
 		});
 	}
 	return units;
-}
-//#endregion
-//#region ../renderer/dist/tokens.js
-/**
-* Visual tokens, font files and render targets shared by the deterministic renderers.
-* Font values are CSS-style fallback chains ("Inter, Helvetica, Arial, sans-serif") so the
-* HTML renderer can use them verbatim; the FFmpeg renderer resolves them to one font file.
-*/
-const DEFAULT_TOKENS = Object.freeze({
-	font_heading: "Inter, \"Noto Sans\", Helvetica, Arial, sans-serif",
-	font_body: "Inter, \"Noto Sans\", Helvetica, Arial, sans-serif",
-	font_mono: "\"JetBrains Mono\", Menlo, \"DejaVu Sans Mono\", monospace",
-	color_background: "#0B0F19",
-	color_text: "#F5F7FA",
-	color_primary: "#4F8CFF",
-	color_secondary: "#22C55E"
-});
-const PALETTE_KEYS = {
-	color_background: ["background", "bg"],
-	color_text: [
-		"text",
-		"foreground",
-		"fg"
-	],
-	color_primary: ["primary", "accent"],
-	color_secondary: ["secondary"]
-};
-/** Normalise `#rgb`, `#rrggbb` or `#rrggbbaa` to upper-case `#RRGGBB` (alpha dropped). */
-function normalizeHex(color) {
-	const m = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.exec(color.trim());
-	if (!m) throw new Error(`invalid hex colour "${color}"`);
-	let hex = m[1];
-	if (hex.length === 3) hex = hex.replace(/./g, (c) => c + c);
-	return `#${hex.slice(0, 6).toUpperCase()}`;
-}
-/** Brand font first, then the default chain (unless the brand already gives a chain). */
-function fontChain(brandFont, fallback) {
-	if (!brandFont) return fallback;
-	if (brandFont.includes(",")) return brandFont;
-	return `${/\s/.test(brandFont) && !/^["']/.test(brandFont) ? `"${brandFont}"` : brandFont}, ${fallback}`;
-}
-/** Insert brand fallback families (e.g. Noto Sans JP) before the chain's generic family, skipping duplicates. */
-function withFallbacks(chain, extra) {
-	if (extra.length === 0) return chain;
-	const names = parseFontChain(chain);
-	const add = extra.filter((f) => !names.includes(f)).map((f) => /\s/.test(f) ? `"${f}"` : f);
-	if (add.length === 0) return chain;
-	const parts = chain.split(",").map((p) => p.trim());
-	const at = parts.findIndex((p) => GENERIC.has(p.replace(/^["']|["']$/g, "")));
-	parts.splice(at === -1 ? parts.length : at, 0, ...add);
-	return parts.join(", ");
-}
-/** A style font before the default chain, without repeating a family the chain already has. */
-function styleFontChain(font, fallback) {
-	if (!font) return fallback;
-	if (font.includes(",")) return font;
-	const rest = fallback.split(",").map((p) => p.trim()).filter((p) => p.replace(/^["']|["']$/g, "").toLowerCase() !== font.toLowerCase());
-	return [/\s/.test(font) && !/^["']/.test(font) ? `"${font}"` : font, ...rest].join(", ");
-}
-/**
-* Default motion per personality, used when only brand.motion.personality is set (no style), or
-* when the brand's personality differs from the style's. Transitions are the default scene join.
-*/
-const PERSONALITY_MOTION = Object.freeze({
-	calm: {
-		easing: "ease_out",
-		enter_ms: 600,
-		exit_ms: 250,
-		stagger_ms: 180,
-		transition: "crossfade",
-		transition_ms: 500
-	},
-	precise: {
-		easing: "snap",
-		enter_ms: 160,
-		exit_ms: 0,
-		stagger_ms: 60,
-		transition: "cut",
-		transition_ms: 0
-	},
-	friendly: {
-		easing: "ease_in_out",
-		enter_ms: 450,
-		exit_ms: 200,
-		stagger_ms: 120,
-		transition: "crossfade",
-		transition_ms: 350
-	},
-	energetic: {
-		easing: "spring",
-		enter_ms: 350,
-		exit_ms: 120,
-		stagger_ms: 70,
-		transition: "whip",
-		transition_ms: 250
-	},
-	playful: {
-		easing: "spring",
-		enter_ms: 500,
-		exit_ms: 150,
-		stagger_ms: 110,
-		transition: "zoom",
-		transition_ms: 300
-	}
-});
-/**
-* Resolve visual tokens. Precedence: DEFAULT_TOKENS < `defaults` < `style` < brand.yaml.
-* - Style: palette, fonts (placed before the default chain), weights, text case / heading scale /
-*   alignment, motion, and `style` = `<id>@<version>`.
-* - Brand: palette keys `background|bg`, `text|foreground|fg`, `primary|accent`, `secondary`;
-*   fonts; `visual.weights`; `motion.personality` (a personality other than the style's also
-*   brings that personality's easing and timings, keeping the style's transition kind) and
-*   `motion.transition_ms`. A brand personality without a style maps through PERSONALITY_MOTION.
-* `visual.font_fallbacks` are added to every chain before its generic family.
-* `logo_path` is the brand's logo path as written (project-relative); renderers resolve it.
-* Without a style and without brand weights or motion, the tokens are exactly the v1 tokens.
-*/
-function resolveTokens$1(brand, defaults = {}, style, opts = {}) {
-	const out = resolveTokensBase(brand, defaults, style);
-	return opts.language ? withLanguage(out, opts.language) : out;
-}
-/**
-* Tokens for a spec language: when the language is written in a non-Latin script (ja, hi, ar, …)
-* the script's font families (Noto Sans JP / Devanagari / Arabic first) are added to every chain
-* before its generic family, and `language` is recorded. Latin-script languages (en, fr, …)
-* return the tokens unchanged, so English renders and their cache keys do not move.
-*/
-function withLanguage(tokens, language) {
-	const script = languageScript(language);
-	if (!script || script === "latin") return tokens;
-	return {
-		...tokens,
-		language,
-		font_heading: withScriptFonts(tokens.font_heading, [script], language),
-		font_body: withScriptFonts(tokens.font_body, [script], language),
-		font_mono: withScriptFonts(tokens.font_mono, [script], language)
-	};
-}
-/** Add the families covering `scripts` to a chain, before its generic family (skipping families already there). */
-function withScriptFonts(chain, scripts, language) {
-	return withFallbacks(chain, scripts.flatMap((s) => scriptFontFamilies(s, language)));
-}
-/**
-* A chain for drawing one line of `script` text with a single font file (FFmpeg drawtext has no
-* per-glyph fallback): the script's families first, then the original chain. Latin: unchanged.
-*/
-function scriptFirstChain(chain, script, language) {
-	const fams = scriptFontFamilies(script, language);
-	if (fams.length === 0) return chain;
-	const rest = chain.split(",").map((p) => p.trim()).filter((p) => p && !fams.some((f) => f.toLowerCase() === p.replace(/^["']|["']$/g, "").toLowerCase()));
-	return [...fams.map((f) => /\s/.test(f) ? `"${f}"` : f), ...rest].join(", ");
-}
-function resolveTokensBase(brand, defaults = {}, style) {
-	const base = {
-		...DEFAULT_TOKENS,
-		...defaults
-	};
-	if (style) {
-		base.style = `${style.id}@${style.version}`;
-		const sp = style.palette ?? {};
-		if (sp.background) base.color_background = sp.background;
-		if (sp.text) base.color_text = sp.text;
-		if (sp.primary) base.color_primary = sp.primary;
-		if (sp.secondary) base.color_secondary = sp.secondary;
-		base.font_heading = styleFontChain(style.fonts?.heading, base.font_heading);
-		base.font_body = styleFontChain(style.fonts?.body, base.font_body);
-		base.font_mono = styleFontChain(style.fonts?.mono, base.font_mono);
-		if (style.weights?.heading !== void 0) base.weight_heading = style.weights.heading;
-		if (style.weights?.body !== void 0) base.weight_body = style.weights.body;
-		if (style.text?.case) base.text_case = style.text.case;
-		if (style.text?.heading_scale !== void 0) base.heading_scale = style.text.heading_scale;
-		if (style.text?.align) base.text_align = style.text.align;
-		base.motion = { ...style.motion };
-	}
-	const visual = brand?.visual;
-	const extra = visual?.font_fallbacks ?? [];
-	const out = {
-		...base,
-		font_heading: withFallbacks(fontChain(visual?.fonts.heading, base.font_heading), extra),
-		font_body: withFallbacks(fontChain(visual?.fonts.body, base.font_body), extra),
-		font_mono: withFallbacks(fontChain(visual?.fonts.mono, base.font_mono), extra)
-	};
-	const palette = visual?.palette ?? {};
-	for (const [token, keys] of Object.entries(PALETTE_KEYS)) {
-		const key = keys.find((k) => palette[k] !== void 0);
-		out[token] = normalizeHex(key ? palette[key] : out[token]);
-	}
-	if (visual?.weights?.heading !== void 0) out.weight_heading = visual.weights.heading;
-	if (visual?.weights?.body !== void 0) out.weight_body = visual.weights.body;
-	const bm = brand?.motion;
-	if (bm?.personality && bm.personality !== out.motion?.personality) {
-		const table = PERSONALITY_MOTION[bm.personality];
-		out.motion = out.motion ? {
-			...out.motion,
-			personality: bm.personality,
-			easing: table.easing,
-			enter_ms: table.enter_ms,
-			exit_ms: table.exit_ms,
-			stagger_ms: table.stagger_ms
-		} : {
-			personality: bm.personality,
-			...table
-		};
-	}
-	if (bm?.transition_ms !== void 0 && out.motion) out.motion = {
-		...out.motion,
-		transition_ms: bm.transition_ms
-	};
-	const logo = visual?.logo ?? base.logo_path;
-	if (logo) out.logo_path = logo;
-	else delete out.logo_path;
-	return out;
-}
-const BUNDLED_FONTS = Object.freeze([
-	{
-		family: "Inter",
-		weight: 400,
-		file: "Inter/Inter-Regular.ttf"
-	},
-	{
-		family: "Inter",
-		weight: 700,
-		file: "Inter/Inter-Bold.ttf"
-	},
-	{
-		family: "Noto Sans",
-		weight: 400,
-		file: "NotoSans/NotoSans-Regular.ttf"
-	},
-	{
-		family: "Noto Sans",
-		weight: 700,
-		file: "NotoSans/NotoSans-Bold.ttf"
-	},
-	{
-		family: "JetBrains Mono",
-		weight: 400,
-		file: "JetBrainsMono/JetBrainsMono-Regular.ttf"
-	},
-	{
-		family: "JetBrains Mono",
-		weight: 700,
-		file: "JetBrainsMono/JetBrainsMono-Bold.ttf"
-	},
-	{
-		family: "Noto Sans JP",
-		weight: 400,
-		file: "NotoSansJP/NotoSansJP-Regular.otf",
-		script: "cjk"
-	},
-	{
-		family: "Noto Sans JP",
-		weight: 700,
-		file: "NotoSansJP/NotoSansJP-Bold.otf",
-		script: "cjk"
-	},
-	{
-		family: "Noto Sans Devanagari",
-		weight: 400,
-		file: "NotoSansDevanagari/NotoSansDevanagari-Regular.ttf",
-		script: "devanagari"
-	},
-	{
-		family: "Noto Sans Devanagari",
-		weight: 700,
-		file: "NotoSansDevanagari/NotoSansDevanagari-Bold.ttf",
-		script: "devanagari"
-	},
-	{
-		family: "Noto Sans Arabic",
-		weight: 400,
-		file: "NotoSansArabic/NotoSansArabic-Regular.ttf",
-		script: "arabic"
-	},
-	{
-		family: "Noto Sans Arabic",
-		weight: 700,
-		file: "NotoSansArabic/NotoSansArabic-Bold.ttf",
-		script: "arabic"
-	}
-]);
-const FONTS_MARKER = "README.md";
-/**
-* The bundled `fonts/` directory: `${CLAUDE_PLUGIN_ROOT}/fonts`, else the first `fonts/` with a
-* README.md found walking up from this module (the repo root in dev, the plugin root from
-* `dist/mcp.mjs`). Null when the fonts are not installed; callers then fall back to host fonts
-* and should report it (see `bundledFontsStatus`).
-*/
-function findFontsDir(env = process.env, from) {
-	const root = env.CLAUDE_PLUGIN_ROOT;
-	if (root && existsSync(join(root, "fonts", FONTS_MARKER))) return join(root, "fonts");
-	let dir = from ?? dirname(fileURLToPath(import.meta.url));
-	for (let i = 0; i < 6; i++) {
-		const candidate = join(dir, "fonts");
-		if (existsSync(join(candidate, FONTS_MARKER))) return candidate;
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
-	}
-	return null;
-}
-/**
-* Which bundled font files are present in `dir` (null dir: none). Script fonts (Noto Sans JP,
-* Devanagari, Arabic) count in `present`/`missing` only for the `scripts` a render uses, so a
-* missing Japanese font only matters for videos with Japanese text.
-*/
-function bundledFontsStatus(dir, opts = {}) {
-	const present = [];
-	const missing = [];
-	const scriptMissing = [];
-	const want = new Set(opts.scripts ?? []);
-	for (const f of BUNDLED_FONTS) {
-		const ok = Boolean(dir && existsSync(join(dir, f.file)));
-		if (f.script && !ok) scriptMissing.push(f.file);
-		if (f.script && !want.has(f.script)) continue;
-		(ok ? present : missing).push(f.file);
-	}
-	return {
-		dir,
-		present,
-		missing,
-		script_missing: scriptMissing
-	};
-}
-/** Nearest bundled weight: 600 and up map to Bold, anything lighter to Regular. */
-function bundledWeight(weight) {
-	return (weight ?? 400) >= 600 ? 700 : 400;
-}
-/** Absolute path of the bundled file for `family` at (the nearest) `weight`, if bundled and present. */
-function bundledFontFile(family, weight, dir) {
-	if (!dir) return null;
-	const want = family.trim().toLowerCase();
-	const w = bundledWeight(weight);
-	const hit = BUNDLED_FONTS.find((f) => f.family.toLowerCase() === want && f.weight === w);
-	if (!hit) return null;
-	const p = join(dir, hit.file);
-	return existsSync(p) ? p : null;
-}
-/**
-* `@font-face` rules (file:// URLs) for every bundled family named in the tokens' chains, both
-* weights, for the HTML renderer. Empty when the fonts directory is missing, so callers can
-* embed it unconditionally; the chains' other families still apply through the browser.
-*/
-function fontFaceCss(tokens, opts = {}) {
-	const dir = opts.fontsDir === void 0 ? findFontsDir(opts.env ?? process.env) : opts.fontsDir;
-	if (!dir) return "";
-	const used = new Set([
-		tokens.font_heading,
-		tokens.font_body,
-		tokens.font_mono
-	].flatMap((c) => parseFontChain(c ?? "")).map((n) => n.toLowerCase()));
-	const rules = [];
-	for (const f of BUNDLED_FONTS) {
-		if (!used.has(f.family.toLowerCase())) continue;
-		const p = join(dir, f.file);
-		if (!existsSync(p)) continue;
-		const format = f.file.endsWith(".otf") ? "opentype" : "truetype";
-		rules.push(`@font-face { font-family: "${f.family}"; src: url("${pathToFileURL(p).href}") format("${format}"); font-weight: ${f.weight}; font-style: normal; font-display: block; }`);
-	}
-	return rules.join("\n");
-}
-/** Split a CSS font-family list into names (quotes removed). */
-function parseFontChain(chain) {
-	return chain.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "").trim()).filter(Boolean);
-}
-const GENERIC = /* @__PURE__ */ new Set([
-	"sans-serif",
-	"serif",
-	"monospace",
-	"system-ui",
-	"ui-monospace",
-	"ui-sans-serif",
-	"cursive",
-	"fantasy"
-]);
-async function fileExists$1(path) {
-	try {
-		await access(path, constants.R_OK);
-		return true;
-	} catch {
-		return false;
-	}
-}
-const defaultFcMatch = async (args, env) => {
-	try {
-		const { stdout } = await runProcess(env.FC_MATCH_PATH || "fc-match", args, {
-			captureStdout: true,
-			timeoutMs: 15e3
-		});
-		return stdout;
-	} catch {
-		return null;
-	}
-};
-const MAC_FALLBACKS = {
-	sans: [
-		"/System/Library/Fonts/Helvetica.ttc",
-		"/System/Library/Fonts/Supplemental/Arial.ttf",
-		"/Library/Fonts/Arial.ttf"
-	],
-	mono: ["/System/Library/Fonts/Menlo.ttc", "/System/Library/Fonts/Monaco.ttf"]
-};
-const LINUX_FALLBACKS = {
-	sans: [
-		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-		"/usr/share/fonts/TTF/DejaVuSans.ttf",
-		"/usr/share/fonts/dejavu/DejaVuSans.ttf",
-		"/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
-		"/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-	],
-	mono: [
-		"/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-		"/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-		"/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
-		"/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf",
-		"/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"
-	]
-};
-const WIN_FALLBACKS = {
-	sans: ["C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/segoeui.ttf"],
-	mono: ["C:/Windows/Fonts/consola.ttf", "C:/Windows/Fonts/cour.ttf"]
-};
-const FONT_EXT = /\.(ttf|otf|ttc)$/i;
-const MONO_HINT = /mono|menlo|consol|courier|code|monaco/i;
-var FontNotFoundError = class extends Error {
-	family;
-	constructor(family) {
-		super(`no font file found for "${family}"`);
-		this.family = family;
-		this.name = "FontNotFoundError";
-	}
-};
-/**
-* Locate a TTF/OTF/TTC file for a CSS-style family chain. For each named family, a bundled file
-* (Inter, Noto Sans, JetBrains Mono in `fonts/`, nearest of Regular/Bold to `weight`) wins first;
-* otherwise the family is tried with
-* `fc-match -f '%{family}\n%{file}'` and accepted only when fontconfig returns that family
-* (fontconfig otherwise substitutes silently). Then platform fallbacks (macOS Helvetica /
-* Arial / Menlo, Linux DejaVu / Liberation, Windows Arial / Consolas), then fontconfig's
-* substitute for the first family. Throws FontNotFoundError if nothing is found.
-*/
-async function resolveFontFile(family, env = process.env, deps = {}, weight) {
-	const platform = deps.platform ?? process.platform;
-	const fontsDir = deps.fontsDir === void 0 ? findFontsDir(env) : deps.fontsDir;
-	const fcMatch = deps.fcMatch ?? defaultFcMatch;
-	const exists = deps.exists ?? fileExists$1;
-	const names = parseFontChain(family);
-	if (names.length === 0) names.push("sans-serif");
-	const mono = names.some((n) => MONO_HINT.test(n) || n === "monospace");
-	let substitute = null;
-	for (const name of names) {
-		if (FONT_EXT.test(name) && await exists(name)) return name;
-		const bundled = bundledFontFile(name, weight, fontsDir);
-		if (bundled) return bundled;
-		const out = await fcMatch([
-			"-f",
-			"%{family}\n%{file}",
-			name
-		], env);
-		if (!out) continue;
-		const [fams = "", file = ""] = out.trim().split("\n");
-		if (!file || !FONT_EXT.test(file) || !await exists(file)) continue;
-		const got = fams.split(",").map((f) => f.trim().toLowerCase());
-		if (GENERIC.has(name.toLowerCase()) || got.includes(name.toLowerCase())) return file;
-		substitute ??= file;
-	}
-	const table = platform === "darwin" ? MAC_FALLBACKS : platform === "win32" ? WIN_FALLBACKS : LINUX_FALLBACKS;
-	const byName = /* @__PURE__ */ new Map([
-		["helvetica", "/System/Library/Fonts/Helvetica.ttc"],
-		["arial", "/System/Library/Fonts/Supplemental/Arial.ttf"],
-		["menlo", "/System/Library/Fonts/Menlo.ttc"],
-		["dejavu sans mono", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"],
-		["dejavu sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
-	]);
-	const named = names.map((n) => byName.get(n.toLowerCase())).filter((p) => Boolean(p));
-	for (const p of [...named, ...table[mono ? "mono" : "sans"]]) if (await exists(p)) return p;
-	if (substitute) return substitute;
-	throw new FontNotFoundError(family);
-}
-/** A memoising FontResolver bound to `env`. */
-function createFontResolver(env = process.env, deps = {}) {
-	const cache = /* @__PURE__ */ new Map();
-	return (family, weight) => {
-		const key = `${family}\u0000${bundledWeight(weight)}`;
-		let p = cache.get(key);
-		if (!p) {
-			p = resolveFontFile(family, env, deps, weight);
-			p.catch(() => cache.delete(key));
-			cache.set(key, p);
-		}
-		return p;
-	};
-}
-const metricsCache = /* @__PURE__ */ new Map();
-/**
-* Vertical metrics from a TTF/OTF (first face of a TTC), read from the `head`, `hhea` and `OS/2`
-* tables. Null when the file cannot be read or parsed. Memoised per path.
-*/
-function readFontMetrics(file) {
-	if (metricsCache.has(file)) return metricsCache.get(file);
-	let out = null;
-	let fd;
-	try {
-		fd = openSync(file, "r");
-		const read = (pos, len) => {
-			const b = Buffer.alloc(len);
-			readSync(fd, b, 0, len, pos);
-			return b;
-		};
-		let base = 0;
-		if (read(0, 4).toString("latin1") === "ttcf") base = read(12, 4).readUInt32BE(0);
-		const n = read(base, 12).readUInt16BE(4);
-		const dir = read(base + 12, n * 16);
-		const tables = {};
-		for (let i = 0; i < n; i++) tables[dir.toString("latin1", i * 16, i * 16 + 4)] = dir.readUInt32BE(i * 16 + 8);
-		if (tables.head !== void 0 && tables.hhea !== void 0 && tables["OS/2"] !== void 0) {
-			const head = read(tables.head, 54);
-			const hhea = read(tables.hhea, 8);
-			const os2 = read(tables["OS/2"], 78);
-			out = {
-				unitsPerEm: head.readUInt16BE(18),
-				winHeight: os2.readUInt16BE(74) + os2.readUInt16BE(76),
-				winAscent: os2.readUInt16BE(74),
-				hheaAscent: hhea.readInt16BE(4),
-				hheaDescent: hhea.readInt16BE(6)
-			};
-			if (!(out.unitsPerEm > 0 && out.winHeight > 0)) out = null;
-		}
-	} catch {
-		out = null;
-	} finally {
-		if (fd !== void 0) closeSync(fd);
-	}
-	metricsCache.set(file, out);
-	return out;
-}
-/**
-* libass font size for a wanted em size: libass scales a font so that its OS/2 win height
-* (usWinAscent + usWinDescent) equals the ASS font size, while FFmpeg drawtext sizes the em.
-* Tall-metric fonts (Noto Sans Devanagari 1.906, Arabic 2.169) would otherwise come out small.
-*/
-function assFontSize(emPx, metrics) {
-	if (!metrics) return emPx;
-	return Math.round(emPx * metrics.winHeight / metrics.unitsPerEm * 100) / 100;
-}
-/**
-* libass only reads font files directly inside its `fontsdir` (not sub-directories), while
-* `fonts/` keeps one directory per family. Link the given font files (default: every bundled
-* font present) flat into `destDir` and return it, for `subtitles=…:fontsdir=` / `ass=…:fontsdir=`.
-* Symlinks, so nothing is copied; existing links are replaced.
-*/
-async function prepareLibassFontsDir(destDir, files, fontsDir = findFontsDir()) {
-	await mkdir(destDir, { recursive: true });
-	const list = files ?? (fontsDir ? BUNDLED_FONTS.map((f) => join(fontsDir, f.file)).filter((p) => existsSync(p)) : []);
-	for (const src of list) {
-		const dest = join(destDir, basename(src));
-		try {
-			if (await readlink(dest) === src) continue;
-			await unlink(dest);
-		} catch {}
-		try {
-			await symlink(src, dest);
-		} catch {}
-	}
-	return destDir;
-}
-/** Frame size for an aspect ratio, keeping the short side at `shortSide` (even dimensions). */
-function targetForAspect(aspect, opts = {}) {
-	const s = opts.shortSide ?? 1080;
-	const even = (n) => Math.max(2, Math.round(n / 2) * 2);
-	const [aw, ah] = aspect.split(":").map(Number);
-	return {
-		width: aw <= ah ? even(s) : even(s * aw / ah),
-		height: aw <= ah ? even(s * ah / aw) : even(s),
-		fps: opts.fps ?? 30,
-		aspect_ratio: aspect
-	};
-}
-/** Transitions that blend two scenes during assembly (the outgoing picture must stay on screen). */
-const BLENDING_TRANSITIONS = /* @__PURE__ */ new Set([
-	"crossfade",
-	"slide",
-	"zoom",
-	"whip"
-]);
-/**
-* Exit fade length for a scene: the style's exit_ms, except when the style's transition blends
-* scenes: then the assembly's transition is the exit, and a fade to the background here would
-* leave it blending from an empty frame.
-*/
-function exitFadeMs(motion) {
-	if (!motion) return 0;
-	return BLENDING_TRANSITIONS.has(motion.transition) ? 0 : motion.exit_ms;
 }
 const SchemaVersion = literal$1("1.0").describe("Schema version of this document.");
 /** ISO-8601 date-time string (UTC `Z` or explicit offset). Never a Date object. */
@@ -23639,20 +23221,710 @@ const Template$1 = strictObject({
 	description: "A story template as data: beat structure with duration shares, pacing, caption preset, preferred hook mechanisms and rules."
 });
 //#endregion
+//#region ../renderer/dist/styles.js
+/**
+* Style packs: `styles/<id>.yaml` (look and motion), selected by `VideoSpec.style`.
+* See styles/README.md for the packs and the precedence rules (defaults < style < brand).
+*
+* Project-local packs: `<project>/styles/<id>.yaml` (e.g. written by `analyze write_style`) are
+* looked up before the bundled directory when a project dir is given. They are parsed as data with
+* the same schema, and their ref carries the file's sha256 so editing the file re-renders.
+*/
+/** Present in every `styles/` directory, so it can be found before any pack exists. */
+const MARKER$2 = "README.md";
+const ID$1 = /^[a-z0-9][a-z0-9-]*$/;
+/**
+* The bundled `styles/` directory: `${CLAUDE_PLUGIN_ROOT}/styles`, else the first `styles/` with a
+* README.md found walking up from this module (the repo root in dev, the plugin root from
+* `dist/mcp.mjs`). Null when not installed.
+*/
+function findStylesDir(env = process.env, from) {
+	const root = env.CLAUDE_PLUGIN_ROOT;
+	if (root && existsSync(join(root, "styles", MARKER$2))) return join(root, "styles");
+	let dir = from ?? dirname(fileURLToPath(import.meta.url));
+	for (let i = 0; i < 6; i++) {
+		const candidate = join(dir, "styles");
+		if (existsSync(join(candidate, MARKER$2))) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+function parseStyle(text, file, fileId) {
+	const parsed = parseYamlOrJson(Style$2, text);
+	if (!parsed.ok) throw new Error(`invalid style ${file}: ${parsed.errors.map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
+	if (parsed.data.id !== fileId) throw new Error(`style ${file} has id "${parsed.data.id}" but is named "${fileId}.yaml"`);
+	return parsed.data;
+}
+/**
+* The file hash of a pack loaded from a project's `styles/`, kept on the object under a symbol key:
+* it survives spreads (series palettes), and JSON / canonical hashing never see it.
+*/
+const PROJECT_SHA = Symbol.for("video-studio.style.project-sha256");
+/** `<project>/styles`: where project-local packs live. */
+function projectStylesDir(projectDir) {
+	return join(projectDir, "styles");
+}
+function tagProject(style, text) {
+	Object.defineProperty(style, PROJECT_SHA, {
+		value: createHash("sha256").update(text).digest("hex"),
+		enumerable: true
+	});
+	return style;
+}
+/** The sha256 of a project-local pack's file; undefined for a bundled pack. */
+function projectStyleSha(style) {
+	return style[PROJECT_SHA];
+}
+async function yamlNames(dir) {
+	if (!dir || !existsSync(dir)) return [];
+	return (await readdir(dir)).filter((n) => n.endsWith(".yaml") && ID$1.test(n.slice(0, -5))).sort();
+}
+/** Ids of the packs in `dir` (null dir: none), plus the project's own packs when a project dir is given. */
+async function styleIds(dir, projectDir) {
+	const ids = /* @__PURE__ */ new Set();
+	if (dir) for (const n of (await readdir(dir)).filter((n) => n.endsWith(".yaml"))) ids.add(n.slice(0, -5));
+	if (projectDir) for (const n of await yamlNames(projectStylesDir(projectDir))) ids.add(n.slice(0, -5));
+	return [...ids].sort();
+}
+/**
+* Load one pack by id: `<projectDir>/styles/<id>.yaml` first (when a project dir is given), then
+* the bundled `dir`. The error lists the available ids.
+*/
+async function getStyle(dir, id, projectDir) {
+	if (ID$1.test(id)) {
+		if (projectDir) {
+			const file = join(projectStylesDir(projectDir), `${id}.yaml`);
+			if (existsSync(file)) {
+				const text = await readFile(file, "utf8");
+				return tagProject(parseStyle(text, file, id), text);
+			}
+		}
+		if (dir) {
+			const file = join(dir, `${id}.yaml`);
+			if (existsSync(file)) return parseStyle(await readFile(file, "utf8"), file, id);
+		}
+	}
+	const ids = await styleIds(dir, projectDir);
+	throw new Error(`unknown style "${id}"; available: ${ids.join(", ") || "(none: no styles/ directory found)"}`);
+}
+/**
+* `<id>@<version>`, as recorded in tokens, the cache key and video.lock. A project-local pack adds
+* its file hash (`<id>@<version>+sha256:<hex>`), so editing the file re-renders without a version bump.
+*/
+function styleRef(style) {
+	const sha = projectStyleSha(style);
+	return sha ? `${style.id}@${style.version}+sha256:${sha}` : `${style.id}@${style.version}`;
+}
+//#endregion
+//#region ../renderer/dist/tokens.js
+/**
+* Visual tokens, font files and render targets shared by the deterministic renderers.
+* Font values are CSS-style fallback chains ("Inter, Helvetica, Arial, sans-serif") so the
+* HTML renderer can use them verbatim; the FFmpeg renderer resolves them to one font file.
+*/
+const DEFAULT_TOKENS = Object.freeze({
+	font_heading: "Inter, \"Noto Sans\", Helvetica, Arial, sans-serif",
+	font_body: "Inter, \"Noto Sans\", Helvetica, Arial, sans-serif",
+	font_mono: "\"JetBrains Mono\", Menlo, \"DejaVu Sans Mono\", monospace",
+	color_background: "#0B0F19",
+	color_text: "#F5F7FA",
+	color_primary: "#4F8CFF",
+	color_secondary: "#22C55E"
+});
+const PALETTE_KEYS = {
+	color_background: ["background", "bg"],
+	color_text: [
+		"text",
+		"foreground",
+		"fg"
+	],
+	color_primary: ["primary", "accent"],
+	color_secondary: ["secondary"]
+};
+/** Normalise `#rgb`, `#rrggbb` or `#rrggbbaa` to upper-case `#RRGGBB` (alpha dropped). */
+function normalizeHex(color) {
+	const m = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.exec(color.trim());
+	if (!m) throw new Error(`invalid hex colour "${color}"`);
+	let hex = m[1];
+	if (hex.length === 3) hex = hex.replace(/./g, (c) => c + c);
+	return `#${hex.slice(0, 6).toUpperCase()}`;
+}
+/** Brand font first, then the default chain (unless the brand already gives a chain). */
+function fontChain(brandFont, fallback) {
+	if (!brandFont) return fallback;
+	if (brandFont.includes(",")) return brandFont;
+	return `${/\s/.test(brandFont) && !/^["']/.test(brandFont) ? `"${brandFont}"` : brandFont}, ${fallback}`;
+}
+/** Insert brand fallback families (e.g. Noto Sans JP) before the chain's generic family, skipping duplicates. */
+function withFallbacks(chain, extra) {
+	if (extra.length === 0) return chain;
+	const names = parseFontChain(chain);
+	const add = extra.filter((f) => !names.includes(f)).map((f) => /\s/.test(f) ? `"${f}"` : f);
+	if (add.length === 0) return chain;
+	const parts = chain.split(",").map((p) => p.trim());
+	const at = parts.findIndex((p) => GENERIC.has(p.replace(/^["']|["']$/g, "")));
+	parts.splice(at === -1 ? parts.length : at, 0, ...add);
+	return parts.join(", ");
+}
+/** A style font before the default chain, without repeating a family the chain already has. */
+function styleFontChain(font, fallback) {
+	if (!font) return fallback;
+	if (font.includes(",")) return font;
+	const rest = fallback.split(",").map((p) => p.trim()).filter((p) => p.replace(/^["']|["']$/g, "").toLowerCase() !== font.toLowerCase());
+	return [/\s/.test(font) && !/^["']/.test(font) ? `"${font}"` : font, ...rest].join(", ");
+}
+/**
+* Default motion per personality, used when only brand.motion.personality is set (no style), or
+* when the brand's personality differs from the style's. Transitions are the default scene join.
+*/
+const PERSONALITY_MOTION = Object.freeze({
+	calm: {
+		easing: "ease_out",
+		enter_ms: 600,
+		exit_ms: 250,
+		stagger_ms: 180,
+		transition: "crossfade",
+		transition_ms: 500
+	},
+	precise: {
+		easing: "snap",
+		enter_ms: 160,
+		exit_ms: 0,
+		stagger_ms: 60,
+		transition: "cut",
+		transition_ms: 0
+	},
+	friendly: {
+		easing: "ease_in_out",
+		enter_ms: 450,
+		exit_ms: 200,
+		stagger_ms: 120,
+		transition: "crossfade",
+		transition_ms: 350
+	},
+	energetic: {
+		easing: "spring",
+		enter_ms: 350,
+		exit_ms: 120,
+		stagger_ms: 70,
+		transition: "whip",
+		transition_ms: 250
+	},
+	playful: {
+		easing: "spring",
+		enter_ms: 500,
+		exit_ms: 150,
+		stagger_ms: 110,
+		transition: "zoom",
+		transition_ms: 300
+	}
+});
+/**
+* Resolve visual tokens. Precedence: DEFAULT_TOKENS < `defaults` < `style` < brand.yaml.
+* - Style: palette, fonts (placed before the default chain), weights, text case / heading scale /
+*   alignment, motion, and `style` = `<id>@<version>`.
+* - Brand: palette keys `background|bg`, `text|foreground|fg`, `primary|accent`, `secondary`;
+*   fonts; `visual.weights`; `motion.personality` (a personality other than the style's also
+*   brings that personality's easing and timings, keeping the style's transition kind) and
+*   `motion.transition_ms`. A brand personality without a style maps through PERSONALITY_MOTION.
+* `visual.font_fallbacks` are added to every chain before its generic family.
+* `logo_path` is the brand's logo path as written (project-relative); renderers resolve it.
+* Without a style and without brand weights or motion, the tokens are exactly the v1 tokens.
+*/
+function resolveTokens$1(brand, defaults = {}, style, opts = {}) {
+	const out = resolveTokensBase(brand, defaults, style);
+	return opts.language ? withLanguage(out, opts.language) : out;
+}
+/**
+* Tokens for a spec language: when the language is written in a non-Latin script (ja, hi, ar, …)
+* the script's font families (Noto Sans JP / Devanagari / Arabic first) are added to every chain
+* before its generic family, and `language` is recorded. Latin-script languages (en, fr, …)
+* return the tokens unchanged, so English renders and their cache keys do not move.
+*/
+function withLanguage(tokens, language) {
+	const script = languageScript(language);
+	if (!script || script === "latin") return tokens;
+	return {
+		...tokens,
+		language,
+		font_heading: withScriptFonts(tokens.font_heading, [script], language),
+		font_body: withScriptFonts(tokens.font_body, [script], language),
+		font_mono: withScriptFonts(tokens.font_mono, [script], language)
+	};
+}
+/** Add the families covering `scripts` to a chain, before its generic family (skipping families already there). */
+function withScriptFonts(chain, scripts, language) {
+	return withFallbacks(chain, scripts.flatMap((s) => scriptFontFamilies(s, language)));
+}
+/**
+* A chain for drawing one line of `script` text with a single font file (FFmpeg drawtext has no
+* per-glyph fallback): the script's families first, then the original chain. Latin: unchanged.
+*/
+function scriptFirstChain(chain, script, language) {
+	const fams = scriptFontFamilies(script, language);
+	if (fams.length === 0) return chain;
+	const rest = chain.split(",").map((p) => p.trim()).filter((p) => p && !fams.some((f) => f.toLowerCase() === p.replace(/^["']|["']$/g, "").toLowerCase()));
+	return [...fams.map((f) => /\s/.test(f) ? `"${f}"` : f), ...rest].join(", ");
+}
+function resolveTokensBase(brand, defaults = {}, style) {
+	const base = {
+		...DEFAULT_TOKENS,
+		...defaults
+	};
+	if (style) {
+		base.style = styleRef(style);
+		const sp = style.palette ?? {};
+		if (sp.background) base.color_background = sp.background;
+		if (sp.text) base.color_text = sp.text;
+		if (sp.primary) base.color_primary = sp.primary;
+		if (sp.secondary) base.color_secondary = sp.secondary;
+		base.font_heading = styleFontChain(style.fonts?.heading, base.font_heading);
+		base.font_body = styleFontChain(style.fonts?.body, base.font_body);
+		base.font_mono = styleFontChain(style.fonts?.mono, base.font_mono);
+		if (style.weights?.heading !== void 0) base.weight_heading = style.weights.heading;
+		if (style.weights?.body !== void 0) base.weight_body = style.weights.body;
+		if (style.text?.case) base.text_case = style.text.case;
+		if (style.text?.heading_scale !== void 0) base.heading_scale = style.text.heading_scale;
+		if (style.text?.align) base.text_align = style.text.align;
+		base.motion = { ...style.motion };
+	}
+	const visual = brand?.visual;
+	const extra = visual?.font_fallbacks ?? [];
+	const out = {
+		...base,
+		font_heading: withFallbacks(fontChain(visual?.fonts.heading, base.font_heading), extra),
+		font_body: withFallbacks(fontChain(visual?.fonts.body, base.font_body), extra),
+		font_mono: withFallbacks(fontChain(visual?.fonts.mono, base.font_mono), extra)
+	};
+	const palette = visual?.palette ?? {};
+	for (const [token, keys] of Object.entries(PALETTE_KEYS)) {
+		const key = keys.find((k) => palette[k] !== void 0);
+		out[token] = normalizeHex(key ? palette[key] : out[token]);
+	}
+	if (visual?.weights?.heading !== void 0) out.weight_heading = visual.weights.heading;
+	if (visual?.weights?.body !== void 0) out.weight_body = visual.weights.body;
+	const bm = brand?.motion;
+	if (bm?.personality && bm.personality !== out.motion?.personality) {
+		const table = PERSONALITY_MOTION[bm.personality];
+		out.motion = out.motion ? {
+			...out.motion,
+			personality: bm.personality,
+			easing: table.easing,
+			enter_ms: table.enter_ms,
+			exit_ms: table.exit_ms,
+			stagger_ms: table.stagger_ms
+		} : {
+			personality: bm.personality,
+			...table
+		};
+	}
+	if (bm?.transition_ms !== void 0 && out.motion) out.motion = {
+		...out.motion,
+		transition_ms: bm.transition_ms
+	};
+	const logo = visual?.logo ?? base.logo_path;
+	if (logo) out.logo_path = logo;
+	else delete out.logo_path;
+	return out;
+}
+const BUNDLED_FONTS = Object.freeze([
+	{
+		family: "Inter",
+		weight: 400,
+		file: "Inter/Inter-Regular.ttf"
+	},
+	{
+		family: "Inter",
+		weight: 700,
+		file: "Inter/Inter-Bold.ttf"
+	},
+	{
+		family: "Noto Sans",
+		weight: 400,
+		file: "NotoSans/NotoSans-Regular.ttf"
+	},
+	{
+		family: "Noto Sans",
+		weight: 700,
+		file: "NotoSans/NotoSans-Bold.ttf"
+	},
+	{
+		family: "JetBrains Mono",
+		weight: 400,
+		file: "JetBrainsMono/JetBrainsMono-Regular.ttf"
+	},
+	{
+		family: "JetBrains Mono",
+		weight: 700,
+		file: "JetBrainsMono/JetBrainsMono-Bold.ttf"
+	},
+	{
+		family: "Noto Sans JP",
+		weight: 400,
+		file: "NotoSansJP/NotoSansJP-Regular.otf",
+		script: "cjk"
+	},
+	{
+		family: "Noto Sans JP",
+		weight: 700,
+		file: "NotoSansJP/NotoSansJP-Bold.otf",
+		script: "cjk"
+	},
+	{
+		family: "Noto Sans Devanagari",
+		weight: 400,
+		file: "NotoSansDevanagari/NotoSansDevanagari-Regular.ttf",
+		script: "devanagari"
+	},
+	{
+		family: "Noto Sans Devanagari",
+		weight: 700,
+		file: "NotoSansDevanagari/NotoSansDevanagari-Bold.ttf",
+		script: "devanagari"
+	},
+	{
+		family: "Noto Sans Arabic",
+		weight: 400,
+		file: "NotoSansArabic/NotoSansArabic-Regular.ttf",
+		script: "arabic"
+	},
+	{
+		family: "Noto Sans Arabic",
+		weight: 700,
+		file: "NotoSansArabic/NotoSansArabic-Bold.ttf",
+		script: "arabic"
+	}
+]);
+const FONTS_MARKER = "README.md";
+/**
+* The bundled `fonts/` directory: `${CLAUDE_PLUGIN_ROOT}/fonts`, else the first `fonts/` with a
+* README.md found walking up from this module (the repo root in dev, the plugin root from
+* `dist/mcp.mjs`). Null when the fonts are not installed; callers then fall back to host fonts
+* and should report it (see `bundledFontsStatus`).
+*/
+function findFontsDir(env = process.env, from) {
+	const root = env.CLAUDE_PLUGIN_ROOT;
+	if (root && existsSync(join(root, "fonts", FONTS_MARKER))) return join(root, "fonts");
+	let dir = from ?? dirname(fileURLToPath(import.meta.url));
+	for (let i = 0; i < 6; i++) {
+		const candidate = join(dir, "fonts");
+		if (existsSync(join(candidate, FONTS_MARKER))) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+/**
+* Which bundled font files are present in `dir` (null dir: none). Script fonts (Noto Sans JP,
+* Devanagari, Arabic) count in `present`/`missing` only for the `scripts` a render uses, so a
+* missing Japanese font only matters for videos with Japanese text.
+*/
+function bundledFontsStatus(dir, opts = {}) {
+	const present = [];
+	const missing = [];
+	const scriptMissing = [];
+	const want = new Set(opts.scripts ?? []);
+	for (const f of BUNDLED_FONTS) {
+		const ok = Boolean(dir && existsSync(join(dir, f.file)));
+		if (f.script && !ok) scriptMissing.push(f.file);
+		if (f.script && !want.has(f.script)) continue;
+		(ok ? present : missing).push(f.file);
+	}
+	return {
+		dir,
+		present,
+		missing,
+		script_missing: scriptMissing
+	};
+}
+/** Nearest bundled weight: 600 and up map to Bold, anything lighter to Regular. */
+function bundledWeight(weight) {
+	return (weight ?? 400) >= 600 ? 700 : 400;
+}
+/** Absolute path of the bundled file for `family` at (the nearest) `weight`, if bundled and present. */
+function bundledFontFile(family, weight, dir) {
+	if (!dir) return null;
+	const want = family.trim().toLowerCase();
+	const w = bundledWeight(weight);
+	const hit = BUNDLED_FONTS.find((f) => f.family.toLowerCase() === want && f.weight === w);
+	if (!hit) return null;
+	const p = join(dir, hit.file);
+	return existsSync(p) ? p : null;
+}
+/**
+* `@font-face` rules (file:// URLs) for every bundled family named in the tokens' chains, both
+* weights, for the HTML renderer. Empty when the fonts directory is missing, so callers can
+* embed it unconditionally; the chains' other families still apply through the browser.
+*/
+function fontFaceCss(tokens, opts = {}) {
+	const dir = opts.fontsDir === void 0 ? findFontsDir(opts.env ?? process.env) : opts.fontsDir;
+	if (!dir) return "";
+	const used = new Set([
+		tokens.font_heading,
+		tokens.font_body,
+		tokens.font_mono
+	].flatMap((c) => parseFontChain(c ?? "")).map((n) => n.toLowerCase()));
+	const rules = [];
+	for (const f of BUNDLED_FONTS) {
+		if (!used.has(f.family.toLowerCase())) continue;
+		const p = join(dir, f.file);
+		if (!existsSync(p)) continue;
+		const format = f.file.endsWith(".otf") ? "opentype" : "truetype";
+		rules.push(`@font-face { font-family: "${f.family}"; src: url("${pathToFileURL(p).href}") format("${format}"); font-weight: ${f.weight}; font-style: normal; font-display: block; }`);
+	}
+	return rules.join("\n");
+}
+/** Split a CSS font-family list into names (quotes removed). */
+function parseFontChain(chain) {
+	return chain.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "").trim()).filter(Boolean);
+}
+const GENERIC = /* @__PURE__ */ new Set([
+	"sans-serif",
+	"serif",
+	"monospace",
+	"system-ui",
+	"ui-monospace",
+	"ui-sans-serif",
+	"cursive",
+	"fantasy"
+]);
+async function fileExists$1(path) {
+	try {
+		await access(path, constants.R_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+const defaultFcMatch = async (args, env) => {
+	try {
+		const { stdout } = await runProcess(env.FC_MATCH_PATH || "fc-match", args, {
+			captureStdout: true,
+			timeoutMs: 15e3
+		});
+		return stdout;
+	} catch {
+		return null;
+	}
+};
+const MAC_FALLBACKS = {
+	sans: [
+		"/System/Library/Fonts/Helvetica.ttc",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+		"/Library/Fonts/Arial.ttf"
+	],
+	mono: ["/System/Library/Fonts/Menlo.ttc", "/System/Library/Fonts/Monaco.ttf"]
+};
+const LINUX_FALLBACKS = {
+	sans: [
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/TTF/DejaVuSans.ttf",
+		"/usr/share/fonts/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+		"/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+	],
+	mono: [
+		"/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+		"/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+		"/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
+		"/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf",
+		"/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"
+	]
+};
+const WIN_FALLBACKS = {
+	sans: ["C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/segoeui.ttf"],
+	mono: ["C:/Windows/Fonts/consola.ttf", "C:/Windows/Fonts/cour.ttf"]
+};
+const FONT_EXT = /\.(ttf|otf|ttc)$/i;
+const MONO_HINT = /mono|menlo|consol|courier|code|monaco/i;
+var FontNotFoundError = class extends Error {
+	family;
+	constructor(family) {
+		super(`no font file found for "${family}"`);
+		this.family = family;
+		this.name = "FontNotFoundError";
+	}
+};
+/**
+* Locate a TTF/OTF/TTC file for a CSS-style family chain. For each named family, a bundled file
+* (Inter, Noto Sans, JetBrains Mono in `fonts/`, nearest of Regular/Bold to `weight`) wins first;
+* otherwise the family is tried with
+* `fc-match -f '%{family}\n%{file}'` and accepted only when fontconfig returns that family
+* (fontconfig otherwise substitutes silently). Then platform fallbacks (macOS Helvetica /
+* Arial / Menlo, Linux DejaVu / Liberation, Windows Arial / Consolas), then fontconfig's
+* substitute for the first family. Throws FontNotFoundError if nothing is found.
+*/
+async function resolveFontFile(family, env = process.env, deps = {}, weight) {
+	const platform = deps.platform ?? process.platform;
+	const fontsDir = deps.fontsDir === void 0 ? findFontsDir(env) : deps.fontsDir;
+	const fcMatch = deps.fcMatch ?? defaultFcMatch;
+	const exists = deps.exists ?? fileExists$1;
+	const names = parseFontChain(family);
+	if (names.length === 0) names.push("sans-serif");
+	const mono = names.some((n) => MONO_HINT.test(n) || n === "monospace");
+	let substitute = null;
+	for (const name of names) {
+		if (FONT_EXT.test(name) && await exists(name)) return name;
+		const bundled = bundledFontFile(name, weight, fontsDir);
+		if (bundled) return bundled;
+		const out = await fcMatch([
+			"-f",
+			"%{family}\n%{file}",
+			name
+		], env);
+		if (!out) continue;
+		const [fams = "", file = ""] = out.trim().split("\n");
+		if (!file || !FONT_EXT.test(file) || !await exists(file)) continue;
+		const got = fams.split(",").map((f) => f.trim().toLowerCase());
+		if (GENERIC.has(name.toLowerCase()) || got.includes(name.toLowerCase())) return file;
+		substitute ??= file;
+	}
+	const table = platform === "darwin" ? MAC_FALLBACKS : platform === "win32" ? WIN_FALLBACKS : LINUX_FALLBACKS;
+	const byName = /* @__PURE__ */ new Map([
+		["helvetica", "/System/Library/Fonts/Helvetica.ttc"],
+		["arial", "/System/Library/Fonts/Supplemental/Arial.ttf"],
+		["menlo", "/System/Library/Fonts/Menlo.ttc"],
+		["dejavu sans mono", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"],
+		["dejavu sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+	]);
+	const named = names.map((n) => byName.get(n.toLowerCase())).filter((p) => Boolean(p));
+	for (const p of [...named, ...table[mono ? "mono" : "sans"]]) if (await exists(p)) return p;
+	if (substitute) return substitute;
+	throw new FontNotFoundError(family);
+}
+/** A memoising FontResolver bound to `env`. */
+function createFontResolver(env = process.env, deps = {}) {
+	const cache = /* @__PURE__ */ new Map();
+	return (family, weight) => {
+		const key = `${family}\u0000${bundledWeight(weight)}`;
+		let p = cache.get(key);
+		if (!p) {
+			p = resolveFontFile(family, env, deps, weight);
+			p.catch(() => cache.delete(key));
+			cache.set(key, p);
+		}
+		return p;
+	};
+}
+const metricsCache = /* @__PURE__ */ new Map();
+/**
+* Vertical metrics from a TTF/OTF (first face of a TTC), read from the `head`, `hhea` and `OS/2`
+* tables. Null when the file cannot be read or parsed. Memoised per path.
+*/
+function readFontMetrics(file) {
+	if (metricsCache.has(file)) return metricsCache.get(file);
+	let out = null;
+	let fd;
+	try {
+		fd = openSync(file, "r");
+		const read = (pos, len) => {
+			const b = Buffer.alloc(len);
+			readSync(fd, b, 0, len, pos);
+			return b;
+		};
+		let base = 0;
+		if (read(0, 4).toString("latin1") === "ttcf") base = read(12, 4).readUInt32BE(0);
+		const n = read(base, 12).readUInt16BE(4);
+		const dir = read(base + 12, n * 16);
+		const tables = {};
+		for (let i = 0; i < n; i++) tables[dir.toString("latin1", i * 16, i * 16 + 4)] = dir.readUInt32BE(i * 16 + 8);
+		if (tables.head !== void 0 && tables.hhea !== void 0 && tables["OS/2"] !== void 0) {
+			const head = read(tables.head, 54);
+			const hhea = read(tables.hhea, 8);
+			const os2 = read(tables["OS/2"], 78);
+			out = {
+				unitsPerEm: head.readUInt16BE(18),
+				winHeight: os2.readUInt16BE(74) + os2.readUInt16BE(76),
+				winAscent: os2.readUInt16BE(74),
+				hheaAscent: hhea.readInt16BE(4),
+				hheaDescent: hhea.readInt16BE(6)
+			};
+			if (!(out.unitsPerEm > 0 && out.winHeight > 0)) out = null;
+		}
+	} catch {
+		out = null;
+	} finally {
+		if (fd !== void 0) closeSync(fd);
+	}
+	metricsCache.set(file, out);
+	return out;
+}
+/**
+* libass font size for a wanted em size: libass scales a font so that its OS/2 win height
+* (usWinAscent + usWinDescent) equals the ASS font size, while FFmpeg drawtext sizes the em.
+* Tall-metric fonts (Noto Sans Devanagari 1.906, Arabic 2.169) would otherwise come out small.
+*/
+function assFontSize(emPx, metrics) {
+	if (!metrics) return emPx;
+	return Math.round(emPx * metrics.winHeight / metrics.unitsPerEm * 100) / 100;
+}
+/**
+* libass only reads font files directly inside its `fontsdir` (not sub-directories), while
+* `fonts/` keeps one directory per family. Link the given font files (default: every bundled
+* font present) flat into `destDir` and return it, for `subtitles=…:fontsdir=` / `ass=…:fontsdir=`.
+* Symlinks, so nothing is copied; existing links are replaced.
+*/
+async function prepareLibassFontsDir(destDir, files, fontsDir = findFontsDir()) {
+	await mkdir(destDir, { recursive: true });
+	const list = files ?? (fontsDir ? BUNDLED_FONTS.map((f) => join(fontsDir, f.file)).filter((p) => existsSync(p)) : []);
+	for (const src of list) {
+		const dest = join(destDir, basename(src));
+		try {
+			if (await readlink(dest) === src) continue;
+			await unlink(dest);
+		} catch {}
+		try {
+			await symlink(src, dest);
+		} catch {}
+	}
+	return destDir;
+}
+/** Frame size for an aspect ratio, keeping the short side at `shortSide` (even dimensions). */
+function targetForAspect(aspect, opts = {}) {
+	const s = opts.shortSide ?? 1080;
+	const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+	const [aw, ah] = aspect.split(":").map(Number);
+	return {
+		width: aw <= ah ? even(s) : even(s * aw / ah),
+		height: aw <= ah ? even(s * ah / aw) : even(s),
+		fps: opts.fps ?? 30,
+		aspect_ratio: aspect
+	};
+}
+/** Transitions that blend two scenes during assembly (the outgoing picture must stay on screen). */
+const BLENDING_TRANSITIONS = /* @__PURE__ */ new Set([
+	"crossfade",
+	"slide",
+	"zoom",
+	"whip"
+]);
+/**
+* Exit fade length for a scene: the style's exit_ms, except when the style's transition blends
+* scenes: then the assembly's transition is the exit, and a fade to the background here would
+* leave it blending from an empty frame.
+*/
+function exitFadeMs(motion) {
+	if (!motion) return 0;
+	return BLENDING_TRANSITIONS.has(motion.transition) ? 0 : motion.exit_ms;
+}
+//#endregion
 //#region ../platforms/dist/registry.js
 /** Present in every `platform-specs/` directory, so it can be found before any contract exists. */
-const MARKER$2 = "README.md";
+const MARKER$1 = "README.md";
 /**
 * Locate the bundled `platform-specs/` directory: `${CLAUDE_PLUGIN_ROOT}/platform-specs` first, then
 * walk up from this module (works from `packages/*\/src`, `packages/*\/dist` and `dist/mcp.mjs`).
 */
 function findPlatformSpecsDir(env = process.env, from) {
 	const root = env.CLAUDE_PLUGIN_ROOT;
-	if (root && existsSync(join(root, "platform-specs", MARKER$2))) return join(root, "platform-specs");
+	if (root && existsSync(join(root, "platform-specs", MARKER$1))) return join(root, "platform-specs");
 	let dir = from ?? dirname(fileURLToPath(import.meta.url));
 	for (let i = 0; i < 6; i++) {
 		const candidate = join(dir, "platform-specs");
-		if (existsSync(join(candidate, MARKER$2))) return candidate;
+		if (existsSync(join(candidate, MARKER$1))) return candidate;
 		const parent = dirname(dir);
 		if (parent === dir) break;
 		dir = parent;
@@ -27743,7 +28015,7 @@ const REFRAME = {
 	/** subject_near_edge: the subject centre within this share of the crop's edge. */
 	edge_margin: .08
 };
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const clamp$2 = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const n4 = (n) => String(Math.round(n * 1e4) / 1e4);
 /** Size of the source (w×h) once scaled to cover W×H, before the crop (ffmpeg force_original_aspect_ratio=increase). */
 function coverSize(srcW, srcH, W, H) {
@@ -27773,7 +28045,7 @@ function toPlayPoints(track, opts = {}) {
 	const box = opts.media?.content_box;
 	const sw = opts.media?.width;
 	const sh = opts.media?.height;
-	const toBox = (v, full, off, len) => full ? clamp((v * full - off) / len, 0, 1) : v;
+	const toBox = (v, full, off, len) => full ? clamp$2((v * full - off) / len, 0, 1) : v;
 	const pts = [];
 	for (const k of track) {
 		if (opts.spanSec !== void 0 && pts.length && pts[pts.length - 1].t * speed >= opts.spanSec) break;
@@ -27822,8 +28094,8 @@ function smoothFocus(points, opts = {}) {
 		const step = vmax * Math.max(0, p.t - prev.t);
 		out.push({
 			t: p.t,
-			x: prev.x + clamp(p.x - prev.x, -step, step),
-			y: prev.y + clamp(p.y - prev.y, -step, step)
+			x: prev.x + clamp$2(p.x - prev.x, -step, step),
+			y: prev.y + clamp$2(p.y - prev.y, -step, step)
 		});
 	}
 	const lean = out.filter((p, i) => {
@@ -27868,8 +28140,8 @@ function focusAt(points, t) {
 /** Crop offset in pixels (top-left) for a subject centre, on a cover-scaled iw×ih frame cropped to W×H. */
 function coverCropAt(center, iw, ih, W, H) {
 	return {
-		x: clamp(center.x * iw - W / 2, 0, Math.max(0, iw - W)),
-		y: clamp(center.y * ih - H / 2, 0, Math.max(0, ih - H))
+		x: clamp$2(center.x * iw - W / 2, 0, Math.max(0, iw - W)),
+		y: clamp$2(center.y * ih - H / 2, 0, Math.max(0, ih - H))
 	};
 }
 /** ffmpeg expression (in `t`) for one axis of the subject centre, mirroring focusAt. */
@@ -38046,57 +38318,6 @@ function createHyperframesRenderer(opts = {}) {
 		}
 	};
 }
-//#endregion
-//#region ../renderer/dist/styles.js
-/**
-* Style packs: `styles/<id>.yaml` (look and motion), selected by `VideoSpec.style`.
-* See styles/README.md for the packs and the precedence rules (defaults < style < brand).
-*/
-/** Present in every `styles/` directory, so it can be found before any pack exists. */
-const MARKER$1 = "README.md";
-const ID$1 = /^[a-z0-9][a-z0-9-]*$/;
-/**
-* The bundled `styles/` directory: `${CLAUDE_PLUGIN_ROOT}/styles`, else the first `styles/` with a
-* README.md found walking up from this module (the repo root in dev, the plugin root from
-* `dist/mcp.mjs`). Null when not installed.
-*/
-function findStylesDir(env = process.env, from) {
-	const root = env.CLAUDE_PLUGIN_ROOT;
-	if (root && existsSync(join(root, "styles", MARKER$1))) return join(root, "styles");
-	let dir = from ?? dirname(fileURLToPath(import.meta.url));
-	for (let i = 0; i < 6; i++) {
-		const candidate = join(dir, "styles");
-		if (existsSync(join(candidate, MARKER$1))) return candidate;
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
-	}
-	return null;
-}
-function parseStyle(text, file, fileId) {
-	const parsed = parseYamlOrJson(Style$2, text);
-	if (!parsed.ok) throw new Error(`invalid style ${file}: ${parsed.errors.map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
-	if (parsed.data.id !== fileId) throw new Error(`style ${file} has id "${parsed.data.id}" but is named "${fileId}.yaml"`);
-	return parsed.data;
-}
-/** Ids of the packs in `dir` (null dir: none). */
-async function styleIds(dir) {
-	if (!dir) return [];
-	return (await readdir(dir)).filter((n) => n.endsWith(".yaml")).map((n) => n.slice(0, -5)).sort();
-}
-/** Load one pack by id. The error lists the available ids. */
-async function getStyle(dir, id) {
-	if (dir && ID$1.test(id)) {
-		const file = join(dir, `${id}.yaml`);
-		if (existsSync(file)) return parseStyle(await readFile(file, "utf8"), file, id);
-	}
-	const ids = await styleIds(dir);
-	throw new Error(`unknown style "${id}"; available: ${ids.join(", ") || "(none: no styles/ directory found)"}`);
-}
-/** `<id>@<version>`, as recorded in tokens, the cache key and video.lock. */
-function styleRef(style) {
-	return `${style.id}@${style.version}`;
-}
 /** Grace period between SIGTERM and SIGKILL. */
 const KILL_GRACE_MS = 2e3;
 function abortError(cmd, signal) {
@@ -40673,6 +40894,10 @@ function seriesRecord(loaded, usage) {
 		files: usage.files
 	};
 }
+/** The series bible's glossary (names and terms that correct transcripts and captions); empty without one. */
+function seriesGlossary(loaded) {
+	return loaded?.series.glossary ?? [];
+}
 //#endregion
 //#region src/spec-validate.ts
 async function readIfExists$2(path) {
@@ -40761,7 +40986,7 @@ async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = find
 		})));
 	}
 	if (parsed.data.style) {
-		const style = await checkSpecStyle(parsed.data.style, stylesDir);
+		const style = await checkSpecStyle(parsed.data.style, stylesDir, projectDir);
 		if (style) result.errors.push(style);
 	}
 	const series = await checkSeries(parsed.data, projectDir, stylesDir);
@@ -40872,7 +41097,7 @@ async function checkSeries(spec, projectDir, stylesDir = findStylesDir()) {
 		fix: "list the entries each scene shows in its series_refs"
 	});
 	if (!spec.style && loaded.series.style) {
-		const style = await checkSpecStyle(loaded.series.style, stylesDir);
+		const style = await checkSpecStyle(loaded.series.style, stylesDir, projectDir);
 		if (style) errors.push({
 			...style,
 			path: "series",
@@ -40886,9 +41111,12 @@ async function checkSeries(spec, projectDir, stylesDir = findStylesDir()) {
 		warnings
 	};
 }
-/** An error when `id` is not a loadable style pack in `dir`, listing the available ids. */
-async function checkSpecStyle(id, dir) {
-	const ids = await styleIds(dir).catch(() => []);
+/**
+* An error when `id` is not a loadable style pack in the project's `styles/` (when `projectDir` is
+* given) or the bundled `dir`, listing the available ids.
+*/
+async function checkSpecStyle(id, dir, projectDir) {
+	const ids = await styleIds(dir, projectDir).catch(() => []);
 	if (!ids.includes(id)) {
 		const near = closestMatches(id, ids);
 		return {
@@ -40899,7 +41127,7 @@ async function checkSpecStyle(id, dir) {
 		};
 	}
 	try {
-		await getStyle(dir, id);
+		await getStyle(dir, id, projectDir);
 		return null;
 	} catch (e) {
 		return {
@@ -42549,7 +42777,7 @@ async function styleAvoid(spec, stylesDir, projectDir) {
 	const series = !spec.style && spec.series ? await loadSeries(projectDir, spec.series).catch(() => void 0) : void 0;
 	const id = spec.style ?? series?.series.style;
 	if (!id) return void 0;
-	const style = await getStyle(stylesDir, id).catch(() => void 0);
+	const style = await getStyle(stylesDir, id, projectDir).catch(() => void 0);
 	return style ? {
 		id: style.id,
 		...style.motion.avoid ? { avoid: style.motion.avoid } : {}
@@ -43417,6 +43645,44 @@ async function resolveMusic(bed, projectDir, env = process.env, opts = {}) {
 		sha256: await hashFile(path),
 		...bed.license ? { license: bed.license } : {},
 		bed
+	};
+}
+//#endregion
+//#region src/glossary.ts
+/**
+* The project's glossary: the series bible's (spec.series) with the brand's added
+* (`brand.language.glossary`; the brand wins a term both define). Corrects transcripts and
+* captions only; TTS pronunciation stays in `brand.language.terminology`.
+*/
+function projectGlossary(brand, series) {
+	return mergeGlossary(seriesGlossary(series), brand?.language?.glossary);
+}
+/**
+* Load the glossary for a project folder (brand.yaml or project/brand.yaml, and the series named
+* by project/video-spec.json). A missing or unreadable file never blocks transcription: it is
+* reported in `warnings` and skipped.
+*/
+async function loadProjectGlossary(root) {
+	const warnings = [];
+	let brand;
+	try {
+		brand = (await loadBrand$1(root))?.brand;
+	} catch (e) {
+		warnings.push(`glossary: brand not read (${e instanceof Error ? e.message : String(e)})`);
+	}
+	let series;
+	let ref;
+	try {
+		ref = JSON.parse(await readFile(join(root, "project", "video-spec.json"), "utf8")).series;
+	} catch {}
+	if (typeof ref === "string" && ref.trim()) try {
+		series = await loadSeries(root, ref);
+	} catch (e) {
+		warnings.push(`glossary: series ${ref} not read (${e instanceof Error ? e.message : String(e)})`);
+	}
+	return {
+		glossary: projectGlossary(brand, series),
+		warnings
 	};
 }
 //#endregion
@@ -243918,7 +244184,7 @@ function parseAudioWindows(stderr) {
 	};
 }
 const mean = (xs) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN;
-function percentile(xs, p) {
+function percentile$1(xs, p) {
 	const s = [...xs].sort((a, b) => a - b);
 	return s[Math.min(s.length - 1, Math.max(0, Math.floor(p * (s.length - 1) + .5)))];
 }
@@ -243959,8 +244225,8 @@ function footageQualityVerdict(v, a, opts = {}) {
 		if (q.clipped_audio) q.notes.push(`audio clips (reaches full scale in ${clippedWindows} places): it will sound distorted; replace or re-record the audio at a lower input level`);
 		const audible = a.rms.filter(Number.isFinite);
 		if (audible.length >= Math.max(4, a.rms.length * .1)) {
-			const loud = percentile(audible, .9);
-			const floor = Math.max(-120, percentile(a.rms.map((x) => Number.isFinite(x) ? x : -120), .1));
+			const loud = percentile$1(audible, .9);
+			const floor = Math.max(-120, percentile$1(a.rms.map((x) => Number.isFinite(x) ? x : -120), .1));
 			const snr = loud - floor;
 			q.snr_db = r1(snr);
 			if (floor > L.silent_floor_db && snr < L.low_snr_db) q.notes.push(`noisy or unclear audio (estimated SNR ${r1(snr)} dB, noise floor ${r1(floor)} dBFS): no quiet gaps above the noise; if this clip has speech it may be hard to follow (replace or re-record, or put voiceover or music over it). Steady music, ambience or hum also reads this way: ignore it for b-roll`);
@@ -246547,6 +246813,9 @@ async function transcribeAsset(projectDir, assetId, opts = {}) {
 	let downloaded;
 	let speakerTurns;
 	const warnings = [];
+	const gl = await loadProjectGlossary(root);
+	warnings.push(...gl.warnings);
+	const prompt = glossaryPrompt(gl.glossary);
 	if (opts.captions_file) {
 		let file;
 		try {
@@ -246592,7 +246861,8 @@ async function transcribeAsset(projectDir, assetId, opts = {}) {
 			model: model.path,
 			...language ? { language } : {},
 			...speakers ? { speakers: true } : {},
-			...opts.whisperBin ? { bin: opts.whisperBin } : {}
+			...opts.whisperBin ? { bin: opts.whisperBin } : {},
+			...prompt ? { prompt } : {}
 		});
 		words = r.words;
 		speakerTurns = r.speaker_turns;
@@ -246615,7 +246885,12 @@ async function transcribeAsset(projectDir, assetId, opts = {}) {
 	const abs = join(root, rel);
 	const relCheck = relative(root, abs);
 	if (relCheck.startsWith("..") || isAbsolute(relCheck)) throw new TranscribeError("transcript path escaped the project");
-	await writeJsonAtomic(abs, words);
+	const corrected = applyGlossary(words, gl.glossary);
+	words = corrected.words;
+	await writeJsonAtomic(abs, corrected.corrections.length ? {
+		words,
+		glossary_corrections: corrected.corrections
+	} : words);
 	const applied = applyTranscript(ir, asset.id, words, {
 		path: rel,
 		...meta
@@ -246636,7 +246911,12 @@ async function transcribeAsset(projectDir, assetId, opts = {}) {
 			speaker_turns: speakerTurns ?? 0
 		} : {},
 		...warnings.length ? { warnings } : {},
-		...downloaded ? { model_downloaded: downloaded } : {}
+		...downloaded ? { model_downloaded: downloaded } : {},
+		...gl.glossary.length ? { glossary: {
+			terms: gl.glossary.length,
+			...prompt && meta.source === "whisper" ? { prompt } : {},
+			corrections: corrected.corrections
+		} } : {}
 	};
 }
 /**
@@ -247467,7 +247747,7 @@ async function stageInputs(run) {
 		usage: await seriesUsage(seriesLoaded, spec.scenes)
 	} : void 0;
 	const styleId = effectiveStyleId(spec.style, seriesLoaded?.series);
-	const look = seriesLook(seriesLoaded?.series, spec.style, styleId ? await getStyle(findStylesDir(env), styleId) : void 0);
+	const look = seriesLook(seriesLoaded?.series, spec.style, styleId ? await getStyle(findStylesDir(env), styleId, root) : void 0);
 	const style = look.style;
 	const tokens = resolveTokens$1(brand, look.defaults, style, { language: spec.language });
 	if (brand?.visual?.logo_placement?.position === "none") delete tokens.logo_path;
@@ -247982,7 +248262,7 @@ async function stageCaptions(run, input) {
 		};
 	});
 	const totalMs = Math.round(frameMs(bounds[bounds.length - 1]));
-	const words = buildWordTimeline(placements);
+	const words = applyGlossary(buildWordTimeline(placements), projectGlossary(input.inputs.brand, input.inputs.series?.loaded)).words;
 	const captionsDir = join(renderDir(root, quality), "captions");
 	await rm(captionsDir, {
 		recursive: true,
@@ -249193,7 +249473,7 @@ async function lockFromState(root, state, projectId, outputs) {
 	if (!fonts) {
 		const brandFile = await loadBrand$1(root).catch(() => void 0);
 		const styleId = state.style?.split("@")[0];
-		const style = styleId ? await getStyle(findStylesDir(process.env), styleId).catch(() => void 0) : void 0;
+		const style = styleId ? await getStyle(findStylesDir(process.env), styleId, root).catch(() => void 0) : void 0;
 		const language = await loadSpecLoose(root).then((r) => r.spec.language).catch(() => void 0);
 		const tokens = resolveTokens$1(brandFile?.brand, {}, style, language ? { language } : {});
 		fonts = await lockFonts(fontRequests(tokens, brandFile?.brand.captions?.family ?? parseFontChain(tokens.font_body)[0], state.burn_in), { fontsDir: findFontsDir(process.env) });
@@ -263906,6 +264186,401 @@ function formatAdapt(r) {
 		...r.notes.map((n) => `note: ${n}`)
 	].join("\n");
 }
+/** Silences from `silencedetect` stderr; a silence still open at the end runs to `durationMs`. */
+function parseSilences(stderr, durationMs) {
+	const starts = [...stderr.matchAll(/silence_start:\s*(-?[\d.]+)/g)].map((m) => Math.max(0, Number(m[1]) * 1e3));
+	const ends = [...stderr.matchAll(/silence_end:\s*(-?[\d.]+)/g)].map((m) => Number(m[1]) * 1e3);
+	return starts.map((s, i) => ({
+		start_ms: Math.round(s),
+		end_ms: Math.round(Math.min(ends[i] ?? durationMs, durationMs))
+	})).filter((x) => x.end_ms > x.start_ms);
+}
+/** Voice-band silences of a file (one decode). */
+async function measureSilences(path, durationMs, signal) {
+	return parseSilences((await runFfmpeg([
+		"-i",
+		path,
+		"-map",
+		"0:a:0",
+		"-vn",
+		"-af",
+		`highpass=f=200,lowpass=f=3500,silencedetect=n=-35dB:d=${100 / 1e3}`,
+		"-f",
+		"null",
+		"-"
+	], {
+		keepStderr: true,
+		timeoutMs: 18e5,
+		...signal ? { signal } : {}
+	})).stderr, durationMs);
+}
+/** Share of the file with voice-band sound (silences of 300 ms or more count as silent). */
+function soundShareOf(silences, durationMs) {
+	const silent = silences.filter((s) => s.end_ms - s.start_ms >= 300).reduce((t, s) => t + (s.end_ms - s.start_ms), 0);
+	return Math.max(0, Math.min(1, 1 - silent / Math.max(durationMs, 1)));
+}
+/** Nearest-rank percentile of sorted values. */
+function percentile(sorted, p) {
+	return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(p / 100 * sorted.length) - 1))];
+}
+/**
+* Pause statistics: the pauses are the silences inside speech (a silence touching the start or
+* the end of the file is lead-in or tail, not a pause). `silence_share` is the pauses' total over
+* the speech span (first sound to last sound); median and p95 use the nearest rank and are null
+* without pauses.
+*/
+function speechPacing(silences, durationMs) {
+	const EDGE = 20;
+	const sorted = [...silences].sort((a, b) => a.start_ms - b.start_ms);
+	const lead = sorted.find((s) => s.start_ms <= EDGE);
+	const tail = [...sorted].reverse().find((s) => s.end_ms >= durationMs - EDGE);
+	const spanStart = lead ? lead.end_ms : 0;
+	const spanEnd = tail && tail !== lead ? tail.start_ms : durationMs;
+	const pauses = sorted.filter((s) => s !== lead && s !== tail).map((s) => s.end_ms - s.start_ms);
+	const span = Math.max(1, spanEnd - spanStart);
+	const total = pauses.reduce((t, d) => t + d, 0);
+	const lengths = [...pauses].sort((a, b) => a - b);
+	return {
+		silence_share: lead && tail === lead ? 1 : Math.round(Math.min(1, total / span) * 1e3) / 1e3,
+		pauses_analyzed: pauses.length,
+		pause_median_ms: lengths.length ? percentile(lengths, 50) : null,
+		pause_p95_ms: lengths.length ? percentile(lengths, 95) : null
+	};
+}
+/** Pause statistics of a file (probe + one silencedetect pass). */
+async function measureSpeechPacing(path, signal) {
+	const p = await ffprobe(path);
+	if (!p.has_audio) throw new Error(`${path} has no audio track to measure pauses in`);
+	const durationMs = Math.round(p.duration_s * 1e3);
+	return speechPacing(await measureSilences(path, durationMs, signal), durationMs);
+}
+const PACING_MAX_PAUSE_RANGE = [250, 1500];
+const PACING_KEEP_PAUSE_RANGE = [120, 600];
+const clamp$1 = (x, [lo, hi]) => Math.min(hi, Math.max(lo, Math.round(x)));
+/**
+* tighten limits from measured pacing: pauses up to the speaker's own p95 stay, longer ones are
+* shortened to their median. max_pause_ms = clamp(p95, 250, 1500), keep_pause_ms =
+* clamp(median, 120, 600) and never above max_pause_ms. The clamps keep a pause-heavy or
+* pause-free reference from producing a rushed or untouched edit.
+*/
+function pacingLimits(p) {
+	if (p.pause_p95_ms === null || p.pause_median_ms === null || p.pauses_analyzed === 0) throw new Error("the pacing reference has no pauses inside speech to learn from; pass max_pause_ms/keep_pause_ms instead");
+	const max_pause_ms = clamp$1(p.pause_p95_ms, PACING_MAX_PAUSE_RANGE);
+	return {
+		max_pause_ms,
+		keep_pause_ms: Math.min(clamp$1(p.pause_median_ms, PACING_KEEP_PAUSE_RANGE), max_pause_ms)
+	};
+}
+/** Energy (8-bit code values) a change must reach, above the noise floor. */
+const MOTION_HIGH = .5;
+/** Energy under which a frame counts as still, above the noise floor. */
+const MOTION_LOW = .25;
+/** A still stretch at least this long is a hold. */
+const HOLD_MIN_S = .3;
+const median = (xs) => quantile(xs, .5);
+function quantile(xs, q) {
+	const s = [...xs].sort((a, b) => a - b);
+	if (!s.length) return 0;
+	const pos = (s.length - 1) * q;
+	const lo = Math.floor(pos);
+	const hi = Math.ceil(pos);
+	return s[lo] + (s[hi] - s[lo]) * (pos - lo);
+}
+/**
+* The easing class of one change from its energy curve (one value per frame interval):
+* - one active interval: `snap` (a cut, or an element that appears in one frame);
+* - a second rise after the main hump has decayed below half its peak: `spring` (overshoot and rebound);
+* - flat (at least 6 intervals, each third's mean within ±20 % of the whole mean): `linear`;
+* - the peak (middle of its plateau) in the first third: `ease_out`; otherwise `ease_in_out`
+*   (an ease-in, peak in the last third, has no class of its own and reads as ease_in_out).
+*/
+function classifyEasing(curve) {
+	const n = curve.length;
+	if (n <= 1) return "snap";
+	const peak = Math.max(...curve);
+	const k = curve.indexOf(peak);
+	if (n >= 3) {
+		let min = peak;
+		let decayed = false;
+		for (let j = k + 1; j < n; j++) {
+			const v = curve[j];
+			if (v < peak * .5) decayed = true;
+			if (decayed && v >= min * 1.3 && v - min >= peak * .03 && v >= .25) return "spring";
+			min = Math.min(min, v);
+		}
+	}
+	if (n >= 6) {
+		const mean = (xs) => xs.reduce((a, v) => a + v, 0) / xs.length;
+		const all = mean(curve);
+		const third = Math.round(n / 3);
+		const parts = [
+			curve.slice(0, third),
+			curve.slice(third, n - third),
+			curve.slice(n - third)
+		];
+		if (all > 0 && parts.every((part) => Math.abs(mean(part) - all) <= .2 * all)) return "linear";
+	}
+	let last = k;
+	while (last + 1 < n && curve[last + 1] >= peak * .97) last++;
+	return (k + last) / 2 / (n - 1) < 1 / 3 ? "ease_out" : "ease_in_out";
+}
+/**
+* Split a change at a deep valley between two humps of similar height (staggered entrances that
+* overlap). A small second hump is a rebound (spring) and stays in the same change.
+*/
+function splitOverlaps(curve) {
+	const parts = [];
+	let start = 0;
+	let hump = curve[0] ?? 0;
+	let valley = Infinity;
+	let valleyAt = -1;
+	for (let j = 1; j < curve.length; j++) {
+		const v = curve[j];
+		if (valleyAt >= 0 && v > curve[j - 1]) {
+			let p = j;
+			while (p + 1 < curve.length && curve[p + 1] >= curve[p]) p++;
+			const next = curve[p];
+			if (next >= .6 * hump && valley <= .5 * Math.min(hump, next)) {
+				parts.push([start, valleyAt]);
+				start = valleyAt + 1;
+				hump = next;
+			} else hump = Math.max(hump, next);
+			valley = Infinity;
+			valleyAt = -1;
+			j = p;
+			continue;
+		}
+		if (v < curve[j - 1]) {
+			if (v < valley) {
+				valley = v;
+				valleyAt = j;
+			}
+		} else if (valleyAt < 0) hump = Math.max(hump, v);
+	}
+	parts.push([start, curve.length - 1]);
+	return parts;
+}
+/** Motion timing from per-interval difference energies (`samples[i].y` = |frame i − frame i−1|). */
+function motionTimingFrom(samples) {
+	const empty = {
+		timing: {
+			changes_analyzed: 0,
+			enter_ms_median: null,
+			enter_ms_p75: null,
+			easing: null,
+			easing_share: null,
+			stagger_ms_median: null,
+			holds: {
+				count: 0,
+				median_ms: null,
+				longest_ms: null
+			}
+		},
+		changes: [],
+		continuous: 0
+	};
+	if (samples.length < 3) return empty;
+	const e = samples.map((s) => Math.max(0, s.y));
+	const span = samples[samples.length - 1].t - samples[0].t;
+	const dt = span > 0 ? span / (samples.length - 1) : 1 / 30;
+	const floor = median(e);
+	const mad = median(e.map((v) => Math.abs(v - floor)));
+	const hi = floor + Math.max(MOTION_HIGH, 6 * mad);
+	const lo = floor + Math.max(MOTION_LOW, 3 * mad);
+	const runs = [];
+	let i = 0;
+	while (i < e.length) {
+		if (e[i] <= lo) {
+			i++;
+			continue;
+		}
+		const s = i;
+		let last = i;
+		let still = 0;
+		for (i = i + 1; i < e.length; i++) if (e[i] > lo) {
+			last = i;
+			still = 0;
+		} else if (++still >= 2) break;
+		runs.push([s, last]);
+		i = last + 1;
+	}
+	const changes = [];
+	let continuous = 0;
+	let prev;
+	for (const [s, t] of runs) {
+		const run = e.slice(s, t + 1);
+		for (const [a, b] of splitOverlaps(run)) {
+			const curve = run.slice(a, b + 1);
+			const peak = Math.max(...curve);
+			const last = changes[changes.length - 1];
+			if (last && prev && (s + a - prev.to) * dt <= .25 && peak < .2 * last.peak) {
+				prev.to = s + b;
+				last.duration_ms = Math.round((prev.to - prev.from + 1) * dt * 1e3);
+				continue;
+			}
+			if (peak < hi) continue;
+			if (curve.length * dt > 2) {
+				continuous++;
+				continue;
+			}
+			const at = s + a;
+			prev = {
+				from: at,
+				to: s + b
+			};
+			changes.push({
+				start_sec: Math.round(Math.max(0, samples[at].t - dt) * 1e3) / 1e3,
+				duration_ms: Math.round(curve.length * dt * 1e3),
+				easing: classifyEasing(curve),
+				peak: Math.round(peak * 100) / 100
+			});
+		}
+	}
+	const holds = [];
+	let still = 0;
+	for (const v of [...e, Infinity]) if (v <= lo) still++;
+	else {
+		if (still * dt >= .299999) holds.push(Math.round(still * dt * 1e3));
+		still = 0;
+	}
+	const n = changes.length;
+	const counts = /* @__PURE__ */ new Map();
+	for (const c of changes) counts.set(c.easing, (counts.get(c.easing) ?? 0) + 1);
+	const winner = [
+		"ease_out",
+		"ease_in_out",
+		"spring",
+		"linear",
+		"snap"
+	].reduce((best, cls) => (counts.get(cls) ?? 0) > (best ? counts.get(best) ?? 0 : 0) ? cls : best, null);
+	const animated = changes.filter((c) => c.easing !== "snap").map((c) => c.duration_ms);
+	const durations = animated.length >= 2 ? animated : changes.map((c) => c.duration_ms);
+	const gaps = [];
+	for (let j = 1; j < n; j++) {
+		const g = changes[j].start_sec - changes[j - 1].start_sec;
+		if (g < .8) gaps.push(g * 1e3);
+	}
+	return {
+		timing: {
+			changes_analyzed: n,
+			enter_ms_median: n >= 2 ? Math.round(median(durations)) : null,
+			enter_ms_p75: n >= 2 ? Math.round(quantile(durations, .75)) : null,
+			easing: n >= 2 ? winner : null,
+			easing_share: n >= 2 && winner ? Math.round((counts.get(winner) ?? 0) / n * 1e3) / 1e3 : null,
+			stagger_ms_median: gaps.length ? Math.round(median(gaps)) : null,
+			holds: {
+				count: holds.length,
+				median_ms: holds.length ? Math.round(median(holds)) : null,
+				longest_ms: holds.length ? Math.max(...holds) : null
+			}
+		},
+		changes,
+		continuous
+	};
+}
+/** Per-interval difference energy of a video's first picture track, in one decode pass. */
+async function differenceEnergy(path) {
+	return parseLuma((await runFfmpeg([
+		"-i",
+		path,
+		"-map",
+		"0:v:0",
+		"-an",
+		"-sn",
+		"-vf",
+		`scale=160:-2,format=gray,tblend=all_mode=difference,signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG`,
+		"-f",
+		"null",
+		"-"
+	], {
+		keepStderr: true,
+		timeoutMs: 36e5
+	})).stderr);
+}
+async function measureMotionTiming(path) {
+	return motionTimingFrom(await differenceEnergy(path));
+}
+function formatMotionTiming(m) {
+	const ms = (x) => x === null ? "n/a" : `${Math.round(x)} ms`;
+	return [
+		"## Motion timing",
+		"",
+		`- Changes analyzed: ${m.changes_analyzed}`,
+		`- Entrance: median ${ms(m.enter_ms_median)}, p75 ${ms(m.enter_ms_p75)}`,
+		`- Easing: ${m.easing ? `**${m.easing}**${m.easing_share !== null ? ` (${Math.round(m.easing_share * 100)}% of changes)` : ""}` : "n/a"}`,
+		`- Stagger: ${ms(m.stagger_ms_median)}`,
+		`- Holds (still ≥ ${HOLD_MIN_S * 1e3} ms): ${m.holds.count}${m.holds.count ? ` (median ${ms(m.holds.median_ms)}, longest ${ms(m.holds.longest_ms)})` : ""}`
+	];
+}
+const STYLE_ID = /^[a-z0-9][a-z0-9-]*$/;
+const r10 = (x) => Math.round(x / 10) * 10;
+const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+/**
+* A style pack from measured motion timing: easing and durations from the measurement, the scene
+* transition from the cut rate (≥ 3 cuts per 10 s or a snap-dominated reference: cut; else crossfade).
+*/
+function styleFromMotion(id, g) {
+	const m = g.motion_timing;
+	const easing = m?.easing ?? "ease_out";
+	const enter = clamp(r10(m?.enter_ms_median ?? 400), 0, 2e3);
+	const personality = easing === "spring" ? "playful" : easing === "snap" || enter < 300 ? "energetic" : easing === "linear" ? "precise" : enter >= 500 ? "calm" : easing === "ease_in_out" ? "precise" : "friendly";
+	const cut = easing === "snap" || g.cuts_per_10s >= 3;
+	const name = id.split("-").filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+	return Style$2.parse({
+		id,
+		name,
+		version: 1,
+		description: "measured from a reference; structure only",
+		motion: {
+			personality,
+			easing,
+			enter_ms: enter,
+			exit_ms: clamp(r10(enter * .7), 0, 2e3),
+			stagger_ms: clamp(r10(m?.stagger_ms_median ?? enter * .4), 0, 1e3),
+			transition: cut ? "cut" : "crossfade",
+			transition_ms: cut ? 0 : clamp(r10(enter * .8), 200, 800),
+			avoid: []
+		}
+	});
+}
+/** The pack as YAML (JSON-quoted scalars; YAML is a superset of JSON). */
+function styleYaml(s) {
+	const q = (v) => JSON.stringify(v);
+	const lines = [
+		"# Measured by analyze from a reference video: motion timing only, nothing from the reference is kept.",
+		`id: ${q(s.id)}`,
+		`name: ${q(s.name)}`,
+		`version: ${s.version}`,
+		`description: ${q(s.description)}`,
+		"motion:"
+	];
+	for (const [k, v] of Object.entries(s.motion)) lines.push(`  ${k}: ${Array.isArray(v) ? `[${v.map(q).join(", ")}]` : q(v)}`);
+	return `${lines.join("\n")}\n`;
+}
+/**
+* Where write_style would write `<id>`, or an error: an id that is not a file-name id, an existing
+* file, and an id that would shadow a bundled pack are refused unless `overwrite`.
+*/
+async function styleTarget(projectDir, id, o = {}) {
+	if (!STYLE_ID.test(id)) throw new Error(`write_style id "${id}" must be lowercase letters, digits and dashes (it names styles/<id>.yaml)`);
+	const path = join(projectStylesDir(projectDir), `${id}.yaml`);
+	const warnings = [];
+	if ((await styleIds(o.stylesDir === void 0 ? findStylesDir() : o.stylesDir).catch(() => [])).includes(id)) {
+		if (!o.overwrite) throw new Error(`"${id}" is a bundled style; pick another id, or pass overwrite: true to shadow it in this project`);
+		warnings.push(`styles/${id}.yaml shadows the bundled "${id}" pack in this project`);
+	}
+	if (existsSync(path) && !o.overwrite) throw new Error(`styles/${id}.yaml already exists; pass overwrite: true to replace it`);
+	return {
+		path,
+		warnings
+	};
+}
+/** Write `<project>/styles/<id>.yaml` (refusals as in styleTarget). */
+async function writeProjectStyle(projectDir, style, o = {}) {
+	const t = await styleTarget(projectDir, style.id, o);
+	await writeFileAtomic(t.path, styleYaml(style));
+	return t;
+}
 //#endregion
 //#region src/shorts.ts
 /** Max distance a boundary moves to meet a shot cut. */
@@ -264404,32 +265079,37 @@ async function sampleEdgeRows(path, duration, w, h) {
 		});
 	}
 }
-/** Share of the file where the voice band (200–3500 Hz) is above -35 dBFS. */
-async function soundShare(path, duration) {
-	const r = await runFfmpeg([
-		"-i",
-		path,
-		"-map",
-		"0:a:0",
-		"-vn",
-		"-af",
-		"highpass=f=200,lowpass=f=3500,silencedetect=n=-35dB:d=0.3",
-		"-f",
-		"null",
-		"-"
-	], {
-		keepStderr: true,
-		timeoutMs: 18e5
-	});
-	const starts = [...r.stderr.matchAll(/silence_start:\s*(-?[\d.]+)/g)].map((m) => Math.max(0, Number(m[1])));
-	const ends = [...r.stderr.matchAll(/silence_end:\s*(-?[\d.]+)/g)].map((m) => Number(m[1]));
-	let silent = 0;
-	starts.forEach((s, i) => {
-		silent += Math.max(0, Math.min(ends[i] ?? duration, duration) - s);
-	});
-	return Math.max(0, Math.min(1, 1 - silent / Math.max(duration, .001)));
+/**
+* Share of the file where the voice band (200–3500 Hz) is above -35 dBFS, and the pauses inside
+* speech (speech-pacing.ts), from one silencedetect pass.
+*/
+async function speechMeasures(path, duration) {
+	const ms = Math.round(duration * 1e3);
+	const silences = await measureSilences(path, ms);
+	return {
+		share: soundShareOf(silences, ms),
+		pacing: speechPacing(silences, ms)
+	};
+}
+/** Motion timing (motion-timing.ts) for the grammar, with a note; undefined when it can't be measured. */
+async function motionTimingFor(path, notes) {
+	try {
+		const m = await measureMotionTiming(path);
+		if (m.continuous) notes.push(`${m.continuous} long continuous motion stretch(es) (over 2 s: camera moves or live footage) were left out of the motion timing.`);
+		notes.push("motion_timing reads entrances from frame-to-frame difference energy: crossfades read as linear changes, cuts as snaps.");
+		return m.timing;
+	} catch (e) {
+		notes.push(`motion timing not measured: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
+		return;
+	}
 }
 async function analyzeVideo(path, opts = {}) {
+	if (opts.writeStyle !== void 0 && !opts.projectDir) throw new Error("write_style needs project_dir (the style is written to <project>/styles/<id>.yaml)");
+	const styleOpts = {
+		...opts.overwrite ? { overwrite: true } : {},
+		...opts.stylesDir !== void 0 ? { stylesDir: opts.stylesDir } : {}
+	};
+	if (opts.writeStyle !== void 0 && opts.projectDir) await styleTarget(opts.projectDir, opts.writeStyle, styleOpts);
 	if (!existsSync(path)) throw new Error(`video not found: ${path}`);
 	const p = await ffprobe(path);
 	if (!p.has_video) throw new Error("analyze needs a video with a picture track (this file has none)");
@@ -264447,17 +265127,22 @@ async function analyzeVideo(path, opts = {}) {
 	if (caption_band) notes.push(`Burned-in text most likely sits at ${Math.round(caption_band.y_from * 100)}–${Math.round(caption_band.y_to * 100)}% of the frame height.`);
 	else notes.push("No consistent burned-in text band found in the lower two-thirds.");
 	let speech_ratio;
+	let speech_pacing;
 	let loudness;
 	if (p.has_audio) {
 		try {
-			speech_ratio = r3(await soundShare(path, duration));
+			const sm = await speechMeasures(path, duration);
+			speech_ratio = r3(sm.share);
+			speech_pacing = sm.pacing;
 			notes.push("speech_ratio is the share of time with voice-band sound (200–3500 Hz above -35 dBFS); music can count as speech.");
+			notes.push("speech_pacing: pauses are voice-band silences of 100 ms or more inside speech (lead-in and tail excluded); tighten pacing_from uses them.");
 		} catch {}
 		try {
 			const l = await measureLoudness(path);
 			if (l.integrated_lufs !== null && Number.isFinite(l.integrated_lufs)) loudness = Math.round(l.integrated_lufs * 10) / 10;
 		} catch {}
 	} else notes.push("No audio track.");
+	const motion_timing = await motionTimingFor(path, notes);
 	const g = {
 		schema_version: "1.0",
 		duration_sec: r3(duration),
@@ -264468,20 +265153,27 @@ async function analyzeVideo(path, opts = {}) {
 		hook_shot_sec: r3(shots[0] ? shots[0].end_sec - shots[0].start_sec : duration),
 		has_speech: p.has_audio && (speech_ratio ?? 0) >= .2,
 		...speech_ratio !== void 0 ? { speech_ratio } : {},
+		...speech_pacing ? { speech_pacing } : {},
 		...loudness !== void 0 ? { loudness_lufs: loudness } : {},
 		caption_band,
 		pacing: pacingFor(avg),
+		...motion_timing ? { motion_timing } : {},
 		notes
 	};
 	const parsed = FormatGrammar.parse(g);
-	const report_md = formatGrammar(parsed);
+	const written = opts.writeStyle !== void 0 && opts.projectDir ? await writeProjectStyle(opts.projectDir, styleFromMotion(opts.writeStyle, parsed), styleOpts) : void 0;
+	const report_md = formatGrammar(parsed) + (written ? `\n\nStyle pack written: styles/${opts.writeStyle}.yaml${written.warnings.map((w) => `\n- ${w}`).join("")}` : "");
 	if (opts.projectDir) {
 		await writeJsonAtomic(join(opts.projectDir, "qa", "analysis.json"), parsed);
 		await writeFileAtomic(join(opts.projectDir, "qa", "analysis.md"), `${report_md}\n`);
 	}
 	return {
 		...parsed,
-		report_md
+		report_md,
+		...written ? {
+			style_path: written.path,
+			style_warnings: written.warnings
+		} : {}
 	};
 }
 function formatGrammar(g) {
@@ -264493,11 +265185,13 @@ function formatGrammar(g) {
 		`- Shots: ${g.shots.length} (avg ${g.avg_shot_sec.toFixed(1)} s, ${g.cuts_per_10s.toFixed(1)} cuts per 10 s), pacing **${g.pacing}**`,
 		`- Hook shot: ${g.hook_shot_sec.toFixed(1)} s`,
 		`- Speech: ${g.has_speech === void 0 ? "n/a" : g.has_speech ? "yes" : "no"}${g.speech_ratio !== void 0 ? ` (${Math.round(g.speech_ratio * 100)}% voice-band sound)` : ""}`,
+		...g.speech_pacing ? [`- Pauses: ${g.speech_pacing.pauses_analyzed} inside speech (${Math.round(g.speech_pacing.silence_share * 100)}% of the speech span)${g.speech_pacing.pause_median_ms !== null ? `, median ${g.speech_pacing.pause_median_ms} ms, p95 ${g.speech_pacing.pause_p95_ms} ms` : ""}`] : [],
 		`- Loudness: ${g.loudness_lufs !== void 0 ? `${g.loudness_lufs} LUFS` : "n/a"}`,
 		`- Caption band: ${band}`,
 		"",
 		"Shot lengths (s): " + g.shots.map((s) => (s.end_sec - s.start_sec).toFixed(1)).join(", ")
 	];
+	if (g.motion_timing) lines.push("", ...formatMotionTiming(g.motion_timing));
 	if (g.notes.length) lines.push("", ...g.notes.map((n) => `- ${n}`));
 	return lines.join("\n");
 }
@@ -266661,35 +267355,184 @@ function retimeWords(words, keep) {
 	}
 	return out;
 }
-async function tightenAsset(projectDir, assetId, opts = {}) {
+const isContent = (w) => {
+	const n = norm(w);
+	return n !== "" && !FILLERS.has(n);
+};
+/**
+* Pure: check every join of a plan against the ORIGINAL word timings. `partial_word`: a
+* boundary falls strictly inside a word (the fix moves it to the nearer edge of that word, i.e.
+* the adjacent gap). `repeated_word`: the same content word (case, punctuation and fillers
+* ignored) ends the left side and starts the right side (the fix ends the left side before the
+* first one).
+*/
+function checkJoins(words, keep) {
+	const joins = [];
+	let at = 0;
+	for (let i = 0; i + 1 < keep.length; i++) {
+		const L = keep[i];
+		const R = keep[i + 1];
+		at += L.end_ms - L.start_ms;
+		const findings = [];
+		const partial = (b, boundary) => {
+			for (const w of words) if (w.start_ms < b && b < w.end_ms) {
+				const suggested = b - w.start_ms <= w.end_ms - b ? w.start_ms : w.end_ms;
+				findings.push({
+					kind: "partial_word",
+					words: [w.word],
+					boundary,
+					suggested_ms: suggested,
+					fix: `the cut at ${b} ms is inside "${w.word}" (${w.start_ms}–${w.end_ms} ms): move the ${boundary === "out" ? "end of the left part" : "start of the right part"} to ${suggested} ms (${suggested === w.start_ms ? "before" : "after"} the word)`
+				});
+			}
+		};
+		partial(L.end_ms, "out");
+		partial(R.start_ms, "in");
+		let left;
+		for (const w of words) if (w.start_ms < L.end_ms && w.end_ms > L.start_ms && isContent(w.word)) left = w;
+		const right = words.find((w) => w.end_ms > R.start_ms && w.start_ms < R.end_ms && isContent(w.word));
+		if (left && right && left !== right && norm(left.word) === norm(right.word)) findings.push({
+			kind: "repeated_word",
+			words: [left.word, right.word],
+			boundary: "out",
+			suggested_ms: left.start_ms,
+			fix: `"${norm(left.word)}" is said on both sides of the join: end the left part at ${left.start_ms} ms (before the first one), or start the right part after the second`
+		});
+		joins.push({
+			index: i,
+			out_ms: L.end_ms,
+			in_ms: R.start_ms,
+			at_ms: at,
+			...left ? { left: left.word } : {},
+			...right ? { right: right.word } : {},
+			findings
+		});
+	}
+	return joins;
+}
+/** Longest common subsequence length (word lists). */
+function lcs(a, b) {
+	const dp = new Array(b.length + 1).fill(0);
+	for (const x of a) {
+		let prev = 0;
+		for (let j = 1; j <= b.length; j++) {
+			const tmp = dp[j];
+			dp[j] = x === b[j - 1] ? prev + 1 : Math.max(dp[j], dp[j - 1]);
+			prev = tmp;
+		}
+	}
+	return dp[b.length];
+}
+/** Seconds of audio re-transcribed on each side of a join. */
+const JOIN_ASR_WINDOW_MS = 2e3;
+/** Share of the expected words whisper must hear, in order, around a join. */
+const JOIN_ASR_MIN_MATCH = .6;
+/**
+* Pure: compare what whisper heard around a join with the re-timed transcript. Expected words
+* are those whose middle lies inside the window minus 300 ms at each edge (edge words may be
+* clipped); a mismatch is fewer than 60% of them heard in order, or a content word heard twice
+* in a row where the transcript has it once.
+*/
+function compareJoinAsr(expectedWords, heardWords, window) {
+	const inner = expectedWords.filter((w) => {
+		const mid = (w.start_ms + w.end_ms) / 2;
+		return mid >= window.start_ms + 300 && mid <= window.end_ms - 300;
+	});
+	const exp = inner.map((w) => norm(w.word)).filter((w) => w && !FILLERS.has(w));
+	const heard = heardWords.map((w) => norm(w.word)).filter((w) => w && !FILLERS.has(w));
+	const repeats = (xs) => xs.filter((x, i) => i > 0 && xs[i - 1] === x).length;
+	const score = exp.length ? lcs(exp, heard) / exp.length : 1;
+	const doubled = repeats(heard) > repeats(exp);
+	if (exp.length >= 2 && score < JOIN_ASR_MIN_MATCH || doubled) return {
+		kind: "join_mismatch",
+		words: heardWords.map((w) => w.word),
+		expected: inner.map((w) => w.word).join(" "),
+		heard: heardWords.map((w) => w.word).join(" "),
+		fix: doubled ? "a word is heard twice across the join: move the join to remove one" : `whisper heard ${Math.round(score * 100)}% of the expected words: listen to the join and move the cut to the nearest pause`
+	};
+}
+/**
+* pacing_from → speech pacing: a project-relative JSON file (analyze's qa/analysis.json, a
+* FormatGrammar with `speech_pacing`) or a video/audio asset id of this project, measured now.
+*/
+async function resolvePacing(projectDir, ir, from) {
+	if (/\.json$/i.test(from)) {
+		let abs;
+		try {
+			abs = await resolveInsideProject(projectPaths(projectDir), from);
+		} catch {
+			throw new Error(`pacing_from must be a path inside the project (e.g. qa/analysis.json) or an asset id: ${from}`);
+		}
+		const g = FormatGrammar.safeParse(JSON.parse(await readFile(abs, "utf8")));
+		if (!g.success) throw new Error(`${from} is not an analyze result (FormatGrammar)`);
+		if (!g.data.speech_pacing) throw new Error(`${from} has no speech_pacing: run analyze again on a video with speech (it measures pauses since 0.4)`);
+		return g.data.speech_pacing;
+	}
+	const a = ir.assets.find((x) => x.id === from);
+	if (!a || a.kind === "image") throw new Error(`pacing_from "${from}" is neither a .json analysis file nor a video/audio asset of this project`);
+	return measureSpeechPacing(join(projectDir, a.path));
+}
+async function tightenAsset(projectDir, assetId, opts = {}, deps = {}) {
 	const { path: irPath, ir } = await loadContentIr$2(projectDir);
 	const asset = findMediaAsset(ir, assetId);
 	const words = await loadTranscriptWords(projectDir, asset);
 	const src = join(projectDir, asset.path);
-	const plan = planTighten(words, Math.round((asset.media?.duration_sec ?? (await ffprobe(src)).duration_s) * 1e3), opts);
+	const durationMs = Math.round((asset.media?.duration_sec ?? (await ffprobe(src)).duration_s) * 1e3);
+	let pacing;
+	const planOpts = { ...opts };
+	if (opts.pacing_from) {
+		const measured = await resolvePacing(projectDir, ir, opts.pacing_from);
+		const limits = pacingLimits(measured);
+		planOpts.max_pause_ms = opts.max_pause_ms ?? limits.max_pause_ms;
+		planOpts.keep_pause_ms = opts.keep_pause_ms ?? limits.keep_pause_ms;
+		pacing = {
+			from: opts.pacing_from,
+			pacing: measured,
+			max_pause_ms: planOpts.max_pause_ms,
+			keep_pause_ms: Math.min(planOpts.keep_pause_ms, planOpts.max_pause_ms)
+		};
+	}
+	const plan = planTighten(words, durationMs, planOpts);
 	const counts = {
 		silence: 0,
 		filler: 0,
 		retake: 0
 	};
 	for (const c of plan.cuts) counts[c.reason]++;
+	const joins = checkJoins(words, plan.keep);
+	const partials = joins.flatMap((j) => j.findings.filter((f) => f.kind === "partial_word").map((f) => ({
+		j,
+		f
+	})));
 	const edlRel = `qa/tighten-${asset.id}.json`;
 	await mkdir(join(projectDir, "qa"), { recursive: true });
-	await writeJsonAtomic(join(projectDir, edlRel), {
+	const writeEdl = (asr, js) => writeJsonAtomic(join(projectDir, edlRel), {
 		asset: asset.id,
 		...plan,
-		counts
+		counts,
+		...pacing ? { pacing } : {},
+		joins: js,
+		asr_check: asr
 	});
+	const dryAsr = {
+		status: "not_run",
+		reason: opts.apply ? "not run yet" : "dry run: joins are re-transcribed after apply"
+	};
+	await writeEdl(dryAsr, joins);
 	const result = {
 		asset: asset.id,
 		dry_run: !opts.apply,
 		plan,
 		counts,
 		removed_ms: plan.source_ms - plan.result_ms,
-		edl_path: edlRel
+		edl_path: edlRel,
+		joins,
+		asr_check: dryAsr,
+		...pacing ? { pacing } : {}
 	};
 	if (!opts.apply) return result;
 	if (plan.keep.length === 0) throw new Error("nothing would be left after tightening; loosen the options (e.g. silences: false)");
+	if (partials.length && opts.force !== true) throw new Error(`refusing to apply: ${partials.length} join(s) cut inside a word (see ${edlRel}):\n${partials.map(({ j, f }) => `- join ${j.index} at ${(j.at_ms / 1e3).toFixed(2)} s: ${f.fix}`).join("\n")}\nFix the transcript timings or the options, or pass force: true to apply anyway`);
 	const newId = `${asset.id}-tight`;
 	const isVideo = asset.kind === "video" && asset.media?.has_video !== false;
 	const ext = isVideo ? ".mp4" : ".m4a";
@@ -266779,15 +267622,87 @@ async function tightenAsset(projectDir, assetId, opts = {}) {
 		...t?.model ? { model: t.model } : {},
 		...t?.language ? { language: t.language } : {}
 	}).ir);
+	const asr = await asrJoinCheck(projectDir, asset, out, joins, newWords, plan.result_ms, deps);
+	await writeEdl(asr, joins);
 	return {
 		...result,
+		joins,
+		asr_check: asr,
 		new_asset: newId,
 		path: rel
+	};
+}
+/** Whisper check of every join (mutates `joins`: adds join_mismatch findings). Never throws. */
+async function asrJoinCheck(projectDir, asset, outPath, joins, newWords, resultMs, deps) {
+	if (!joins.length) return {
+		status: "ok",
+		checked: 0,
+		reason: "no joins"
+	};
+	const gl = await loadProjectGlossary(projectDir);
+	let run = deps.whisper;
+	if (!run) {
+		const language = asset.media?.transcript?.language;
+		let model;
+		try {
+			const plan = await planWhisperModel(projectDir, language && language !== "en" ? { language } : {}, deps.env ?? process.env);
+			if (!plan.model.exists) return {
+				status: "not_run",
+				reason: `no whisper model at ${plan.model.path} (transcribe downloads one with the user's consent)`
+			};
+			model = plan.model.path;
+		} catch (e) {
+			return {
+				status: "not_run",
+				reason: `no whisper model: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`
+			};
+		}
+		const prompt = glossaryPrompt(gl.glossary);
+		run = (mediaPath, range) => whisperTranscribe(mediaPath, {
+			model,
+			range,
+			...language && language !== "en" ? { language } : {},
+			...prompt ? { prompt } : {},
+			...deps.whisperBin ? { bin: deps.whisperBin } : {}
+		});
+	}
+	const todo = joins.slice(0, 40);
+	let mismatches = 0;
+	for (const j of todo) {
+		const window = {
+			start_ms: Math.max(0, j.at_ms - JOIN_ASR_WINDOW_MS),
+			end_ms: Math.min(resultMs, j.at_ms + JOIN_ASR_WINDOW_MS)
+		};
+		let heard;
+		try {
+			heard = applyGlossary(await run(outPath, window), gl.glossary).words;
+		} catch (e) {
+			const msg = e instanceof Error ? e.message.split("\n")[0] : String(e);
+			return {
+				status: "not_run",
+				reason: /not found/.test(msg) ? msg : `whisper failed: ${msg}`,
+				checked: todo.indexOf(j)
+			};
+		}
+		const f = compareJoinAsr(newWords, heard, window);
+		if (f) {
+			j.findings.push(f);
+			mismatches++;
+		}
+	}
+	const skipped = joins.length - todo.length;
+	return {
+		status: mismatches ? "mismatch" : "ok",
+		checked: todo.length,
+		...skipped > 0 ? { reason: `only the first 40 of ${joins.length} joins were re-transcribed` } : {}
 	};
 }
 function formatTighten(r) {
 	const sec = (ms) => `${(ms / 1e3).toFixed(1)}s`;
 	const lines = [`${r.dry_run ? "dry run" : "applied"}: ${r.asset} ${sec(r.plan.source_ms)} → ${sec(r.plan.result_ms)} (−${sec(r.removed_ms)}): ${r.counts.silence} pause(s) shortened, ${r.counts.filler} filler(s), ${r.counts.retake} retake(s); edit list ${r.edl_path}`, ...r.plan.cuts.filter((c) => c.reason !== "silence").map((c) => `- ${c.reason} ${sec(c.start_ms)}–${sec(c.end_ms)}: "${c.text ?? ""}"`)];
+	if (r.pacing) lines.push(`pacing from ${r.pacing.from}: median pause ${r.pacing.pacing.pause_median_ms} ms, p95 ${r.pacing.pacing.pause_p95_ms} ms → max_pause_ms ${r.pacing.max_pause_ms}, keep_pause_ms ${r.pacing.keep_pause_ms}`);
+	const issues = r.joins.flatMap((j) => j.findings.map((f) => `- join ${j.index} at ${sec(j.at_ms)} ${f.kind}: ${f.fix}${f.heard !== void 0 ? ` (expected "${f.expected}", heard "${f.heard}")` : ""}`));
+	lines.push(`joins: ${r.joins.length} checked, ${issues.length} issue(s); whisper check: ${r.asr_check.status}${r.asr_check.reason ? ` (${r.asr_check.reason})` : ""}`, ...issues);
 	if (r.new_asset) lines.push(`new asset ${r.new_asset} → ${r.path} (transcript re-timed; use it in shorts or footage scenes)`);
 	else lines.push("review the cuts above, then call tighten again with apply: true");
 	return lines.join("\n");
@@ -271062,7 +271977,7 @@ function createServer$1(options = {}) {
 	}));
 	server.registerTool("transcribe", {
 		title: "Transcribe a video or audio asset",
-		description: "Produce a timed-word transcript for a ContentIR video/audio asset of <project_dir> with local whisper.cpp (whisper-cli), or import a caption file the user supplied (captions_file: project-relative .srt/.vtt). Writes source/transcripts/<asset>.json and records it on the asset's media.transcript (with the detected language), so captions, shorts and talking-head scenes can use it. Languages: English by default (model base.en); for any other language pass language (ISO code like \"es\", \"hi\", or \"auto\" to detect), which uses the multilingual model base; a non-English project/video-spec.json language also selects it. speakers: true detects speaker turns in an English conversation (model small.en-tdrz, ~488 MB): words get labels S1/S2 alternating at each turn (it detects turn changes, not identities; assumes two people). Models are downloaded only with the USER's approval: the engine asks them in an approval dialog when the client supports it (recorded in project/consent.json, not asked again); otherwise ask the user first (name the model and its size) and pass download_model: true. Returns language, speaker_turns and warnings (e.g. spec language mismatch). Local only.",
+		description: "Produce a timed-word transcript for a ContentIR video/audio asset of <project_dir> with local whisper.cpp (whisper-cli), or import a caption file the user supplied (captions_file: project-relative .srt/.vtt). Writes source/transcripts/<asset>.json and records it on the asset's media.transcript (with the detected language), so captions, shorts and talking-head scenes can use it. Languages: English by default (model base.en); for any other language pass language (ISO code like \"es\", \"hi\", or \"auto\" to detect), which uses the multilingual model base; a non-English project/video-spec.json language also selects it. speakers: true detects speaker turns in an English conversation (model small.en-tdrz, ~488 MB): words get labels S1/S2 alternating at each turn (it detects turn changes, not identities; assumes two people). Models are downloaded only with the USER's approval: the engine asks them in an approval dialog when the client supports it (recorded in project/consent.json, not asked again); otherwise ask the user first (name the model and its size) and pass download_model: true. The glossary (series bible glossary plus brand language.glossary: {term, variants, case_sensitive}) seeds the whisper prompt and corrects misheard names in the words (timings kept; also for imported captions); corrections are returned under glossary and stored in the transcript file. Returns language, speaker_turns and warnings (e.g. spec language mismatch). Local only.",
 		inputSchema: {
 			project_dir: string().min(1),
 			asset: string().min(1).describe("ContentIR asset id (see ingest output)"),
@@ -271106,7 +272021,8 @@ function createServer$1(options = {}) {
 		});
 		const extra = [r.language ? `language ${r.language}` : "", r.speakers ? `${r.speaker_turns ?? 0} speaker turn(s)` : ""].filter(Boolean).join(", ");
 		const warn = r.warnings?.length ? `\nwarnings:\n${r.warnings.map((w) => `- ${w}`).join("\n")}` : "";
-		return jsonResult(`transcribed ${r.asset} (${r.source}${r.model ? `, ${r.model}` : ""}${extra ? `, ${extra}` : ""}): ${r.words} words → ${r.path}${warn}`, r);
+		const gloss = r.glossary?.corrections.length ? `\nglossary: ${r.glossary.corrections.length} correction(s): ${r.glossary.corrections.slice(0, 8).map((c) => `"${c.from}" → "${c.to}"`).join(", ")}${r.glossary.corrections.length > 8 ? ", …" : ""}` : "";
+		return jsonResult(`transcribed ${r.asset} (${r.source}${r.model ? `, ${r.model}` : ""}${extra ? `, ${extra}` : ""}): ${r.words} words → ${r.path}${gloss}${warn}`, r);
 	}));
 	server.registerTool("shorts", {
 		title: "Find standalone shorts in a long recording",
@@ -271236,10 +272152,12 @@ function createServer$1(options = {}) {
 	}));
 	server.registerTool("analyze", {
 		title: "Analyze a reference video's format",
-		description: "Clean-room analysis of a reference video file: shot lengths (scene detection), cuts per 10 s, first-shot length, pacing, speech share, loudness and the band where burned-in text sits. Returns structure only (FormatGrammar), never its words, frames or audio; use it to pick pacing and caption placement for your own video. Local ffmpeg only.",
+		description: "Clean-room analysis of a reference video file: shot lengths (scene detection), cuts per 10 s, first-shot length, pacing, speech share, loudness, the band where burned-in text sits, and motion timing (entrance durations, easing class, stagger, holds). Returns structure only (FormatGrammar), never its words, frames or audio; use it to pick pacing, caption placement and motion for your own video. write_style turns the motion timing into a project style pack (<project>/styles/<id>.yaml; set the spec's style to that id). Local ffmpeg only.",
 		inputSchema: {
 			path: string().min(1).describe("Video file to analyze"),
-			project_dir: string().min(1).optional().describe("Write qa/analysis.{json,md} into this project")
+			project_dir: string().min(1).optional().describe("Write qa/analysis.{json,md} into this project"),
+			write_style: string().regex(/^[a-z0-9][a-z0-9-]*$/).optional().describe("Also write the measured motion timing as <project_dir>/styles/<id>.yaml (needs project_dir). Refuses an existing file or a bundled style id unless overwrite"),
+			overwrite: boolean().optional().describe("Replace an existing project style, or shadow a bundled one (only when the user agreed)")
 		},
 		annotations: {
 			readOnlyHint: false,
@@ -271248,8 +272166,13 @@ function createServer$1(options = {}) {
 			openWorldHint: false
 		}
 	}, safe(async (args) => {
-		const g = await analyzeVideo(resolveInputPath(args.path, cwd()), args.project_dir ? { projectDir: resolveInputPath(args.project_dir, cwd()) } : {});
-		return jsonResult(formatGrammar(g), g);
+		const g = await analyzeVideo(resolveInputPath(args.path, cwd()), {
+			...args.project_dir ? { projectDir: resolveInputPath(args.project_dir, cwd()) } : {},
+			...args.write_style !== void 0 ? { writeStyle: args.write_style } : {},
+			...args.overwrite ? { overwrite: true } : {}
+		});
+		const { report_md, ...data } = g;
+		return jsonResult(report_md ?? formatGrammar(g), data);
 	}));
 	server.registerTool("demo", {
 		title: "Record a demo of the user's running app",
@@ -271301,7 +272224,7 @@ function createServer$1(options = {}) {
 	}));
 	server.registerTool("tighten", {
 		title: "Tighten talking-head footage",
-		description: "Clean up a transcribed video/audio asset of <project_dir> from its word timings: shorten pauses longer than max_pause_ms (default 700) to keep_pause_ms (default 300), cut filler words (um, uh, erm, er, ah, hmm, mm) and drop false starts / retakes (a sentence the speaker restarts with the same opening words, or 'let me start again'). Default is a dry run returning the edit list (each cut with time, reason and words; also qa/tighten-<asset>.json) for review. With apply: true it writes a NEW asset <asset>-tight (the original is never changed) with 15 ms audio fades at every join, the transcript re-timed and fresh evidence refs, ready for shorts or footage scenes. Run transcribe first.",
+		description: "Clean up a transcribed video/audio asset of <project_dir> from its word timings: shorten pauses longer than max_pause_ms (default 700) to keep_pause_ms (default 300), cut filler words (um, uh, erm, er, ah, hmm, mm) and drop false starts / retakes (a sentence the speaker restarts with the same opening words, or 'let me start again'). Default is a dry run returning the edit list (each cut with time, reason and words; also qa/tighten-<asset>.json) for review. With apply: true it writes a NEW asset <asset>-tight (the original is never changed) with 15 ms audio fades at every join, the transcript re-timed and fresh evidence refs, ready for shorts or footage scenes. Every join is checked against the original word timings (joins[] in the result and the plan file): partial_word (a cut inside a word) and repeated_word (the same word on both sides), each with a fix that moves the cut to the nearest word gap; apply refuses while a partial_word remains unless force: true. After apply, with whisper installed, ±2 s around each join is re-transcribed and compared (join_mismatch; asr_check ok/mismatch, or not_run with the reason). pacing_from learns the pause limits from the user's own pacing: max_pause_ms = p95 pause clamped to 250–1500, keep_pause_ms = median clamped to 120–600 (explicit values win). Run transcribe first.",
 		inputSchema: {
 			project_dir: string().min(1),
 			asset: string().min(1).describe("Transcribed video or audio asset id"),
@@ -271310,7 +272233,9 @@ function createServer$1(options = {}) {
 			retakes: boolean().optional().describe("Drop false starts and explicit retakes (default true)"),
 			max_pause_ms: int().min(200).max(5e3).optional(),
 			keep_pause_ms: int().min(0).max(2e3).optional(),
-			apply: boolean().optional().describe("Write the tightened asset (default: dry run)")
+			apply: boolean().optional().describe("Write the tightened asset (default: dry run)"),
+			pacing_from: string().min(1).optional().describe("Project-relative analyze result (e.g. qa/analysis.json, with speech_pacing) or a video/audio asset id of the user's own edited speech: pause limits come from its median/p95 pause"),
+			force: boolean().optional().describe("Apply even though a join cuts inside a word (partial_word)")
 		},
 		annotations: {
 			readOnlyHint: false,
@@ -271320,7 +272245,7 @@ function createServer$1(options = {}) {
 		}
 	}, safe(async (args) => {
 		const { project_dir, asset, ...opts } = args;
-		const r = await tightenAsset(resolveInputPath(project_dir, cwd()), asset, opts);
+		const r = await tightenAsset(resolveInputPath(project_dir, cwd()), asset, opts, { env });
 		return jsonResult(formatTighten(r), r);
 	}));
 	server.registerTool("prompt_pack", {

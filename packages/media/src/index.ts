@@ -9,3 +9,4 @@ export * from "./beats.js";
 export * from "./letterbox.js";
 export * from "./subject-detect.js";
 export * from "./score.js";
+export * from "./glossary.js";

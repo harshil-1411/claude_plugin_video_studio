@@ -105,6 +105,14 @@ only after a transcript.
      changes, not who is speaking, and assumes two people. Evidence text is
      prefixed at each turn (`S2: …`) and captions break there. English only;
      it finds no turns between separate monologues.
+   - **Names and terms.** If the brand (`language.glossary`) or the series
+     bible (`glossary`) lists terms (`{term, variants, case_sensitive}`),
+     transcribe seeds whisper's prompt with them and replaces each misheard
+     variant with the term (word timings kept; imported captions too).
+     When the transcript misspells a product or person name, suggest adding
+     it to the brand glossary with the misheard form as a variant and
+     re-running `transcribe`; captions in every render use the glossary too.
+     Pronunciation for TTS stays in `language.terminology`.
    - If the whisper model is missing and the client can show an approval
      dialog, the engine asks the user itself (model, size, source,
      destination) and records the answer in `project/consent.json`; a
@@ -118,7 +126,8 @@ only after a transcript.
      `download_model: true`. Never pass `download_model: true`
      without that yes. If they decline, offer the caption-file route.
 3. After transcribing, report the word and sentence counts, the detected
-   language (and speaker turns, if requested) and the first evidence refs
+   language (and speaker turns, if requested), any `glossary` corrections
+   (`"msp docs" → "MSB Docs"`) and the first evidence refs
    (for example `video:talk.mp4#t=12.3-18.9`). Specs cite these refs in
    `claim_refs`.
 4. Next steps for footage: `/video-studio:shorts` (long recording → short

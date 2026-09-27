@@ -78,8 +78,11 @@ describe("analyzeVideo", () => {
     expect(g.hook_shot_sec).toBeCloseTo(g.shots[0]!.end_sec, 3);
     expect(g.cuts_per_10s).toBeCloseTo(((g.shots.length - 1) / g.duration_sec) * 10, 2);
     expect(g.speech_ratio).toBeGreaterThan(0.8);
+    // A continuous tone has no pauses inside speech.
+    expect(g.speech_pacing).toEqual({ silence_share: 0, pauses_analyzed: 0, pause_median_ms: null, pause_p95_ms: null });
     expect(g.loudness_lufs).toBeTypeOf("number");
     const json = JSON.parse(await readFile(join(project, "qa", "analysis.json"), "utf8"));
+    expect(json.speech_pacing).toEqual(g.speech_pacing);
     expect(json.report_md).toBeUndefined();
     expect(json.shots).toEqual(g.shots);
     expect(await readFile(join(project, "qa", "analysis.md"), "utf8")).toContain("# Format grammar");

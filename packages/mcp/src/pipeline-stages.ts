@@ -29,6 +29,7 @@ import {
   type AudioSlot,
   type CaptionWord,
   type SpeechInterval,
+  applyGlossary,
   assemble,
   buildWordTimeline,
   ffmpegFeatures,
@@ -78,6 +79,7 @@ import { type PolicySummary, recordSpend, resolveVoicePolicy, summarizePolicy } 
 import { COVER_VERSION, renderCover } from "./cover.js";
 import { type ResolvedMusic, resolveMusic } from "./music.js";
 import { lockFonts } from "./lock.js";
+import { projectGlossary } from "./glossary.js";
 import { type LoadedSeries, type SeriesUsage, effectiveStyleId, loadSeries, seriesLook, seriesRecord, seriesUsage } from "./series.js";
 import { alignVoiceTracks } from "./voice-align.js";
 import {
@@ -178,7 +180,7 @@ export async function stageInputs(run: RenderRun): Promise<RenderInputs> {
   const series = seriesLoaded ? { loaded: seriesLoaded, usage: await seriesUsage(seriesLoaded, spec.scenes) } : undefined;
   // Style pack (styles/<id>.yaml): defaults < series < style < brand. Unknown ids fail with the available ones.
   const styleId = effectiveStyleId(spec.style, seriesLoaded?.series);
-  const look = seriesLook(seriesLoaded?.series, spec.style, styleId ? await getStyle(findStylesDir(env), styleId) : undefined);
+  const look = seriesLook(seriesLoaded?.series, spec.style, styleId ? await getStyle(findStylesDir(env), styleId, root) : undefined);
   const style: Style | undefined = look.style;
   // The spec language picks script fonts (Noto JP/Devanagari/Arabic) ahead of the Latin chain.
   const tokens: VisualTokens = resolveTokens(brand, look.defaults, style, { language: spec.language });
@@ -712,7 +714,9 @@ export async function stageCaptions(
     return { scene_start_ms: frameMs(bounds[i]!), track: { ...track, duration_ms: Math.min(track.duration_ms || Math.round(dur), Math.round(dur)) } };
   });
   const totalMs = Math.round(frameMs(bounds[bounds.length - 1]!));
-  const words = buildWordTimeline(placements);
+  // Glossary (series + brand): correct names in every caption source (TTS alignment and native
+  // footage transcripts); timings are kept, and the TTS input is never touched.
+  const words = applyGlossary(buildWordTimeline(placements), projectGlossary(input.inputs.brand, input.inputs.series?.loaded)).words;
   const captionsDir = join(renderDir(root, quality), "captions");
   await rm(captionsDir, { recursive: true, force: true });
   // Caption engine: phrases placed in the caption zone (or centred on captions.position.y), brand caption styling.

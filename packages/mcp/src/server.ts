@@ -886,7 +886,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Transcribe a video or audio asset",
       description:
-        "Produce a timed-word transcript for a ContentIR video/audio asset of <project_dir> with local whisper.cpp (whisper-cli), or import a caption file the user supplied (captions_file: project-relative .srt/.vtt). Writes source/transcripts/<asset>.json and records it on the asset's media.transcript (with the detected language), so captions, shorts and talking-head scenes can use it. Languages: English by default (model base.en); for any other language pass language (ISO code like \"es\", \"hi\", or \"auto\" to detect), which uses the multilingual model base; a non-English project/video-spec.json language also selects it. speakers: true detects speaker turns in an English conversation (model small.en-tdrz, ~488 MB): words get labels S1/S2 alternating at each turn (it detects turn changes, not identities; assumes two people). Models are downloaded only with the USER's approval: the engine asks them in an approval dialog when the client supports it (recorded in project/consent.json, not asked again); otherwise ask the user first (name the model and its size) and pass download_model: true. Returns language, speaker_turns and warnings (e.g. spec language mismatch). Local only.",
+        "Produce a timed-word transcript for a ContentIR video/audio asset of <project_dir> with local whisper.cpp (whisper-cli), or import a caption file the user supplied (captions_file: project-relative .srt/.vtt). Writes source/transcripts/<asset>.json and records it on the asset's media.transcript (with the detected language), so captions, shorts and talking-head scenes can use it. Languages: English by default (model base.en); for any other language pass language (ISO code like \"es\", \"hi\", or \"auto\" to detect), which uses the multilingual model base; a non-English project/video-spec.json language also selects it. speakers: true detects speaker turns in an English conversation (model small.en-tdrz, ~488 MB): words get labels S1/S2 alternating at each turn (it detects turn changes, not identities; assumes two people). Models are downloaded only with the USER's approval: the engine asks them in an approval dialog when the client supports it (recorded in project/consent.json, not asked again); otherwise ask the user first (name the model and its size) and pass download_model: true. The glossary (series bible glossary plus brand language.glossary: {term, variants, case_sensitive}) seeds the whisper prompt and corrects misheard names in the words (timings kept; also for imported captions); corrections are returned under glossary and stored in the transcript file. Returns language, speaker_turns and warnings (e.g. spec language mismatch). Local only.",
       inputSchema: {
         project_dir: z.string().min(1),
         asset: z.string().min(1).describe("ContentIR asset id (see ingest output)"),
@@ -920,7 +920,8 @@ export function createServer(options: ServerOptions = {}): McpServer {
       });
       const extra = [r.language ? `language ${r.language}` : "", r.speakers ? `${r.speaker_turns ?? 0} speaker turn(s)` : ""].filter(Boolean).join(", ");
       const warn = r.warnings?.length ? `\nwarnings:\n${r.warnings.map((w) => `- ${w}`).join("\n")}` : "";
-      return jsonResult(`transcribed ${r.asset} (${r.source}${r.model ? `, ${r.model}` : ""}${extra ? `, ${extra}` : ""}): ${r.words} words → ${r.path}${warn}`, r as unknown as Record<string, unknown>);
+      const gloss = r.glossary?.corrections.length ? `\nglossary: ${r.glossary.corrections.length} correction(s): ${r.glossary.corrections.slice(0, 8).map((c) => `"${c.from}" → "${c.to}"`).join(", ")}${r.glossary.corrections.length > 8 ? ", …" : ""}` : "";
+      return jsonResult(`transcribed ${r.asset} (${r.source}${r.model ? `, ${r.model}` : ""}${extra ? `, ${extra}` : ""}): ${r.words} words → ${r.path}${gloss}${warn}`, r as unknown as Record<string, unknown>);
     }),
   );
 
@@ -1038,16 +1039,27 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Analyze a reference video's format",
       description:
-        "Clean-room analysis of a reference video file: shot lengths (scene detection), cuts per 10 s, first-shot length, pacing, speech share, loudness and the band where burned-in text sits. Returns structure only (FormatGrammar), never its words, frames or audio; use it to pick pacing and caption placement for your own video. Local ffmpeg only.",
+        "Clean-room analysis of a reference video file: shot lengths (scene detection), cuts per 10 s, first-shot length, pacing, speech share, loudness, the band where burned-in text sits, and motion timing (entrance durations, easing class, stagger, holds). Returns structure only (FormatGrammar), never its words, frames or audio; use it to pick pacing, caption placement and motion for your own video. write_style turns the motion timing into a project style pack (<project>/styles/<id>.yaml; set the spec's style to that id). Local ffmpeg only.",
       inputSchema: {
         path: z.string().min(1).describe("Video file to analyze"),
         project_dir: z.string().min(1).optional().describe("Write qa/analysis.{json,md} into this project"),
+        write_style: z
+          .string()
+          .regex(/^[a-z0-9][a-z0-9-]*$/)
+          .optional()
+          .describe("Also write the measured motion timing as <project_dir>/styles/<id>.yaml (needs project_dir). Refuses an existing file or a bundled style id unless overwrite"),
+        overwrite: z.boolean().optional().describe("Replace an existing project style, or shadow a bundled one (only when the user agreed)"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    safe(async (args: { path: string; project_dir?: string }) => {
-      const g = await analyzeVideo(resolveInputPath(args.path, cwd()), args.project_dir ? { projectDir: resolveInputPath(args.project_dir, cwd()) } : {});
-      return jsonResult(formatGrammar(g), g as unknown as Record<string, unknown>);
+    safe(async (args: { path: string; project_dir?: string; write_style?: string; overwrite?: boolean }) => {
+      const g = await analyzeVideo(resolveInputPath(args.path, cwd()), {
+        ...(args.project_dir ? { projectDir: resolveInputPath(args.project_dir, cwd()) } : {}),
+        ...(args.write_style !== undefined ? { writeStyle: args.write_style } : {}),
+        ...(args.overwrite ? { overwrite: true } : {}),
+      });
+      const { report_md, ...data } = g;
+      return jsonResult(report_md ?? formatGrammar(g), data as unknown as Record<string, unknown>);
     }),
   );
 
@@ -1102,7 +1114,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Tighten talking-head footage",
       description:
-        "Clean up a transcribed video/audio asset of <project_dir> from its word timings: shorten pauses longer than max_pause_ms (default 700) to keep_pause_ms (default 300), cut filler words (um, uh, erm, er, ah, hmm, mm) and drop false starts / retakes (a sentence the speaker restarts with the same opening words, or 'let me start again'). Default is a dry run returning the edit list (each cut with time, reason and words; also qa/tighten-<asset>.json) for review. With apply: true it writes a NEW asset <asset>-tight (the original is never changed) with 15 ms audio fades at every join, the transcript re-timed and fresh evidence refs, ready for shorts or footage scenes. Run transcribe first.",
+        "Clean up a transcribed video/audio asset of <project_dir> from its word timings: shorten pauses longer than max_pause_ms (default 700) to keep_pause_ms (default 300), cut filler words (um, uh, erm, er, ah, hmm, mm) and drop false starts / retakes (a sentence the speaker restarts with the same opening words, or 'let me start again'). Default is a dry run returning the edit list (each cut with time, reason and words; also qa/tighten-<asset>.json) for review. With apply: true it writes a NEW asset <asset>-tight (the original is never changed) with 15 ms audio fades at every join, the transcript re-timed and fresh evidence refs, ready for shorts or footage scenes. Every join is checked against the original word timings (joins[] in the result and the plan file): partial_word (a cut inside a word) and repeated_word (the same word on both sides), each with a fix that moves the cut to the nearest word gap; apply refuses while a partial_word remains unless force: true. After apply, with whisper installed, ±2 s around each join is re-transcribed and compared (join_mismatch; asr_check ok/mismatch, or not_run with the reason). pacing_from learns the pause limits from the user's own pacing: max_pause_ms = p95 pause clamped to 250–1500, keep_pause_ms = median clamped to 120–600 (explicit values win). Run transcribe first.",
       inputSchema: {
         project_dir: z.string().min(1),
         asset: z.string().min(1).describe("Transcribed video or audio asset id"),
@@ -1112,13 +1124,15 @@ export function createServer(options: ServerOptions = {}): McpServer {
         max_pause_ms: z.int().min(200).max(5000).optional(),
         keep_pause_ms: z.int().min(0).max(2000).optional(),
         apply: z.boolean().optional().describe("Write the tightened asset (default: dry run)"),
+        pacing_from: z.string().min(1).optional().describe("Project-relative analyze result (e.g. qa/analysis.json, with speech_pacing) or a video/audio asset id of the user's own edited speech: pause limits come from its median/p95 pause"),
+        force: z.boolean().optional().describe("Apply even though a join cuts inside a word (partial_word)"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     safe(
-      async (args: { project_dir: string; asset: string; silences?: boolean; fillers?: boolean; retakes?: boolean; max_pause_ms?: number; keep_pause_ms?: number; apply?: boolean }) => {
+      async (args: { project_dir: string; asset: string; silences?: boolean; fillers?: boolean; retakes?: boolean; max_pause_ms?: number; keep_pause_ms?: number; apply?: boolean; pacing_from?: string; force?: boolean }) => {
         const { project_dir, asset, ...opts } = args;
-        const r = await tightenAsset(resolveInputPath(project_dir, cwd()), asset, opts);
+        const r = await tightenAsset(resolveInputPath(project_dir, cwd()), asset, opts, { env });
         return jsonResult(formatTighten(r), r as unknown as Record<string, unknown>);
       },
     ),

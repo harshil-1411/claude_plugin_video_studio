@@ -644,7 +644,7 @@ async function lockFromState(root: string, state: RenderState, projectId: string
   if (!fonts) {
     const brandFile = await loadBrand(root).catch(() => undefined);
     const styleId = state.style?.split("@")[0];
-    const style = styleId ? await getStyle(findStylesDir(process.env), styleId).catch(() => undefined) : undefined;
+    const style = styleId ? await getStyle(findStylesDir(process.env), styleId, root).catch(() => undefined) : undefined;
     const language = await loadSpecLoose(root).then((r) => r.spec.language).catch(() => undefined);
     const tokens = resolveTokens(brandFile?.brand, {}, style, language ? { language } : {});
     const captionFamily = brandFile?.brand.captions?.family ?? parseFontChain(tokens.font_body)[0];

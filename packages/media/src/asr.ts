@@ -33,6 +33,45 @@ export interface AsrOptions {
   gpu?: boolean;
   /** Kill whisper-cli after this long. Default 60 minutes. */
   timeoutMs?: number;
+  /**
+   * Initial prompt (`--prompt`): spellings whisper should prefer, e.g. glossary terms
+   * ({@link glossaryPrompt}). A hint only; the glossary pass still corrects the words.
+   */
+  prompt?: string;
+  /**
+   * Only transcribe this part of the file (the audio is trimmed before whisper runs). Word
+   * times are still on the file's timeline (offset by `start_ms`).
+   */
+  range?: { start_ms: number; end_ms: number };
+}
+
+/** ffmpeg arguments that decode `mediaPath` (or only `range`) to 16 kHz mono PCM in `wav`. */
+export function whisperExtractArgs(mediaPath: string, wav: string, range?: AsrOptions["range"]): string[] {
+  const seek: string[] = [];
+  if (range) {
+    const start = Math.max(0, range.start_ms);
+    const end = Math.max(start, range.end_ms);
+    seek.push("-ss", (start / 1000).toFixed(3), "-t", ((end - start) / 1000).toFixed(3));
+  }
+  return ["-y", ...seek, "-i", mediaPath, "-vn", "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav];
+}
+
+/** whisper-cli arguments (`-ml 1 -sow -oj`: one JSON segment per word). */
+export function whisperCliArgs(opts: AsrOptions, wav: string, outBase: string, cpu: boolean): string[] {
+  const prompt = opts.prompt?.trim();
+  return [
+    "-m", opts.model,
+    "-f", wav,
+    "-l", whisperLanguage(opts.model, opts.language),
+    "-ml", "1",
+    "-sow",
+    ...(opts.speakers ? ["-tdrz"] : []),
+    ...(prompt ? ["--prompt", prompt] : []),
+    "-oj",
+    "-of", outBase,
+    "-np",
+    ...(cpu ? ["-ng"] : []),
+  ];
 }
 
 /** Language passed to whisper-cli: explicit, else `en` for English-only (`*.en`) models, else auto-detect. */
@@ -71,24 +110,13 @@ export async function whisperTranscribeDetailed(mediaPath: string, opts: AsrOpti
   const work = await mkdtemp(join(tmpdir(), "vs-asr-"));
   try {
     const wav = join(work, "audio.wav");
-    await runFfmpeg(["-y", "-i", mediaPath, "-vn", "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav], {
+    await runFfmpeg(whisperExtractArgs(mediaPath, wav, opts.range), {
       ...(opts.signal ? { signal: opts.signal } : {}),
       timeoutMs: 30 * 60 * 1000,
     });
     const outBase = join(work, "out");
     const bin = opts.bin ?? "whisper-cli";
-    const args = (cpu: boolean) => [
-      "-m", opts.model,
-      "-f", wav,
-      "-l", whisperLanguage(opts.model, opts.language),
-      "-ml", "1",
-      "-sow",
-      ...(opts.speakers ? ["-tdrz"] : []),
-      "-oj",
-      "-of", outBase,
-      "-np",
-      ...(cpu ? ["-ng"] : []),
-    ];
+    const args = (cpu: boolean) => whisperCliArgs(opts, wav, outBase, cpu);
     const run = (cpu: boolean) =>
       runProcess(bin, args(cpu), { ...(opts.signal ? { signal: opts.signal } : {}), timeoutMs: opts.timeoutMs ?? 60 * 60 * 1000 });
     try {
@@ -103,10 +131,16 @@ export async function whisperTranscribeDetailed(mediaPath: string, opts: AsrOpti
         throw whisperError(err2, bin);
       }
     }
-    return parseWhisperOutput(await readFile(`${outBase}.json`, "utf8"), { speakers: opts.speakers === true });
+    const result = parseWhisperOutput(await readFile(`${outBase}.json`, "utf8"), { speakers: opts.speakers === true });
+    return opts.range ? { ...result, words: offsetWords(result.words, Math.max(0, opts.range.start_ms)) } : result;
   } finally {
     await rm(work, { recursive: true, force: true });
   }
+}
+
+/** Shift words by `offsetMs` (a range transcript back onto the file's timeline). */
+export function offsetWords(words: readonly TimedWord[], offsetMs: number): TimedWord[] {
+  return words.map((w) => ({ ...w, start_ms: w.start_ms + offsetMs, end_ms: w.end_ms + offsetMs }));
 }
 
 function whisperError(err: unknown, bin: string): Error {

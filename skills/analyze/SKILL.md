@@ -26,6 +26,10 @@ identity. Use it only for pacing and layout.
    - speech share: voice-band sound, so music can inflate it
    - loudness in LUFS
    - caption band, as a percentage of the frame height, or "none found"
+   - motion timing (`motion_timing`): how long elements take to settle after
+     a change starts (median and p75 entrance, ms), the easing class
+     (`ease_out`, `ease_in_out`, `spring`, `linear`, `snap`) and its share,
+     the stagger between entrances in a burst, and the still holds
 4. Turn it into guidance for the user's own video, for example:
    - Cut every ~N s to match the pacing: set scene `duration_sec` near
      `avg_shot_sec`.
@@ -33,6 +37,14 @@ identity. Use it only for pacing and layout.
    - Keep captions in a similar band, but let the platform lint decide the
      exact position (`/video-studio:lint`).
    - For fast pacing, use short phrases and more scenes.
+   - To move like the reference, offer `analyze {path, project_dir,
+     write_style: "<id>"}`: it writes `<project>/styles/<id>.yaml`, a style
+     pack with the measured easing, entrance, exit and stagger times and a
+     cut or crossfade transition (from the cut rate). Set the spec's `style`
+     to that id. Project styles resolve before the bundled ones; editing the
+     file re-renders. It refuses an existing file or a bundled style id
+     (`minimal`, `editorial`, ...) unless the user agrees to `overwrite: true`.
+     The pack has no palette or fonts: those stay the user's.
 5. Offer the next step: the creative brief or plan, written from the
    user's own sources.
 
@@ -41,3 +53,10 @@ Limits:
   graphics, so a count of 1–2 shots on an animated reel is normal.
 - The caption band is the densest text-like band in the lower two-thirds of
   the frame. It can be a headline instead of captions.
+- Motion timing reads frame-to-frame difference energy of the whole frame.
+  Crossfades read as `linear` changes and hard cuts as `snap`; camera moves
+  and live footage over 2 s are left out (the notes say how many). Two
+  elements moving at once count as one change. Entrance durations, easing
+  and holds are null with fewer than 2 changes; stagger is null without two
+  changes under 0.8 s apart. The slow ends of an ease-in-out read up to a
+  frame short.
