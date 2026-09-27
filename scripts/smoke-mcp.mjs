@@ -41,6 +41,7 @@ const expected = [
   "source_summary",
   "spec_scaffold",
   "spec_validate",
+  "stills",
   "storyboard_render",
   "template_get",
   "template_list",

@@ -7,10 +7,12 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ProducerConfig, ProducerLogger, RenderConfigInput, RenderJob } from "@hyperframes/producer";
 import { ffprobe, resolveFfmpeg, type ProbeResult } from "@video-studio/media";
+import { canonicalJson, sha256Hex } from "@video-studio/core";
+import { type CaptureSession, type CaptureSessionOptions, type DeterminismResult, DETERMINISM_CHECK_VERSION, determinismFindings, formatCheckFinding, openCaptureSession, runDeterminismCheck } from "./capture.js";
 import { buildComposition, type CompositionAsset, HYPERFRAMES_KINDS } from "./hyperframes-compose.js";
 import { MOTION_INTERNAL_DIR } from "./motion-compose.js";
 import { formatMotionFinding, loadMotionPage } from "./motion-lint.js";
-import type { Availability, SceneRenderer, SceneRenderRequest, SceneRenderResult } from "./types.js";
+import type { Availability, SceneRenderer, SceneRenderRequest, SceneRenderResult, TextBox } from "./types.js";
 
 /** Exact pinned producer version (package.json pins "@hyperframes/producer": "0.8.78"). */
 export const HYPERFRAMES_VERSION = "0.8.78";
@@ -47,6 +49,15 @@ export interface HyperframesRendererOptions {
   probeOutput?: (path: string, signal?: AbortSignal) => Promise<ProbeResult>;
   /** Check that the producer package is installed (default: import.meta.resolve). */
   producerInstalled?: () => boolean;
+  /** Resolved producer entry file: captures (determinism check, stills) use its puppeteer-core. */
+  producerEntry?: string;
+  /**
+   * Seek-determinism (and loop-seam) check of `motion` scenes before the producer renders them
+   * (default on; see capture.ts). The result is cached next to the clip, keyed by the composed page.
+   */
+  determinismCheck?: boolean;
+  /** Capture session for the determinism check (tests). */
+  openCapture?: (o: CaptureSessionOptions & { width: number; height: number }) => Promise<CaptureSession>;
 }
 
 // ------------------------------------------------------------------------------ chrome lookup
@@ -238,7 +249,7 @@ export function describeHyperframesError(err: unknown, sceneId: string, job?: Re
  */
 let guardDepth = 0;
 let saved: Pick<Console, "log" | "info" | "debug"> | undefined;
-function guardStdout(): () => void {
+export function guardStdout(): () => void {
   if (guardDepth++ === 0) {
     saved = { log: console.log, info: console.info, debug: console.debug };
     const toErr = (...a: unknown[]) => console.error(...a);
@@ -309,6 +320,141 @@ export function clearHyperframesProbeCache(): void {
   probeCache.clear();
 }
 
+// ------------------------------------------------------------------------------ composition
+
+/** A scene's composition, ready to write: the composer's output plus a motion page's own files. */
+export interface ScenePage {
+  composition_id: string;
+  html: string;
+  assets: CompositionAsset[];
+  warnings: string[];
+  text_boxes: TextBox[];
+}
+
+/**
+ * Compose `req.scene` exactly as the renderer draws it (any HyperFrames kind). A motion page is
+ * untrusted code: it is composed only when the static lint finds no error (the composition's CSP
+ * is the runtime backstop), and its local files are copied next to the composition with the same
+ * relative paths. Throws for a refused page.
+ */
+export async function composeScene(req: SceneRenderRequest): Promise<ScenePage> {
+  const { scene } = req;
+  const kind = scene.deterministic?.kind;
+  let motionHtml: string | undefined;
+  const motionAssets: CompositionAsset[] = [];
+  const motionWarnings: string[] = [];
+  if (kind === "motion") {
+    const html = (scene.deterministic!.props as { html?: unknown }).html;
+    const page = await loadMotionPage(req.project_dir, typeof html === "string" ? html : "");
+    const errors = page.findings.filter((f) => f.severity === "error");
+    if (errors.length || page.html === undefined) {
+      throw new Error(`HyperFrames renderer refuses motion page ${String(html)} of scene ${scene.id} (${errors.length} lint error(s)): ${errors.map(formatMotionFinding).join("; ")}`);
+    }
+    motionHtml = page.html;
+    for (const f of page.findings) motionWarnings.push(`motion: ${formatMotionFinding(f)}`);
+    for (const f of page.files) {
+      if (f.ref === "index.html" || f.ref.startsWith(`${MOTION_INTERNAL_DIR}/`)) motionWarnings.push(`motion: ${f.ref} clashes with a composition file; not copied`);
+      else motionAssets.push({ src: f.abs, dest: f.ref });
+    }
+    // Text boxes: none. The page lays out its own text, which the composer cannot measure.
+  }
+  const assetIndex = await loadAssetIndex(req.project_dir);
+  const comp = buildComposition(req, { resolveAsset: (id) => assetIndex.get(id), ...(req.cues?.length ? { cues: req.cues } : {}), ...(motionHtml !== undefined ? { motionHtml } : {}) });
+  return {
+    composition_id: comp.composition_id,
+    html: comp.html,
+    assets: [...comp.assets, ...motionAssets],
+    warnings: [...comp.warnings, ...motionWarnings],
+    text_boxes: comp.text_boxes,
+  };
+}
+
+/** Write `page` into `dir` (index.html plus its assets). Returns warnings for assets that could not be copied. */
+export async function writeComposition(dir: string, page: Pick<ScenePage, "html" | "assets">): Promise<string[]> {
+  const warnings: string[] = [];
+  await writeFile(join(dir, "index.html"), page.html, "utf8");
+  for (const a of page.assets) {
+    const dest = resolve(dir, a.dest);
+    await mkdir(dirname(dest), { recursive: true });
+    try {
+      await copyFile(a.src, dest);
+    } catch (e) {
+      warnings.push(`asset ${a.src} could not be copied: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return warnings;
+}
+
+// ------------------------------------------------------------------------------ determinism
+
+/** A motion scene failed its determinism check (finding `nondeterministic_scene`). */
+export class DeterminismError extends Error {
+  constructor(
+    readonly sceneId: string,
+    detail: string,
+  ) {
+    super(`HyperFrames refused to render scene ${sceneId}: ${detail}`);
+    this.name = "DeterminismError";
+  }
+}
+
+/** What the determinism check of a written composition depends on: the page, its files, size, fps and the check version. */
+export async function determinismKey(dir: string, page: Pick<ScenePage, "html" | "assets">, target: { width: number; height: number; fps: number }): Promise<string> {
+  const files: Array<{ dest: string; sha256: string | null }> = [];
+  for (const a of page.assets) {
+    let sha: string | null = null;
+    try {
+      sha = sha256Hex(await readFile(resolve(dir, a.dest)));
+    } catch {
+      /* not copied: keyed as missing */
+    }
+    files.push({ dest: a.dest, sha256: sha });
+  }
+  files.sort((x, y) => (x.dest < y.dest ? -1 : x.dest > y.dest ? 1 : 0));
+  return sha256Hex(canonicalJson({ v: DETERMINISM_CHECK_VERSION, producer: HYPERFRAMES_VERSION, html: sha256Hex(page.html), files, w: target.width, h: target.height, fps: target.fps }));
+}
+
+/** The cached check result next to the clip: `<dir of out_path>/<scene>.determinism.json`. */
+export function determinismCachePath(req: Pick<SceneRenderRequest, "out_path" | "scene">): string {
+  return join(dirname(req.out_path), `${req.scene.id}.determinism.json`);
+}
+
+interface CachedCheck {
+  key: string;
+  result: DeterminismResult;
+}
+
+/**
+ * Run (or reuse) the determinism and loop-seam check of the motion composition written in `dir`.
+ * The result is cached by {@link determinismKey}, so reruns of an unchanged page skip Chrome.
+ */
+async function motionDeterminism(req: SceneRenderRequest, dir: string, page: ScenePage, chromePath: string, opts: HyperframesRendererOptions) {
+  const { scene, target } = req;
+  const key = await determinismKey(dir, page, target);
+  const cachePath = determinismCachePath(req);
+  let result: DeterminismResult | undefined;
+  try {
+    const cached = JSON.parse(await readFile(cachePath, "utf8")) as CachedCheck;
+    if (cached.key === key && cached.result?.version === DETERMINISM_CHECK_VERSION) result = cached.result;
+  } catch {
+    /* no cache */
+  }
+  if (!result) {
+    const open = opts.openCapture ?? openCaptureSession;
+    const session = await open({ chromePath, width: target.width, height: target.height, ...(opts.producerEntry ? { producerEntry: opts.producerEntry } : {}) });
+    try {
+      const pc = await session.open(dir, page.composition_id, target.width, target.height);
+      const loop = (scene.deterministic!.props as { loop?: unknown }).loop === true;
+      result = await runDeterminismCheck((t) => pc.capture(t), { duration: scene.duration_sec, fps: target.fps, loop });
+    } finally {
+      await session.close();
+    }
+    await mkdir(dirname(cachePath), { recursive: true });
+    await writeFile(cachePath, `${JSON.stringify({ key, result } satisfies CachedCheck)}\n`);
+  }
+  return determinismFindings(scene.id, result);
+}
+
 // ------------------------------------------------------------------------------ renderer
 
 export function createHyperframesRenderer(opts: HyperframesRendererOptions = {}): SceneRenderer {
@@ -364,47 +510,23 @@ export function createHyperframesRenderer(opts: HyperframesRendererOptions = {})
       const avail = await check(process.env);
       if (!avail.ok || !avail.chromePath) throw new Error(`HyperFrames renderer unavailable: ${avail.reason}`);
 
-      // A motion page is untrusted code: it renders only when the static lint finds no error
-      // (the composition's CSP is the runtime backstop), and its local files are copied next
-      // to the composition with the same relative paths.
-      let motionHtml: string | undefined;
-      const motionAssets: CompositionAsset[] = [];
-      const motionWarnings: string[] = [];
-      if (kind === "motion") {
-        const html = (scene.deterministic!.props as { html?: unknown }).html;
-        const page = await loadMotionPage(req.project_dir, typeof html === "string" ? html : "");
-        const errors = page.findings.filter((f) => f.severity === "error");
-        if (errors.length || page.html === undefined) {
-          throw new Error(`HyperFrames renderer refuses motion page ${String(html)} of scene ${scene.id} (${errors.length} lint error(s)): ${errors.map(formatMotionFinding).join("; ")}`);
-        }
-        motionHtml = page.html;
-        for (const f of page.findings) motionWarnings.push(`motion: ${formatMotionFinding(f)}`);
-        for (const f of page.files) {
-          if (f.ref === "index.html" || f.ref.startsWith(`${MOTION_INTERNAL_DIR}/`)) motionWarnings.push(`motion: ${f.ref} clashes with a composition file; not copied`);
-          else motionAssets.push({ src: f.abs, dest: f.ref });
-        }
-        // Text boxes: none. The page lays out its own text, which the composer cannot measure.
-      }
-
-      const assetIndex = await loadAssetIndex(req.project_dir);
-      const comp = buildComposition(req, { resolveAsset: (id) => assetIndex.get(id), ...(req.cues?.length ? { cues: req.cues } : {}), ...(motionHtml !== undefined ? { motionHtml } : {}) });
-      comp.assets.push(...motionAssets);
-      const warnings = [...comp.warnings, ...motionWarnings];
+      const comp = await composeScene(req);
+      const warnings = [...comp.warnings];
 
       const keep = opts.keepTmp || process.env.VS_KEEP_HYPERFRAMES_TMP === "1";
       const dir = await mkdtemp(join(opts.tmpRoot ?? tmpdir(), `vs-hf-${scene.id}-`));
       let job: RenderJob | undefined;
       const release = guardStdout();
       try {
-        await writeFile(join(dir, "index.html"), comp.html, "utf8");
-        for (const a of comp.assets) {
-          const dest = resolve(dir, a.dest);
-          await mkdir(dirname(dest), { recursive: true });
-          try {
-            await copyFile(a.src, dest);
-          } catch (e) {
-            warnings.push(`asset ${a.src} could not be copied: ${e instanceof Error ? e.message : String(e)}`);
-          }
+        warnings.push(...(await writeComposition(dir, comp)));
+
+        // A motion page must draw the same frame for the same time, whatever order it is seeked
+        // in (and, with loop, end where it began): checked in Chrome before the producer runs.
+        if (kind === "motion" && opts.determinismCheck !== false) {
+          const findings = await motionDeterminism(req, dir, comp, avail.chromePath, opts);
+          const errors = findings.filter((f) => f.severity === "error");
+          if (errors.length) throw new DeterminismError(scene.id, errors.map(formatCheckFinding).join("; "));
+          for (const f of findings) warnings.push(formatCheckFinding(f));
         }
 
         // The producer finds ffmpeg via HYPERFRAMES_FFMPEG_PATH or PATH; point it at the same
@@ -437,6 +559,7 @@ export function createHyperframesRenderer(opts: HyperframesRendererOptions = {})
         if (job.status === "failed" || job.status === "cancelled") throw new Error(job.error ?? `render ${job.status}`);
         for (const w of job.warnings ?? []) warnings.push(`hyperframes: ${w.code}: ${w.message}`);
       } catch (e) {
+        if (e instanceof DeterminismError) throw e;
         throw new Error(describeHyperframesError(e, scene.id, job), { cause: e });
       } finally {
         release();

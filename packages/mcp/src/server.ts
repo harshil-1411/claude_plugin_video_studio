@@ -25,6 +25,7 @@ import { formatTighten, tightenAsset } from "./tighten.js";
 import { diffProjects, formatDiff } from "./diff.js";
 import { formatGolden, testProject } from "./golden.js";
 import { type ReviewOptions, formatReview, reviewRender } from "./review.js";
+import { type StillsOptions, formatStills, stillsProject } from "./stills.js";
 import { type CompareSide, compareVideos, formatCompare } from "./compare.js";
 import { formatLint, lintProject } from "./lint.js";
 import { formatIssues, renderStoryboard, scaffoldSpec, validateBrief } from "./plan.js";
@@ -594,7 +595,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Re-run technical QA",
       description:
-        "Re-run technical QA (ffprobe size/aspect/duration/codecs, blackdetect, freezedetect, silencedetect, EBU R128 loudness vs -14 LUFS) on the latest rendered reel of <project_dir> (or the given quality), write qa/report.{json,md} and refresh dist/render-manifest.json. Returns {status: pass|warn|fail, findings[] {id, status, detail, fix}}.",
+        "Re-run technical QA (ffprobe size/aspect/duration/codecs, blackdetect, freezedetect, scene changes, silencedetect, EBU R128 loudness vs -14 LUFS) on the latest rendered reel of <project_dir> (or the given quality), write qa/report.{json,md} and refresh dist/render-manifest.json. Motion: frozen_frames fails above spec.acceptance.max_frozen_pct (default 15% of the runtime); motion_density (big changes/s) and longest_static fail only against spec.acceptance; with master.loop, loop_seam checks first vs last frame SSIM and the audio jump. Returns {status: pass|warn|fail, findings[] {id, status, detail, fix}}.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Rendered project folder"),
         quality: QUALITY.optional().describe("Which render to check (default: the latest)"),
@@ -616,7 +617,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Lint against platform contracts",
       description:
-        "Check <project_dir> against its targets' platform contracts (platform-specs/) and the design rules: duration/fps/size/aspect envelopes, text overflow (renderer text boxes), text and burned-in captions under platform UI masks, WCAG contrast, caption reading speed, post caption/hashtag limits, cover, and brand banned phrases. Uses the spec plus, when present, the render of `quality` (default final). Writes qa/lint.{json,md}. Returns {status: pass|warn|fail, findings[] {id, severity, target?, scene_id?, message, fix}}; apply each fix to project/video-spec.json, re-render, lint again.",
+        "Check <project_dir> against its targets' platform contracts (platform-specs/) and the design rules: duration/fps/size/aspect envelopes, text overflow (renderer text boxes), text and burned-in captions under platform UI masks, WCAG contrast, caption reading speed, post caption/hashtag limits, cover, brand banned phrases, banned motion effects (style motion.avoid, brand visual.forbidden), spec.acceptance numbers the render missed (from QA) and the loop seam. Uses the spec plus, when present, the render of `quality` (default final). Writes qa/lint.{json,md}. Returns {status: pass|warn|fail, findings[] {id, severity, target?, scene_id?, message, fix}}; apply each fix to project/video-spec.json, re-render, lint again.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Project folder with project/video-spec.json"),
         quality: QUALITY.optional().describe("Which render to check (default: final); spec-only checks run without a render"),
@@ -687,6 +688,31 @@ export function createServer(options: ServerOptions = {}): McpServer {
   );
 
   server.registerTool(
+    "stills",
+    {
+      title: "Still frames of the composed scenes (before rendering)",
+      description:
+        "Draw chosen moments of <project_dir>'s HyperFrames scenes (motion pages and every other HyperFrames kind) straight from their composed pages in headless Chrome, before the full render, and tile them into a labelled sheet for you to Read: review/stills/stills-<quality>[-<scene>].jpg (full-size frames in review/stills/frames/). This is not a render: renders/ and dist/ are untouched, no voice is synthesized. Moments per scene (scene-local): explicit times, every beat or downbeat of the music bed inside the scene (at), or count evenly spaced frames (default 3: in, mid, out). Each scene is composed exactly as the renderer composes it (tokens, zones, word cues and beat grid of the latest render when it matches the spec). Needs Chrome and the HyperFrames producer; waits for any HyperFrames render in this engine and refuses while a render of this project runs. Returns {image, images, tiles[{scene_id, time_sec, tag, label, frame}], scenes, skipped, grid, durations, notes}.",
+      inputSchema: {
+        project_dir: z.string().min(1).describe("Project folder with project/video-spec.json"),
+        quality: QUALITY.optional().describe("Frame size and fps of this quality's render (default preview)"),
+        scenes: z.array(z.string().min(1)).max(60).optional().describe("Scene ids (default: every HyperFrames scene)"),
+        times: z.array(z.number().nonnegative()).max(48).optional().describe("Scene-local seconds, applied to every chosen scene"),
+        at: z.enum(["beats", "downbeats"]).optional().describe("Every beat, or every bar start, of the music bed inside each scene"),
+        count: z.int().min(1).max(12).optional().describe("Evenly spaced frames per scene (default 3: in, mid, out)"),
+        width: z.int().min(64).max(1080).optional().describe("Tile width in px (default 240)"),
+        cols: z.int().min(1).max(12).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    safe(async ({ project_dir, ...o }: { project_dir: string } & StillsOptions) => {
+      const root = resolveInputPath(project_dir, cwd());
+      const r = await stillsProject(root, o, { env });
+      return jsonResult(formatStills(r), r as unknown as Record<string, unknown>, { relativeTo: root, maxArrayFor: { tiles: 90 } });
+    }),
+  );
+
+  server.registerTool(
     "review",
     {
       title: "Review frames of a render",
@@ -721,14 +747,17 @@ export function createServer(options: ServerOptions = {}): McpServer {
       z.object({ quality: QUALITY, label: z.string().min(1).optional() }).strict(),
       z.object({ project_dir: z.string().min(1), quality: QUALITY.optional(), label: z.string().min(1).optional() }).strict(),
       z.object({ file: z.string().min(1), label: z.string().min(1).optional() }).strict(),
+      z.object({ reference: z.string().min(1), label: z.string().min(1).optional() }).strict(),
     ])
-    .describe("{quality} (this project's render), {project_dir, quality?} (another project's render, e.g. a variant or a short) or {file} (a project-relative video, e.g. assets/supplied/talk-tight.mp4); optional label");
+    .describe(
+      "{quality} (this project's render), {project_dir, quality?} (another project's render, e.g. a variant or a short), {file} (a project-relative video, e.g. assets/supplied/talk-tight.mp4) or {reference} (a video to match: project-relative, or an absolute path the user gave); optional label",
+    );
   server.registerTool(
     "compare",
     {
       title: "Before/after comparison page",
       description:
-        "Build a before/after page for two videos of <project_dir> at qa/compare/index.html, with both videos copied next to it as a.mp4/b.mp4 (self-contained: inline CSS/JS, no network; the folder can be zipped and shared). Views: side by side, stacked and wipe (draggable divider); one play/pause, scrubber and time readout drive both in sync, frame step (arrow keys), speed, per-side mute (b audible by default). Default: a = this project's preview render, b = its final render. Returns {html, a: {label, path, duration_sec, width, height}, b}. You cannot open a browser: give the user the path to open.",
+        "Build a before/after page for two videos of <project_dir> at qa/compare/index.html, with both videos copied next to it as a.mp4/b.mp4 (self-contained: inline CSS/JS, no network; the folder can be zipped and shared). Views: side by side, stacked and wipe (draggable divider); one play/pause, scrubber and time readout drive both in sync, frame step (arrow keys), speed, per-side mute (b audible by default). Default: a = this project's preview render, b = its final render; with a {reference} side the other side defaults to this project's latest render. Both sides are measured (duration, frozen seconds and %, big changes/s, cuts/s, longest static stretch, integrated loudness) into a table on the page, and with a reference each metric gets a meets/misses verdict for ours. Returns {html, a: {label, path, duration_sec, width, height, metrics}, b, metrics[] {id, a, b, meets, verdict}}. You cannot open a browser: give the user the path to open.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Project folder (the page is written to its qa/compare/)"),
         a: compareSide.optional(),

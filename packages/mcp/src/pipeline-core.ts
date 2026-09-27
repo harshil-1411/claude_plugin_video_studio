@@ -42,8 +42,8 @@ export type Env = Record<string, string | undefined>;
 
 /** Engine version recorded in manifests. Keep in sync with SERVER_VERSION. */
 export const ENGINE_VERSION = "0.1.0";
-/** Bump when technical QA's checks change, so cached QA results are re-run. 2: background-aware black frames, intended silence. */
-export const QA_VERSION = 3;
+/** Bump when technical QA's checks change, so cached QA results are re-run. 2: background-aware black frames, intended silence. 4: motion density, longest static stretch, frozen share fails above its limit, loop seam, acceptance numbers. */
+export const QA_VERSION = 4;
 /** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). 4: the caption plate is its own ASS layer (no dark bars around highlighted words). 5: loudness true peak −1.5 dBTP (headroom for the AAC encode). 6: the brand logo is overlaid in the concat encode (one fewer H.264 generation). 7: sound effects land by their peak, not their first sample. */
 export const ASSEMBLY_VERSION = 7;
 /** Scene transition length when neither the scene nor the style sets one (ms). */
@@ -97,6 +97,18 @@ export interface QaFinding {
   status: "warn" | "fail";
   detail: string;
   fix?: string;
+}
+
+/** Motion density of a reel (media `MotionStats` without the change list). */
+export interface QaMotionMetrics {
+  changes: number;
+  changes_per_sec: number;
+  cuts: number;
+  cuts_per_sec: number;
+  longest_static_s: number;
+  longest_static_at?: { start_s: number; end_s: number };
+  frozen_s: number;
+  frozen_pct: number;
 }
 
 export interface QaOutcome {
@@ -228,7 +240,23 @@ export interface RenderState {
     crops: Array<{ id: string; targets: string[]; x: number; y: number; w: number; h: number }>;
   };
   assembly_key: string;
-  qa?: { version?: number; status: "pass" | "warn" | "fail"; video_sha256: string; checks: Array<{ id: string; status: "pass" | "warn" | "fail"; message?: string }>; findings: QaFinding[] };
+  qa?: {
+    version?: number;
+    status: "pass" | "warn" | "fail";
+    video_sha256: string;
+    checks: Array<{ id: string; status: "pass" | "warn" | "fail"; message?: string }>;
+    findings: QaFinding[];
+    /** Hash of the acceptance numbers and loop flag QA ran against (a change re-runs QA on the same reel). */
+    expect_key?: string;
+    /** Motion density measured on the reel (for lint's acceptance_unmet). */
+    motion?: QaMotionMetrics;
+    /** Loop seam measured on the reel (master.loop). */
+    loop_seam?: { ssim: number | null; audio_jump_db: number | null };
+  };
+  /** spec.acceptance at render time: the numbers QA held the render to. */
+  acceptance?: { min_changes_per_sec?: number; max_frozen_pct?: number; max_static_sec?: number; hold_ms?: number; loop?: boolean };
+  /** spec master.loop (or acceptance.loop) at render time: QA checks the loop seam. */
+  loop?: boolean;
   timing_adjustments: TimingAdjustment[];
   warnings: string[];
   tool_versions: Record<string, string>;
@@ -249,7 +277,7 @@ export interface RenderState {
     /** Where the effect's peak sits in the file (ms); the mix starts it this much before `at_sec` so the peak lands on time. */
     peak_ms?: number;
   }>;
-  /** Beats of the music bed when beat_sync is on (detected, or the exact grid of a synthesized score). */
+  /** Beats of the music bed when beat_sync is on, or when motion pages need the grid (detected, or the exact grid of a synthesized score). */
   beat_sync?: {
     bpm: number | null;
     beats: number;
@@ -267,6 +295,8 @@ export interface RenderState {
     alternate_bpm?: number;
     /** The bed's drop on the video timeline (ms), first occurrence. */
     drop_ms?: number;
+    /** beat_sync is off: the grid was read only for motion pages (window.__vs.beats); no cut moved. */
+    grid_only?: true;
   };
   /** Brand logo drawn over the scenes (brand visual.logo_placement at a corner), for lint and review. */
   logo?: { path: string; box: { x: number; y: number; w: number; h: number }; scenes: string[] };

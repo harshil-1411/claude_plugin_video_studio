@@ -1,7 +1,7 @@
 import { copyFile, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { ensureDir, hashFile, projectPaths, readJson, writeJsonAtomic } from "@video-studio/core";
-import { type QaReport, technicalQa, writeQaReport } from "@video-studio/media";
+import { type MotionStats, type QaReport, technicalQa, writeQaReport } from "@video-studio/media";
 import { type SceneRenderEntry, findFontsDir, findStylesDir, getStyle, LAYOUT_VERSION, parseFontChain, resolveTokens } from "@video-studio/renderer";
 import { CreativeBrief, RenderManifest, type SceneRender, VideoSpec, parseYamlOrJson, resolveTargets, type C2paRecord } from "@video-studio/schema";
 import { ZONES_VERSION, findPlatformSpecsDir, loadContracts } from "@video-studio/platforms";
@@ -18,6 +18,7 @@ import {
   QA_VERSION,
   type DistFiles,
   type QaFinding,
+  type QaMotionMetrics,
   type QaOutcome,
   type Quality,
   type RenderProjectOptions,
@@ -142,6 +143,7 @@ async function renderProjectLocked(projectDir: string, o: RenderProjectOptions):
   const state = await stageRenderState(run, { inputs, target, vs, timingSource, timing, footage, music, cueLog, scenes, captions, audio, asm, cover });
   state.policy = vs.policy;
   if (vs.paid_voice) state.paid_voice = vs.paid_voice;
+  setQaExpectations(state, spec);
 
   // f'. technical QA on the reel (reused when the reel is unchanged), then persist the state
   const qa = await stageQa(run, state, asm.reel, asm.statePath);
@@ -182,7 +184,13 @@ async function stageQa(run: RenderRun, state: RenderState, reel: string, statePa
   const { root, paths, quality, signal, progress, now } = run;
   const reelSha = await hashFile(reel);
   let qa: QaOutcome;
-  if (state.qa && state.qa.video_sha256 === reelSha && state.qa.version === QA_VERSION && (await exists(join(paths.qa, "report.json")))) {
+  if (
+    state.qa &&
+    state.qa.video_sha256 === reelSha &&
+    state.qa.version === QA_VERSION &&
+    state.qa.expect_key === qaExpectKey(state) &&
+    (await exists(join(paths.qa, "report.json")))
+  ) {
     qa = { status: state.qa.status, findings: state.qa.findings, report_json: join(paths.qa, "report.json"), report_md: join(paths.qa, "report.md") };
   } else {
     signal?.throwIfAborted();
@@ -199,6 +207,19 @@ async function stageQa(run: RenderRun, state: RenderState, reel: string, statePa
 
 const QA_MAP = { ok: "pass", warn: "warn", fail: "fail" } as const;
 
+/** Record the spec's acceptance numbers and loop flag in the render state, for QA and lint. */
+function setQaExpectations(state: RenderState, spec: Pick<VideoSpec, "acceptance" | "master">): void {
+  if (spec.acceptance) state.acceptance = { ...spec.acceptance };
+  else delete state.acceptance;
+  if (spec.master?.loop || spec.acceptance?.loop) state.loop = true;
+  else delete state.loop;
+}
+
+/** What QA was held to: a change re-runs QA on an unchanged reel. */
+function qaExpectKey(state: RenderState): string {
+  return JSON.stringify({ acceptance: state.acceptance ?? null, loop: state.loop ?? false });
+}
+
 async function runQaOn(root: string, state: RenderState, reelSha?: string): Promise<QaOutcome> {
   const reel = join(root, state.reel);
   const noSound = !state.voice.has_audio && !state.music && !state.scene_audio;
@@ -211,6 +232,8 @@ async function runQaOn(root: string, state: RenderState, reelSha?: string): Prom
     // silence and loudness are not findings then, just not measured.
     ...(noSound ? { intended_silence: true, silence_reason: state.voice_mode === "none" ? "silent on purpose (no narration, no music)" : "rendered with the silent voice (no narration audio)" } : {}),
     ...(state.background ? { background: state.background } : {}),
+    ...(state.acceptance ? { acceptance: state.acceptance } : {}),
+    ...(state.loop ? { loop: true } : {}),
   });
   // Relative path in the report so the project folder stays portable.
   report.video = state.reel;
@@ -225,8 +248,16 @@ async function runQaOn(root: string, state: RenderState, reelSha?: string): Prom
     video_sha256: reelSha ?? (await hashFile(reel)),
     checks: report.checks.map((c) => ({ id: c.id, status: QA_MAP[c.status], message: c.detail })),
     findings,
+    expect_key: qaExpectKey(state),
+    ...(report.metrics.motion ? { motion: motionView(report.metrics.motion) } : {}),
+    ...(report.metrics.loop_seam ? { loop_seam: report.metrics.loop_seam } : {}),
   };
   return { status, findings, report_json: files.json, report_md: files.md };
+}
+
+function motionView(m: MotionStats): QaMotionMetrics {
+  const { change_times_s: _times, ...rest } = m;
+  return rest;
 }
 
 async function loadState(projectDir: string, quality?: Quality): Promise<RenderState> {
@@ -245,6 +276,9 @@ async function loadState(projectDir: string, quality?: Quality): Promise<RenderS
 export async function runQa(projectDir: string, opts: { quality?: Quality; now?: () => Date } = {}): Promise<{ qa: QaOutcome; quality: Quality; dist: DistFiles }> {
   const root = projectPaths(projectDir).root;
   const state = await loadState(root, opts.quality);
+  // Hold the render to the spec's current acceptance numbers and loop flag.
+  const spec = await loadSpecLoose(root).then((r) => r.spec).catch(() => undefined);
+  if (spec) setQaExpectations(state, spec);
   const qa = await runQaOn(root, state);
   await writeJsonAtomic(join(renderDir(root, state.quality), "render-state.json"), state);
   const dist = await exportFromState(root, state, opts.now ?? (() => new Date()));
@@ -485,7 +519,9 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
       ...(state.paid_voice ? { paid_voice: state.paid_voice } : {}),
       ...(state.music ? { music: { file: state.music.ref, ...(state.music.title ? { title: state.music.title } : {}), license: state.music.license ?? null } } : {}),
       ...(state.footage?.length ? { footage: state.footage.map((f) => ({ asset: f.asset, file: f.path, sha256: f.sha256, scenes: f.scenes })) } : {}),
-      ...(state.sfx?.length ? { sfx: state.sfx.map((x) => ({ file: x.file, sha256: x.sha256, scenes: x.scenes, license: x.license ?? null })) } : {}),
+      ...(state.sfx?.length
+        ? { sfx: state.sfx.map((x) => ({ file: x.file, sha256: x.sha256, scenes: x.scenes, license: x.license ?? null, ...(x.peak_ms !== undefined ? { peak_ms: x.peak_ms } : {}) })) }
+        : {}),
       ...(state.timing_adjustments.length ? { timing_adjustments: state.timing_adjustments } : {}),
       ...(state.sound_events ? { captions: { sound_events: state.sound_events } } : {}),
       ...(c2pa && c2paSource ? { c2pa: { ...c2pa, digital_source_type: c2paSource.digital_source_type, reasons: c2paSource.reasons } } : {}),

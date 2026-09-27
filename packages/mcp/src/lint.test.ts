@@ -4,7 +4,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TextBox } from "@video-studio/schema";
 import { describe, expect, it } from "vitest";
-import { type LintFinding, checkCues, checkCutaways, checkForbidden, checkLogo, checkTextRepeatsCaptions, contrastRatio, lintProject } from "./lint.js";
+import {
+  type LintFinding,
+  checkAcceptance,
+  checkBannedEffect,
+  checkCues,
+  checkCutaways,
+  checkForbidden,
+  checkLogo,
+  checkLoopSeam,
+  checkTextRepeatsCaptions,
+  contrastRatio,
+  lintProject,
+} from "./lint.js";
 
 const FIXTURE = join(import.meta.dirname, "__fixtures__", "lint", "tiktok-low-captions");
 
@@ -370,6 +382,22 @@ describe("lint: caption, beat and on-screen timing", () => {
     expect(ids(await lintProject(rendered({ lines: good, edit: audio(), extra: { beat_sync: { bpm: 60, beats: 8, moved_cuts: 0 } } })), "cut_off_beat")).toEqual([]);
   });
 
+  it("cut_off_beat: with snap downbeat, cuts are measured against bar starts", async () => {
+    const beats = [0, 1000, 2000, 3000, 4000, 5000, 6000, 7000];
+    const audio = (snap?: string) => (s: Record<string, any>) =>
+      (s.audio = { music: { file: "assets/m.wav", license: { id: "user-owned" } }, beat_sync: { enabled: true, ...(snap ? { snap } : {}) } });
+    const extra = { beat_sync: { bpm: 60, beats: 8, moved_cuts: 0, beat_times_ms: beats, downbeat_times_ms: [0, 4000], snap: "downbeat" } };
+    // The cut at 3 s is on a beat, so snapping to any beat is satisfied.
+    expect(ids(await lintProject(rendered({ lines: good, edit: audio(), extra: { beat_sync: { ...extra.beat_sync, snap: "beat" } } })), "cut_off_beat")).toEqual([]);
+    const r = await lintProject(rendered({ lines: good, edit: audio("downbeat"), extra }));
+    expect(ids(r, "cut_off_beat")).toEqual([
+      expect.objectContaining({ scene_id: "s01", message: expect.stringMatching(/at 3s is 1000 ms from the nearest downbeat \(4s\)/), fix: expect.stringMatching(/duration_sec to 4\b/) }),
+    ]);
+    // Downbeats asked for but not found (the render fell back to beats): measured against beats.
+    const fell = { beat_sync: { bpm: 60, beats: 8, moved_cuts: 0, beat_times_ms: beats, snap: "beat" } };
+    expect(ids(await lintProject(rendered({ lines: good, edit: audio("downbeat"), extra: fell })), "cut_off_beat")).toEqual([]);
+  });
+
   it("onscreen_too_brief: unspoken on-screen text in a narrated scene; spoken text is fine", async () => {
     const r = await lintProject(
       project((s) => {
@@ -525,5 +553,71 @@ describe("on-screen text repeating the captions", () => {
     const k = [scene("s01", "I gave Claude a new superpower.", "kinetic_text", { text: "I gave Claude a new superpower." })];
     expect(run(k, false)).toEqual([]);
     expect(run(k, true, "native")).toEqual([]);
+  });
+});
+
+describe("taste guard, acceptance and loop seam", () => {
+  const motionScene = (id: string, effects: string[]) =>
+    ({ id, deterministic: { kind: "motion", props: { html: "motion/a.html", text: ["Hi"], effects } }, visual_requirements: {} }) as unknown as VideoSpec["scenes"][number];
+
+  it("banned_effect: declared effects against the style's avoid list and brand.visual.forbidden", () => {
+    const out: LintFinding[] = [];
+    const scenes = [motionScene("s01", ["shake", "rgb_split"]), motionScene("s02", ["flash"]), motionScene("s03", [])];
+    checkBannedEffect({ scenes, style: "calm" } as VideoSpec, { id: "calm", avoid: ["shake", "lens_flare"] }, { visual: { forbidden: ["RGB split", "Flashes"] } } as never, out);
+    expect(out.map((f) => `${f.id}:${f.scene_id}:${f.severity}`)).toEqual(["banned_effect:s01:error", "banned_effect:s01:error", "banned_effect:s02:error"]);
+    expect(out[0]!.message).toMatch(/"shake".*style "calm" avoids/);
+    expect(out[0]!.fix).toMatch(/remove "shake" from scene s01's props\.effects/);
+    expect(out[1]!.message).toMatch(/"rgb_split".*brand\.yaml.*"RGB split"/);
+    expect(out[2]!.message).toMatch(/"flash"/);
+    // No style and no brand: nothing to check.
+    const none: LintFinding[] = [];
+    checkBannedEffect({ scenes } as VideoSpec, undefined, undefined, none);
+    expect(none).toEqual([]);
+  });
+
+  it("banned_effect through lintProject, with the active style pack", async () => {
+    const stylesDir = mkdtempSync(join(tmpdir(), "vs-lint-styles-"));
+    writeFileSync(join(stylesDir, "README.md"), "styles\n");
+    const raw = readFileSync(join(import.meta.dirname, "..", "..", "..", "styles", "minimal.yaml"), "utf8");
+    writeFileSync(join(stylesDir, "minimal.yaml"), raw.replace(/\n  transition_ms: (\d+)/, "\n  transition_ms: $1\n  avoid: [shake, neon_glow]"));
+    const dir = project((s) => {
+      s.style = "minimal";
+      s.scenes[0].deterministic = { kind: "motion", props: { html: "motion/a.html", text: ["Captions hide"], effects: ["neon_glow"] } };
+    });
+    const r = await lintProject(dir, { stylesDir });
+    expect(r.findings.filter((f) => f.id === "banned_effect")).toEqual([expect.objectContaining({ severity: "error", scene_id: "s01", message: expect.stringMatching(/neon_glow/) })]);
+  });
+
+  it("acceptance_unmet: every acceptance number the render misses, with the measured value", () => {
+    const motion = { changes: 10, changes_per_sec: 0.5, cuts: 4, cuts_per_sec: 0.2, longest_static_s: 6.2, frozen_s: 5, frozen_pct: 25 };
+    const out: LintFinding[] = [];
+    checkAcceptance({ acceptance: { min_changes_per_sec: 1, max_frozen_pct: 10, max_static_sec: 3, hold_ms: 400 } } as VideoSpec, { qa: { motion } }, out);
+    expect(out.map((f) => f.severity)).toEqual(["error", "error", "error"]);
+    expect(out.map((f) => f.message)).toEqual([
+      expect.stringMatching(/0\.5 big changes\/s.*minimum 1/),
+      expect.stringMatching(/25% of the runtime frozen.*maximum 10%/),
+      expect.stringMatching(/6\.2s without a big change.*maximum 3s/),
+    ]);
+    // Met, or no QA metrics yet: nothing.
+    const quiet: LintFinding[] = [];
+    checkAcceptance({ acceptance: { min_changes_per_sec: 0.4 } } as VideoSpec, { qa: { motion } }, quiet);
+    checkAcceptance({ acceptance: { min_changes_per_sec: 5 } } as VideoSpec, {}, quiet);
+    checkAcceptance({} as VideoSpec, { qa: { motion } }, quiet);
+    expect(quiet).toEqual([]);
+  });
+
+  it("loop_seam: surfaces QA's seam measurement when master.loop is set", () => {
+    const spec = { master: { width: 1080, height: 1920, fps: 30, loop: true } } as VideoSpec;
+    const out: LintFinding[] = [];
+    checkLoopSeam(spec, { qa: { loop_seam: { ssim: 0.91, audio_jump_db: 9.5 } } }, out);
+    expect(out).toEqual([expect.objectContaining({ id: "loop_seam", severity: "error", message: expect.stringMatching(/SSIM 0\.91.*9\.5 dB/) })]);
+    const ok: LintFinding[] = [];
+    checkLoopSeam(spec, { qa: { loop_seam: { ssim: 0.995, audio_jump_db: 1 } } }, ok);
+    checkLoopSeam({ master: { width: 1080, height: 1920, fps: 30 } } as VideoSpec, { qa: { loop_seam: { ssim: 0.5, audio_jump_db: 20 } } }, ok);
+    expect(ok).toEqual([]);
+    // Rendered but not measured (QA ran without loop): a warning to re-run QA.
+    const stale: LintFinding[] = [];
+    checkLoopSeam(spec, { qa: {} }, stale);
+    expect(stale).toEqual([expect.objectContaining({ id: "loop_seam", severity: "warning", fix: expect.stringMatching(/qa_run/) })]);
   });
 });

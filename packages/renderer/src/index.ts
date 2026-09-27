@@ -15,6 +15,13 @@ export {
   puppeteerLaunchProbe,
   clearHyperframesProbeCache,
   describeHyperframesError,
+  composeScene,
+  writeComposition,
+  determinismKey,
+  determinismCachePath,
+  guardStdout,
+  DeterminismError,
+  type ScenePage,
   HYPERFRAMES_VERSION,
   type HyperframesRendererOptions,
   type HyperframesProducer,
@@ -23,3 +30,5 @@ export * from "./styles.js";
 export { MOTION_KIT_SOURCE, MOTION_KIT_VERSION } from "./motion-kit.js";
 export { composeMotion, splitMotionPage, scriptJson, MOTION_CSP, type MotionComposeOptions } from "./motion-compose.js";
 export { lintMotionPage, loadMotionPage, formatMotionFinding, motionPageDigest, type MotionFile, type MotionLintFinding, type MotionLintResult, type MotionPage, type MotionPageFile } from "./motion-lint.js";
+export * from "./capture.js";
+export * from "./motion-blur.js";

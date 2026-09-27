@@ -1,6 +1,6 @@
 ---
 name: lint
-description: Lint a video-studio project against its platform targets (TikTok, Instagram, YouTube Shorts, LinkedIn, Facebook Page API) - duration/fps/size envelopes, text cut off, text or captions under the app UI, contrast, caption reading speed and timing (captions too brief or out of sync with the voice, flicker), cuts off the beat, on-screen text too brief to read, story arc, post caption and hashtag limits, cover, brand banned phrases - and fix what it finds by editing the spec and re-rendering. Use when the user runs /video-studio:lint, asks whether a video is ready for a platform, or after a render before publishing.
+description: Lint a video-studio project against its platform targets (TikTok, Instagram, YouTube Shorts, LinkedIn, Facebook Page API) - duration/fps/size envelopes, text cut off, text or captions under the app UI, contrast, caption reading speed and timing (captions too brief or out of sync with the voice, flicker), cuts off the beat, on-screen text too brief to read, story arc, post caption and hashtag limits, cover, brand banned phrases, banned motion effects, acceptance numbers and the loop seam - and fix what it finds by editing the spec and re-rendering. Use when the user runs /video-studio:lint, asks whether a video is ready for a platform, or after a render before publishing.
 allowed-tools: mcp__plugin_video-studio_engine__lint mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status Read Edit
 ---
 
@@ -48,9 +48,17 @@ Run this loop when lint returns errors, or warnings the user wants cleared:
      - `caption_gap` (minor): captions separated by under 120 ms flicker.
        Re-render; if it stays, join the two phrases.
      - `cut_off_beat`: with `audio.beat_sync` on, a cut further than the
-       tolerance (default 250 ms) from a beat, usually because moving it
-       would clip speech. Set the named `duration_sec`, shorten the
-       voiceover, or raise `audio.beat_sync.tolerance_ms`.
+       tolerance (default 250 ms) from a beat (from a downbeat when
+       `snap: downbeat`), usually because moving it would clip speech. Set
+       the named `duration_sec`, shorten the voiceover, or raise
+       `audio.beat_sync.tolerance_ms`.
+     - `acceptance_unmet` (error): the render missed a `spec.acceptance`
+       number (changes per second, frozen %, longest static stretch, hold);
+       the message has the measured value. Stage more visual beats or cut
+       the static stretches `qa/report.md` lists, re-render, lint again.
+     - `loop_seam` (error, with `master.loop`): the last frame does not
+       return to the first, or the audio jumps across the seam. Make cyclic
+       motion periods divide the loop length and loop the bed on a bar.
      - `onscreen_too_brief`: on-screen text (`on_screen_text` + props) the
        voiceover does not say needs more reading time than the scene has
        (3 words/s after a 1 s settle). Cut the text, say it, or lengthen
@@ -69,6 +77,11 @@ Run this loop when lint returns errors, or warnings the user wants cleared:
      false` on that scene (the .srt/.vtt keep the words). Otherwise put
      something else on screen (the number, a keyword, the payoff), or cut
      it to the 1-3 words that matter.
+   - `banned_effect` (error): a `motion` scene declares in `props.effects`
+     an effect the style's `motion.avoid` bans or `brand.visual.forbidden`
+     names. Remove it from `effects` and from the page, or pick another
+     style with the user. Lint only sees declared effects: also look at the
+     stills sheet.
    - `cutaway_rhythm`: a cutaway (`footage.cutaway`) starts inside the
      hook's first second, lasts outside 3–10 s, or leaves under 2 s of the
      speaker since the previous one. Move, lengthen, split or merge it.

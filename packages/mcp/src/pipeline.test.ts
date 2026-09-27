@@ -12,7 +12,7 @@ import { layoutZones } from "@video-studio/platforms";
 import { FFMPEG_RENDERER_VERSION, createFfmpegRenderer } from "@video-studio/renderer";
 import { RenderManifest, VideoLock, type VideoSpec } from "@video-studio/schema";
 import { type VoiceBackend, tokenize } from "@video-studio/voice";
-import { ASSEMBLY_VERSION, type RenderProjectOptions, SpecInvalidError, bracketCue, exportProject, isSoundCue, loadValidSpec, renderProject, runQa, socialCopy, soundEventCues } from "./pipeline.js";
+import { ASSEMBLY_VERSION, QA_VERSION, type RenderProjectOptions, SpecInvalidError, bracketCue, exportProject, isSoundCue, loadValidSpec, renderProject, runQa, socialCopy, soundEventCues } from "./pipeline.js";
 import { diffLocks, readLock } from "./lock.js";
 import { validateSpecFile } from "./spec-validate.js";
 import { RenderJobManager } from "./render-jobs.js";
@@ -270,6 +270,19 @@ describe("renderProject (tiny, silent, ffmpeg)", () => {
       const q = await runQa(dir);
       expect(q.quality).toBe("preview");
       expect(["pass", "warn"]).toContain(q.qa.status);
+      const statePath = join(dir, "renders", "preview", "render-state.json");
+      const st = JSON.parse(await readFile(statePath, "utf8"));
+      expect(st.qa).toMatchObject({ version: QA_VERSION, motion: { changes_per_sec: expect.any(Number), frozen_pct: expect.any(Number) } });
+      // qa_run holds the render to the spec's current acceptance numbers.
+      const accPath = join(dir, "project", "video-spec.json");
+      const before = await readFile(accPath, "utf8");
+      await writeFile(accPath, JSON.stringify({ ...JSON.parse(before), acceptance: { min_changes_per_sec: 10 } }, null, 2));
+      const strict = await runQa(dir);
+      expect(strict.qa.status).toBe("fail");
+      expect(strict.qa.findings.find((f) => f.id === "motion_density")).toMatchObject({ status: "fail", detail: expect.stringMatching(/minimum 10\/s/) });
+      expect(JSON.parse(await readFile(statePath, "utf8")).acceptance).toEqual({ min_changes_per_sec: 10 });
+      await writeFile(accPath, before);
+      expect(["pass", "warn"]).toContain((await runQa(dir)).qa.status);
       await rm(join(dir, "dist"), { recursive: true, force: true });
       const e = await exportProject(dir);
       expect((await stat(e.dist.reel)).size).toBeGreaterThan(0);

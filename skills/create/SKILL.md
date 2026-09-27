@@ -97,8 +97,10 @@ TTS is unavailable, or ffmpeg because HyperFrames is not installed).
 Before showing the preview, run the render skill's step 4: `review` the
 preview and do its review → fix → re-render loop (at most 2 passes,
 spec-level fixes only). Show the user the result with what you fixed. Then
-walk through the QA findings (frozen frames on static scenes are
-expected; with a silent voice, loudness is not measured). Offer fixes: scene edits (back to
+walk through the QA findings. Frozen frames are a real defect, not
+something to explain away: over 15% of the runtime frozen (or the brief's
+`acceptance.max_frozen_pct`) fails QA, and `motion_density` / `longest_static`
+show where the reel stands still. With a silent voice, loudness is not measured. Offer fixes: scene edits (back to
 the plan rules and step 4), a different voice, or `timing_adjustments`
 folded into the spec. Re-render the preview after changes; cached scenes are
 reused.

@@ -11,9 +11,9 @@ import { Readable, Transform } from "node:stream";
 import { DatabaseSync } from "node:sqlite";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import http from "node:http";
+import http, { createServer } from "node:http";
+import { createBrotliDecompress, createGunzip, createInflate, inflateSync } from "node:zlib";
 import https from "node:https";
-import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import perf_hooks from "node:perf_hooks";
@@ -10726,289 +10726,6 @@ async function assemble(input, opts = {}) {
 	}
 }
 //#endregion
-//#region ../media/dist/qa.js
-/** Default blackdetect pixel threshold (fraction of the luma range). */
-const BLACK_PIX_TH = .1;
-/** Normalised limited-range luma (0–1) of a #RRGGBB colour, BT.709. */
-function lumaOf(hex) {
-	const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-	if (!m) return null;
-	const n = parseInt(m[1], 16);
-	const [r, g, b] = [
-		n >> 16 & 255,
-		n >> 8 & 255,
-		n & 255
-	];
-	return (.2126 * r + .7152 * g + .0722 * b) / 255;
-}
-/**
-* blackdetect pix_th for a background: half its luma (so the background itself is not "black"),
-* capped at the default. `nearBlack` means the background is too dark to tell a sparse scene from
-* a blank one, so black intervals can only be a warning.
-*/
-function blackThreshold(background) {
-	const l = background ? lumaOf(background) : null;
-	if (l === null) return {
-		pix_th: BLACK_PIX_TH,
-		nearBlack: false
-	};
-	const pix_th = Math.min(BLACK_PIX_TH, Math.round(l / 2 * 1e3) / 1e3);
-	return {
-		pix_th: Math.max(.005, pix_th),
-		nearBlack: l < .02
-	};
-}
-const r3$3 = (n) => Math.round(n * 1e3) / 1e3;
-function ranges(stderr, startRe, endRe, totalS) {
-	const events = [];
-	for (const m of stderr.matchAll(startRe)) events.push({
-		t: Number(m[1]),
-		kind: "s",
-		at: m.index
-	});
-	for (const m of stderr.matchAll(endRe)) events.push({
-		t: Number(m[1]),
-		kind: "e",
-		at: m.index
-	});
-	events.sort((a, b) => a.at - b.at);
-	const out = [];
-	let open = null;
-	for (const e of events) if (e.kind === "s") open = e.t;
-	else if (open !== null) {
-		out.push({
-			start_s: r3$3(open),
-			end_s: r3$3(e.t),
-			duration_s: r3$3(e.t - open)
-		});
-		open = null;
-	}
-	if (open !== null && totalS > open) out.push({
-		start_s: r3$3(open),
-		end_s: r3$3(totalS),
-		duration_s: r3$3(totalS - open)
-	});
-	return out;
-}
-/** Parse blackdetect / freezedetect / silencedetect / ebur128 output from one decode pass. */
-function parseDetections(stderr, totalS) {
-	const black = [];
-	for (const m of stderr.matchAll(/black_start:\s*(-?[\d.]+)\s+black_end:\s*(-?[\d.]+)\s+black_duration:\s*(-?[\d.]+)/g)) black.push({
-		start_s: r3$3(Number(m[1])),
-		end_s: r3$3(Number(m[2])),
-		duration_s: r3$3(Number(m[3]))
-	});
-	return {
-		black,
-		freeze: ranges(stderr, /freeze_start:\s*(-?[\d.]+)/g, /freeze_end:\s*(-?[\d.]+)/g, totalS),
-		silence: ranges(stderr, /silence_start:\s*(-?[\d.]+)/g, /silence_end:\s*(-?[\d.]+)/g, totalS),
-		...parseEbur128Summary(stderr)
-	};
-}
-const fmtRanges = (rs) => rs.map((r) => `${r.start_s.toFixed(2)}–${r.end_s.toFixed(2)}s`).join(", ");
-/**
-* Technical QA in one ffprobe plus one decode pass (blackdetect, freezedetect, silencedetect,
-* ebur128). Freeze and silence are warnings: static motion-graphic scenes legitimately freeze.
-*/
-async function technicalQa(videoPath, expect, opts = {}) {
-	const tol = expect.tolerance_s ?? .5;
-	const target = expect.loudness_target ?? -14;
-	const ltol = expect.loudness_tolerance ?? 1.5;
-	const requireAudio = expect.require_audio ?? true;
-	const probe = await ffprobe(videoPath, opts);
-	const checks = [];
-	if (!probe.has_video) checks.push({
-		id: "video_stream",
-		status: "fail",
-		detail: "no video stream",
-		fix: "Re-run the render; the output has no video."
-	});
-	else {
-		const sizeOk = probe.width === expect.width && probe.height === expect.height;
-		checks.push({
-			id: "resolution",
-			status: sizeOk ? "ok" : "fail",
-			detail: `${probe.width}x${probe.height} (expected ${expect.width}x${expect.height})`,
-			...sizeOk ? {} : { fix: "Re-assemble with the target width/height (concatVideos normalises every segment)." }
-		});
-		const ar = probe.width / probe.height;
-		const want = expect.width / expect.height;
-		const arOk = Math.abs(ar - want) / want < .01;
-		checks.push({
-			id: "aspect",
-			status: arOk ? "ok" : "fail",
-			detail: `aspect ${ar.toFixed(4)} (expected ${want.toFixed(4)})`,
-			...arOk ? {} : { fix: "Scale and pad/crop to the target aspect ratio." }
-		});
-		const h264 = probe.video_codec === "h264";
-		checks.push({
-			id: "video_codec",
-			status: h264 ? "ok" : "warn",
-			detail: `${probe.video_codec} ${probe.pix_fmt ?? ""}`.trim(),
-			...h264 ? {} : { fix: "Encode with libx264 (encodeFinal) for platform compatibility." }
-		});
-		if (probe.pix_fmt && probe.pix_fmt !== "yuv420p") checks.push({
-			id: "pix_fmt",
-			status: "warn",
-			detail: `${probe.pix_fmt}; most platforms expect yuv420p`,
-			fix: "Add `format=yuv420p` / `-pix_fmt yuv420p`."
-		});
-	}
-	const dd = Math.abs(probe.duration_s - expect.duration_s);
-	checks.push({
-		id: "duration",
-		status: dd <= tol ? "ok" : "fail",
-		detail: `${probe.duration_s.toFixed(3)}s (expected ${expect.duration_s.toFixed(3)}s ± ${tol}s)`,
-		...dd <= tol ? {} : { fix: "Check scene durations and the voice track length; the concat enforces exact slots." }
-	});
-	if (!probe.has_audio) checks.push({
-		id: "audio_stream",
-		status: requireAudio ? "fail" : "ok",
-		detail: "no audio stream",
-		...requireAudio ? { fix: "Mux the voice track (muxAudio), or a silent track for a silent video." } : {}
-	});
-	else {
-		const aacOk = probe.audio_codec === "aac" && probe.sample_rate === 48e3;
-		checks.push({
-			id: "audio_stream",
-			status: aacOk ? "ok" : "warn",
-			detail: `${probe.audio_codec} ${probe.sample_rate} Hz, ${probe.channels} ch`,
-			...aacOk ? {} : { fix: "Encode audio as AAC 48 kHz." }
-		});
-	}
-	const args = ["-i", videoPath];
-	const black = blackThreshold(expect.background);
-	if (probe.has_video) args.push("-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=${black.pix_th},freezedetect=n=-60dB:d=1.0`);
-	if (probe.has_audio) args.push("-map", "0:a:0", "-af", "silencedetect=n=-50dB:d=1.0,ebur128=peak=true:framelog=quiet");
-	args.push("-f", "null", "-");
-	const { stderr } = await runFfmpeg(args, {
-		...opts,
-		keepStderr: true
-	});
-	const det = parseDetections(stderr, probe.duration_s);
-	if (probe.has_video) {
-		const longest = Math.max(0, ...det.black.map((b) => b.duration_s));
-		checks.push(det.black.length === 0 ? {
-			id: "black_frames",
-			status: "ok",
-			detail: "no black intervals ≥ 0.5s"
-		} : {
-			id: "black_frames",
-			status: longest >= 2 && !black.nearBlack ? "fail" : "warn",
-			detail: `black at ${fmtRanges(det.black)}${black.nearBlack ? " (the background is near black, so sparse scenes can read as black)" : ""}`,
-			fix: "Check the scene(s) at those times rendered correctly; re-render them if blank."
-		});
-		checks.push(det.freeze.length === 0 ? {
-			id: "frozen_frames",
-			status: "ok",
-			detail: "no frozen intervals ≥ 1s"
-		} : {
-			id: "frozen_frames",
-			status: "warn",
-			detail: `frozen at ${fmtRanges(det.freeze)} (expected for static motion-graphic scenes)`,
-			fix: "If those scenes should move, check their animation timelines or generated clips."
-		});
-	}
-	if (probe.has_audio && expect.intended_silence) {
-		const why = expect.silence_reason ?? "silent on purpose (no narration, no music)";
-		checks.push({
-			id: "silence",
-			status: "ok",
-			detail: why
-		});
-		checks.push({
-			id: "loudness",
-			status: "ok",
-			detail: `not measured: ${why}`
-		});
-	} else if (probe.has_audio) {
-		checks.push(det.silence.length === 0 ? {
-			id: "silence",
-			status: "ok",
-			detail: "no silence ≥ 1s below -50 dB"
-		} : {
-			id: "silence",
-			status: "warn",
-			detail: `silent at ${fmtRanges(det.silence)}`,
-			fix: "Check the voice track covers those scenes, or accept intentional pauses."
-		});
-		const I = det.integrated_lufs;
-		if (I === null) checks.push({
-			id: "loudness",
-			status: "warn",
-			detail: "integrated loudness not measurable (silent audio?)"
-		});
-		else {
-			const off = Math.abs(I - target);
-			checks.push({
-				id: "loudness",
-				status: off <= ltol ? "ok" : "warn",
-				detail: `${I.toFixed(1)} LUFS (target ${target} ± ${ltol})`,
-				...off <= ltol ? {} : { fix: "Run two-pass loudnorm (loudnorm2pass) on the voice track before muxing." }
-			});
-		}
-		if (det.true_peak_dbtp !== null && det.true_peak_dbtp > -1) checks.push({
-			id: "true_peak",
-			status: "warn",
-			detail: `true peak ${det.true_peak_dbtp.toFixed(1)} dBTP > -1 dBTP`,
-			fix: "Normalise with TP=-1 (loudnorm2pass)."
-		});
-	}
-	return {
-		status: checks.some((c) => c.status === "fail") ? "fail" : checks.some((c) => c.status === "warn") ? "warn" : "ok",
-		video: videoPath,
-		checks,
-		metrics: {
-			probe,
-			black: det.black,
-			freeze: det.freeze,
-			silence: det.silence,
-			integrated_lufs: det.integrated_lufs,
-			lra: det.lra,
-			true_peak_dbtp: det.true_peak_dbtp
-		}
-	};
-}
-function formatQaMarkdown(r) {
-	const icon = {
-		ok: "ok",
-		warn: "WARN",
-		fail: "FAIL"
-	};
-	const p = r.metrics.probe;
-	return [
-		`# Technical QA: ${r.status.toUpperCase()}`,
-		"",
-		`Video: \`${r.video}\``,
-		"",
-		"| Check | Status | Detail | Fix |",
-		"| --- | --- | --- | --- |",
-		...r.checks.map((c) => `| ${c.id} | ${icon[c.status]} | ${c.detail.replace(/\|/g, "\\|")} | ${(c.status !== "ok" && c.fix ? c.fix : "").replace(/\|/g, "\\|")} |`),
-		"",
-		"## Metrics",
-		"",
-		`- Size: ${p.width}x${p.height} @ ${p.fps ?? "?"} fps, ${p.duration_s.toFixed(3)} s, ${p.video_codec ?? "no video"} / ${p.audio_codec ?? "no audio"}`,
-		`- Loudness: ${r.metrics.integrated_lufs ?? "n/a"} LUFS integrated, LRA ${r.metrics.lra ?? "n/a"} LU, true peak ${r.metrics.true_peak_dbtp ?? "n/a"} dBTP`,
-		`- Black: ${r.metrics.black.length ? fmtRanges(r.metrics.black) : "none"}`,
-		`- Frozen: ${r.metrics.freeze.length ? fmtRanges(r.metrics.freeze) : "none"}`,
-		`- Silence: ${r.metrics.silence.length ? fmtRanges(r.metrics.silence) : "none"}`,
-		""
-	].join("\n");
-}
-/** Write `<dir>/qa/report.json` and `<dir>/qa/report.md`. */
-async function writeQaReport(dir, report) {
-	const qaDir = join(dir, "qa");
-	await mkdir(qaDir, { recursive: true });
-	const json = join(qaDir, "report.json");
-	const md = join(qaDir, "report.md");
-	await writeFile(json, `${JSON.stringify(report, null, 2)}\n`);
-	await writeFile(md, formatQaMarkdown(report));
-	return {
-		json,
-		md
-	};
-}
-//#endregion
 //#region ../media/dist/frames.js
 /**
 * Frame sampling and perceptual comparison for golden-frame tests and render diffs. ffmpeg only
@@ -11106,6 +10823,552 @@ async function pngSize$1(path) {
 	} finally {
 		await fh.close();
 	}
+}
+/** A loop's last frame must match its first at least this well (SSIM, the golden-frame metric). */
+const LOOP_SSIM_MIN = .99;
+/** Floor for RMS levels (dB), so two silent ends compare as equal. */
+const SILENCE_DB = -90;
+/** Default blackdetect pixel threshold (fraction of the luma range). */
+const BLACK_PIX_TH = .1;
+/** Normalised limited-range luma (0–1) of a #RRGGBB colour, BT.709. */
+function lumaOf(hex) {
+	const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+	if (!m) return null;
+	const n = parseInt(m[1], 16);
+	const [r, g, b] = [
+		n >> 16 & 255,
+		n >> 8 & 255,
+		n & 255
+	];
+	return (.2126 * r + .7152 * g + .0722 * b) / 255;
+}
+/**
+* blackdetect pix_th for a background: half its luma (so the background itself is not "black"),
+* capped at the default. `nearBlack` means the background is too dark to tell a sparse scene from
+* a blank one, so black intervals can only be a warning.
+*/
+function blackThreshold(background) {
+	const l = background ? lumaOf(background) : null;
+	if (l === null) return {
+		pix_th: BLACK_PIX_TH,
+		nearBlack: false
+	};
+	const pix_th = Math.min(BLACK_PIX_TH, Math.round(l / 2 * 1e3) / 1e3);
+	return {
+		pix_th: Math.max(.005, pix_th),
+		nearBlack: l < .02
+	};
+}
+const r3$4 = (n) => Math.round(n * 1e3) / 1e3;
+function ranges(stderr, startRe, endRe, totalS) {
+	const events = [];
+	for (const m of stderr.matchAll(startRe)) events.push({
+		t: Number(m[1]),
+		kind: "s",
+		at: m.index
+	});
+	for (const m of stderr.matchAll(endRe)) events.push({
+		t: Number(m[1]),
+		kind: "e",
+		at: m.index
+	});
+	events.sort((a, b) => a.at - b.at);
+	const out = [];
+	let open = null;
+	for (const e of events) if (e.kind === "s") open = e.t;
+	else if (open !== null) {
+		out.push({
+			start_s: r3$4(open),
+			end_s: r3$4(e.t),
+			duration_s: r3$4(e.t - open)
+		});
+		open = null;
+	}
+	if (open !== null && totalS > open) out.push({
+		start_s: r3$4(open),
+		end_s: r3$4(totalS),
+		duration_s: r3$4(totalS - open)
+	});
+	return out;
+}
+/** Parse blackdetect / freezedetect / silencedetect / ebur128 output from one decode pass. */
+function parseDetections(stderr, totalS) {
+	const black = [];
+	for (const m of stderr.matchAll(/black_start:\s*(-?[\d.]+)\s+black_end:\s*(-?[\d.]+)\s+black_duration:\s*(-?[\d.]+)/g)) black.push({
+		start_s: r3$4(Number(m[1])),
+		end_s: r3$4(Number(m[2])),
+		duration_s: r3$4(Number(m[3]))
+	});
+	return {
+		black,
+		freeze: ranges(stderr, /freeze_start:\s*(-?[\d.]+)/g, /freeze_end:\s*(-?[\d.]+)/g, totalS),
+		silence: ranges(stderr, /silence_start:\s*(-?[\d.]+)/g, /silence_end:\s*(-?[\d.]+)/g, totalS),
+		...parseEbur128Summary(stderr)
+	};
+}
+/** Big changes from `scdet` log lines (score ≥ BIG_CHANGE_SCORE), merged within CHANGE_MERGE_S. */
+function parseSceneChanges(stderr, minScore = 5) {
+	const out = [];
+	for (const m of stderr.matchAll(/lavfi\.scd\.score:\s*([\d.]+),\s*lavfi\.scd\.time:\s*(-?[\d.]+)/g)) {
+		const score = Number(m[1]);
+		const t = r3$4(Number(m[2]));
+		if (!Number.isFinite(score) || !Number.isFinite(t) || score < minScore) continue;
+		const prev = out[out.length - 1];
+		if (prev && t - prev.t < .1) {
+			prev.score = Math.max(prev.score, score);
+			continue;
+		}
+		out.push({
+			t,
+			score
+		});
+	}
+	return out;
+}
+/** Changes/s, cuts/s, the longest stretch without a change and the frozen share of `durationS`. */
+function motionStats(changes, durationS, freeze) {
+	const d = durationS > 0 ? durationS : 0;
+	const per = (n) => d > 0 ? r3$4(n / d) : 0;
+	const cuts = changes.filter((c) => c.score >= 15).length;
+	const edges = [
+		0,
+		...changes.map((c) => c.t).filter((t) => t > 0 && t < d),
+		d
+	];
+	let longest = 0;
+	let at;
+	for (let i = 1; i < edges.length; i++) {
+		const gap = edges[i] - edges[i - 1];
+		if (gap > longest) {
+			longest = gap;
+			at = {
+				start_s: r3$4(edges[i - 1]),
+				end_s: r3$4(edges[i])
+			};
+		}
+	}
+	const frozen = freeze.reduce((n, f) => n + f.duration_s, 0);
+	return {
+		changes: changes.length,
+		changes_per_sec: per(changes.length),
+		cuts,
+		cuts_per_sec: per(cuts),
+		change_times_s: changes.slice(0, 500).map((c) => c.t),
+		longest_static_s: r3$4(longest),
+		...at ? { longest_static_at: at } : {},
+		frozen_s: r3$4(frozen),
+		frozen_pct: d > 0 ? Math.round(frozen / d * 1e3) / 10 : 0
+	};
+}
+/** RMS level (dB full scale) of mono PCM, floored at -90 dB. */
+function rmsDb(pcm) {
+	if (!pcm.length) return SILENCE_DB;
+	let e = 0;
+	for (const v of pcm) e += v * v;
+	const rms = Math.sqrt(e / pcm.length);
+	return rms > 0 ? Math.max(SILENCE_DB, Math.round(20 * Math.log10(rms) * 100) / 100) : SILENCE_DB;
+}
+/**
+* One ffprobe plus one decode pass: blackdetect, freezedetect and scdet on the video, silencedetect
+* and ebur128 on the audio. Shared by technical QA and `compare` (a reference video).
+*/
+async function analyzeVideo$1(videoPath, o = {}, opts = {}) {
+	const probe = o.probe ?? await ffprobe(videoPath, opts);
+	const args = ["-i", videoPath];
+	const black = blackThreshold(o.background);
+	if (probe.has_video) args.push("-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=${black.pix_th},freezedetect=n=-60dB:d=1.0,scdet=t=5`);
+	if (probe.has_audio) args.push("-map", "0:a:0", "-af", "silencedetect=n=-50dB:d=1.0,ebur128=peak=true:framelog=quiet");
+	args.push("-f", "null", "-");
+	const { stderr } = await runFfmpeg(args, {
+		...opts,
+		keepStderr: true
+	});
+	const det = parseDetections(stderr, probe.duration_s);
+	const motion = motionStats(probe.has_video ? parseSceneChanges(stderr) : [], probe.duration_s, det.freeze);
+	return {
+		probe,
+		...det,
+		motion,
+		black_threshold: black
+	};
+}
+/**
+* Measure a loop's seam: SSIM of the first vs the last frame (160 px wide, as golden frames) and
+* the RMS level jump between the last and first {@link LOOP_AUDIO_WINDOW_MS} of audio.
+*/
+async function measureLoopSeam(videoPath, probe, opts = {}) {
+	const work = await mkdtemp(join(tmpdir(), "vs-loop-seam-"));
+	const run = (args) => runFfmpeg(["-y", ...args], {
+		...opts.tools ? { tools: opts.tools } : {},
+		...opts.signal ? { signal: opts.signal } : {},
+		timeoutMs: 12e4
+	});
+	try {
+		let ssim = null;
+		if (probe.has_video) {
+			const first = join(work, "first.png");
+			const last = join(work, "last.png");
+			const png = [
+				"-vf",
+				"scale=160:-2:flags=bicubic",
+				"-pix_fmt",
+				"rgb24",
+				"-c:v",
+				"png"
+			];
+			await run([
+				"-i",
+				videoPath,
+				"-map",
+				"0:v:0",
+				"-frames:v",
+				"1",
+				...png,
+				first
+			]);
+			await run([
+				"-sseof",
+				"-1",
+				"-i",
+				videoPath,
+				"-map",
+				"0:v:0",
+				...png,
+				"-update",
+				"1",
+				"-f",
+				"image2",
+				last
+			]);
+			const ok = async (f) => ((await stat(f).catch(() => void 0))?.size ?? 0) > 0;
+			if (await ok(first) && await ok(last)) ssim = Math.round(await frameSsim(first, last, opts) * 1e4) / 1e4;
+		}
+		let jump = null;
+		if (probe.has_audio) {
+			const w = (50 / 1e3).toFixed(3);
+			const pcm = [
+				"-map",
+				"0:a:0",
+				"-ac",
+				"1",
+				"-ar",
+				"16000",
+				"-f",
+				"f32le",
+				"-c:a",
+				"pcm_f32le"
+			];
+			const head = join(work, "head.f32");
+			const tail = join(work, "tail.f32");
+			await run([
+				"-i",
+				videoPath,
+				"-t",
+				w,
+				...pcm,
+				head
+			]);
+			await run([
+				"-sseof",
+				`-${w}`,
+				"-i",
+				videoPath,
+				...pcm,
+				tail
+			]);
+			const level = async (f) => {
+				const buf = await readFile(f);
+				return rmsDb(new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4)));
+			};
+			jump = Math.round(Math.abs(await level(tail) - await level(head)) * 100) / 100;
+		}
+		return {
+			ssim,
+			audio_jump_db: jump
+		};
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+const fmtRanges = (rs) => rs.map((r) => `${r.start_s.toFixed(2)}–${r.end_s.toFixed(2)}s`).join(", ");
+/**
+* Technical QA in one ffprobe plus one decode pass (blackdetect, freezedetect, scdet,
+* silencedetect, ebur128), plus the loop seam when asked. Frozen time fails above its limit;
+* motion density and the longest static stretch fail only against acceptance numbers.
+*/
+async function technicalQa(videoPath, expect, opts = {}) {
+	const tol = expect.tolerance_s ?? .5;
+	const target = expect.loudness_target ?? -14;
+	const ltol = expect.loudness_tolerance ?? 1.5;
+	const requireAudio = expect.require_audio ?? true;
+	const probe = await ffprobe(videoPath, opts);
+	const checks = [];
+	if (!probe.has_video) checks.push({
+		id: "video_stream",
+		status: "fail",
+		detail: "no video stream",
+		fix: "Re-run the render; the output has no video."
+	});
+	else {
+		const sizeOk = probe.width === expect.width && probe.height === expect.height;
+		checks.push({
+			id: "resolution",
+			status: sizeOk ? "ok" : "fail",
+			detail: `${probe.width}x${probe.height} (expected ${expect.width}x${expect.height})`,
+			...sizeOk ? {} : { fix: "Re-assemble with the target width/height (concatVideos normalises every segment)." }
+		});
+		const ar = probe.width / probe.height;
+		const want = expect.width / expect.height;
+		const arOk = Math.abs(ar - want) / want < .01;
+		checks.push({
+			id: "aspect",
+			status: arOk ? "ok" : "fail",
+			detail: `aspect ${ar.toFixed(4)} (expected ${want.toFixed(4)})`,
+			...arOk ? {} : { fix: "Scale and pad/crop to the target aspect ratio." }
+		});
+		const h264 = probe.video_codec === "h264";
+		checks.push({
+			id: "video_codec",
+			status: h264 ? "ok" : "warn",
+			detail: `${probe.video_codec} ${probe.pix_fmt ?? ""}`.trim(),
+			...h264 ? {} : { fix: "Encode with libx264 (encodeFinal) for platform compatibility." }
+		});
+		if (probe.pix_fmt && probe.pix_fmt !== "yuv420p") checks.push({
+			id: "pix_fmt",
+			status: "warn",
+			detail: `${probe.pix_fmt}; most platforms expect yuv420p`,
+			fix: "Add `format=yuv420p` / `-pix_fmt yuv420p`."
+		});
+	}
+	const dd = Math.abs(probe.duration_s - expect.duration_s);
+	checks.push({
+		id: "duration",
+		status: dd <= tol ? "ok" : "fail",
+		detail: `${probe.duration_s.toFixed(3)}s (expected ${expect.duration_s.toFixed(3)}s ± ${tol}s)`,
+		...dd <= tol ? {} : { fix: "Check scene durations and the voice track length; the concat enforces exact slots." }
+	});
+	if (!probe.has_audio) checks.push({
+		id: "audio_stream",
+		status: requireAudio ? "fail" : "ok",
+		detail: "no audio stream",
+		...requireAudio ? { fix: "Mux the voice track (muxAudio), or a silent track for a silent video." } : {}
+	});
+	else {
+		const aacOk = probe.audio_codec === "aac" && probe.sample_rate === 48e3;
+		checks.push({
+			id: "audio_stream",
+			status: aacOk ? "ok" : "warn",
+			detail: `${probe.audio_codec} ${probe.sample_rate} Hz, ${probe.channels} ch`,
+			...aacOk ? {} : { fix: "Encode audio as AAC 48 kHz." }
+		});
+	}
+	const det = await analyzeVideo$1(videoPath, {
+		probe,
+		...expect.background ? { background: expect.background } : {}
+	}, opts);
+	const black = det.black_threshold;
+	const acc = expect.acceptance ?? {};
+	let loopSeam;
+	if (probe.has_video) {
+		const longest = Math.max(0, ...det.black.map((b) => b.duration_s));
+		checks.push(det.black.length === 0 ? {
+			id: "black_frames",
+			status: "ok",
+			detail: "no black intervals ≥ 0.5s"
+		} : {
+			id: "black_frames",
+			status: longest >= 2 && !black.nearBlack ? "fail" : "warn",
+			detail: `black at ${fmtRanges(det.black)}${black.nearBlack ? " (the background is near black, so sparse scenes can read as black)" : ""}`,
+			fix: "Check the scene(s) at those times rendered correctly; re-render them if blank."
+		});
+		checks.push(...motionChecks(det.motion, det.freeze, acc));
+		if (expect.loop) {
+			loopSeam = await measureLoopSeam(videoPath, probe, opts);
+			checks.push(loopSeamCheck(loopSeam));
+		}
+	}
+	if (probe.has_audio && expect.intended_silence) {
+		const why = expect.silence_reason ?? "silent on purpose (no narration, no music)";
+		checks.push({
+			id: "silence",
+			status: "ok",
+			detail: why
+		});
+		checks.push({
+			id: "loudness",
+			status: "ok",
+			detail: `not measured: ${why}`
+		});
+	} else if (probe.has_audio) {
+		checks.push(det.silence.length === 0 ? {
+			id: "silence",
+			status: "ok",
+			detail: "no silence ≥ 1s below -50 dB"
+		} : {
+			id: "silence",
+			status: "warn",
+			detail: `silent at ${fmtRanges(det.silence)}`,
+			fix: "Check the voice track covers those scenes, or accept intentional pauses."
+		});
+		const I = det.integrated_lufs;
+		if (I === null) checks.push({
+			id: "loudness",
+			status: "warn",
+			detail: "integrated loudness not measurable (silent audio?)"
+		});
+		else {
+			const off = Math.abs(I - target);
+			checks.push({
+				id: "loudness",
+				status: off <= ltol ? "ok" : "warn",
+				detail: `${I.toFixed(1)} LUFS (target ${target} ± ${ltol})`,
+				...off <= ltol ? {} : { fix: "Run two-pass loudnorm (loudnorm2pass) on the voice track before muxing." }
+			});
+		}
+		if (det.true_peak_dbtp !== null && det.true_peak_dbtp > -1) checks.push({
+			id: "true_peak",
+			status: "warn",
+			detail: `true peak ${det.true_peak_dbtp.toFixed(1)} dBTP > -1 dBTP`,
+			fix: "Normalise with TP=-1 (loudnorm2pass)."
+		});
+	}
+	return {
+		status: checks.some((c) => c.status === "fail") ? "fail" : checks.some((c) => c.status === "warn") ? "warn" : "ok",
+		video: videoPath,
+		checks,
+		metrics: {
+			probe,
+			black: det.black,
+			freeze: det.freeze,
+			silence: det.silence,
+			integrated_lufs: det.integrated_lufs,
+			lra: det.lra,
+			true_peak_dbtp: det.true_peak_dbtp,
+			...probe.has_video ? { motion: det.motion } : {},
+			...loopSeam ? { loop_seam: loopSeam } : {}
+		}
+	};
+}
+const fmtS = (n) => `${Math.round(n * 100) / 100}s`;
+/**
+* frozen_frames, motion_density, longest_static and (with acceptance.hold_ms) hold. Frozen time
+* fails above the limit (default {@link DEFAULT_MAX_FROZEN_PCT}%): a frozen reel reads as a
+* slideshow, whatever made it. Density and static stretch fail only against acceptance numbers.
+*/
+function motionChecks(m, freeze, acc) {
+	const out = [];
+	const maxFrozen = acc.max_frozen_pct ?? 15;
+	if (!freeze.length) out.push({
+		id: "frozen_frames",
+		status: "ok",
+		detail: `no frozen intervals ≥ 1s (limit ${maxFrozen}% of the runtime)`
+	});
+	else {
+		const over = m.frozen_pct > maxFrozen;
+		out.push({
+			id: "frozen_frames",
+			status: over ? "fail" : "ok",
+			detail: `${fmtS(m.frozen_s)} frozen, ${m.frozen_pct}% of the runtime (limit ${maxFrozen}%): ${fmtRanges([...freeze])}`,
+			...over ? { fix: "Give those stretches motion (a `motion` scene, a camera move, staged reveals or a count-up), or shorten them; a frozen reel reads as a slideshow." } : {}
+		});
+	}
+	const perSec = `${m.changes_per_sec} big changes/s (${m.changes} in total, ${m.cuts} cuts)`;
+	if (acc.min_changes_per_sec === void 0) out.push({
+		id: "motion_density",
+		status: "ok",
+		detail: `${perSec}; no acceptance minimum set`
+	});
+	else {
+		const ok = m.changes_per_sec >= acc.min_changes_per_sec;
+		out.push({
+			id: "motion_density",
+			status: ok ? "ok" : "fail",
+			detail: `${perSec}; minimum ${acc.min_changes_per_sec}/s`,
+			...ok ? {} : { fix: "Add visual beats: stage each scene as several states (reveals, match cuts, camera moves) or split long scenes." }
+		});
+	}
+	const where = m.longest_static_at ? ` (${m.longest_static_at.start_s.toFixed(2)}–${m.longest_static_at.end_s.toFixed(2)}s)` : "";
+	if (acc.max_static_sec === void 0) out.push({
+		id: "longest_static",
+		status: "ok",
+		detail: `longest stretch without a big change ${fmtS(m.longest_static_s)}${where}; no acceptance maximum set`
+	});
+	else {
+		const ok = m.longest_static_s <= acc.max_static_sec;
+		out.push({
+			id: "longest_static",
+			status: ok ? "ok" : "fail",
+			detail: `longest stretch without a big change ${fmtS(m.longest_static_s)}${where}; maximum ${acc.max_static_sec}s`,
+			...ok ? {} : { fix: "Add a change inside that stretch (a new state, a cut or a reveal), or shorten the scene there." }
+		});
+	}
+	if (acc.hold_ms !== void 0) {
+		const ok = m.longest_static_s * 1e3 >= acc.hold_ms;
+		out.push({
+			id: "hold",
+			status: ok ? "ok" : "fail",
+			detail: `longest hold ${Math.round(m.longest_static_s * 1e3)} ms; at least one of ${acc.hold_ms} ms wanted`,
+			...ok ? {} : { fix: "Hold one key moment still (no big change) so the motion around it feels earned." }
+		});
+	}
+	return out;
+}
+/** loop_seam: first vs last frame SSIM ≥ LOOP_SSIM_MIN and the audio level jump < LOOP_AUDIO_JUMP_DB. */
+function loopSeamCheck(seam) {
+	const frameOk = seam.ssim !== null && seam.ssim >= .99;
+	const audioOk = seam.audio_jump_db === null || seam.audio_jump_db < 6;
+	const detail = [`first vs last frame SSIM ${seam.ssim ?? "not measured"} (minimum ${LOOP_SSIM_MIN})`, seam.audio_jump_db === null ? "no audio" : `audio level jump ${seam.audio_jump_db} dB across the seam (maximum 6 dB)`].join("; ");
+	const fixes = [...frameOk ? [] : ["make the last frame return to the first (cyclic motion periods must divide the loop length)"], ...audioOk ? [] : ["end the music and sound where they started (loop the bed on a bar, no fade-in or fade-out at the seam)"]];
+	return {
+		id: "loop_seam",
+		status: frameOk && audioOk ? "ok" : "fail",
+		detail,
+		...fixes.length ? { fix: `${fixes.join("; ")}.` } : {}
+	};
+}
+function formatQaMarkdown(r) {
+	const icon = {
+		ok: "ok",
+		warn: "WARN",
+		fail: "FAIL"
+	};
+	const p = r.metrics.probe;
+	return [
+		`# Technical QA: ${r.status.toUpperCase()}`,
+		"",
+		`Video: \`${r.video}\``,
+		"",
+		"| Check | Status | Detail | Fix |",
+		"| --- | --- | --- | --- |",
+		...r.checks.map((c) => `| ${c.id} | ${icon[c.status]} | ${c.detail.replace(/\|/g, "\\|")} | ${(c.status !== "ok" && c.fix ? c.fix : "").replace(/\|/g, "\\|")} |`),
+		"",
+		"## Metrics",
+		"",
+		`- Size: ${p.width}x${p.height} @ ${p.fps ?? "?"} fps, ${p.duration_s.toFixed(3)} s, ${p.video_codec ?? "no video"} / ${p.audio_codec ?? "no audio"}`,
+		`- Loudness: ${r.metrics.integrated_lufs ?? "n/a"} LUFS integrated, LRA ${r.metrics.lra ?? "n/a"} LU, true peak ${r.metrics.true_peak_dbtp ?? "n/a"} dBTP`,
+		`- Black: ${r.metrics.black.length ? fmtRanges(r.metrics.black) : "none"}`,
+		`- Frozen: ${r.metrics.freeze.length ? fmtRanges(r.metrics.freeze) : "none"}`,
+		...r.metrics.motion ? [`- Motion: ${r.metrics.motion.changes} big changes (${r.metrics.motion.changes_per_sec}/s), ${r.metrics.motion.cuts} cuts (${r.metrics.motion.cuts_per_sec}/s), longest static ${r.metrics.motion.longest_static_s}s, frozen ${r.metrics.motion.frozen_pct}%`] : [],
+		...r.metrics.loop_seam ? [`- Loop seam: SSIM ${r.metrics.loop_seam.ssim ?? "n/a"}, audio jump ${r.metrics.loop_seam.audio_jump_db ?? "n/a"} dB`] : [],
+		`- Silence: ${r.metrics.silence.length ? fmtRanges(r.metrics.silence) : "none"}`,
+		""
+	].join("\n");
+}
+/** Write `<dir>/qa/report.json` and `<dir>/qa/report.md`. */
+async function writeQaReport(dir, report) {
+	const qaDir = join(dir, "qa");
+	await mkdir(qaDir, { recursive: true });
+	const json = join(qaDir, "report.json");
+	const md = join(qaDir, "report.md");
+	await writeFile(json, `${JSON.stringify(report, null, 2)}\n`);
+	await writeFile(md, formatQaMarkdown(report));
+	return {
+		json,
+		md
+	};
 }
 //#endregion
 //#region ../media/dist/asr.js
@@ -12038,7 +12301,7 @@ function pickPrimary(det, prev) {
 	return null;
 }
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
-const r3$2 = (v) => Math.round(v * 1e3) / 1e3;
+const r3$3 = (v) => Math.round(v * 1e3) / 1e3;
 /**
 * Per-frame picks → keyframes: misses carry the previous subject forward (leading misses take the
 * first detection), a 1-2-1 average removes jitter, and runs that stay inside the dead zone keep
@@ -12089,9 +12352,9 @@ function picksToTrack(times, picks) {
 	});
 	const same = (a, b) => !!a && a.x === b.x && a.y === b.y;
 	const keys = dz.filter((p, i) => !(same(dz[i - 1], p) && same(dz[i + 1], p))).map((k) => ({
-		t: r3$2(k.t),
-		x: r3$2(k.x),
-		y: r3$2(k.y)
+		t: r3$3(k.t),
+		x: r3$3(k.x),
+		y: r3$3(k.y)
 	}));
 	return keys.filter((k, i) => i === 0 || k.t > keys[i - 1].t).slice(0, 200);
 }
@@ -12108,7 +12371,7 @@ async function suggestFocusTrack(video, opts) {
 	let fps = opts.fps ?? 2;
 	if (span * fps > 180) {
 		fps = 180 / span;
-		notes.push(`sampled ${r3$2(fps)} frames/s so at most 180 frames are checked`);
+		notes.push(`sampled ${r3$3(fps)} frames/s so at most 180 frames are checked`);
 	}
 	const dir = await mkdtemp(join(tmpdir(), "vs-focus-"));
 	try {
@@ -25948,7 +26211,7 @@ function map$1(p, c) {
 	};
 }
 /** Pure layout of a deterministic scene into draw elements (exported for tests and previews). */
-function composeScene(scene, target, tokens, inputs = {}) {
+function composeScene$1(scene, target, tokens, inputs = {}) {
 	const det = scene.deterministic;
 	if (!det) throw new Error(`scene ${scene.id} has no deterministic content`);
 	const c = {
@@ -26765,7 +27028,7 @@ function createFfmpegRenderer(opts = {}) {
 				images[side] = path ? await probeImage(path, tools) : null;
 				if (!images[side]) warnings.push(`split_screen: ${side} asset "${id}" could not be resolved or read; drew a placeholder`);
 			}
-			const comp = composeScene(scene, target, tokens, {
+			const comp = composeScene$1(scene, target, tokens, {
 				image,
 				images,
 				...req.zones ? { zones: req.zones } : {}
@@ -27227,7 +27490,7 @@ function footageOverlay(req) {
 		comp: null,
 		warnings: [`footage: "${det.kind}" is not drawn over footage (supported: ${FOOTAGE_OVERLAY_KINDS.join(", ")}); skipped`]
 	};
-	const comp = composeScene(req.scene, req.target, req.tokens, req.zones ? { zones: req.zones } : {});
+	const comp = composeScene$1(req.scene, req.target, req.tokens, req.zones ? { zones: req.zones } : {});
 	if (SCRIM_KINDS.has(det.kind)) {
 		const scrim = {
 			type: "box",
@@ -33446,6 +33709,11 @@ function serialQueue() {
 		return p;
 	};
 }
+/**
+* One Chrome at a time in this process: HyperFrames scene renders and still captures (`stills`)
+* both go through this gate, so a still sheet never launches Chrome beside a render.
+*/
+const chromeGate = serialQueue();
 /** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version. */
 function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage, cues, images, motion) {
 	return sha256Hex(canonicalJson({
@@ -33590,7 +33858,6 @@ async function renderScenes(spec, o) {
 	const scenes = o.only ? spec.scenes.filter((s) => o.only.includes(s.id)) : spec.scenes;
 	const results = new Array(scenes.length);
 	let footageRenderer = o.footageRenderer;
-	const chromeGate = serialQueue();
 	let irAssets;
 	const renderOne = async (given) => {
 		const orig = cutawayPicture(given);
@@ -35998,6 +36265,497 @@ ${timelineScript(compositionId, dur)}
 		text_boxes: boxes
 	};
 }
+/**
+* Loop-seam tolerance. `render(0)` and `render(duration)` are reached through different float
+* paths (e.g. `sin(2π·t/d)` at t = d is -2.4e-16, not 0; a transform can differ by 1e-13 px), and
+* the rasterizer may then round a few antialiased edge pixels by a level or two. Channel
+* differences up to `channel` are ignored; beyond that, at most `fraction` of the pixels may
+* differ (0.05%: about 1000 px of a 1080x1920 frame, a few glyph edges). A real seam moves or
+* recolours whole shapes: tens of thousands of pixels by large amounts.
+*/
+const LOOP_SEAM_TOLERANCE = {
+	channel: 2,
+	fraction: 5e-4
+};
+/** `t` on the frame grid (nearest frame), clamped to [0, last frame]; with `allowEnd`, to [0, duration]. */
+function frameAlignedTime(t, fps, duration, allowEnd = false) {
+	const frames = Math.max(1, Math.round(duration * fps));
+	const maxFrame = allowEnd ? frames : frames - 1;
+	const f = Math.min(maxFrame, Math.max(0, Math.round((Number.isFinite(t) ? t : 0) * fps)));
+	return Math.round(f / fps * 1e6) / 1e6;
+}
+/**
+* The seeks of the determinism check: t1 (≈25%), mid (≈50%) and t2 (≈75%), frame-aligned, in the
+* order t1, mid, t2, t1, t2, mid. Each time is drawn twice after different frames, so state
+* carried between seeks (or a clock, or unseeded randomness) shows up as different pixels.
+* Very short scenes fall back to fewer distinct times (0 is added when needed).
+*/
+function determinismPlan(duration, fps, loop = false) {
+	const at = (f) => frameAlignedTime(duration * f, fps, duration);
+	let [t1, mid, t2] = [
+		at(.25),
+		at(.5),
+		at(.75)
+	];
+	const distinct = [.../* @__PURE__ */ new Set([
+		t1,
+		mid,
+		t2
+	])];
+	if (distinct.length < 2) {
+		const other = distinct[0] === 0 ? frameAlignedTime(1 / fps, fps, duration) : 0;
+		[t1, mid, t2] = [
+			distinct[0],
+			other,
+			distinct[0]
+		];
+	}
+	return {
+		order: distinct.length === 2 && t1 === t2 ? [
+			t1,
+			mid,
+			t1,
+			mid
+		] : [
+			t1,
+			mid,
+			t2,
+			t1,
+			t2,
+			mid
+		],
+		...loop ? { loop: [0, frameAlignedTime(duration, fps, duration, true)] } : {}
+	};
+}
+/** Times whose captures do not all hash the same, with the distinct hashes (in capture order). */
+function compareCaptures(captures) {
+	const byT = /* @__PURE__ */ new Map();
+	for (const c of captures) byT.set(c.t, [...byT.get(c.t) ?? [], c.sha256]);
+	const out = [];
+	for (const [t, hs] of byT) {
+		const distinct = [...new Set(hs)];
+		if (distinct.length > 1) out.push({
+			t,
+			hashes: distinct
+		});
+	}
+	return out.sort((a, b) => a.t - b.t);
+}
+function sha256(buf) {
+	return createHash("sha256").update(buf).digest("hex");
+}
+const PNG_SIG = Buffer.from([
+	137,
+	80,
+	78,
+	71,
+	13,
+	10,
+	26,
+	10
+]);
+/**
+* Decode an 8-bit, non-interlaced RGB/RGBA/grey PNG (what Chrome's screenshots are) to RGBA.
+* Returns null for anything else (palette, 16-bit, interlaced), so callers fall back to hashes.
+*/
+function decodePng(buf) {
+	const b = Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength);
+	if (b.length < 8 || !b.subarray(0, 8).equals(PNG_SIG)) return null;
+	let off = 8;
+	let width = 0;
+	let height = 0;
+	let channels = 0;
+	const idat = [];
+	while (off + 8 <= b.length) {
+		const len = b.readUInt32BE(off);
+		const type = b.toString("latin1", off + 4, off + 8);
+		const body = b.subarray(off + 8, off + 8 + len);
+		off += 12 + len;
+		if (type === "IHDR") {
+			width = body.readUInt32BE(0);
+			height = body.readUInt32BE(4);
+			const depth = body[8];
+			const colour = body[9];
+			const interlace = body[12];
+			channels = colour === 6 ? 4 : colour === 2 ? 3 : colour === 0 ? 1 : colour === 4 ? 2 : 0;
+			if (depth !== 8 || interlace !== 0 || !channels) return null;
+		} else if (type === "IDAT") idat.push(body);
+		else if (type === "IEND") break;
+	}
+	if (!width || !height || !channels) return null;
+	let raw;
+	try {
+		raw = inflateSync(Buffer.concat(idat));
+	} catch {
+		return null;
+	}
+	const stride = width * channels;
+	if (raw.length < height * (stride + 1)) return null;
+	const px = new Uint8Array(height * stride);
+	for (let y = 0; y < height; y++) {
+		const filter = raw[y * (stride + 1)];
+		const src = y * (stride + 1) + 1;
+		const row = y * stride;
+		const prev = row - stride;
+		for (let x = 0; x < stride; x++) {
+			const v = raw[src + x];
+			const a = x >= channels ? px[row + x - channels] : 0;
+			const up = y > 0 ? px[prev + x] : 0;
+			const c = x >= channels && y > 0 ? px[prev + x - channels] : 0;
+			let out;
+			switch (filter) {
+				case 0:
+					out = v;
+					break;
+				case 1:
+					out = v + a;
+					break;
+				case 2:
+					out = v + up;
+					break;
+				case 3:
+					out = v + (a + up >> 1);
+					break;
+				case 4: {
+					const p = a + up - c;
+					const pa = Math.abs(p - a);
+					const pb = Math.abs(p - up);
+					const pc = Math.abs(p - c);
+					out = v + (pa <= pb && pa <= pc ? a : pb <= pc ? up : c);
+					break;
+				}
+				default: return null;
+			}
+			px[row + x] = out & 255;
+		}
+	}
+	const data = new Uint8Array(width * height * 4);
+	for (let i = 0, j = 0; i < width * height; i++, j += channels) {
+		const o = i * 4;
+		if (channels >= 3) {
+			data[o] = px[j];
+			data[o + 1] = px[j + 1];
+			data[o + 2] = px[j + 2];
+			data[o + 3] = channels === 4 ? px[j + 3] : 255;
+		} else {
+			data[o] = data[o + 1] = data[o + 2] = px[j];
+			data[o + 3] = channels === 2 ? px[j + 1] : 255;
+		}
+	}
+	return {
+		width,
+		height,
+		data
+	};
+}
+/** Per-pixel comparison of two same-size RGBA images; null when their sizes differ. */
+function pixelDiff(a, b, channelTolerance = 0) {
+	if (a.width !== b.width || a.height !== b.height) return null;
+	let differing = 0;
+	let max = 0;
+	const n = a.width * a.height;
+	for (let i = 0; i < n; i++) {
+		let worst = 0;
+		for (let k = 0; k < 4; k++) {
+			const d = Math.abs(a.data[i * 4 + k] - b.data[i * 4 + k]);
+			if (d > worst) worst = d;
+		}
+		if (worst > max) max = worst;
+		if (worst > channelTolerance) differing++;
+	}
+	return {
+		differing,
+		fraction: n ? differing / n : 0,
+		max
+	};
+}
+/** render(0) vs render(duration): equal hashes pass; otherwise the pixel diff must stay within {@link LOOP_SEAM_TOLERANCE}. */
+function judgeLoopSeam(first, last) {
+	if (sha256(first) === sha256(last)) return {
+		ok: true,
+		sha_equal: true
+	};
+	const a = decodePng(first);
+	const b = decodePng(last);
+	const d = a && b ? pixelDiff(a, b, LOOP_SEAM_TOLERANCE.channel) : null;
+	if (!d) return {
+		ok: false,
+		sha_equal: false
+	};
+	return {
+		ok: d.fraction <= LOOP_SEAM_TOLERANCE.fraction,
+		sha_equal: false,
+		differing_fraction: Math.round(d.fraction * 1e6) / 1e6,
+		max_channel_diff: d.max
+	};
+}
+/** Run the determinism (and, with `loop`, loop-seam) check through `capture(t)` (a PNG of the frame at t). */
+async function runDeterminismCheck(capture, o) {
+	const plan = determinismPlan(o.duration, o.fps, o.loop === true);
+	const hashes = [];
+	for (const t of plan.order) hashes.push({
+		t,
+		sha256: sha256(await capture(t))
+	});
+	const mismatches = compareCaptures(hashes);
+	let loop_seam;
+	if (plan.loop) {
+		const [a, b] = plan.loop;
+		loop_seam = {
+			...judgeLoopSeam(await capture(a), await capture(b)),
+			first_t: a,
+			last_t: b
+		};
+	}
+	return {
+		version: 1,
+		ok: mismatches.length === 0,
+		order: plan.order,
+		mismatches,
+		...loop_seam ? { loop_seam } : {}
+	};
+}
+/** The check's findings for scene `sceneId` (none when it passed). */
+function determinismFindings(sceneId, r) {
+	const out = [];
+	if (r.mismatches.length) {
+		const times = r.mismatches.map((m) => `${m.t}s (${m.hashes.length} different frames)`).join(", ");
+		out.push({
+			id: "nondeterministic_scene",
+			severity: "error",
+			message: `scene ${sceneId}: seeking the same time twice drew different frames at ${times} (seek order ${r.order.join(", ")})`,
+			fix: "make window.seek(t) a pure function of t: no clock (Date.now, performance.now, timers, requestAnimationFrame), no unseeded randomness (use vs.rng(seed)), and no state carried between frames (accumulators, deltas from the previous t, physics stepped per call, nodes appended on each seek); rebuild the whole frame from t on every call"
+		});
+	}
+	const seam = r.loop_seam;
+	if (seam && !seam.ok) {
+		const how = seam.differing_fraction !== void 0 ? `${(seam.differing_fraction * 100).toFixed(2)}% of pixels differ (up to ${seam.max_channel_diff} levels)` : "the frames differ";
+		out.push({
+			id: "loop_seam",
+			severity: "warning",
+			message: `scene ${sceneId}: props.loop is set but the frame at ${seam.last_t}s does not match the frame at ${seam.first_t}s: ${how}`,
+			fix: "with loop, seek(duration) must draw exactly what seek(0) draws: drive each cycle from the phase (t % period) / period with a period that divides the duration, let springs and eases reach their rest value by the end, and return every element to its opening state"
+		});
+	}
+	return out;
+}
+function formatCheckFinding(f) {
+	return `${f.id}: ${f.message}; fix: ${f.fix}`;
+}
+/**
+* Chrome flags for captures: the pixel-relevant subset of the producer's own launch (0.8.78
+* `buildChromeArgs` in screenshot mode with its default software GPU mode). Chrome's sandbox
+* stays on: the page is untrusted, and the sandbox does not change pixels.
+*/
+function captureChromeArgs(width, height) {
+	return [
+		"--use-gl=angle",
+		"--use-angle=swiftshader",
+		"--enable-unsafe-swiftshader",
+		"--disable-gpu-compositing",
+		"--font-render-hinting=none",
+		"--force-color-profile=srgb",
+		`--window-size=${Math.round(width)},${Math.round(height)}`,
+		"--hide-scrollbars",
+		"--mute-audio",
+		"--disable-background-timer-throttling",
+		"--disable-backgrounding-occluded-windows",
+		"--disable-renderer-backgrounding",
+		"--disable-extensions",
+		"--disable-sync",
+		"--disable-component-update",
+		"--disable-default-apps",
+		"--no-pings",
+		"--disable-features=Translate,BackForwardCache,IntensiveWakeUpThrottling"
+	];
+}
+/**
+* puppeteer-core as the producer resolves it (`producerEntry`: the resolved producer entry file;
+* default: resolved from this module). Undefined when it cannot be loaded.
+*/
+async function loadPuppeteerLaunch(producerEntry) {
+	let entry = producerEntry;
+	if (!entry) try {
+		entry = fileURLToPath(import.meta.resolve("@hyperframes/producer"));
+	} catch {
+		return;
+	}
+	try {
+		const path = createRequire(entry).resolve("puppeteer-core");
+		const mod = await import(pathToFileURL(path).href);
+		const launch = mod.launch ?? mod.default?.launch;
+		return launch ? (o) => launch.call(mod.default ?? mod, o) : void 0;
+	} catch {
+		return;
+	}
+}
+const MIME$1 = {
+	".html": "text/html; charset=utf-8",
+	".js": "text/javascript; charset=utf-8",
+	".mjs": "text/javascript; charset=utf-8",
+	".css": "text/css; charset=utf-8",
+	".json": "application/json",
+	".svg": "image/svg+xml",
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".jpeg": "image/jpeg",
+	".webp": "image/webp",
+	".gif": "image/gif",
+	".avif": "image/avif",
+	".woff": "font/woff",
+	".woff2": "font/woff2",
+	".ttf": "font/ttf",
+	".otf": "font/otf",
+	".mp4": "video/mp4",
+	".webm": "video/webm",
+	".mp3": "audio/mpeg",
+	".wav": "audio/wav"
+};
+/** The file a request path maps to inside `root` (real paths; no escape through `..` or symlinks), or null. */
+function servedFile(root, urlPath) {
+	let rel;
+	try {
+		rel = decodeURIComponent(urlPath.split("?")[0].split("#")[0]);
+	} catch {
+		return null;
+	}
+	if (rel.includes("\0")) return null;
+	if (rel === "/" || rel === "") rel = "/index.html";
+	let realRoot;
+	try {
+		realRoot = realpathSync(root);
+	} catch {
+		return null;
+	}
+	const abs = resolve(realRoot, `.${rel.startsWith("/") ? rel : `/${rel}`}`);
+	if (abs !== realRoot && !abs.startsWith(realRoot + sep)) return null;
+	try {
+		const real = realpathSync(abs);
+		if (!real.startsWith(realRoot + sep)) return null;
+		return statSync(real).isFile() ? real : null;
+	} catch {
+		return null;
+	}
+}
+/** Serve `root` read-only on 127.0.0.1 (GET/HEAD only), for the capture page. */
+function serveDirectory(root) {
+	const server = createServer((req, res) => {
+		if (req.method !== "GET" && req.method !== "HEAD") {
+			res.writeHead(405).end();
+			return;
+		}
+		const file = servedFile(root, req.url ?? "/");
+		if (!file) {
+			res.writeHead(404, { "content-type": "text/plain" }).end("not found");
+			return;
+		}
+		const body = readFileSync(file);
+		res.writeHead(200, {
+			"content-type": MIME$1[extname(file).toLowerCase()] ?? "application/octet-stream",
+			"cache-control": "no-store",
+			"content-length": body.length
+		});
+		res.end(req.method === "HEAD" ? void 0 : body);
+	});
+	return new Promise((done, fail) => {
+		server.once("error", fail);
+		server.listen(0, "127.0.0.1", () => {
+			const addr = server.address();
+			done({
+				url: `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`,
+				close: () => new Promise((r) => server.close(() => r()))
+			});
+		});
+	});
+}
+/** Page-side readiness: the registered timeline, `__hf.buildReady[id]`, fonts and image decode. */
+function readinessScript(compositionId, timeoutMs) {
+	return `(async function () {
+  var id = ${JSON.stringify(compositionId)};
+  var deadline = Date.now() + ${Math.round(timeoutMs)};
+  while (!(window.__timelines && window.__timelines[id])) {
+    if (Date.now() > deadline) throw new Error("the page never registered window.__timelines[" + JSON.stringify(id) + "]");
+    await new Promise(function (r) { setTimeout(r, 25); });
+  }
+  var ready = window.__hf && window.__hf.buildReady && window.__hf.buildReady[id];
+  if (ready) await ready;
+  if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  var imgs = Array.prototype.slice.call(document.images || []);
+  await Promise.all(imgs.map(function (i) { return i.decode ? i.decode().catch(function () {}) : null; }));
+  return true;
+})()`;
+}
+/** Page-side seek through the registered timeline, then two animation frames so the frame is painted. */
+function seekScript(compositionId, t) {
+	return `(async function () {
+  var tl = window.__timelines[${JSON.stringify(compositionId)}];
+  tl.pause && tl.pause();
+  tl.seek(${Number.isFinite(t) ? t : 0});
+  await new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); });
+  return true;
+})()`;
+}
+/**
+* One headless Chrome for a batch of captures (one page per composition). Callers serialize it
+* with the renderer's Chrome gate (`chromeGate`) so it never runs beside a HyperFrames render.
+*/
+async function openCaptureSession(o) {
+	const timeoutMs = o.timeoutMs ?? 6e4;
+	const launch = o.launch ?? await loadPuppeteerLaunch(o.producerEntry);
+	if (!launch) throw new Error("puppeteer-core (a dependency of the HyperFrames producer) could not be loaded; run doctor for setup");
+	const browser = await launch({
+		executablePath: o.chromePath,
+		headless: true,
+		args: captureChromeArgs(o.width, o.height),
+		defaultViewport: null,
+		timeout: timeoutMs
+	});
+	const pages = /* @__PURE__ */ new Set();
+	return {
+		async open(dir, compositionId, width, height) {
+			const server = await serveDirectory(dir);
+			let page;
+			try {
+				page = await browser.newPage();
+				const errors = [];
+				page.on("pageerror", (e) => errors.push(e instanceof Error ? e.message : String(e)));
+				await page.setViewport({
+					width: Math.round(width),
+					height: Math.round(height),
+					deviceScaleFactor: 1
+				});
+				await page.goto(`${server.url}/index.html`, {
+					waitUntil: "load",
+					timeout: timeoutMs
+				});
+				await page.evaluate(readinessScript(compositionId, timeoutMs));
+				const p = page;
+				const pc = {
+					errors,
+					async capture(t) {
+						await p.evaluate(seekScript(compositionId, t));
+						return new Uint8Array(await p.screenshot({ type: "png" }));
+					},
+					async close() {
+						pages.delete(pc);
+						await p.close().catch(() => {});
+						await server.close();
+					}
+				};
+				pages.add(pc);
+				return pc;
+			} catch (e) {
+				await page?.close().catch(() => {});
+				await server.close();
+				throw e;
+			}
+		},
+		async close() {
+			for (const p of [...pages]) await p.close();
+			await browser.close().catch(() => {});
+		}
+	};
+}
 //#endregion
 //#region ../renderer/dist/hyperframes-renderer.js
 /** Exact pinned producer version (package.json pins "@hyperframes/producer": "0.8.78"). */
@@ -36244,6 +37002,136 @@ function defaultProducerInstalled() {
 const PRODUCER_SPECIFIER = "@hyperframes/producer";
 const defaultLoadProducer = async () => await import(PRODUCER_SPECIFIER);
 const probeCache = /* @__PURE__ */ new Map();
+/**
+* Compose `req.scene` exactly as the renderer draws it (any HyperFrames kind). A motion page is
+* untrusted code: it is composed only when the static lint finds no error (the composition's CSP
+* is the runtime backstop), and its local files are copied next to the composition with the same
+* relative paths. Throws for a refused page.
+*/
+async function composeScene(req) {
+	const { scene } = req;
+	const kind = scene.deterministic?.kind;
+	let motionHtml;
+	const motionAssets = [];
+	const motionWarnings = [];
+	if (kind === "motion") {
+		const html = scene.deterministic.props.html;
+		const page = await loadMotionPage(req.project_dir, typeof html === "string" ? html : "");
+		const errors = page.findings.filter((f) => f.severity === "error");
+		if (errors.length || page.html === void 0) throw new Error(`HyperFrames renderer refuses motion page ${String(html)} of scene ${scene.id} (${errors.length} lint error(s)): ${errors.map(formatMotionFinding).join("; ")}`);
+		motionHtml = page.html;
+		for (const f of page.findings) motionWarnings.push(`motion: ${formatMotionFinding(f)}`);
+		for (const f of page.files) if (f.ref === "index.html" || f.ref.startsWith(`__vs/`)) motionWarnings.push(`motion: ${f.ref} clashes with a composition file; not copied`);
+		else motionAssets.push({
+			src: f.abs,
+			dest: f.ref
+		});
+	}
+	const assetIndex = await loadAssetIndex(req.project_dir);
+	const comp = buildComposition(req, {
+		resolveAsset: (id) => assetIndex.get(id),
+		...req.cues?.length ? { cues: req.cues } : {},
+		...motionHtml !== void 0 ? { motionHtml } : {}
+	});
+	return {
+		composition_id: comp.composition_id,
+		html: comp.html,
+		assets: [...comp.assets, ...motionAssets],
+		warnings: [...comp.warnings, ...motionWarnings],
+		text_boxes: comp.text_boxes
+	};
+}
+/** Write `page` into `dir` (index.html plus its assets). Returns warnings for assets that could not be copied. */
+async function writeComposition(dir, page) {
+	const warnings = [];
+	await writeFile(join(dir, "index.html"), page.html, "utf8");
+	for (const a of page.assets) {
+		const dest = resolve(dir, a.dest);
+		await mkdir(dirname(dest), { recursive: true });
+		try {
+			await copyFile(a.src, dest);
+		} catch (e) {
+			warnings.push(`asset ${a.src} could not be copied: ${e instanceof Error ? e.message : String(e)}`);
+		}
+	}
+	return warnings;
+}
+/** A motion scene failed its determinism check (finding `nondeterministic_scene`). */
+var DeterminismError = class extends Error {
+	sceneId;
+	constructor(sceneId, detail) {
+		super(`HyperFrames refused to render scene ${sceneId}: ${detail}`);
+		this.sceneId = sceneId;
+		this.name = "DeterminismError";
+	}
+};
+/** What the determinism check of a written composition depends on: the page, its files, size, fps and the check version. */
+async function determinismKey(dir, page, target) {
+	const files = [];
+	for (const a of page.assets) {
+		let sha = null;
+		try {
+			sha = sha256Hex(await readFile(resolve(dir, a.dest)));
+		} catch {}
+		files.push({
+			dest: a.dest,
+			sha256: sha
+		});
+	}
+	files.sort((x, y) => x.dest < y.dest ? -1 : x.dest > y.dest ? 1 : 0);
+	return sha256Hex(canonicalJson({
+		v: 1,
+		producer: HYPERFRAMES_VERSION,
+		html: sha256Hex(page.html),
+		files,
+		w: target.width,
+		h: target.height,
+		fps: target.fps
+	}));
+}
+/** The cached check result next to the clip: `<dir of out_path>/<scene>.determinism.json`. */
+function determinismCachePath(req) {
+	return join(dirname(req.out_path), `${req.scene.id}.determinism.json`);
+}
+/**
+* Run (or reuse) the determinism and loop-seam check of the motion composition written in `dir`.
+* The result is cached by {@link determinismKey}, so reruns of an unchanged page skip Chrome.
+*/
+async function motionDeterminism(req, dir, page, chromePath, opts) {
+	const { scene, target } = req;
+	const key = await determinismKey(dir, page, target);
+	const cachePath = determinismCachePath(req);
+	let result;
+	try {
+		const cached = JSON.parse(await readFile(cachePath, "utf8"));
+		if (cached.key === key && cached.result?.version === 1) result = cached.result;
+	} catch {}
+	if (!result) {
+		const session = await (opts.openCapture ?? openCaptureSession)({
+			chromePath,
+			width: target.width,
+			height: target.height,
+			...opts.producerEntry ? { producerEntry: opts.producerEntry } : {}
+		});
+		try {
+			const pc = await session.open(dir, page.composition_id, target.width, target.height);
+			const loop = scene.deterministic.props.loop === true;
+			result = await runDeterminismCheck((t) => pc.capture(t), {
+				duration: scene.duration_sec,
+				fps: target.fps,
+				loop
+			});
+		} finally {
+			await session.close();
+		}
+		await mkdir(dirname(cachePath), { recursive: true });
+		await writeFile(cachePath, `${JSON.stringify({
+			key,
+			result
+		})}\n`);
+	}
+	return determinismFindings(scene.id, result);
+}
 function createHyperframesRenderer(opts = {}) {
 	const probeTimeoutMs = opts.probeTimeoutMs ?? 2e4;
 	const launchProbe = opts.launchProbe ?? ((path, ms) => puppeteerLaunchProbe(path, ms));
@@ -36310,44 +37198,19 @@ function createHyperframesRenderer(opts = {}) {
 			].includes(target.fps)) throw new Error(`HyperFrames renderer supports 24, 30 or 60 fps (scene ${scene.id} asked for ${target.fps})`);
 			const avail = await check(process.env);
 			if (!avail.ok || !avail.chromePath) throw new Error(`HyperFrames renderer unavailable: ${avail.reason}`);
-			let motionHtml;
-			const motionAssets = [];
-			const motionWarnings = [];
-			if (kind === "motion") {
-				const html = scene.deterministic.props.html;
-				const page = await loadMotionPage(req.project_dir, typeof html === "string" ? html : "");
-				const errors = page.findings.filter((f) => f.severity === "error");
-				if (errors.length || page.html === void 0) throw new Error(`HyperFrames renderer refuses motion page ${String(html)} of scene ${scene.id} (${errors.length} lint error(s)): ${errors.map(formatMotionFinding).join("; ")}`);
-				motionHtml = page.html;
-				for (const f of page.findings) motionWarnings.push(`motion: ${formatMotionFinding(f)}`);
-				for (const f of page.files) if (f.ref === "index.html" || f.ref.startsWith(`__vs/`)) motionWarnings.push(`motion: ${f.ref} clashes with a composition file; not copied`);
-				else motionAssets.push({
-					src: f.abs,
-					dest: f.ref
-				});
-			}
-			const assetIndex = await loadAssetIndex(req.project_dir);
-			const comp = buildComposition(req, {
-				resolveAsset: (id) => assetIndex.get(id),
-				...req.cues?.length ? { cues: req.cues } : {},
-				...motionHtml !== void 0 ? { motionHtml } : {}
-			});
-			comp.assets.push(...motionAssets);
-			const warnings = [...comp.warnings, ...motionWarnings];
+			const comp = await composeScene(req);
+			const warnings = [...comp.warnings];
 			const keep = opts.keepTmp || process.env.VS_KEEP_HYPERFRAMES_TMP === "1";
 			const dir = await mkdtemp(join(opts.tmpRoot ?? tmpdir(), `vs-hf-${scene.id}-`));
 			let job;
 			const release = guardStdout();
 			try {
-				await writeFile(join(dir, "index.html"), comp.html, "utf8");
-				for (const a of comp.assets) {
-					const dest = resolve(dir, a.dest);
-					await mkdir(dirname(dest), { recursive: true });
-					try {
-						await copyFile(a.src, dest);
-					} catch (e) {
-						warnings.push(`asset ${a.src} could not be copied: ${e instanceof Error ? e.message : String(e)}`);
-					}
+				warnings.push(...await writeComposition(dir, comp));
+				if (kind === "motion" && opts.determinismCheck !== false) {
+					const findings = await motionDeterminism(req, dir, comp, avail.chromePath, opts);
+					const errors = findings.filter((f) => f.severity === "error");
+					if (errors.length) throw new DeterminismError(scene.id, errors.map(formatCheckFinding).join("; "));
+					for (const f of findings) warnings.push(formatCheckFinding(f));
 				}
 				const tools = await resolveFfmpeg(process.env);
 				process.env.HYPERFRAMES_FFMPEG_PATH ||= tools.ffmpeg;
@@ -36376,6 +37239,7 @@ function createHyperframesRenderer(opts = {}) {
 				if (job.status === "failed" || job.status === "cancelled") throw new Error(job.error ?? `render ${job.status}`);
 				for (const w of job.warnings ?? []) warnings.push(`hyperframes: ${w.code}: ${w.message}`);
 			} catch (e) {
+				if (e instanceof DeterminismError) throw e;
 				throw new Error(describeHyperframesError(e, scene.id, job), { cause: e });
 			} finally {
 				release();
@@ -39308,6 +40172,8 @@ function checkLogo(state, boxes, out) {
 		fix: "move the logo to another corner (brand.yaml visual.logo_placement.position), make it smaller (max_fraction), or shorten the text so it sits clear of the corner"
 	});
 }
+/** Brand-forbidden phrase matching (checkForbidden, checkBannedEffect): lower case, `_`/`-` as spaces, plural `s`/`es` dropped. */
+const normPhrase = (s) => s.toLowerCase().replace(/[_-]+/g, " ").replace(/[^\p{L}\p{N} ]+/gu, " ").replace(/\s+/g, " ").trim().split(" ").map((w) => w.length > 4 && /(sh|ch|x|ss)es$/.test(w) ? w.slice(0, -2) : w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w).join(" ");
 /**
 * Brand `visual.forbidden` treatments ("drop shadows", "zoom transitions", "kinetic text") named by
 * a scene: its visual requirements, transition, motion pattern or graphic kind. Text match only:
@@ -39316,19 +40182,18 @@ function checkLogo(state, boxes, out) {
 function checkForbidden(spec, brand, out) {
 	const forbidden = brand?.visual?.forbidden ?? [];
 	if (!forbidden.length) return;
-	const norm = (s) => ` ${s.toLowerCase().replace(/[_-]+/g, " ").replace(/[^\p{L}\p{N} ]+/gu, " ").replace(/\s+/g, " ").trim()} `;
-	const stem = (w) => w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w;
 	for (const s of spec.scenes) {
-		const text = norm([
+		const parts = [
 			...strings(s.visual_requirements),
 			s.transition ? `${s.transition} transition` : "",
 			s.motion ? `${s.motion.pattern} motion` : "",
 			s.deterministic ? s.deterministic.kind : ""
-		].filter(Boolean).join(" ")).split(" ").map(stem).join(" ");
+		].filter(Boolean);
+		const text = ` ${normPhrase(parts.join(" "))} `;
 		for (const phrase of forbidden) {
-			const want = norm(phrase).trim().split(" ").map(stem);
-			if (!want.length || !want[0]) continue;
-			if (!text.includes(` ${want.join(" ")} `)) continue;
+			const want = normPhrase(phrase);
+			if (!want) continue;
+			if (!text.includes(` ${want} `)) continue;
 			out.push({
 				id: "brand_forbidden",
 				severity: "warning",
@@ -39519,7 +40384,10 @@ function checkCaptionGap(lines, out) {
 }
 /** Scene cuts that beat sync could not move onto a beat. */
 function checkBeatCuts(spec, state, spans, out) {
-	const beats = state?.beat_sync?.beat_times_ms;
+	const bs = state?.beat_sync;
+	const wantDown = spec.audio?.beat_sync?.snap === "downbeat" && bs?.snap !== "beat" && Boolean(bs?.downbeat_times_ms?.length);
+	const beats = wantDown ? bs?.downbeat_times_ms : bs?.beat_times_ms;
+	const unit = wantDown ? "downbeat" : "beat";
 	if (!spec.audio?.beat_sync?.enabled || !beats?.length || !spans || spans.length < 2) return;
 	const tol = spec.audio.beat_sync.tolerance_ms ?? 250;
 	const lastBeat = Math.max(...beats);
@@ -39537,8 +40405,8 @@ function checkBeatCuts(spec, state, spans, out) {
 			id: "cut_off_beat",
 			severity: "warning",
 			scene_id: cur.id,
-			message: `the cut from ${cur.id} to ${next.id} at ${sec(cut)} is ${Math.round(off)} ms from the nearest beat (${sec(near)}); tolerance ${tol} ms`,
-			fix: `set scene ${cur.id} duration_sec to ${newDur} so the cut lands on the beat at ${sec(near)}; beat sync does not move a cut into speech, so if ${near < cut ? cur.id : next.id}'s voiceover fills its scene, shorten it first (or raise audio.beat_sync.tolerance_ms)`
+			message: `the cut from ${cur.id} to ${next.id} at ${sec(cut)} is ${Math.round(off)} ms from the nearest ${unit} (${sec(near)}); tolerance ${tol} ms`,
+			fix: `set scene ${cur.id} duration_sec to ${newDur} so the cut lands on the ${unit} at ${sec(near)}; beat sync does not move a cut into speech, so if ${near < cut ? cur.id : next.id}'s voiceover fills its scene, shorten it first (or raise audio.beat_sync.tolerance_ms)`
 		});
 	}
 }
@@ -39853,6 +40721,91 @@ async function checkMotionUnsafe(root, spec, out) {
 		});
 	}
 }
+/**
+* Effects a `motion` scene declares in `props.effects` that the active style avoids
+* (`motion.avoid`) or brand.yaml forbids (`visual.forbidden`, matched like brand_forbidden).
+* Lint only sees declared effects; the stills review covers the rest.
+*/
+function checkBannedEffect(spec, style, brand, out) {
+	const avoid = new Set(style?.avoid ?? []);
+	const forbidden = (brand?.visual?.forbidden ?? []).map((phrase) => ({
+		phrase,
+		norm: normPhrase(phrase)
+	})).filter((f) => f.norm);
+	if (!avoid.size && !forbidden.length) return;
+	for (const s of spec.scenes) {
+		const effects = s.deterministic?.kind === "motion" && Array.isArray(s.deterministic.props.effects) ? s.deterministic.props.effects : [];
+		for (const effect of effects) {
+			const fix = `remove "${effect}" from scene ${s.id}'s props.effects (and from its page), or choose a style that allows it`;
+			if (avoid.has(effect)) {
+				out.push({
+					id: "banned_effect",
+					severity: "error",
+					scene_id: s.id,
+					message: `scene ${s.id} uses "${effect}", which style "${style.id}" avoids (motion.avoid)`,
+					fix
+				});
+				continue;
+			}
+			const hit = forbidden.find((f) => f.norm === normPhrase(effect));
+			if (hit) out.push({
+				id: "banned_effect",
+				severity: "error",
+				scene_id: s.id,
+				message: `scene ${s.id} uses "${effect}", which brand.yaml forbids ("${hit.phrase}" in visual.forbidden)`,
+				fix: `remove "${effect}" from scene ${s.id}'s props.effects (and from its page); the brand forbids it`
+			});
+		}
+	}
+}
+/** spec.acceptance numbers the render misses, from the QA metrics in render state (error each). */
+function checkAcceptance(spec, state, out) {
+	const a = spec.acceptance;
+	const m = state?.qa?.motion;
+	if (!a || !m) return;
+	const push = (message, fix) => out.push({
+		id: "acceptance_unmet",
+		severity: "error",
+		message,
+		fix
+	});
+	if (a.min_changes_per_sec !== void 0 && m.changes_per_sec < a.min_changes_per_sec) push(`the render has ${m.changes_per_sec} big changes/s; acceptance.min_changes_per_sec is minimum ${a.min_changes_per_sec}`, "stage more visual beats (new states, reveals, match cuts, camera moves) or split long scenes, re-render and run qa_run");
+	if (a.max_frozen_pct !== void 0 && m.frozen_pct > a.max_frozen_pct) push(`the render has ${m.frozen_pct}% of the runtime frozen (${m.frozen_s}s); acceptance.max_frozen_pct is maximum ${a.max_frozen_pct}%`, "give the frozen stretches (qa/report.md lists them) motion, or shorten them, then re-render");
+	if (a.max_static_sec !== void 0 && m.longest_static_s > a.max_static_sec) push(`the render goes ${m.longest_static_s}s without a big change; acceptance.max_static_sec is maximum ${a.max_static_sec}s`, "add a change inside that stretch (qa/report.md gives its times) or shorten the scene there");
+	if (a.hold_ms !== void 0 && m.longest_static_s * 1e3 < a.hold_ms) push(`the longest hold is ${Math.round(m.longest_static_s * 1e3)} ms; acceptance.hold_ms wants at least one of ${a.hold_ms} ms`, "hold one key moment still so the motion around it feels earned");
+}
+/** With master.loop, the loop seam QA measured: first vs last frame SSIM and the audio level jump. */
+function checkLoopSeam(spec, state, out) {
+	if (!(spec.master?.loop || spec.acceptance?.loop) || !state?.qa) return;
+	const seam = state.qa.loop_seam;
+	if (!seam) {
+		out.push({
+			id: "loop_seam",
+			severity: "warning",
+			message: "master.loop is set but QA has not measured the loop seam of this render",
+			fix: "run qa_run (or re-render) so QA measures the seam"
+		});
+		return;
+	}
+	const frameBad = seam.ssim === null || seam.ssim < .99;
+	const audioBad = seam.audio_jump_db !== null && seam.audio_jump_db >= 6;
+	if (!frameBad && !audioBad) return;
+	out.push({
+		id: "loop_seam",
+		severity: "error",
+		message: `the loop seam shows: first vs last frame SSIM ${seam.ssim ?? "not measured"} (minimum ${LOOP_SSIM_MIN})${seam.audio_jump_db !== null ? `, audio level jump ${seam.audio_jump_db} dB (maximum 6 dB)` : ""}`,
+		fix: [...frameBad ? ["make the last frame return to the first (cyclic motion periods must divide the loop length)"] : [], ...audioBad ? ["end the music and sound where they started (loop the bed on a bar, no fades at the seam)"] : []].join("; ")
+	});
+}
+/** The active style's avoid list (none when the spec names no style or the pack can't be read). */
+async function styleAvoid(spec, stylesDir) {
+	if (!spec.style) return void 0;
+	const style = await getStyle(stylesDir, spec.style).catch(() => void 0);
+	return style ? {
+		id: style.id,
+		...style.motion.avoid ? { avoid: style.motion.avoid } : {}
+	} : void 0;
+}
 function formatMarkdown$1(r) {
 	const lines = [
 		`# Lint: ${r.status}`,
@@ -39924,6 +40877,9 @@ async function lintProject(projectDir, opts = {}) {
 	checkFootageQuality(spec, irMedia, findings);
 	checkLogo(state, boxes, findings);
 	checkForbidden(spec, brand, findings);
+	checkBannedEffect(spec, await styleAvoid(spec, opts.stylesDir === void 0 ? findStylesDir() : opts.stylesDir), brand, findings);
+	checkAcceptance(spec, state, findings);
+	checkLoopSeam(spec, state, findings);
 	checkPostCopy(spec, contracts, findings);
 	checkCover(spec, contracts, state?.cover ? {
 		...state.cover.headline_box ? { headline_box: state.cover.headline_box } : {},
@@ -40296,6 +41252,7 @@ function hyperframesOptions(env = process.env, extra = {}) {
 		...extra,
 		resolution,
 		producerInstalled: () => true,
+		producerEntry: resolution.entry,
 		loadProducer: async () => await import(url),
 		launchProbe: (chromePath, timeoutMs) => puppeteerLaunchProbe(chromePath, timeoutMs, resolution.entry)
 	};
@@ -241480,7 +242437,7 @@ function percentile(xs, p) {
 	return s[Math.min(s.length - 1, Math.max(0, Math.floor(p * (s.length - 1) + .5)))];
 }
 const r1 = (x) => Math.round(x * 10) / 10;
-const r3$1 = (x) => Math.round(x * 1e3) / 1e3;
+const r3$2 = (x) => Math.round(x * 1e3) / 1e3;
 /**
 * Turn the sampled measurements into `media.quality` with a plain note (and a suggestion) per
 * problem. Exposure is not judged on HDR sources: their code values are PQ/HLG, not SDR luma.
@@ -241497,8 +242454,8 @@ function footageQualityVerdict(v, a, opts = {}) {
 		const bright = v.pbright.length ? mean(v.pbright) / 100 : NaN;
 		q.luma_mean = r1(lumaMean);
 		if (Number.isFinite(contrast)) q.contrast = r1(Math.max(0, contrast));
-		if (Number.isFinite(dark)) q.dark_fraction = r3$1(dark);
-		if (Number.isFinite(bright)) q.bright_fraction = r3$1(bright);
+		if (Number.isFinite(dark)) q.dark_fraction = r3$2(dark);
+		if (Number.isFinite(bright)) q.bright_fraction = r3$2(bright);
 		if (opts.hdr) q.notes.push("HDR footage: exposure is not judged on the PQ/HLG signal; the footage renderer tonemaps it to SDR");
 		else {
 			const isDark = lumaMean < L.dark_mean || dark > L.dark_fraction;
@@ -245240,6 +246197,14 @@ async function stagePlanTiming(run, spec, voice, music, trackById) {
 			}
 			if (r.adjustments.length) warnings.push(`timing: beat sync moved ${r.summary.moved_cuts} cut(s) onto ${r.summary.snap === "downbeat" ? "bar starts" : "beats"} (${r.summary.bpm ?? "?"} bpm)`);
 		}
+	} else if (music && hasMotionScenes(spec.scenes)) {
+		signal?.throwIfAborted();
+		const g = await musicBeatGrid(spec.scenes, adjusted, music, {
+			cacheDir: join(resolveDataDir(run.env).cache, "beats"),
+			...signal ? { signal } : {}
+		});
+		beatSync = g.grid;
+		if (g.warning) warnings.push(g.warning);
 	}
 	timing_adjustments.sort((a, b) => spec.scenes.findIndex((s) => s.id === a.scene_id) - spec.scenes.findIndex((s) => s.id === b.scene_id));
 	const planScenes = spec.scenes.map((s) => adjusted.has(s.id) ? {
@@ -245250,6 +246215,28 @@ async function stagePlanTiming(run, spec, voice, music, trackById) {
 		timing_adjustments,
 		beatSync,
 		planScenes
+	};
+}
+/** Whether any scene is a `motion` page (the kinds that read the beat grid). */
+function hasMotionScenes(scenes) {
+	return scenes.some((s) => s.deterministic?.kind === "motion");
+}
+/**
+* The music bed's beat grid on the render plan's timeline without moving any cut (beat_sync off):
+* the same detection (cached by the bed's hash) or synthesized-score grid beat sync uses, recorded
+* with `grid_only` so `sceneBeatGrids` hands motion pages their beats. Specs without motion scenes
+* never call this, so their render state, cache keys and lock are unchanged.
+*/
+async function musicBeatGrid(scenes, adjusted, music, o = {}) {
+	const r = await beatSyncDurations(scenes, adjusted, music, 0, /* @__PURE__ */ new Map(), o);
+	const { snap: _snap, ...summary } = r.summary;
+	return {
+		grid: {
+			...summary,
+			moved_cuts: 0,
+			grid_only: true
+		},
+		...r.warning ? { warning: r.warning.replace(/^beat_sync: /, "motion beats: ").replace(/; cuts unchanged$/, "; motion pages get no beat grid") } : {}
 	};
 }
 /** Slots sit on frame boundaries of the cumulative timeline, so per-scene rounding never adds frames. */
@@ -245341,16 +246328,17 @@ function resolveWordCues(run, planScenes, nativeTracks, trackById, slotMs) {
 /**
 * The music beat grid inside each `motion` scene of the render plan, in scene-local seconds (the
 * page reads it as `window.__vs.beats` / `downbeats`). Scene starts are the frame-aligned slots of
-* `frameTimeline`. Empty without a beat grid; other kinds get none (their clips do not use it).
+* `frameTimeline`. Empty without a beat grid; other kinds get none (their clips do not use it)
+* unless `allKinds` (stills sample every scene on the grid).
 */
-function sceneBeatGrids(planScenes, fps, beatSync) {
+function sceneBeatGrids(planScenes, fps, beatSync, allKinds = false) {
 	const out = /* @__PURE__ */ new Map();
 	const beats = beatSync?.beat_times_ms ?? [];
 	const downbeats = beatSync?.downbeat_times_ms ?? [];
 	if (!beats.length && !downbeats.length) return out;
 	const { bounds, frameMs } = frameTimeline(planScenes, fps);
 	planScenes.forEach((s, i) => {
-		if (s.deterministic?.kind !== "motion") return;
+		if (!allKinds && s.deterministic?.kind !== "motion") return;
 		const start = frameMs(bounds[i]);
 		const end = frameMs(bounds[i + 1]);
 		const local = (list) => list.filter((t) => t >= start && t < end).map((t) => Math.round(t - start) / 1e3);
@@ -246038,6 +247026,7 @@ async function renderProjectLocked(projectDir, o) {
 	});
 	state.policy = vs.policy;
 	if (vs.paid_voice) state.paid_voice = vs.paid_voice;
+	setQaExpectations(state, spec);
 	const qa = await stageQa(run, state, asm.reel, asm.statePath);
 	progress({
 		stage: "export",
@@ -246088,7 +247077,7 @@ async function stageQa(run, state, reel, statePath) {
 	const { root, paths, quality, signal, progress, now } = run;
 	const reelSha = await hashFile(reel);
 	let qa;
-	if (state.qa && state.qa.video_sha256 === reelSha && state.qa.version === 3 && await exists(join(paths.qa, "report.json"))) qa = {
+	if (state.qa && state.qa.video_sha256 === reelSha && state.qa.version === 4 && state.qa.expect_key === qaExpectKey(state) && await exists(join(paths.qa, "report.json"))) qa = {
 		status: state.qa.status,
 		findings: state.qa.findings,
 		report_json: join(paths.qa, "report.json"),
@@ -246112,6 +247101,20 @@ const QA_MAP = {
 	warn: "warn",
 	fail: "fail"
 };
+/** Record the spec's acceptance numbers and loop flag in the render state, for QA and lint. */
+function setQaExpectations(state, spec) {
+	if (spec.acceptance) state.acceptance = { ...spec.acceptance };
+	else delete state.acceptance;
+	if (spec.master?.loop || spec.acceptance?.loop) state.loop = true;
+	else delete state.loop;
+}
+/** What QA was held to: a change re-runs QA on an unchanged reel. */
+function qaExpectKey(state) {
+	return JSON.stringify({
+		acceptance: state.acceptance ?? null,
+		loop: state.loop ?? false
+	});
+}
 async function runQaOn(root, state, reelSha) {
 	const reel = join(root, state.reel);
 	const noSound = !state.voice.has_audio && !state.music && !state.scene_audio;
@@ -246124,7 +247127,9 @@ async function runQaOn(root, state, reelSha) {
 			intended_silence: true,
 			silence_reason: state.voice_mode === "none" ? "silent on purpose (no narration, no music)" : "rendered with the silent voice (no narration audio)"
 		} : {},
-		...state.background ? { background: state.background } : {}
+		...state.background ? { background: state.background } : {},
+		...state.acceptance ? { acceptance: state.acceptance } : {},
+		...state.loop ? { loop: true } : {}
 	});
 	report.video = state.reel;
 	const files = await writeQaReport(root, report);
@@ -246136,7 +247141,7 @@ async function runQaOn(root, state, reelSha) {
 	}));
 	const status = QA_MAP[report.status];
 	state.qa = {
-		version: 3,
+		version: 4,
 		status,
 		video_sha256: reelSha ?? await hashFile(reel),
 		checks: report.checks.map((c) => ({
@@ -246144,7 +247149,10 @@ async function runQaOn(root, state, reelSha) {
 			status: QA_MAP[c.status],
 			message: c.detail
 		})),
-		findings
+		findings,
+		expect_key: qaExpectKey(state),
+		...report.metrics.motion ? { motion: motionView(report.metrics.motion) } : {},
+		...report.metrics.loop_seam ? { loop_seam: report.metrics.loop_seam } : {}
 	};
 	return {
 		status,
@@ -246152,6 +247160,10 @@ async function runQaOn(root, state, reelSha) {
 		report_json: files.json,
 		report_md: files.md
 	};
+}
+function motionView(m) {
+	const { change_times_s: _times, ...rest } = m;
+	return rest;
 }
 async function loadState(projectDir, quality) {
 	const paths = projectPaths(projectDir);
@@ -246170,6 +247182,8 @@ async function loadState(projectDir, quality) {
 async function runQa(projectDir, opts = {}) {
 	const root = projectPaths(projectDir).root;
 	const state = await loadState(root, opts.quality);
+	const spec = await loadSpecLoose(root).then((r) => r.spec).catch(() => void 0);
+	if (spec) setQaExpectations(state, spec);
 	const qa = await runQaOn(root, state);
 	await writeJsonAtomic(join(renderDir(root, state.quality), "render-state.json"), state);
 	const dist = await exportFromState(root, state, opts.now ?? (() => /* @__PURE__ */ new Date()));
@@ -246429,7 +247443,8 @@ async function exportFromState(root, state, now, opts = {}) {
 				file: x.file,
 				sha256: x.sha256,
 				scenes: x.scenes,
-				license: x.license ?? null
+				license: x.license ?? null,
+				...x.peak_ms !== void 0 ? { peak_ms: x.peak_ms } : {}
 			})) } : {},
 			...state.timing_adjustments.length ? { timing_adjustments: state.timing_adjustments } : {},
 			...state.sound_events ? { captions: { sound_events: state.sound_events } } : {},
@@ -262738,7 +263753,7 @@ var FootageError = class extends Error {
 		this.name = "FootageError";
 	}
 };
-const r3 = (x) => Math.round(x * 1e3) / 1e3;
+const r3$1 = (x) => Math.round(x * 1e3) / 1e3;
 const fmt$1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
 async function loadIr(root) {
 	try {
@@ -262798,12 +263813,12 @@ function pickFrames(shots, from, to, duration, limit, fps = 25) {
 		};
 		firsts.push({
 			...base,
-			time: r3(Math.min(last, a + Math.min(.3, len * .2))),
+			time: r3$1(Math.min(last, a + Math.min(.3, len * .2))),
 			first: true
 		});
 		if (len >= 5) mids.push({
 			...base,
-			time: r3(Math.min(last, a + len / 2)),
+			time: r3$1(Math.min(last, a + len / 2)),
 			first: false
 		});
 	});
@@ -262816,8 +263831,8 @@ function pickFrames(shots, from, to, duration, limit, fps = 25) {
 async function transcriptWindow(root, asset, from, to) {
 	if (!asset.media?.transcript) return void 0;
 	const all = groupSentences((await loadTranscriptWords(root, asset)).filter((w) => w.start_ms < to * 1e3 && w.end_ms > from * 1e3)).map((s) => ({
-		start_sec: r3(s.start_ms / 1e3),
-		end_sec: r3(s.end_ms / 1e3),
+		start_sec: r3$1(s.start_ms / 1e3),
+		end_sec: r3$1(s.end_ms / 1e3),
 		...s.speaker !== void 0 ? { speaker: s.speaker } : {},
 		text: s.text
 	}));
@@ -262987,8 +264002,8 @@ async function footageLook(projectDir, assetId, opts = {}) {
 		if (stale) notes.push(`${stale} stored footage note(s) are stale (the file changed since): write them again with footage_notes`);
 		return {
 			asset: asset.id,
-			from_sec: r3(from),
-			to_sec: r3(to),
+			from_sec: r3$1(from),
+			to_sec: r3$1(to),
 			duration_sec: duration,
 			images,
 			images_rel: images.map((i) => relative(root, i)),
@@ -263046,8 +264061,8 @@ async function footageNotes(projectDir, assetId, input, now = () => /* @__PURE__
 		const clean = (s) => s === void 0 ? void 0 : s.trim() || void 0;
 		const tags = n.tags?.map((t) => t.trim()).filter(Boolean);
 		const note = {
-			from_sec: r3(n.from_sec),
-			to_sec: r3(Math.min(n.to_sec, duration)),
+			from_sec: r3$1(n.from_sec),
+			to_sec: r3$1(Math.min(n.to_sec, duration)),
 			...clean(n.subject) ? { subject: clean(n.subject) } : {},
 			...clean(n.action) ? { action: clean(n.action) } : {},
 			...clean(n.on_screen_text) ? { on_screen_text: clean(n.on_screen_text) } : {},
@@ -264616,6 +265631,372 @@ function formatDiff(r) {
 	if (r.spec.changes.length > 10) lines.push(`  - …${r.spec.changes.length - 10} more in ${r.report_md}`);
 	return lines.join("\n");
 }
+/**
+* The frames to draw, scene by scene, on each scene's frame grid (duplicates dropped): explicit
+* `times`, every beat or downbeat inside the scene (`at`), or `count` evenly spaced frames. A
+* scene without beats falls back to in/mid/out, with a note. At most {@link REVIEW_MAX_SHEET_TILES}.
+*/
+function planStillTimes(scenes, fps, o = {}) {
+	const notes = [];
+	const out = [];
+	const spaced = (s, n) => {
+		const len = s.duration_sec;
+		const frame = 1 / fps;
+		const a = Math.min(.3, len * .2);
+		const b = len - Math.max(frame, Math.min(.45, len * .15));
+		if (n === 1) return [{
+			scene_id: s.id,
+			time: len / 2,
+			tag: "mid"
+		}];
+		if (n === 3) return [
+			a,
+			len / 2,
+			b
+		].map((time, i) => ({
+			scene_id: s.id,
+			time,
+			tag: [
+				"in",
+				"mid",
+				"out"
+			][i]
+		}));
+		return Array.from({ length: n }, (_, i) => ({
+			scene_id: s.id,
+			time: a + (b - a) * i / (n - 1),
+			tag: `${i + 1}/${n}`
+		}));
+	};
+	const count = Math.min(12, Math.max(1, Math.round(o.count ?? 3)));
+	for (const s of scenes) {
+		let list;
+		if (o.times?.length) {
+			const inside = o.times.filter((t) => t >= 0 && t <= s.duration_sec);
+			if (inside.length < o.times.length) notes.push(`${s.id}: ${o.times.length - inside.length} time(s) past its ${s.duration_sec}s dropped`);
+			list = inside.map((time) => ({
+				scene_id: s.id,
+				time,
+				tag: "t"
+			}));
+		} else if (o.at) {
+			const grid = (o.at === "beats" ? s.beats?.beats_s : s.beats?.downbeats_s) ?? [];
+			if (!grid.length) {
+				notes.push(`${s.id}: no ${o.at === "beats" ? "beats" : "bar starts"} inside the scene; showing in/mid/out`);
+				list = spaced(s, 3);
+			} else list = grid.map((time, i) => ({
+				scene_id: s.id,
+				time,
+				tag: `${o.at === "beats" ? "beat" : "bar"} ${i + 1}`
+			}));
+		} else list = spaced(s, count);
+		const seen = /* @__PURE__ */ new Set();
+		for (const x of list) {
+			const time = frameAlignedTime(x.time, fps, s.duration_sec);
+			if (seen.has(time)) continue;
+			seen.add(time);
+			out.push({
+				...x,
+				time
+			});
+		}
+	}
+	if (out.length > 90) {
+		notes.push(`${out.length} frames requested; showing the first 90 (narrow scenes or times)`);
+		out.length = 90;
+	}
+	return {
+		tiles: out,
+		notes
+	};
+}
+/** The render plan's scene durations: the latest render's timing adjustments when it matches the spec, else the spec's. */
+function planDurations(scenes, state) {
+	const ids = scenes.map((s) => s.id).join("\0");
+	if (!state?.scenes || state.scenes.map((s) => s.scene_id).join("\0") !== ids) return {
+		scenes: [...scenes],
+		from: "spec"
+	};
+	const adj = new Map((state.timing_adjustments ?? []).map((a) => [a.scene_id, a]));
+	return {
+		scenes: scenes.map((s) => {
+			const a = adj.get(s.id);
+			return a && a.spec_duration_sec === s.duration_sec ? {
+				...s,
+				duration_sec: a.render_duration_sec
+			} : s;
+		}),
+		from: "render-state"
+	};
+}
+const r3 = (x) => Math.round(x * 1e3) / 1e3;
+async function stillsProject(projectDir, opts = {}, deps = {}) {
+	const env = deps.env ?? process.env;
+	const quality = opts.quality ?? "preview";
+	const paths = projectPaths(projectDir);
+	const root = paths.root;
+	const lockPath = join(paths.renders, ".render.lock");
+	const holder = await renderLockHolder(lockPath);
+	if (holder) throw new RenderLockedError(holder, lockPath);
+	const { spec, tokens } = await stageInputs(createRenderRun(root, {
+		quality,
+		env
+	}));
+	const target = targetFor(spec, quality, true);
+	const notes = [];
+	let state;
+	const statePath = join(renderDir(root, quality), "render-state.json");
+	if (existsSync(statePath)) state = await readJson(statePath).catch(() => void 0);
+	const plan = planDurations(spec.scenes, state);
+	if (state && plan.from === "spec") notes.push(`the ${quality} render state is for other scenes (spec changed since): spec durations used, no word cues`);
+	if (!state) notes.push(`no ${quality} render yet: spec durations (voiceover overruns and beat sync can still move cuts at render time)`);
+	let grid;
+	let gridSource = "none";
+	if (plan.from === "render-state" && state?.beat_sync?.beat_times_ms?.length) {
+		grid = state.beat_sync;
+		gridSource = "render-state";
+	} else if (spec.audio?.music) try {
+		const total = plan.scenes.reduce((a, s) => a + s.duration_sec, 0);
+		const music = await resolveMusic(spec.audio.music, root, env, {
+			durationSec: total,
+			cacheDir: join(resolveDataDir(env).cache, "score")
+		});
+		const g = await musicBeatGrid(plan.scenes, /* @__PURE__ */ new Map(), music, { cacheDir: join(resolveDataDir(env).cache, "beats") });
+		grid = g.grid;
+		gridSource = "music";
+		if (g.warning) notes.push(g.warning);
+	} catch (e) {
+		notes.push(`music bed unreadable, so no beat grid: ${e instanceof Error ? e.message : String(e)}`);
+	}
+	if (opts.at && !grid?.beat_times_ms?.length) throw new Error(`stills at ${opts.at}: this project has no beat grid (${spec.audio?.music ? "no clear beat in the music bed" : "no audio.music bed"}); pass times or count instead`);
+	const allGrids = sceneBeatGrids(plan.scenes, target.fps, grid, true);
+	const motionGrids = sceneBeatGrids(plan.scenes, target.fps, grid);
+	const cues = /* @__PURE__ */ new Map();
+	if (plan.from === "render-state") {
+		for (const c of state?.cues ?? []) {
+			if (c.status !== "placed" || c.at_ms === void 0) continue;
+			cues.set(c.scene_id, [...cues.get(c.scene_id) ?? [], {
+				item: c.item,
+				at_s: c.at_ms / 1e3
+			}]);
+		}
+		for (const list of cues.values()) list.sort((a, b) => a.at_s - b.at_s);
+	}
+	if (opts.scenes?.length) {
+		const unknown = opts.scenes.filter((id) => !plan.scenes.some((s) => s.id === id));
+		if (unknown.length) throw new Error(`no scene ${unknown.map((u) => `"${u}"`).join(", ")} in the spec (scenes: ${plan.scenes.map((s) => s.id).join(", ")})`);
+	}
+	const wanted = opts.scenes?.length ? plan.scenes.filter((s) => opts.scenes.includes(s.id)) : plan.scenes;
+	const skipped = [];
+	const drawn = [];
+	for (const given of wanted) {
+		const s = cutawayPicture(given);
+		const kind = s.deterministic?.kind;
+		if (s.footage) skipped.push({
+			scene_id: s.id,
+			reason: "footage scene: stills draw HyperFrames pages only (use review on a render)"
+		});
+		else if (s.visual_strategy !== "motion_graphic" || !kind) skipped.push({
+			scene_id: s.id,
+			reason: `${s.visual_strategy} scene without a deterministic page`
+		});
+		else if (!HYPERFRAMES_KINDS.includes(kind)) skipped.push({
+			scene_id: s.id,
+			reason: `kind "${kind}" is not drawn by HyperFrames`
+		});
+		else drawn.push(s);
+	}
+	if (!drawn.length) throw new Error(`no scene to draw: ${skipped.map((x) => `${x.scene_id} (${x.reason})`).join("; ") || "the spec has no scenes"}`);
+	const planned = planStillTimes(drawn.map((s) => ({
+		id: s.id,
+		duration_sec: s.duration_sec,
+		...allGrids.get(s.id) ? { beats: allGrids.get(s.id) } : {}
+	})), target.fps, opts);
+	notes.push(...planned.notes);
+	if (!planned.tiles.length) throw new Error("no frames to draw: every requested time lies outside the scenes");
+	const chrome = await findChrome(deps.chromePath, env);
+	if (!chrome.ok) throw new Error(`stills need headless Chrome: ${chrome.reason}`);
+	const producer = resolveHyperframesProducer(env);
+	const open = deps.openCapture ?? openCaptureSession;
+	if (!deps.openCapture && !producer.ok) throw new Error(`stills need the HyperFrames producer's puppeteer-core: ${producer.reason}`);
+	const outDir = join(root, "review", "stills");
+	const framesDir = join(outDir, "frames");
+	await mkdir(framesDir, { recursive: true });
+	const zones = layoutZones(target, await loadTargetContracts(spec));
+	const tiles = [];
+	const pageErrors = [];
+	await chromeGate(async () => {
+		const release = guardStdout();
+		const session = await open({
+			chromePath: chrome.path,
+			width: target.width,
+			height: target.height,
+			...producer.ok ? { producerEntry: producer.entry } : {}
+		});
+		try {
+			for (const s of drawn) {
+				const mine = planned.tiles.filter((t) => t.scene_id === s.id);
+				if (!mine.length) continue;
+				for (const f of await readdir(framesDir)) if (f.startsWith(`${s.id}-`) && f.endsWith(".png")) await rm(join(framesDir, f), { force: true });
+				const req = {
+					scene: s,
+					target,
+					tokens,
+					out_path: join(framesDir, `${s.id}.unused.mp4`),
+					project_dir: root,
+					zones,
+					...cues.get(s.id)?.length ? { cues: cues.get(s.id) } : {},
+					...motionGrids.get(s.id) ? { beats: motionGrids.get(s.id) } : {}
+				};
+				let page;
+				try {
+					page = await composeScene(req);
+				} catch (e) {
+					skipped.push({
+						scene_id: s.id,
+						reason: e instanceof Error ? e.message : String(e)
+					});
+					continue;
+				}
+				const dir = await mkdtemp(join(tmpdir(), `vs-stills-${s.id}-`));
+				try {
+					for (const w of [...page.warnings, ...await writeComposition(dir, page)]) notes.push(`${s.id}: ${w}`);
+					const pc = await session.open(dir, page.composition_id, target.width, target.height);
+					try {
+						for (const t of mine) {
+							const png = await pc.capture(t.time);
+							const frame = join(framesDir, `${s.id}-${t.time.toFixed(3)}s.png`);
+							await writeFile(frame, png);
+							tiles.push({
+								index: tiles.length,
+								scene_id: s.id,
+								time_sec: r3(t.time),
+								tag: t.tag,
+								label: `${s.id} ${t.tag} ${t.time.toFixed(2)}s`,
+								frame: relative(root, frame)
+							});
+						}
+						for (const e of pc.errors) pageErrors.push(`${s.id}: ${e}`);
+					} finally {
+						await pc.close();
+					}
+				} finally {
+					await rm(dir, {
+						recursive: true,
+						force: true
+					});
+				}
+			}
+		} finally {
+			await session.close();
+			release();
+		}
+	});
+	if (pageErrors.length) notes.push(...pageErrors.slice(0, 10).map((e) => `page error: ${e}`));
+	if (!tiles.length) throw new Error(`no frame could be drawn: ${skipped.map((x) => `${x.scene_id}: ${x.reason}`).join("; ")}`);
+	const tagsPerScene = /* @__PURE__ */ new Map();
+	for (const t of tiles) tagsPerScene.set(t.scene_id, [...tagsPerScene.get(t.scene_id) ?? [], t.tag]);
+	const inMidOut = [...tagsPerScene.values()].every((tags) => tags.join(",") === "in,mid,out");
+	const layout = planSheets(tiles.length, {
+		width: Math.max(64, Math.round(opts.width ?? 240)),
+		aspect: target.height / target.width,
+		cols: opts.cols ?? 6,
+		group: inMidOut ? 3 : 1
+	});
+	notes.push(...layout.notes);
+	const work = join(outDir, ".work");
+	await rm(work, {
+		recursive: true,
+		force: true
+	});
+	const font = reviewFont();
+	if (!font) notes.push("bundled fonts not found: tiles are unlabelled; use the tiles list for times");
+	const pages = [];
+	try {
+		for (const [p, [a, b]] of layout.pages.entries()) {
+			const pdir = join(work, `p${p}`);
+			await mkdir(pdir, { recursive: true });
+			for (let i = a; i <= b; i++) {
+				const t = tiles[i];
+				await runFfmpeg([
+					"-y",
+					"-i",
+					join(root, t.frame),
+					"-frames:v",
+					"1",
+					"-vf",
+					`scale=${layout.width}:-2:flags=bicubic${tileDecor(t, layout.width, font)}`,
+					join(pdir, `${String(i - a + 1).padStart(4, "0")}.png`)
+				], { timeoutMs: 6e4 });
+			}
+		}
+		const base = `stills-${quality}${opts.scenes?.length === 1 ? `-${opts.scenes[0]}` : ""}`;
+		const stale = (f) => f === `${base}.jpg` || f.startsWith(`${base}-p`) && /^\d+\.jpg$/.test(f.slice(base.length + 2));
+		for (const f of await readdir(outDir)) if (stale(f)) await rm(join(outDir, f), { force: true });
+		for (const [p, [a, b]] of layout.pages.entries()) {
+			const n = b - a + 1;
+			const cols = Math.min(layout.cols, n);
+			const rows = Math.ceil(n / cols);
+			const image = join(outDir, layout.pages.length === 1 ? `${base}.jpg` : `${base}-p${p + 1}.jpg`);
+			await tileSheet(join(work, `p${p}`), cols, rows, image);
+			const scenes = [...new Set(tiles.slice(a, b + 1).map((x) => x.scene_id))];
+			pages.push({
+				image,
+				image_rel: relative(root, image),
+				cols,
+				rows,
+				tiles: [a, b],
+				scenes
+			});
+		}
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+	const drawnIds = new Set(tiles.map((t) => t.scene_id));
+	return {
+		kind: "stills",
+		quality,
+		width: target.width,
+		height: target.height,
+		fps: target.fps,
+		image: pages[0].image,
+		image_rel: pages[0].image_rel,
+		images: pages.map((p) => p.image),
+		images_rel: pages.map((p) => p.image_rel),
+		pages,
+		cols: pages[0].cols,
+		rows: pages[0].rows,
+		tile_width: layout.width,
+		tiles,
+		scenes: drawn.filter((s) => drawnIds.has(s.id)).map((s) => ({
+			scene_id: s.id,
+			kind: s.deterministic.kind,
+			duration_sec: s.duration_sec,
+			beats: allGrids.get(s.id)?.beats_s.length ?? 0,
+			downbeats: allGrids.get(s.id)?.downbeats_s.length ?? 0
+		})),
+		skipped,
+		durations: plan.from,
+		grid: {
+			source: gridSource,
+			...grid ? { bpm: grid.bpm } : {}
+		},
+		notes
+	};
+}
+function formatStills(r) {
+	return [
+		`stills (not a render; renders/ and dist/ are unchanged): ${r.tiles.length} frame(s) of ${r.scenes.length} scene(s) drawn from the composed pages at ${r.width}x${r.height}, ${r.fps} fps (${r.quality})${r.pages.length === 1 ? ` → ${r.image}` : ` in ${r.pages.length} images (Read every one):`}`,
+		...r.pages.length > 1 ? r.pages.map((p, i) => `  ${i + 1}. ${p.image} (${p.cols}×${p.rows}, tiles ${p.tiles[0] + 1}-${p.tiles[1] + 1}, ${p.scenes.join(", ")})`) : [],
+		`beat grid: ${r.grid.source === "none" ? "none (no music bed)" : `${r.grid.bpm ?? "?"} bpm from the ${r.grid.source === "music" ? "music bed" : "latest render"}`}; durations from the ${r.durations === "spec" ? "spec" : "latest render"}`,
+		...r.skipped.map((s) => `skipped ${s.scene_id}: ${s.reason}`),
+		"Read the image and check every moment: text fits and is readable, nothing overlaps, crowds an edge or sits under captions and app UI, each state lands on its beat or bar (see the labels), no empty or cramped frames. Fix the page or spec and run stills again before render_submit.",
+		...r.notes.map((n) => `note: ${n}`)
+	].join("\n");
+}
 //#endregion
 //#region src/compare.ts
 const round3 = (n) => Math.round(n * 1e3) / 1e3;
@@ -264624,6 +266005,35 @@ function inside(root, p) {
 	return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 async function resolveSide(root, side, which) {
+	if ("reference" in side) {
+		if (!isAbsolute(side.reference)) {
+			const r = await resolveSide(root, {
+				file: side.reference,
+				...side.label ? { label: side.label } : {}
+			}, which).catch((err) => {
+				throw new Error(String(err instanceof Error ? err.message : err).replace(`${which}.file`, `${which}.reference`));
+			});
+			return {
+				...r,
+				label: side.label ?? `reference (${basename(r.path)})`,
+				reference: true
+			};
+		}
+		if (!existsSync(side.reference)) throw new Error(`${which}.reference "${side.reference}" not found`);
+		const p = await ffprobe(side.reference);
+		if (!p.has_video || !p.width || !p.height) throw new Error(`${which}.reference "${side.reference}" has no video stream`);
+		return {
+			label: side.label ?? `reference (${basename(side.reference)})`,
+			path: side.reference,
+			source: side.reference,
+			duration_sec: round3(p.duration_s),
+			width: p.width,
+			height: p.height,
+			...p.fps ? { fps: p.fps } : {},
+			has_audio: p.has_audio,
+			reference: true
+		};
+	}
 	if ("file" in side) {
 		const abs = resolve(root, side.file);
 		if (!inside(root, abs)) throw new Error(`${which}.file "${side.file}" is outside the project ${root}; give a project-relative path such as assets/supplied/talk.mp4`);
@@ -264669,9 +266079,15 @@ async function compareVideos(projectDir, opts = {}) {
 		const have = ["preview", "final"].filter((q) => existsSync(join(paths.renders, q, "render-state.json")) || existsSync(join(paths.renders, q, "reel.mp4")));
 		if (have.length < 2) throw new Error(`nothing to compare by default: the default is this project's preview against its final render, and ${have.length ? `only a ${have[0]} render` : "no render"} exists in ${root}. Pass a and b: {quality}, {project_dir, quality?} or {file} (project-relative)`);
 	}
-	const a = await resolveSide(root, opts.a ?? { quality: "preview" }, "a");
-	const b = await resolveSide(root, opts.b ?? { quality: "final" }, "b");
+	const isRef = (s) => Boolean(s && "reference" in s);
+	const latest = { project_dir: root };
+	const a = await resolveSide(root, opts.a ?? (isRef(opts.b) ? latest : { quality: "preview" }), "a");
+	const b = await resolveSide(root, opts.b ?? (isRef(opts.a) ? latest : { quality: "final" }), "b");
+	if (a.reference && b.reference) throw new Error("both sides are references; make one side this project's render (or a project file)");
 	if (a.path === b.path) notes.push("both sides are the same video");
+	a.metrics = sideMetrics(await analyzeVideo$1(a.path));
+	b.metrics = sideMetrics(await analyzeVideo$1(b.path));
+	const metrics = metricRows(a, b);
 	if (a.label === b.label) {
 		a.label = `A: ${a.label}`;
 		b.label = `B: ${b.label}`;
@@ -264705,7 +266121,8 @@ async function compareVideos(projectDir, opts = {}) {
 		b: {
 			...sideB,
 			file: fileB
-		}
+		},
+		metrics
 	}));
 	return {
 		html,
@@ -264713,8 +266130,111 @@ async function compareVideos(projectDir, opts = {}) {
 		dir,
 		a: sideA,
 		b: sideB,
+		metrics,
 		notes
 	};
+}
+function sideMetrics(v) {
+	return {
+		duration_sec: round3(v.probe.duration_s),
+		frozen_sec: v.motion.frozen_s,
+		frozen_pct: v.motion.frozen_pct,
+		changes_per_sec: v.motion.changes_per_sec,
+		cuts_per_sec: v.motion.cuts_per_sec,
+		longest_static_sec: v.motion.longest_static_s,
+		integrated_lufs: v.integrated_lufs
+	};
+}
+/** Tolerances for "meets the reference" (design rules, not platform facts). */
+const COMPARE_TOLERANCE = {
+	/** Duration within this share of the reference's. */
+	duration_share: .1,
+	/** Frozen share at most this many percentage points above the reference's. */
+	frozen_pct_points: 2,
+	/** Frozen seconds at most this many above the reference's. */
+	frozen_sec: .5,
+	/** Changes and cuts per second at least this share of the reference's. */
+	rate_share: .9,
+	/** Longest static stretch at most this share above the reference's (plus 0.1 s). */
+	static_share: 1.1,
+	/** Integrated loudness within this many LU of the reference's. */
+	loudness_lu: 1.5
+};
+const METRIC_LABELS = {
+	duration_sec: "Duration (s)",
+	frozen_sec: "Frozen (s)",
+	frozen_pct: "Frozen (% of runtime)",
+	changes_per_sec: "Big changes per second",
+	cuts_per_sec: "Cuts per second",
+	longest_static_sec: "Longest static stretch (s)",
+	integrated_lufs: "Loudness (LUFS integrated)"
+};
+/** Rows for both sides; with a reference, each gets a plain verdict for ours. */
+function metricRows(a, b) {
+	const T = COMPARE_TOLERANCE;
+	const refSide = a.reference ? a : b.reference ? b : void 0;
+	const ours = refSide === a ? b : refSide === b ? a : void 0;
+	const judge = (id, o, r) => {
+		if (o === null || r === null) return {
+			meets: null,
+			verdict: "not measurable on both"
+		};
+		switch (id) {
+			case "duration_sec": {
+				const ok = Math.abs(o - r) <= r * T.duration_share;
+				return {
+					meets: ok,
+					verdict: ok ? "meets: about as long as the reference" : `misses: ${o > r ? "longer" : "shorter"} than the reference by ${round3(Math.abs(o - r))}s`
+				};
+			}
+			case "frozen_sec":
+			case "frozen_pct": {
+				const ok = id === "frozen_pct" ? o <= r + T.frozen_pct_points : o <= r + T.frozen_sec;
+				return {
+					meets: ok,
+					verdict: ok ? "meets: no more frozen than the reference" : "misses: more frozen than the reference"
+				};
+			}
+			case "changes_per_sec":
+			case "cuts_per_sec": {
+				const ok = o >= r * T.rate_share;
+				const what = id === "changes_per_sec" ? "big changes" : "cuts";
+				return {
+					meets: ok,
+					verdict: ok ? `meets: at least the reference's pace of ${what}` : `misses: fewer ${what} per second than the reference`
+				};
+			}
+			case "longest_static_sec": {
+				const ok = o <= r * T.static_share + .1;
+				return {
+					meets: ok,
+					verdict: ok ? "meets: no longer static stretch than the reference" : "misses: a longer static stretch than the reference"
+				};
+			}
+			case "integrated_lufs": {
+				const ok = Math.abs(o - r) <= T.loudness_lu;
+				return {
+					meets: ok,
+					verdict: ok ? "meets: as loud as the reference" : `misses: ${o > r ? "louder" : "quieter"} than the reference by ${Math.round(Math.abs(o - r) * 10) / 10} LU`
+				};
+			}
+		}
+	};
+	return Object.keys(METRIC_LABELS).map((id) => {
+		const va = a.metrics?.[id] ?? null;
+		const vb = b.metrics?.[id] ?? null;
+		const j = ours && refSide ? judge(id, ours.metrics?.[id] ?? null, refSide.metrics?.[id] ?? null) : {
+			meets: null,
+			verdict: ""
+		};
+		return {
+			id,
+			label: METRIC_LABELS[id],
+			a: va,
+			b: vb,
+			...j
+		};
+	});
 }
 function formatCompare(r) {
 	const side = (k, s) => `${k}: ${s.label} (${s.source}; ${s.width}x${s.height}, ${s.duration_sec}s${s.fps ? `, ${s.fps} fps` : ""}${s.has_audio ? "" : ", no audio"})`;
@@ -264722,6 +266242,7 @@ function formatCompare(r) {
 		`compare page → ${r.html}`,
 		side("a", r.a),
 		side("b", r.b),
+		...r.metrics.map((m) => `- ${m.label}: a ${m.a ?? "n/a"}, b ${m.b ?? "n/a"}${m.verdict ? `; ${m.verdict}` : ""}`),
 		...r.notes.map((n) => `note: ${n}`),
 		`You can't open a browser from here: give the user this path to open (e.g. \`open "${r.html}"\` on macOS). The folder ${r.dir} is self-contained (page + both videos) and can be zipped and shared. Views: side by side, stacked, wipe; space plays, ←/→ step a frame.`
 	].join("\n");
@@ -264733,6 +266254,21 @@ const esc = (s) => s.replace(/[&<>"']/g, (c) => ({
 	"\"": "&quot;",
 	"'": "&#39;"
 })[c]);
+const cell$1 = (v) => v === null ? "n/a" : String(v);
+/** The metrics table (none when nothing was measured). */
+function metricsTable(d) {
+	if (!d.metrics?.length) return "";
+	const withVerdict = d.metrics.some((m) => m.verdict);
+	const rows = d.metrics.map((m) => `<tr><td>${esc(m.label)}</td><td class="num">${esc(cell$1(m.a))}</td><td class="num">${esc(cell$1(m.b))}</td>${withVerdict ? `<td class="${m.meets === true ? "meets" : m.meets === false ? "misses" : ""}">${esc(m.verdict)}</td>` : ""}</tr>`).join("\n");
+	return `<section class="metrics" aria-label="Metrics">
+<table>
+<thead><tr><th scope="col">Metric</th><th scope="col">A · ${esc(d.a.label)}</th><th scope="col">B · ${esc(d.b.label)}</th>${withVerdict ? "<th scope=\"col\">Ours vs the reference</th>" : ""}</tr></thead>
+<tbody>
+${rows}
+</tbody>
+</table>
+</section>`;
+}
 /** The self-contained page: inline CSS and JS only, videos by relative path. */
 function comparePage(d) {
 	const data = {
@@ -264764,11 +266300,11 @@ function comparePage(d) {
 <style>
 :root {
   --bg: #f6f7f9; --panel: #ffffff; --ink: #14171c; --muted: #5d6572; --line: #d9dde3;
-  --accent: #2f6fed; --accent-ink: #ffffff; --stage: #0c0e12; --a: #2f6fed; --b: #d9480f;
+  --accent: #2f6fed; --accent-ink: #ffffff; --stage: #0c0e12; --a: #2f6fed; --b: #d9480f; --ok: #1b7f3b; --bad: #b42318;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #0f1115; --panel: #171a20; --ink: #e8eaee; --muted: #9aa3b1; --line: #2a2f38; --accent: #5b8cff; --accent-ink: #0f1115; --stage: #000000; --a: #5b8cff; --b: #ff8a4c; }
+  :root { --bg: #0f1115; --panel: #171a20; --ink: #e8eaee; --muted: #9aa3b1; --line: #2a2f38; --accent: #5b8cff; --accent-ink: #0f1115; --stage: #000000; --a: #5b8cff; --b: #ff8a4c; --ok: #5fd08a; --bad: #ff7b6e; }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -264806,6 +266342,13 @@ label.inline { display: inline-flex; gap: 6px; align-items: center; color: var(-
 .card strong { display: block; overflow-wrap: anywhere; }
 .card span { color: var(--muted); font-variant-numeric: tabular-nums; }
 .hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+.metrics { margin-top: 16px; overflow-x: auto; }
+.metrics table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font-variant-numeric: tabular-nums; }
+.metrics th, .metrics td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.metrics tr:last-child td { border-bottom: 0; }
+.metrics td.num { text-align: right; white-space: nowrap; }
+.metrics .meets { color: var(--ok); }
+.metrics .misses { color: var(--bad); }
 @media (max-width: 560px) {
   h1 { font-size: 16px; }
   .stage[data-mode="side"] .grid { gap: 4px; }
@@ -264849,6 +266392,7 @@ label.inline { display: inline-flex; gap: 6px; align-items: center; color: var(-
   <div class="card"><strong>A · ${esc(d.a.label)}</strong><span id="metaA">${esc(meta(d.a))}</span></div>
   <div class="card b"><strong>B · ${esc(d.b.label)}</strong><span id="metaB">${esc(meta(d.b))}</span></div>
 </div>
+${metricsTable(d)}
 <p class="hint">Space plays and pauses, ← and → step one frame. Both videos share one clock (the longer one drives it, and the shorter one holds its last frame).</p>
 </main>
 <script>
@@ -266399,7 +267943,7 @@ function formatJob(v) {
 function jsonResult(summary, data, opts) {
 	return toolResult(summary, data, opts);
 }
-function createServer(options = {}) {
+function createServer$1(options = {}) {
 	const cwd = options.cwd ?? (() => process.cwd());
 	const env = options.env ?? process.env;
 	const server = new McpServer({
@@ -266823,7 +268367,7 @@ function createServer(options = {}) {
 	}));
 	server.registerTool("qa_run", {
 		title: "Re-run technical QA",
-		description: "Re-run technical QA (ffprobe size/aspect/duration/codecs, blackdetect, freezedetect, silencedetect, EBU R128 loudness vs -14 LUFS) on the latest rendered reel of <project_dir> (or the given quality), write qa/report.{json,md} and refresh dist/render-manifest.json. Returns {status: pass|warn|fail, findings[] {id, status, detail, fix}}.",
+		description: "Re-run technical QA (ffprobe size/aspect/duration/codecs, blackdetect, freezedetect, scene changes, silencedetect, EBU R128 loudness vs -14 LUFS) on the latest rendered reel of <project_dir> (or the given quality), write qa/report.{json,md} and refresh dist/render-manifest.json. Motion: frozen_frames fails above spec.acceptance.max_frozen_pct (default 15% of the runtime); motion_density (big changes/s) and longest_static fail only against spec.acceptance; with master.loop, loop_seam checks first vs last frame SSIM and the audio jump. Returns {status: pass|warn|fail, findings[] {id, status, detail, fix}}.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Rendered project folder"),
 			quality: QUALITY.optional().describe("Which render to check (default: the latest)")
@@ -266840,7 +268384,7 @@ function createServer(options = {}) {
 	}));
 	server.registerTool("lint", {
 		title: "Lint against platform contracts",
-		description: "Check <project_dir> against its targets' platform contracts (platform-specs/) and the design rules: duration/fps/size/aspect envelopes, text overflow (renderer text boxes), text and burned-in captions under platform UI masks, WCAG contrast, caption reading speed, post caption/hashtag limits, cover, and brand banned phrases. Uses the spec plus, when present, the render of `quality` (default final). Writes qa/lint.{json,md}. Returns {status: pass|warn|fail, findings[] {id, severity, target?, scene_id?, message, fix}}; apply each fix to project/video-spec.json, re-render, lint again.",
+		description: "Check <project_dir> against its targets' platform contracts (platform-specs/) and the design rules: duration/fps/size/aspect envelopes, text overflow (renderer text boxes), text and burned-in captions under platform UI masks, WCAG contrast, caption reading speed, post caption/hashtag limits, cover, brand banned phrases, banned motion effects (style motion.avoid, brand visual.forbidden), spec.acceptance numbers the render missed (from QA) and the loop seam. Uses the spec plus, when present, the render of `quality` (default final). Writes qa/lint.{json,md}. Returns {status: pass|warn|fail, findings[] {id, severity, target?, scene_id?, message, fix}}; apply each fix to project/video-spec.json, re-render, lint again.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Project folder with project/video-spec.json"),
 			quality: QUALITY.optional().describe("Which render to check (default: final); spec-only checks run without a render")
@@ -266916,6 +268460,33 @@ function createServer(options = {}) {
 		});
 		return jsonResult(formatGolden(r), r);
 	}));
+	server.registerTool("stills", {
+		title: "Still frames of the composed scenes (before rendering)",
+		description: "Draw chosen moments of <project_dir>'s HyperFrames scenes (motion pages and every other HyperFrames kind) straight from their composed pages in headless Chrome, before the full render, and tile them into a labelled sheet for you to Read: review/stills/stills-<quality>[-<scene>].jpg (full-size frames in review/stills/frames/). This is not a render: renders/ and dist/ are untouched, no voice is synthesized. Moments per scene (scene-local): explicit times, every beat or downbeat of the music bed inside the scene (at), or count evenly spaced frames (default 3: in, mid, out). Each scene is composed exactly as the renderer composes it (tokens, zones, word cues and beat grid of the latest render when it matches the spec). Needs Chrome and the HyperFrames producer; waits for any HyperFrames render in this engine and refuses while a render of this project runs. Returns {image, images, tiles[{scene_id, time_sec, tag, label, frame}], scenes, skipped, grid, durations, notes}.",
+		inputSchema: {
+			project_dir: string().min(1).describe("Project folder with project/video-spec.json"),
+			quality: QUALITY.optional().describe("Frame size and fps of this quality's render (default preview)"),
+			scenes: array(string().min(1)).max(60).optional().describe("Scene ids (default: every HyperFrames scene)"),
+			times: array(number().nonnegative()).max(48).optional().describe("Scene-local seconds, applied to every chosen scene"),
+			at: _enum(["beats", "downbeats"]).optional().describe("Every beat, or every bar start, of the music bed inside each scene"),
+			count: int().min(1).max(12).optional().describe("Evenly spaced frames per scene (default 3: in, mid, out)"),
+			width: int().min(64).max(1080).optional().describe("Tile width in px (default 240)"),
+			cols: int().min(1).max(12).optional()
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false
+		}
+	}, safe(async ({ project_dir, ...o }) => {
+		const root = resolveInputPath(project_dir, cwd());
+		const r = await stillsProject(root, o, { env });
+		return jsonResult(formatStills(r), r, {
+			relativeTo: root,
+			maxArrayFor: { tiles: 90 }
+		});
+	}));
 	server.registerTool("review", {
 		title: "Review frames of a render",
 		description: "Write an image of <project_dir>'s rendered reel for you to Read and check before handing it over: mode sheet (default; every scene's opening, middle and closing frame), strip (every frame of a span: from_sec/to_sec or one scene; for motion, transitions and word cues) or crop (a region, as fractions of the frame, at full resolution: captions, small text, faces). Tiles are labelled with scene and time; tiles of scenes with lint findings get a red (error) or amber (warning) border, and strip tiles show the word cues spoken on them. Writes qa/review/<mode>-<quality>[-<scene>].jpg (and qa/lint.{json,md}). Returns {image, tiles[{index, time_sec, scene_id, label, flags?, severity?, cues?}], flagged[{scene_id, severity, findings}], notes}.",
@@ -266967,11 +268538,15 @@ function createServer(options = {}) {
 		object$2({
 			file: string().min(1),
 			label: string().min(1).optional()
+		}).strict(),
+		object$2({
+			reference: string().min(1),
+			label: string().min(1).optional()
 		}).strict()
-	]).describe("{quality} (this project's render), {project_dir, quality?} (another project's render, e.g. a variant or a short) or {file} (a project-relative video, e.g. assets/supplied/talk-tight.mp4); optional label");
+	]).describe("{quality} (this project's render), {project_dir, quality?} (another project's render, e.g. a variant or a short), {file} (a project-relative video, e.g. assets/supplied/talk-tight.mp4) or {reference} (a video to match: project-relative, or an absolute path the user gave); optional label");
 	server.registerTool("compare", {
 		title: "Before/after comparison page",
-		description: "Build a before/after page for two videos of <project_dir> at qa/compare/index.html, with both videos copied next to it as a.mp4/b.mp4 (self-contained: inline CSS/JS, no network; the folder can be zipped and shared). Views: side by side, stacked and wipe (draggable divider); one play/pause, scrubber and time readout drive both in sync, frame step (arrow keys), speed, per-side mute (b audible by default). Default: a = this project's preview render, b = its final render. Returns {html, a: {label, path, duration_sec, width, height}, b}. You cannot open a browser: give the user the path to open.",
+		description: "Build a before/after page for two videos of <project_dir> at qa/compare/index.html, with both videos copied next to it as a.mp4/b.mp4 (self-contained: inline CSS/JS, no network; the folder can be zipped and shared). Views: side by side, stacked and wipe (draggable divider); one play/pause, scrubber and time readout drive both in sync, frame step (arrow keys), speed, per-side mute (b audible by default). Default: a = this project's preview render, b = its final render; with a {reference} side the other side defaults to this project's latest render. Both sides are measured (duration, frozen seconds and %, big changes/s, cuts/s, longest static stretch, integrated loudness) into a table on the page, and with a reference each metric gets a meets/misses verdict for ours. Returns {html, a: {label, path, duration_sec, width, height, metrics}, b, metrics[] {id, a, b, meets, verdict}}. You cannot open a browser: give the user the path to open.",
 		inputSchema: {
 			project_dir: string().min(1).describe("Project folder (the page is written to its qa/compare/)"),
 			a: compareSide.optional(),
@@ -267376,7 +268951,7 @@ console.debug = console.error;
 const SHUTDOWN_WAIT_MS = 5e3;
 async function main() {
 	const jobs = new RenderJobManager();
-	const server = createServer({ jobs });
+	const server = createServer$1({ jobs });
 	const transport = new StdioServerTransport();
 	let stopping;
 	/**

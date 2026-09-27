@@ -75,9 +75,32 @@ Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and th
        - Motion pages only get a beat grid when `beat_sync.enabled` is set; give them the grid whenever there is a music bed.
        - `peak_ms` is not in `provenance.json`.
        - QA still calls frozen frames "expected" for motion graphics (item 4 fixes that).
-   - **Next: W2.**
-     - Lane A: `stills`, the determinism and loop-seam checks, and the blur spike (needs Chrome, so parts are user-run).
-     - Lane B: density QA, `compare` against a reference, `banned_effect`, `acceptance_unmet`, loop QA.
+   - **W2 done (2026-09-27).**
+     - **Lane A:**
+       - `renderer/src/capture.ts`: Chrome capture through the producer's puppeteer-core, plus pure time planning, PNG diff and seam verdict.
+       - `stills` tool and skill: sheets in `<project>/review/stills/`, never reported as a render.
+       - `chromeGate` is now one process-wide queue for renders and stills.
+       - Determinism check before each `motion` render: `nondeterministic_scene` fails the scene, `loop_seam` warns, and results are cached per composed-page hash.
+       - Motion pages get the music grid whenever there is a bed (`beat_sync.grid_only`), with no cuts moved.
+     - **Lane B:**
+       - `technicalQa` adds `motion_density` (ffmpeg `scdet`: big change at a score of 5 or more, cut at 15 or more), `longest_static`, holds and the loop seam (SSIM ≥ 0.99, audio jump < 6 dB).
+       - `frozen_frames` fails above `acceptance.max_frozen_pct`, default 15%. `QA_VERSION` is 4.
+       - `compare` has a reference side with a metrics table and meets/misses verdicts.
+       - Lint rules `banned_effect`, `acceptance_unmet` and `loop_seam`; `cut_off_beat` is downbeat-aware.
+       - `peak_ms` is in provenance.
+     - **Lead:** the render and create skills no longer call frozen frames "expected".
+     - **Sandbox end-to-end run:** the plain 4 s test reel now fails QA as it should (31.7% frozen, 0 changes/s).
+     - **Blur spike:** producer 0.8.78 supports motion blur natively (`RenderConfigInput.motionBlur`, `samplesPerFrame` 1–64, shutter angle and phase). `renderer/src/motion-blur.ts` maps subframes 3–6 to it but is not wired in. Wiring it needs `master.motion_blur` (schema) and a Chrome run: planned for W5.
+     - **User-run (real Chrome):**
+       - `VS_TEST_RENDER=1 npx vitest run packages/renderer/src/capture.test.ts`
+       - `VS_TEST_RENDER=1 npx vitest run packages/renderer/src/hyperframes-renderer.test.ts`
+       - `VS_TEST_RENDER=1 npx vitest run packages/mcp/src/stills.test.ts`
+     - **Known limits:**
+       - `motion_density` counts sudden changes only. Crossfades and smooth motion don't count, so calibrate against the user's reference in W5.
+       - Template `pacing` density fields are not read yet. W3 has the plan skill copy them into `spec.acceptance`.
+   - **Next: W3.**
+     - Lane A: `plan`/`create` inputs interview and beat-plan gate, `skills/plan/references/code-motion.md`, creative-director reviews stills against acceptance.
+     - Lane B: 6 templates (inputs and pacing), style `avoid` lists and version bumps, `variants` durations, hook check.
 4. **Phase 7**, paid providers, ElevenLabs first (needs the user's API key). Step 0 comes first and is local: shot cards, `provider-specs/`, and `prompt_pack` (no keys, no network). The `policy.yaml`, spend and consent machinery it needs is now in place.
 5. **Phase 9**, publishing (needs platform developer accounts). Default targets are Instagram and YouTube Shorts: the user is in India, where TikTok is banned.
 

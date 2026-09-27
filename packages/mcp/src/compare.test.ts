@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runFfmpeg } from "@video-studio/media";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { compareVideos, formatCompare } from "./compare.js";
+import { compareVideos, formatCompare, metricRows } from "./compare.js";
 
 let dir: string;
 let other: string;
@@ -33,6 +33,11 @@ beforeAll(async () => {
   await mkdir(join(dir, "assets", "supplied"), { recursive: true });
   await clip(join(dir, "assets", "supplied", "talk.mp4"), "160x90", 2, "gray");
   await clip(join(dir, "assets", "supplied", "talk-tight.mp4"), "160x90", 1.2, "white");
+  // A lively reference: a new flat colour every 0.5 s (5 cuts in 3 s), with a tone.
+  const colours = ["red", "blue", "green", "white", "black", "yellow"];
+  const graph = colours.map((c, i) => `color=c=${c}:s=90x160:r=15:d=0.5[c${i}]`).join(";") + `;${colours.map((_, i) => `[c${i}]`).join("")}concat=n=6`;
+  await mkdir(join(dir, "ref"), { recursive: true });
+  await runFfmpeg(["-y", "-f", "lavfi", "-i", graph, "-f", "lavfi", "-i", "sine=f=440:d=3", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", join(dir, "ref", "lively.mp4")]);
 }, 60_000);
 
 afterAll(async () => {
@@ -88,4 +93,42 @@ describe("compare", () => {
     await symlink(join(other, "renders", "preview", "reel.mp4"), join(dir, "assets", "supplied", "link.mp4"));
     await expect(compareVideos(dir, { a: { quality: "preview" }, b: { file: "assets/supplied/link.mp4" } })).rejects.toThrow(/resolves outside the project/);
   }, 60_000);
+
+  it("a reference side: metrics for both, and a verdict per metric for ours", async () => {
+    // b defaults to this project's latest render when a is the reference.
+    const r = await compareVideos(dir, { a: { quality: "preview" }, b: { reference: "ref/lively.mp4" } });
+    expect(r.b).toMatchObject({ label: "reference (lively.mp4)", reference: true, has_audio: true });
+    expect(r.b.metrics).toMatchObject({ cuts_per_sec: expect.closeTo(5 / 3, 1), changes_per_sec: expect.closeTo(5 / 3, 1), frozen_pct: 0 });
+    expect(r.b.metrics!.integrated_lufs).not.toBeNull();
+    expect(r.a.metrics).toMatchObject({ changes_per_sec: 0, integrated_lufs: null });
+    expect(r.a.metrics!.frozen_pct).toBeGreaterThan(50);
+    const row = (id: string) => r.metrics.find((m) => m.id === id)!;
+    expect(row("changes_per_sec")).toMatchObject({ meets: false, verdict: expect.stringMatching(/^misses: fewer big changes/) });
+    expect(row("cuts_per_sec")).toMatchObject({ meets: false });
+    expect(row("frozen_pct")).toMatchObject({ meets: false, verdict: expect.stringMatching(/more frozen/) });
+    expect(row("longest_static_sec")).toMatchObject({ meets: false });
+    expect(row("duration_sec")).toMatchObject({ meets: false, verdict: expect.stringMatching(/shorter than the reference/) });
+    expect(row("integrated_lufs")).toMatchObject({ meets: null });
+    const html = await readFile(r.html, "utf8");
+    expect(html).toContain("Ours vs the reference");
+    expect(html).toContain("Big changes per second");
+    expect(html).toMatch(/class="misses">misses: fewer big changes/);
+    expect(formatCompare(r)).toMatch(/Cuts per second: a 0, b 1\.\d+; misses/);
+
+    // An absolute path the user passes is allowed; a relative one is confined to the project.
+    const abs = await compareVideos(other, { a: { reference: join(dir, "ref", "lively.mp4") } });
+    expect(abs.a.reference).toBe(true);
+    expect(abs.b.label).toBe("preview");
+    await expect(compareVideos(dir, { a: { quality: "preview" }, b: { reference: "../nope.mp4" } })).rejects.toThrow(/b\.reference "\.\.\/nope\.mp4" is outside the project/);
+    await expect(compareVideos(dir, { a: { reference: join(dir, "ref", "missing.mp4") } })).rejects.toThrow(/a\.reference .* not found/);
+    await expect(compareVideos(dir, { a: { reference: "ref/lively.mp4" }, b: { reference: "ref/lively.mp4" } })).rejects.toThrow(/both sides are references/);
+  }, 60_000);
+
+  it("verdicts compare ours against the reference with tolerances; no verdict without one", () => {
+    const m = { duration_sec: 10, frozen_sec: 0.5, frozen_pct: 5, changes_per_sec: 1, cuts_per_sec: 0.5, longest_static_sec: 2, integrated_lufs: -14 };
+    const ours = { metrics: { ...m, duration_sec: 10.5, frozen_pct: 6, changes_per_sec: 0.95, integrated_lufs: -15 } };
+    const rows = metricRows(ours, { metrics: m, reference: true });
+    expect(rows.every((x) => x.meets === true)).toBe(true);
+    expect(metricRows({ metrics: m }, { metrics: m }).every((x) => x.meets === null && x.verdict === "")).toBe(true);
+  });
 });

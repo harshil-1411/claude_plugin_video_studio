@@ -17,7 +17,20 @@ import {
   voiceMode,
   MIN_CUE_GAP_MS,
 } from "@video-studio/schema";
-import { REFRAME, type Script, dominantScript, fittedFrame, formatMotionFinding, languageScript, loadMotionPage, scriptsIn, subjectEdgeHits } from "@video-studio/renderer";
+import { LOOP_AUDIO_JUMP_DB, LOOP_SSIM_MIN } from "@video-studio/media";
+import {
+  REFRAME,
+  type Script,
+  dominantScript,
+  findStylesDir,
+  fittedFrame,
+  formatMotionFinding,
+  getStyle,
+  languageScript,
+  loadMotionPage,
+  scriptsIn,
+  subjectEdgeHits,
+} from "@video-studio/renderer";
 import { projectSpecPaths } from "./spec-validate.js";
 
 /**
@@ -120,6 +133,8 @@ export interface LintOptions {
   quality?: LintQuality;
   /** platform-specs directory (tests); default: the bundled one. */
   specsDir?: string | null;
+  /** styles directory (tests); default: the bundled one. */
+  stylesDir?: string | null;
 }
 
 /** The parts of renders/<quality>/render-state.json lint reads (written by the pipeline). */
@@ -135,9 +150,16 @@ interface RenderStateView {
   cover?: { headline_box?: TextBox; crops?: Array<{ id: string; targets: string[]; x: number; y: number; w: number; h: number }> };
   voice?: { timing_source?: string; tracks_path?: string };
   voice_mode?: string;
-  beat_sync?: { bpm?: number | null; beats?: number; moved_cuts?: number; beat_times_ms?: number[] };
+  beat_sync?: { bpm?: number | null; beats?: number; moved_cuts?: number; beat_times_ms?: number[]; downbeat_times_ms?: number[]; snap?: "beat" | "downbeat" };
+  qa?: QaStateView;
   cues?: Array<{ scene_id: string; word: string; item: number; at_ms?: number; status: string }>;
   logo?: { path: string; box: PxBox; scenes: string[] };
+}
+
+/** The QA metrics render-state keeps (pipeline `RenderState.qa`). */
+interface QaStateView {
+  motion?: { changes_per_sec: number; longest_static_s: number; frozen_s: number; frozen_pct: number; cuts_per_sec?: number };
+  loop_seam?: { ssim: number | null; audio_jump_db: number | null };
 }
 
 /** captions/captions.json (media `CaptionJson`): the words and the captions built from them. */
@@ -670,6 +692,18 @@ export function checkLogo(state: Pick<RenderStateView, "logo"> | undefined, boxe
   }
 }
 
+/** Brand-forbidden phrase matching (checkForbidden, checkBannedEffect): lower case, `_`/`-` as spaces, plural `s`/`es` dropped. */
+const normPhrase = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/[^\p{L}\p{N} ]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .map((w) => (w.length > 4 && /(sh|ch|x|ss)es$/.test(w) ? w.slice(0, -2) : w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w))
+    .join(" ");
+
 /**
  * Brand `visual.forbidden` treatments ("drop shadows", "zoom transitions", "kinetic text") named by
  * a scene: its visual requirements, transition, motion pattern or graphic kind. Text match only:
@@ -678,8 +712,6 @@ export function checkLogo(state: Pick<RenderStateView, "logo"> | undefined, boxe
 export function checkForbidden(spec: VideoSpec, brand: Brand | undefined, out: LintFinding[]): void {
   const forbidden = brand?.visual?.forbidden ?? [];
   if (!forbidden.length) return;
-  const norm = (s: string) => ` ${s.toLowerCase().replace(/[_-]+/g, " ").replace(/[^\p{L}\p{N} ]+/gu, " ").replace(/\s+/g, " ").trim()} `;
-  const stem = (w: string) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w);
   for (const s of spec.scenes) {
     const parts = [
       ...strings(s.visual_requirements),
@@ -687,11 +719,11 @@ export function checkForbidden(spec: VideoSpec, brand: Brand | undefined, out: L
       s.motion ? `${s.motion.pattern} motion` : "",
       s.deterministic ? s.deterministic.kind : "",
     ].filter(Boolean);
-    const text = norm(parts.join(" ")).split(" ").map(stem).join(" ");
+    const text = ` ${normPhrase(parts.join(" "))} `;
     for (const phrase of forbidden) {
-      const want = norm(phrase).trim().split(" ").map(stem);
-      if (!want.length || !want[0]) continue;
-      if (!text.includes(` ${want.join(" ")} `)) continue;
+      const want = normPhrase(phrase);
+      if (!want) continue;
+      if (!text.includes(` ${want} `)) continue;
       out.push({
         id: "brand_forbidden",
         severity: "warning",
@@ -896,7 +928,11 @@ function checkCaptionGap(lines: readonly TimedLine[], out: LintFinding[]): void 
 
 /** Scene cuts that beat sync could not move onto a beat. */
 function checkBeatCuts(spec: VideoSpec, state: RenderStateView | undefined, spans: readonly SceneSpan[] | undefined, out: LintFinding[]): void {
-  const beats = state?.beat_sync?.beat_times_ms;
+  // snap: downbeat measures cuts against bar starts, unless the render fell back to beats (no readable bar).
+  const bs = state?.beat_sync;
+  const wantDown = spec.audio?.beat_sync?.snap === "downbeat" && bs?.snap !== "beat" && Boolean(bs?.downbeat_times_ms?.length);
+  const beats = wantDown ? bs?.downbeat_times_ms : bs?.beat_times_ms;
+  const unit = wantDown ? "downbeat" : "beat";
   if (!spec.audio?.beat_sync?.enabled || !beats?.length || !spans || spans.length < 2) return;
   const tol = spec.audio.beat_sync.tolerance_ms ?? BEAT_TOLERANCE_MS;
   const lastBeat = Math.max(...beats);
@@ -914,8 +950,8 @@ function checkBeatCuts(spec: VideoSpec, state: RenderStateView | undefined, span
       id: "cut_off_beat",
       severity: "warning",
       scene_id: cur.id,
-      message: `the cut from ${cur.id} to ${next.id} at ${sec(cut)} is ${Math.round(off)} ms from the nearest beat (${sec(near)}); tolerance ${tol} ms`,
-      fix: `set scene ${cur.id} duration_sec to ${newDur} so the cut lands on the beat at ${sec(near)}; beat sync does not move a cut into speech, so if ${near < cut ? cur.id : next.id}'s voiceover fills its scene, shorten it first (or raise audio.beat_sync.tolerance_ms)`,
+      message: `the cut from ${cur.id} to ${next.id} at ${sec(cut)} is ${Math.round(off)} ms from the nearest ${unit} (${sec(near)}); tolerance ${tol} ms`,
+      fix: `set scene ${cur.id} duration_sec to ${newDur} so the cut lands on the ${unit} at ${sec(near)}; beat sync does not move a cut into speech, so if ${near < cut ? cur.id : next.id}'s voiceover fills its scene, shorten it first (or raise audio.beat_sync.tolerance_ms)`,
     });
   }
 }
@@ -1243,6 +1279,80 @@ export async function checkMotionUnsafe(root: string, spec: VideoSpec, out: Lint
   }
 }
 
+// ------------------------------------------------------------------------------------ craft
+
+/**
+ * Effects a `motion` scene declares in `props.effects` that the active style avoids
+ * (`motion.avoid`) or brand.yaml forbids (`visual.forbidden`, matched like brand_forbidden).
+ * Lint only sees declared effects; the stills review covers the rest.
+ */
+export function checkBannedEffect(spec: VideoSpec, style: { id: string; avoid?: readonly string[] } | undefined, brand: Brand | undefined, out: LintFinding[]): void {
+  const avoid = new Set(style?.avoid ?? []);
+  const forbidden = (brand?.visual?.forbidden ?? []).map((phrase) => ({ phrase, norm: normPhrase(phrase) })).filter((f) => f.norm);
+  if (!avoid.size && !forbidden.length) return;
+  for (const s of spec.scenes) {
+    const effects = s.deterministic?.kind === "motion" && Array.isArray(s.deterministic.props.effects) ? (s.deterministic.props.effects as string[]) : [];
+    for (const effect of effects) {
+      const fix = `remove "${effect}" from scene ${s.id}'s props.effects (and from its page), or choose a style that allows it`;
+      if (avoid.has(effect)) {
+        out.push({ id: "banned_effect", severity: "error", scene_id: s.id, message: `scene ${s.id} uses "${effect}", which style "${style!.id}" avoids (motion.avoid)`, fix });
+        continue;
+      }
+      const hit = forbidden.find((f) => f.norm === normPhrase(effect));
+      if (hit) out.push({ id: "banned_effect", severity: "error", scene_id: s.id, message: `scene ${s.id} uses "${effect}", which brand.yaml forbids ("${hit.phrase}" in visual.forbidden)`, fix: `remove "${effect}" from scene ${s.id}'s props.effects (and from its page); the brand forbids it` });
+    }
+  }
+}
+
+/** spec.acceptance numbers the render misses, from the QA metrics in render state (error each). */
+export function checkAcceptance(spec: Pick<VideoSpec, "acceptance">, state: Pick<RenderStateView, "qa"> | undefined, out: LintFinding[]): void {
+  const a = spec.acceptance;
+  const m = state?.qa?.motion;
+  if (!a || !m) return;
+  const push = (message: string, fix: string) => out.push({ id: "acceptance_unmet", severity: "error", message, fix });
+  if (a.min_changes_per_sec !== undefined && m.changes_per_sec < a.min_changes_per_sec) {
+    push(`the render has ${m.changes_per_sec} big changes/s; acceptance.min_changes_per_sec is minimum ${a.min_changes_per_sec}`, "stage more visual beats (new states, reveals, match cuts, camera moves) or split long scenes, re-render and run qa_run");
+  }
+  if (a.max_frozen_pct !== undefined && m.frozen_pct > a.max_frozen_pct) {
+    push(`the render has ${m.frozen_pct}% of the runtime frozen (${m.frozen_s}s); acceptance.max_frozen_pct is maximum ${a.max_frozen_pct}%`, "give the frozen stretches (qa/report.md lists them) motion, or shorten them, then re-render");
+  }
+  if (a.max_static_sec !== undefined && m.longest_static_s > a.max_static_sec) {
+    push(`the render goes ${m.longest_static_s}s without a big change; acceptance.max_static_sec is maximum ${a.max_static_sec}s`, "add a change inside that stretch (qa/report.md gives its times) or shorten the scene there");
+  }
+  if (a.hold_ms !== undefined && m.longest_static_s * 1000 < a.hold_ms) {
+    push(`the longest hold is ${Math.round(m.longest_static_s * 1000)} ms; acceptance.hold_ms wants at least one of ${a.hold_ms} ms`, "hold one key moment still so the motion around it feels earned");
+  }
+}
+
+/** With master.loop, the loop seam QA measured: first vs last frame SSIM and the audio level jump. */
+export function checkLoopSeam(spec: Pick<VideoSpec, "master" | "acceptance">, state: Pick<RenderStateView, "qa"> | undefined, out: LintFinding[]): void {
+  if (!(spec.master?.loop || spec.acceptance?.loop) || !state?.qa) return;
+  const seam = state.qa.loop_seam;
+  if (!seam) {
+    out.push({ id: "loop_seam", severity: "warning", message: "master.loop is set but QA has not measured the loop seam of this render", fix: "run qa_run (or re-render) so QA measures the seam" });
+    return;
+  }
+  const frameBad = seam.ssim === null || seam.ssim < LOOP_SSIM_MIN;
+  const audioBad = seam.audio_jump_db !== null && seam.audio_jump_db >= LOOP_AUDIO_JUMP_DB;
+  if (!frameBad && !audioBad) return;
+  out.push({
+    id: "loop_seam",
+    severity: "error",
+    message: `the loop seam shows: first vs last frame SSIM ${seam.ssim ?? "not measured"} (minimum ${LOOP_SSIM_MIN})${seam.audio_jump_db !== null ? `, audio level jump ${seam.audio_jump_db} dB (maximum ${LOOP_AUDIO_JUMP_DB} dB)` : ""}`,
+    fix: [
+      ...(frameBad ? ["make the last frame return to the first (cyclic motion periods must divide the loop length)"] : []),
+      ...(audioBad ? ["end the music and sound where they started (loop the bed on a bar, no fades at the seam)"] : []),
+    ].join("; "),
+  });
+}
+
+/** The active style's avoid list (none when the spec names no style or the pack can't be read). */
+async function styleAvoid(spec: VideoSpec, stylesDir: string | null): Promise<{ id: string; avoid?: string[] } | undefined> {
+  if (!spec.style) return undefined;
+  const style = await getStyle(stylesDir, spec.style).catch(() => undefined);
+  return style ? { id: style.id, ...(style.motion.avoid ? { avoid: style.motion.avoid } : {}) } : undefined;
+}
+
 // ------------------------------------------------------------------------------------ entry
 
 function formatMarkdown(r: Omit<LintResult, "report_json" | "report_md">): string {
@@ -1318,6 +1428,9 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   checkFootageQuality(spec, irMedia, findings);
   checkLogo(state, boxes, findings);
   checkForbidden(spec, brand, findings);
+  checkBannedEffect(spec, await styleAvoid(spec, opts.stylesDir === undefined ? findStylesDir() : opts.stylesDir), brand, findings);
+  checkAcceptance(spec, state, findings);
+  checkLoopSeam(spec, state, findings);
   checkPostCopy(spec, contracts, findings);
   const coverView: CoverView | undefined = state?.cover
     ? {

@@ -3,7 +3,7 @@ name: render
 description: Render a planned video-studio project (project/video-spec.json) into a finished package in dist/ - captioned 9:16/16:9 reel, clean master, SRT/VTT captions, transcript, thumbnail, social copy, render manifest and provenance - using only local tools (system TTS or silent voice, HyperFrames or ffmpeg motion graphics). Use when the user runs /video-studio:render, approves a plan, or asks to render, preview or export the video.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+) and ffmpeg with libass and libx264.
-allowed-tools: mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__render_cancel mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__doctor mcp__plugin_video-studio_engine__review mcp__plugin_video-studio_engine__footage_focus Read Write Edit
+allowed-tools: mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status mcp__plugin_video-studio_engine__render_cancel mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__export mcp__plugin_video-studio_engine__doctor mcp__plugin_video-studio_engine__review mcp__plugin_video-studio_engine__stills mcp__plugin_video-studio_engine__footage_focus Read Write Edit
 ---
 
 # Render a video
@@ -24,6 +24,10 @@ absolute paths.
 Call `spec_validate {project_dir}`. If `ok` is false, list the errors with
 their fixes and stop (or fix them per the plan skill and re-validate).
 `render_submit` refuses an invalid spec anyway.
+
+When the spec has HyperFrames scenes (above all `motion` pages), run the
+stills skill first: `stills {project_dir, at: "downbeats"}` (or `{project_dir}`
+without music), Read the sheet and fix what looks wrong before rendering.
 
 ## 2. Preview first
 
@@ -107,8 +111,11 @@ From `result`:
   the headline is legible.
 - **QA**: `pass`, or each finding as `id: detail` with its fix. With the
   silent voice, silence and loudness are not measured (a preview without
-  narration audio); frozen frames are expected for static motion-graphic
-  scenes. Report `fail`
+  narration audio). Frozen frames are never "expected": `frozen_frames`
+  fails above `acceptance.max_frozen_pct` (default 15% of the runtime), and
+  `motion_density` counts big visual changes per second (sudden changes such
+  as cuts, colour flips and elements appearing; smooth continuous motion is
+  not counted). Report `fail`
   findings prominently.
 - **Voice and renderer used, and why**: quote `voice.reason` and
   `renderer.reasons` briefly. If the voice fell back to silent, say why

@@ -149,6 +149,12 @@ function serialQueue() {
   };
 }
 
+/**
+ * One Chrome at a time in this process: HyperFrames scene renders and still captures (`stills`)
+ * both go through this gate, so a still sheet never launches Chrome beside a render.
+ */
+export const chromeGate = serialQueue();
+
 // ---------------------------------------------------------------------------------- renderScenes
 
 export type SceneStatus = "rendered" | "cached" | "pending" | "failed";
@@ -406,8 +412,7 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
   const results: SceneRenderEntry[] = new Array(scenes.length);
 
   let footageRenderer: SceneRenderer | undefined = o.footageRenderer;
-  // One Chrome at a time, even when ffmpeg/footage scenes run in parallel beside it.
-  const chromeGate = serialQueue();
+  // One Chrome at a time (process-wide chromeGate), even when ffmpeg/footage scenes run in parallel beside it.
   let irAssets: Promise<Map<string, string>> | undefined;
   const renderOne = async (given: Scene): Promise<SceneRenderEntry> => {
     // A cutaway draws its graphic instead of the footage (the clip only supplies sound and words),

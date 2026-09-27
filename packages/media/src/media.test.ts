@@ -258,10 +258,12 @@ describe.skipIf(!hasFf)("ffmpeg integration", () => {
     expect(byId("silence").status).toBe("warn");
     expect(qa.metrics.silence[0]!.start_s).toBeCloseTo(1, 1);
     expect(qa.metrics.silence[0]!.end_s).toBeCloseTo(2.5, 1);
-    // Solid-colour segments are static: reported as a warning, never a failure.
-    expect(byId("frozen_frames").status).toBe("warn");
+    // Solid-colour segments are static: frozen well above the default limit fails (a frozen reel reads as a slideshow).
+    expect(byId("frozen_frames").status).toBe("fail");
     expect(qa.metrics.integrated_lufs).not.toBeNull();
-    expect(qa.status).toBe("warn");
+    expect(qa.status).toBe("fail");
+    const lenient = await technicalQa(p("master.mp4"), { width: 180, height: 320, duration_s: 3, acceptance: { max_frozen_pct: 100 } }, { tools: tools! });
+    expect(lenient.status).toBe("warn");
 
     const bad = await technicalQa(p("master.mp4"), { width: 1080, height: 1920, duration_s: 10 }, { tools: tools! });
     expect(bad.status).toBe("fail");
@@ -270,9 +272,9 @@ describe.skipIf(!hasFf)("ffmpeg integration", () => {
 
     const silentOnly = await technicalQa(p("concat.mp4"), { width: 180, height: 320, duration_s: 2 }, { tools: tools! });
     expect(silentOnly.checks.find((c) => c.id === "audio_stream")!.status).toBe("fail");
-    expect((await technicalQa(p("concat.mp4"), { width: 180, height: 320, duration_s: 2, require_audio: false }, { tools: tools! })).status).not.toBe("fail");
+    expect((await technicalQa(p("concat.mp4"), { width: 180, height: 320, duration_s: 2, require_audio: false, acceptance: { max_frozen_pct: 100 } }, { tools: tools! })).status).not.toBe("fail");
 
-    const files = await writeQaReport(dir, qa);
+    const files = await writeQaReport(dir, lenient);
     expect(JSON.parse(await readFile(files.json, "utf8")).status).toBe("warn");
     const md = await readFile(files.md, "utf8");
     expect(md).toContain("# Technical QA: WARN");

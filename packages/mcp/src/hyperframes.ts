@@ -120,6 +120,7 @@ export function hyperframesOptions(env: Env = process.env, extra: HyperframesRen
     ...extra,
     resolution,
     producerInstalled: () => true,
+    producerEntry: resolution.entry,
     loadProducer: async () => (await import(url)) as HyperframesProducer,
     // Probe Chrome through the resolved producer's own puppeteer-core.
     launchProbe: (chromePath: string, timeoutMs: number) => puppeteerLaunchProbe(chromePath, timeoutMs, resolution.entry),

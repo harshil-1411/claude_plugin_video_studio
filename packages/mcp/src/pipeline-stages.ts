@@ -392,10 +392,40 @@ export async function stagePlanTiming(
       }
       if (r.adjustments.length) warnings.push(`timing: beat sync moved ${r.summary.moved_cuts} cut(s) onto ${r.summary.snap === "downbeat" ? "bar starts" : "beats"} (${r.summary.bpm ?? "?"} bpm)`);
     }
+  } else if (music && hasMotionScenes(spec.scenes)) {
+    // Motion pages read the bed's beat grid (window.__vs.beats) even when cuts stay put.
+    signal?.throwIfAborted();
+    const g = await musicBeatGrid(spec.scenes, adjusted, music, { cacheDir: join(resolveDataDir(run.env).cache, "beats"), ...(signal ? { signal } : {}) });
+    beatSync = g.grid;
+    if (g.warning) warnings.push(g.warning);
   }
   timing_adjustments.sort((a, b) => spec.scenes.findIndex((s) => s.id === a.scene_id) - spec.scenes.findIndex((s) => s.id === b.scene_id));
   const planScenes: Scene[] = spec.scenes.map((s) => (adjusted.has(s.id) ? { ...s, duration_sec: adjusted.get(s.id)! } : s));
   return { timing_adjustments, beatSync, planScenes };
+}
+
+/** Whether any scene is a `motion` page (the kinds that read the beat grid). */
+export function hasMotionScenes(scenes: readonly Scene[]): boolean {
+  return scenes.some((s) => s.deterministic?.kind === "motion");
+}
+
+/**
+ * The music bed's beat grid on the render plan's timeline without moving any cut (beat_sync off):
+ * the same detection (cached by the bed's hash) or synthesized-score grid beat sync uses, recorded
+ * with `grid_only` so `sceneBeatGrids` hands motion pages their beats. Specs without motion scenes
+ * never call this, so their render state, cache keys and lock are unchanged.
+ */
+export async function musicBeatGrid(
+  scenes: readonly Scene[],
+  adjusted: ReadonlyMap<string, number>,
+  music: ResolvedMusic,
+  o: { cacheDir?: string; signal?: AbortSignal } = {},
+): Promise<{ grid: NonNullable<RenderState["beat_sync"]>; warning?: string }> {
+  // Tolerance 0 and no voice tracks: snapping is a no-op, and the adjustments are discarded anyway.
+  const r = await beatSyncDurations(scenes, adjusted, music, 0, new Map(), o);
+  const { snap: _snap, ...summary } = r.summary;
+  const grid = { ...summary, moved_cuts: 0, grid_only: true as const };
+  return { grid, ...(r.warning ? { warning: r.warning.replace(/^beat_sync: /, "motion beats: ").replace(/; cuts unchanged$/, "; motion pages get no beat grid") } : {}) };
 }
 
 export interface FrameTimeline {
@@ -498,16 +528,17 @@ export interface ScenesStage {
 /**
  * The music beat grid inside each `motion` scene of the render plan, in scene-local seconds (the
  * page reads it as `window.__vs.beats` / `downbeats`). Scene starts are the frame-aligned slots of
- * `frameTimeline`. Empty without a beat grid; other kinds get none (their clips do not use it).
+ * `frameTimeline`. Empty without a beat grid; other kinds get none (their clips do not use it)
+ * unless `allKinds` (stills sample every scene on the grid).
  */
-export function sceneBeatGrids(planScenes: readonly Scene[], fps: number, beatSync: RenderState["beat_sync"] | undefined): Map<string, SceneBeats> {
+export function sceneBeatGrids(planScenes: readonly Scene[], fps: number, beatSync: RenderState["beat_sync"] | undefined, allKinds = false): Map<string, SceneBeats> {
   const out = new Map<string, SceneBeats>();
   const beats = beatSync?.beat_times_ms ?? [];
   const downbeats = beatSync?.downbeat_times_ms ?? [];
   if (!beats.length && !downbeats.length) return out;
   const { bounds, frameMs } = frameTimeline(planScenes, fps);
   planScenes.forEach((s, i) => {
-    if (s.deterministic?.kind !== "motion") return;
+    if (!allKinds && s.deterministic?.kind !== "motion") return;
     const start = frameMs(bounds[i]!);
     const end = frameMs(bounds[i + 1]!);
     const local = (list: readonly number[]) => list.filter((t) => t >= start && t < end).map((t) => Math.round(t - start) / 1000);

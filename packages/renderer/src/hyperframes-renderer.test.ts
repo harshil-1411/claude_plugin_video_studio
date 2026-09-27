@@ -9,6 +9,8 @@ import {
   clearHyperframesProbeCache,
   createHyperframesRenderer,
   describeHyperframesError,
+  determinismCachePath,
+  DeterminismError,
   findChrome,
   type HyperframesProducer,
 } from "./hyperframes-renderer.js";
@@ -133,7 +135,25 @@ describe("available()", () => {
 });
 
 describe("render() with an injected producer", () => {
-  async function setup(producer: Partial<HyperframesProducer>, probe?: Partial<ProbeResult>) {
+  /** A fake capture session: `frame(t, call)` is the PNG bytes a seek to t draws on the n-th capture. */
+  function fakeCapture(frame: (t: number, call: number) => Uint8Array = (t) => Buffer.from(`f${t}`)) {
+    const log = { opened: 0, seeks: [] as number[], closed: 0, dirs: [] as string[] };
+    const openCapture = async () => {
+      log.opened++;
+      return {
+        async open(dir: string) {
+          log.dirs.push(dir);
+          return { errors: [], capture: async (t: number) => frame(t, log.seeks.push(t) - 1), close: async () => {} };
+        },
+        async close() {
+          log.closed++;
+        },
+      };
+    };
+    return { log, openCapture };
+  }
+
+  async function setup(producer: Partial<HyperframesProducer>, probe?: Partial<ProbeResult>, capture = fakeCapture()) {
     const tmpRoot = await mkdtemp(join(dir, "tmproot-"));
     const project = await mkdtemp(join(dir, "project-"));
     await mkdir(join(project, "source", "assets"), { recursive: true });
@@ -163,8 +183,9 @@ describe("render() with an injected producer", () => {
       launchProbe: async () => ({ ok: true }),
       loadProducer: async () => full,
       probeOutput: async () => ({ duration_s: 1, width: 180, height: 320, has_video: true, ...probe }) as ProbeResult,
+      openCapture: capture.openCapture,
     });
-    return { r, seen, tmpRoot, project };
+    return { r, seen, tmpRoot, project, capture: capture.log };
   }
 
   function request(project: string, over: Partial<SceneRenderRequest> = {}): SceneRenderRequest {
@@ -179,13 +200,15 @@ describe("render() with an injected producer", () => {
   }
 
   it("writes the composition, calls the producer API and cleans up", async () => {
-    const { r, seen, tmpRoot, project } = await setup({});
+    const { r, seen, tmpRoot, project, capture } = await setup({});
     const shot = { ...scene(1), deterministic: { kind: "screenshot" as const, props: { asset: "a1", callouts: ["Here"] } } };
     const res = await r.render(request(project, { scene: shot }));
     expect(res).toEqual({ scene_id: "s01", out_path: join(project, "renders", "s01.mp4"), duration_ms: 1000, renderer: "hyperframes", renderer_version: "0.8.78", warnings: [], text_boxes: expect.any(Array) });
     expect(res.text_boxes!.length).toBeGreaterThan(0);
     expect(seen.html).toContain('data-composition-id="vs-s01"');
     expect(seen.files).toEqual(["assets", "assets/screenshot-1.png", "index.html"]);
+    // Only motion pages go through the determinism check.
+    expect(capture.opened).toBe(0);
     expect(seen.config).toMatchObject({ fps: 30, format: "mp4", quality: "standard", workers: 1, entryFile: "index.html", hdrMode: "force-sdr" });
     expect(seen.producerConfig).toMatchObject({ chromePath: fakeChrome, enableBrowserPool: false, concurrency: 1 });
     expect(process.env.HYPERFRAMES_FFMPEG_PATH).toBe(process.env.FFMPEG_PATH);
@@ -203,6 +226,66 @@ describe("render() with an injected producer", () => {
     expect(seen.html).toContain('"beats":[0.5]');
     expect(seen.files).toEqual(["index.html", "morph.css", "morph.js"]);
     expect(await readdir(tmpRoot)).toEqual([]);
+  });
+
+  it("checks a motion page's determinism in the composed page before rendering, once per page", async () => {
+    const { r, seen, project, capture } = await setup({});
+    await cp(MOTION_FIXTURES, join(project, "motion"), { recursive: true });
+    const motion = { ...scene(1), deterministic: { kind: "motion" as const, props: { html: "motion/morph.html", text: ["Docs in."] } } };
+    await r.render(request(project, { scene: motion }));
+    expect(capture.opened).toBe(1);
+    expect(capture.closed).toBe(1);
+    expect(capture.seeks).toEqual([0.266667, 0.5, 0.766667, 0.266667, 0.766667, 0.5]);
+    const cached = JSON.parse(await readFile(determinismCachePath(request(project)), "utf8"));
+    expect(cached.result).toMatchObject({ ok: true, mismatches: [] });
+    // Same page again: the cached result is reused (no Chrome); a changed page is checked again.
+    await r.render(request(project, { scene: motion }));
+    expect(capture.opened).toBe(1);
+    await writeFile(join(project, "motion", "morph.css"), "/* edited */");
+    await r.render(request(project, { scene: motion }));
+    expect(capture.opened).toBe(2);
+    expect(seen.html).toContain("Content-Security-Policy");
+  });
+
+  it("fails a nondeterministic motion page before the producer starts", async () => {
+    let started = false;
+    const flaky = fakeCapture((t, call) => Buffer.from(`f${t}#${call}`));
+    const { r, project } = await setup({ createRenderJob: () => ((started = true), {}) as any }, undefined, flaky);
+    await cp(MOTION_FIXTURES, join(project, "motion"), { recursive: true });
+    const motion = { ...scene(1), deterministic: { kind: "motion" as const, props: { html: "motion/morph.html", text: ["x"] } } };
+    const err = await r.render(request(project, { scene: motion })).catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(DeterminismError);
+    expect(err.message).toMatch(/scene s01: nondeterministic_scene: .*different frames.*fix: make window\.seek\(t\) a pure function/);
+    expect(started).toBe(false);
+    // The verdict is cached too: an unchanged page fails again without Chrome.
+    await expect(r.render(request(project, { scene: motion }))).rejects.toThrow(/nondeterministic_scene/);
+    expect(flaky.log.opened).toBe(1);
+  });
+
+  it("warns (loop_seam) when a loop page does not end where it began", async () => {
+    const seam = fakeCapture((t) => Buffer.from(t >= 1 ? "end" : `f${t}`));
+    const { r, project } = await setup({}, undefined, seam);
+    await cp(MOTION_FIXTURES, join(project, "motion"), { recursive: true });
+    const motion = { ...scene(1), deterministic: { kind: "motion" as const, props: { html: "motion/morph.html", text: ["x"], loop: true } } };
+    const res = await r.render(request(project, { scene: motion }));
+    expect(seam.log.seeks.slice(-2)).toEqual([0, 1]);
+    expect(res.warnings).toEqual([expect.stringMatching(/^loop_seam: scene s01: props\.loop is set but the frame at 1s does not match the frame at 0s/)]);
+  });
+
+  it("skips the check when determinismCheck is false", async () => {
+    const { project } = await setup({});
+    const cap = fakeCapture();
+    const r = createHyperframesRenderer({
+      chromePath: fakeChrome,
+      launchProbe: async () => ({ ok: true }),
+      determinismCheck: false,
+      openCapture: cap.openCapture,
+      loadProducer: async () => ({ resolveConfig: (o: any) => o, createRenderJob: (c: any) => ({ config: c, status: "queued", warnings: [] }) as any, executeRenderJob: async (_j: any, _d: string, out: string) => writeFile(out, "mp4") }) as any,
+      probeOutput: async () => ({ duration_s: 1, width: 180, height: 320, has_video: true }) as ProbeResult,
+    });
+    await cp(MOTION_FIXTURES, join(project, "motion"), { recursive: true });
+    await r.render(request(project, { scene: { ...scene(1), deterministic: { kind: "motion" as const, props: { html: "motion/morph.html", text: ["x"] } } } }));
+    expect(cap.log.opened).toBe(0);
   });
 
   it("refuses a motion page with lint errors (and never starts the producer)", async () => {

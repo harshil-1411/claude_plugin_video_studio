@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { projectPaths } from "@video-studio/core";
-import { ffprobe } from "@video-studio/media";
+import { type VideoAnalysis, analyzeVideo, ffprobe } from "@video-studio/media";
 import { type Quality, resolveRender } from "./golden.js";
 
 /**
@@ -11,18 +11,46 @@ import { type Quality, resolveRender } from "./golden.js";
  * asset and its `tighten`ed copy). Writes qa/compare/index.html with both videos copied next to it,
  * so the folder is self-contained: one HTML file with inline CSS and JS, no network requests.
  * Side-by-side, stacked and wipe views share one clock, scrubber, frame step and speed control.
+ *
+ * A side can also be a `reference`: any local video (a piece the user wants to match, given as a
+ * project-relative path or an absolute path they passed explicitly). Both sides are measured with
+ * technical QA's decode pass (duration, frozen time, big changes and cuts per second, longest
+ * static stretch, loudness), and with a reference each metric gets a plain meets/misses verdict.
  */
 
 export type CompareSide =
   | { quality: Quality; label?: string }
   | { project_dir: string; quality?: Quality; label?: string }
-  | { file: string; label?: string };
+  | { file: string; label?: string }
+  | { reference: string; label?: string };
 
 export interface CompareOptions {
-  /** Default: this project's preview render. */
+  /** Default: this project's preview render (its latest render when b is a reference). */
   a?: CompareSide;
-  /** Default: this project's final render. */
+  /** Default: this project's final render (its latest render when a is a reference). */
   b?: CompareSide;
+}
+
+/** What `compare` measures on each side (technical QA's decode pass). */
+export interface CompareMetrics {
+  duration_sec: number;
+  frozen_sec: number;
+  frozen_pct: number;
+  changes_per_sec: number;
+  cuts_per_sec: number;
+  longest_static_sec: number;
+  integrated_lufs: number | null;
+}
+
+/** One metric for both sides; with a reference, whether ours meets it. */
+export interface CompareMetricRow {
+  id: keyof CompareMetrics;
+  label: string;
+  a: number | null;
+  b: number | null;
+  /** Ours meets the reference (null: no reference side, or not measurable). */
+  meets: boolean | null;
+  verdict: string;
 }
 
 export interface CompareSideResult {
@@ -38,6 +66,9 @@ export interface CompareSideResult {
   height: number;
   fps?: number;
   has_audio: boolean;
+  /** This side is the reference to match. */
+  reference?: boolean;
+  metrics?: CompareMetrics;
 }
 
 export interface CompareResult {
@@ -48,6 +79,8 @@ export interface CompareResult {
   dir: string;
   a: CompareSideResult;
   b: CompareSideResult;
+  /** Side by side metrics; with a reference, a verdict per metric for ours. */
+  metrics: CompareMetricRow[];
   notes: string[];
 }
 
@@ -59,6 +92,29 @@ function inside(root: string, p: string): boolean {
 }
 
 async function resolveSide(root: string, side: CompareSide, which: "a" | "b"): Promise<Omit<CompareSideResult, "copy">> {
+  if ("reference" in side) {
+    // A project-relative path is confined like `file`; an absolute path is the user's explicit choice.
+    if (!isAbsolute(side.reference)) {
+      const r = await resolveSide(root, { file: side.reference, ...(side.label ? { label: side.label } : {}) }, which).catch((err: unknown) => {
+        throw new Error(String(err instanceof Error ? err.message : err).replace(`${which}.file`, `${which}.reference`));
+      });
+      return { ...r, label: side.label ?? `reference (${basename(r.path)})`, reference: true };
+    }
+    if (!existsSync(side.reference)) throw new Error(`${which}.reference "${side.reference}" not found`);
+    const p = await ffprobe(side.reference);
+    if (!p.has_video || !p.width || !p.height) throw new Error(`${which}.reference "${side.reference}" has no video stream`);
+    return {
+      label: side.label ?? `reference (${basename(side.reference)})`,
+      path: side.reference,
+      source: side.reference,
+      duration_sec: round3(p.duration_s),
+      width: p.width,
+      height: p.height,
+      ...(p.fps ? { fps: p.fps } : {}),
+      has_audio: p.has_audio,
+      reference: true,
+    };
+  }
   if ("file" in side) {
     const abs = resolve(root, side.file);
     if (!inside(root, abs)) throw new Error(`${which}.file "${side.file}" is outside the project ${root}; give a project-relative path such as assets/supplied/talk.mp4`);
@@ -110,9 +166,16 @@ export async function compareVideos(projectDir: string, opts: CompareOptions = {
       );
     }
   }
-  const a = await resolveSide(root, opts.a ?? { quality: "preview" }, "a");
-  const b = await resolveSide(root, opts.b ?? { quality: "final" }, "b");
+  const isRef = (s?: CompareSide) => Boolean(s && "reference" in s);
+  const latest = { project_dir: root } as const;
+  const a = await resolveSide(root, opts.a ?? (isRef(opts.b) ? latest : { quality: "preview" }), "a");
+  const b = await resolveSide(root, opts.b ?? (isRef(opts.a) ? latest : { quality: "final" }), "b");
+  if (a.reference && b.reference) throw new Error("both sides are references; make one side this project's render (or a project file)");
   if (a.path === b.path) notes.push("both sides are the same video");
+  // One decode pass per side, the same measurement technical QA uses.
+  a.metrics = sideMetrics(await analyzeVideo(a.path));
+  b.metrics = sideMetrics(await analyzeVideo(b.path));
+  const metrics = metricRows(a, b);
   if (a.label === b.label) {
     a.label = `A: ${a.label}`;
     b.label = `B: ${b.label}`;
@@ -130,8 +193,87 @@ export async function compareVideos(projectDir: string, opts: CompareOptions = {
   const html = join(dir, "index.html");
   const sideA: CompareSideResult = { ...a, copy: join(dir, fileA) };
   const sideB: CompareSideResult = { ...b, copy: join(dir, fileB) };
-  await writeFile(html, comparePage({ a: { ...sideA, file: fileA }, b: { ...sideB, file: fileB } }));
-  return { html, html_rel: relative(root, html), dir, a: sideA, b: sideB, notes };
+  await writeFile(html, comparePage({ a: { ...sideA, file: fileA }, b: { ...sideB, file: fileB }, metrics }));
+  return { html, html_rel: relative(root, html), dir, a: sideA, b: sideB, metrics, notes };
+}
+
+function sideMetrics(v: VideoAnalysis): CompareMetrics {
+  return {
+    duration_sec: round3(v.probe.duration_s),
+    frozen_sec: v.motion.frozen_s,
+    frozen_pct: v.motion.frozen_pct,
+    changes_per_sec: v.motion.changes_per_sec,
+    cuts_per_sec: v.motion.cuts_per_sec,
+    longest_static_sec: v.motion.longest_static_s,
+    integrated_lufs: v.integrated_lufs,
+  };
+}
+
+/** Tolerances for "meets the reference" (design rules, not platform facts). */
+export const COMPARE_TOLERANCE = {
+  /** Duration within this share of the reference's. */
+  duration_share: 0.1,
+  /** Frozen share at most this many percentage points above the reference's. */
+  frozen_pct_points: 2,
+  /** Frozen seconds at most this many above the reference's. */
+  frozen_sec: 0.5,
+  /** Changes and cuts per second at least this share of the reference's. */
+  rate_share: 0.9,
+  /** Longest static stretch at most this share above the reference's (plus 0.1 s). */
+  static_share: 1.1,
+  /** Integrated loudness within this many LU of the reference's. */
+  loudness_lu: 1.5,
+} as const;
+
+const METRIC_LABELS: Record<keyof CompareMetrics, string> = {
+  duration_sec: "Duration (s)",
+  frozen_sec: "Frozen (s)",
+  frozen_pct: "Frozen (% of runtime)",
+  changes_per_sec: "Big changes per second",
+  cuts_per_sec: "Cuts per second",
+  longest_static_sec: "Longest static stretch (s)",
+  integrated_lufs: "Loudness (LUFS integrated)",
+};
+
+/** Rows for both sides; with a reference, each gets a plain verdict for ours. */
+export function metricRows(a: Pick<CompareSideResult, "metrics" | "reference">, b: Pick<CompareSideResult, "metrics" | "reference">): CompareMetricRow[] {
+  const T = COMPARE_TOLERANCE;
+  const refSide = a.reference ? a : b.reference ? b : undefined;
+  const ours = refSide === a ? b : refSide === b ? a : undefined;
+  const judge = (id: keyof CompareMetrics, o: number | null, r: number | null): { meets: boolean | null; verdict: string } => {
+    if (o === null || r === null) return { meets: null, verdict: "not measurable on both" };
+    switch (id) {
+      case "duration_sec": {
+        const ok = Math.abs(o - r) <= r * T.duration_share;
+        return { meets: ok, verdict: ok ? "meets: about as long as the reference" : `misses: ${o > r ? "longer" : "shorter"} than the reference by ${round3(Math.abs(o - r))}s` };
+      }
+      case "frozen_sec":
+      case "frozen_pct": {
+        const ok = id === "frozen_pct" ? o <= r + T.frozen_pct_points : o <= r + T.frozen_sec;
+        return { meets: ok, verdict: ok ? "meets: no more frozen than the reference" : "misses: more frozen than the reference" };
+      }
+      case "changes_per_sec":
+      case "cuts_per_sec": {
+        const ok = o >= r * T.rate_share;
+        const what = id === "changes_per_sec" ? "big changes" : "cuts";
+        return { meets: ok, verdict: ok ? `meets: at least the reference's pace of ${what}` : `misses: fewer ${what} per second than the reference` };
+      }
+      case "longest_static_sec": {
+        const ok = o <= r * T.static_share + 0.1;
+        return { meets: ok, verdict: ok ? "meets: no longer static stretch than the reference" : "misses: a longer static stretch than the reference" };
+      }
+      case "integrated_lufs": {
+        const ok = Math.abs(o - r) <= T.loudness_lu;
+        return { meets: ok, verdict: ok ? "meets: as loud as the reference" : `misses: ${o > r ? "louder" : "quieter"} than the reference by ${Math.round(Math.abs(o - r) * 10) / 10} LU` };
+      }
+    }
+  };
+  return (Object.keys(METRIC_LABELS) as Array<keyof CompareMetrics>).map((id) => {
+    const va = a.metrics?.[id] ?? null;
+    const vb = b.metrics?.[id] ?? null;
+    const j = ours && refSide ? judge(id, ours.metrics?.[id] ?? null, refSide.metrics?.[id] ?? null) : { meets: null, verdict: "" };
+    return { id, label: METRIC_LABELS[id], a: va, b: vb, ...j };
+  });
 }
 
 export function formatCompare(r: CompareResult): string {
@@ -140,6 +282,7 @@ export function formatCompare(r: CompareResult): string {
     `compare page → ${r.html}`,
     side("a", r.a),
     side("b", r.b),
+    ...r.metrics.map((m) => `- ${m.label}: a ${m.a ?? "n/a"}, b ${m.b ?? "n/a"}${m.verdict ? `; ${m.verdict}` : ""}`),
     ...r.notes.map((n) => `note: ${n}`),
     `You can't open a browser from here: give the user this path to open (e.g. \`open "${r.html}"\` on macOS). The folder ${r.dir} is self-contained (page + both videos) and can be zipped and shared. Views: side by side, stacked, wipe; space plays, ←/→ step a frame.`,
   ].join("\n");
@@ -153,8 +296,30 @@ interface PageSide extends CompareSideResult {
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
+const cell = (v: number | null) => (v === null ? "n/a" : String(v));
+
+/** The metrics table (none when nothing was measured). */
+function metricsTable(d: { a: PageSide; b: PageSide; metrics?: readonly CompareMetricRow[] }): string {
+  if (!d.metrics?.length) return "";
+  const withVerdict = d.metrics.some((m) => m.verdict);
+  const rows = d.metrics
+    .map(
+      (m) =>
+        `<tr><td>${esc(m.label)}</td><td class="num">${esc(cell(m.a))}</td><td class="num">${esc(cell(m.b))}</td>${withVerdict ? `<td class="${m.meets === true ? "meets" : m.meets === false ? "misses" : ""}">${esc(m.verdict)}</td>` : ""}</tr>`,
+    )
+    .join("\n");
+  return `<section class="metrics" aria-label="Metrics">
+<table>
+<thead><tr><th scope="col">Metric</th><th scope="col">A · ${esc(d.a.label)}</th><th scope="col">B · ${esc(d.b.label)}</th>${withVerdict ? '<th scope="col">Ours vs the reference</th>' : ""}</tr></thead>
+<tbody>
+${rows}
+</tbody>
+</table>
+</section>`;
+}
+
 /** The self-contained page: inline CSS and JS only, videos by relative path. */
-export function comparePage(d: { a: PageSide; b: PageSide }): string {
+export function comparePage(d: { a: PageSide; b: PageSide; metrics?: readonly CompareMetricRow[] }): string {
   const data = {
     a: { label: d.a.label, file: d.a.file, duration: d.a.duration_sec, width: d.a.width, height: d.a.height, fps: d.a.fps ?? null },
     b: { label: d.b.label, file: d.b.file, duration: d.b.duration_sec, width: d.b.width, height: d.b.height, fps: d.b.fps ?? null },
@@ -170,11 +335,11 @@ export function comparePage(d: { a: PageSide; b: PageSide }): string {
 <style>
 :root {
   --bg: #f6f7f9; --panel: #ffffff; --ink: #14171c; --muted: #5d6572; --line: #d9dde3;
-  --accent: #2f6fed; --accent-ink: #ffffff; --stage: #0c0e12; --a: #2f6fed; --b: #d9480f;
+  --accent: #2f6fed; --accent-ink: #ffffff; --stage: #0c0e12; --a: #2f6fed; --b: #d9480f; --ok: #1b7f3b; --bad: #b42318;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #0f1115; --panel: #171a20; --ink: #e8eaee; --muted: #9aa3b1; --line: #2a2f38; --accent: #5b8cff; --accent-ink: #0f1115; --stage: #000000; --a: #5b8cff; --b: #ff8a4c; }
+  :root { --bg: #0f1115; --panel: #171a20; --ink: #e8eaee; --muted: #9aa3b1; --line: #2a2f38; --accent: #5b8cff; --accent-ink: #0f1115; --stage: #000000; --a: #5b8cff; --b: #ff8a4c; --ok: #5fd08a; --bad: #ff7b6e; }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -212,6 +377,13 @@ label.inline { display: inline-flex; gap: 6px; align-items: center; color: var(-
 .card strong { display: block; overflow-wrap: anywhere; }
 .card span { color: var(--muted); font-variant-numeric: tabular-nums; }
 .hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+.metrics { margin-top: 16px; overflow-x: auto; }
+.metrics table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font-variant-numeric: tabular-nums; }
+.metrics th, .metrics td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.metrics tr:last-child td { border-bottom: 0; }
+.metrics td.num { text-align: right; white-space: nowrap; }
+.metrics .meets { color: var(--ok); }
+.metrics .misses { color: var(--bad); }
 @media (max-width: 560px) {
   h1 { font-size: 16px; }
   .stage[data-mode="side"] .grid { gap: 4px; }
@@ -255,6 +427,7 @@ label.inline { display: inline-flex; gap: 6px; align-items: center; color: var(-
   <div class="card"><strong>A · ${esc(d.a.label)}</strong><span id="metaA">${esc(meta(d.a))}</span></div>
   <div class="card b"><strong>B · ${esc(d.b.label)}</strong><span id="metaB">${esc(meta(d.b))}</span></div>
 </div>
+${metricsTable(d)}
 <p class="hint">Space plays and pauses, ← and → step one frame. Both videos share one clock (the longer one drives it, and the shorter one holds its last frame).</p>
 </main>
 <script>
