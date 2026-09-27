@@ -449,23 +449,63 @@ export function serveDirectory(root: string): Promise<{ url: string; close: () =
   });
 }
 
-/** Page-side readiness: the registered timeline, `__hf.buildReady[id]`, fonts and image decode. */
+/** What page-side readiness reached; every wait is bounded, so a stuck step is named, not hung. */
+export interface ReadinessReport {
+  timeline: boolean;
+  build_ready: "none" | "resolved" | "pending" | "rejected";
+  build_error?: string;
+  fonts: "none" | "loaded" | "pending";
+  images: { total: number; pending: number };
+}
+
+/**
+ * Page-side readiness: the registered timeline, `__hf.buildReady[id]`, fonts and image decode.
+ * Each step waits at most its share of `timeoutMs` and the script always returns a report
+ * (`readinessProblem` turns an incomplete one into an actionable error), so a page that never
+ * settles fails fast with the step named instead of hanging until the protocol timeout.
+ */
 export function readinessScript(compositionId: string, timeoutMs: number): string {
   const id = JSON.stringify(compositionId);
+  const step = Math.max(1000, Math.round(timeoutMs / 4));
   return `(async function () {
   var id = ${id};
-  var deadline = Date.now() + ${Math.round(timeoutMs)};
-  while (!(window.__timelines && window.__timelines[id])) {
-    if (Date.now() > deadline) throw new Error("the page never registered window.__timelines[" + JSON.stringify(id) + "]");
+  var STEP = ${step};
+  function within(p, ms) {
+    return Promise.race([
+      Promise.resolve(p).then(function () { return "done"; }, function (e) { return "rejected:" + (e && e.message ? e.message : String(e)); }),
+      new Promise(function (r) { setTimeout(function () { r("pending"); }, ms); })
+    ]);
+  }
+  var report = { timeline: false, build_ready: "none", fonts: "none", images: { total: 0, pending: 0 } };
+  var deadline = Date.now() + STEP;
+  while (!(window.__timelines && window.__timelines[id]) && Date.now() < deadline) {
     await new Promise(function (r) { setTimeout(r, 25); });
   }
+  report.timeline = Boolean(window.__timelines && window.__timelines[id]);
+  if (!report.timeline) return report;
   var ready = window.__hf && window.__hf.buildReady && window.__hf.buildReady[id];
-  if (ready) await ready;
-  if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  if (ready) {
+    var b = await within(ready, STEP);
+    report.build_ready = b === "done" ? "resolved" : b === "pending" ? "pending" : "rejected";
+    if (b.indexOf("rejected:") === 0) report.build_error = b.slice(9);
+  }
+  if (document.fonts && document.fonts.ready) report.fonts = (await within(document.fonts.ready, STEP)) === "done" ? "loaded" : "pending";
   var imgs = Array.prototype.slice.call(document.images || []);
-  await Promise.all(imgs.map(function (i) { return i.decode ? i.decode().catch(function () {}) : null; }));
-  return true;
+  report.images.total = imgs.length;
+  var results = await Promise.all(imgs.map(function (i) { return within(i.decode ? i.decode().catch(function () {}) : null, STEP); }));
+  report.images.pending = results.filter(function (r) { return r === "pending"; }).length;
+  return report;
 })()`;
+}
+
+/** The problem with a readiness report, as an actionable message, or null when the page is ready. */
+export function readinessProblem(r: ReadinessReport, compositionId: string): string | null {
+  if (!r.timeline) return `the page never registered window.__timelines["${compositionId}"] (a script error before registration? check the page errors)`;
+  if (r.build_ready === "pending") return `window.__hf.buildReady["${compositionId}"] never settled (for motion pages: window.readyForCapture or document.fonts.ready never resolved)`;
+  if (r.build_ready === "rejected") return `window.__hf.buildReady["${compositionId}"] rejected: ${r.build_error ?? "unknown error"}`;
+  if (r.fonts === "pending") return "document.fonts.ready never resolved (a font that never finishes loading?)";
+  if (r.images.pending > 0) return `${r.images.pending} of ${r.images.total} image(s) never decoded`;
+  return null;
 }
 
 /** Page-side seek through the registered timeline, then two animation frames so the frame is painted. */
@@ -474,7 +514,12 @@ export function seekScript(compositionId: string, t: number): string {
   var tl = window.__timelines[${JSON.stringify(compositionId)}];
   tl.pause && tl.pause();
   tl.seek(${Number.isFinite(t) ? t : 0});
-  await new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); });
+  // Two animation frames so the frame is painted; bounded, because a page Chrome considers
+  // hidden may never run animation frames (the screenshot itself still forces a paint).
+  await Promise.race([
+    new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); }),
+    new Promise(function (r) { setTimeout(r, 250); })
+  ]);
   return true;
 })()`;
 }
@@ -496,6 +541,21 @@ export interface CaptureSessionOptions {
   launch?: Launch;
 }
 
+/** Bound one capture step: a hang becomes an error that names the step, not a protocol timeout. */
+export async function captureStep<T>(label: string, work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`capture step "${label}" did not finish within ${ms} ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export interface CaptureSession {
   /** Open the composition in `dir` (its index.html) at width×height and wait until it is ready. */
   open(dir: string, compositionId: string, width: number, height: number): Promise<PageCapture>;
@@ -510,25 +570,35 @@ export async function openCaptureSession(o: CaptureSessionOptions & { width: num
   const timeoutMs = o.timeoutMs ?? 60_000;
   const launch = o.launch ?? (await loadPuppeteerLaunch(o.producerEntry));
   if (!launch) throw new Error("puppeteer-core (a dependency of the HyperFrames producer) could not be loaded; run doctor for setup");
-  const browser = await launch({ executablePath: o.chromePath, headless: true, args: captureChromeArgs(o.width, o.height), defaultViewport: null, timeout: timeoutMs });
+  const browser = await captureStep(
+    `launch Chrome (${o.chromePath})`,
+    launch({ executablePath: o.chromePath, headless: true, args: captureChromeArgs(o.width, o.height), defaultViewport: null, timeout: timeoutMs, protocolTimeout: timeoutMs }),
+    timeoutMs + 5_000,
+  );
   const pages = new Set<PageCapture>();
   return {
     async open(dir, compositionId, width, height) {
       const server = await serveDirectory(dir);
       let page: CapturePageHandle | undefined;
       try {
-        page = await browser.newPage();
+        page = await captureStep("open a page", browser.newPage(), timeoutMs);
         const errors: string[] = [];
         page.on("pageerror", (e) => errors.push(e instanceof Error ? e.message : String(e)));
-        await page.setViewport({ width: Math.round(width), height: Math.round(height), deviceScaleFactor: 1 });
-        await page.goto(`${server.url}/index.html`, { waitUntil: "load", timeout: timeoutMs });
-        await page.evaluate(readinessScript(compositionId, timeoutMs));
+        page.on("console", (m) => {
+          const msg = m as { type?: () => string; text?: () => string };
+          if (msg.type?.() === "error") errors.push(`console: ${msg.text?.() ?? ""}`);
+        });
+        await captureStep("set the viewport", page.setViewport({ width: Math.round(width), height: Math.round(height), deviceScaleFactor: 1 }), timeoutMs);
+        await captureStep("load the page", page.goto(`${server.url}/index.html`, { waitUntil: "load", timeout: timeoutMs }), timeoutMs + 5_000);
+        const report = (await captureStep("wait for readiness", page.evaluate(readinessScript(compositionId, timeoutMs)), timeoutMs + 5_000)) as ReadinessReport;
+        const problem = readinessProblem(report, compositionId);
+        if (problem) throw new Error(`${problem}${errors.length ? `; page errors: ${errors.slice(0, 3).join(" | ")}` : ""}`);
         const p = page;
         const pc: PageCapture = {
           errors,
           async capture(t) {
-            await p.evaluate(seekScript(compositionId, t));
-            return new Uint8Array(await p.screenshot({ type: "png" }));
+            await captureStep(`seek to ${t}s`, p.evaluate(seekScript(compositionId, t)), timeoutMs);
+            return new Uint8Array(await captureStep(`screenshot at ${t}s`, p.screenshot({ type: "png" }), timeoutMs));
           },
           async close() {
             pages.delete(pc);

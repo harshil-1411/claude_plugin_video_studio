@@ -3,9 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { runInNewContext } from "node:vm";
 import {
   LOOP_SEAM_TOLERANCE,
   captureChromeArgs,
+  captureStep,
+  readinessProblem,
   compareCaptures,
   decodePng,
   determinismFindings,
@@ -237,6 +240,28 @@ describe("capture page plumbing", () => {
     expect(seek).toContain('window.__timelines["vs-s01"]');
     expect(seek).toContain("tl.seek(1.25)");
     expect(seekScript("vs-s01", Number.NaN)).toContain("tl.seek(0)");
+  });
+
+  it("readiness never hangs: a stuck step comes back named in the report", async () => {
+    const run = (win: Record<string, unknown>, doc: Record<string, unknown>) =>
+      runInNewContext(readinessScript("vs-s01", 4000), { window: win, document: doc, setTimeout, Promise, Date, Array, Boolean, String }) as Promise<unknown>;
+    const never = new Promise(() => {});
+    const t0 = Date.now();
+    const stuck = (await run({ __timelines: { "vs-s01": {} }, __hf: { buildReady: { "vs-s01": never } } }, { fonts: { ready: Promise.resolve() }, images: [] })) as Parameters<typeof readinessProblem>[0];
+    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(stuck).toMatchObject({ timeline: true, build_ready: "pending", fonts: "loaded" });
+    expect(readinessProblem(stuck, "vs-s01")).toContain("readyForCapture");
+    const fonts = (await run({ __timelines: { "vs-s01": {} } }, { fonts: { ready: never }, images: [] })) as Parameters<typeof readinessProblem>[0];
+    expect(readinessProblem(fonts, "vs-s01")).toContain("document.fonts.ready");
+    const ok = (await run({ __timelines: { "vs-s01": {} }, __hf: { buildReady: { "vs-s01": Promise.resolve() } } }, { fonts: { ready: Promise.resolve() }, images: [] })) as Parameters<typeof readinessProblem>[0];
+    expect(readinessProblem(ok, "vs-s01")).toBeNull();
+    const none = (await run({}, { images: [] })) as Parameters<typeof readinessProblem>[0];
+    expect(readinessProblem(none, "vs-s01")).toContain("never registered");
+  }, 20_000);
+
+  it("captureStep turns a hang into an error naming the step", async () => {
+    await expect(captureStep("load the page", new Promise(() => {}), 50)).rejects.toThrow('capture step "load the page" did not finish within 50 ms');
+    await expect(captureStep("x", Promise.resolve(7), 50)).resolves.toBe(7);
   });
 
   it("launches with the producer's pixel-relevant flags at the target size", () => {

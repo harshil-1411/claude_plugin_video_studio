@@ -14,6 +14,11 @@ export default function setup(): () => void {
   return () => {
     if (previous === undefined) delete process.env.TMPDIR;
     else process.env.TMPDIR = previous;
-    rmSync(root, { recursive: true, force: true });
+    // Retries: a browser a timed-out test left behind can still be writing its profile here.
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (e) {
+      console.warn(`could not remove the test temp root ${root}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
 }
