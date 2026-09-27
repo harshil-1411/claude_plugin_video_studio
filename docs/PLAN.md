@@ -70,7 +70,7 @@ Each change is cheap now and expensive later:
 
 ## Revised roadmap
 
-Phases 0–3 are done. The Phase 3 exit (interactive `/video-studio:create`) is verified once M9 lands. Each phase ends demoable, keeps the ≤ 2-agent limit, and needs no API keys unless stated.
+Phases 0–3 are done. The Phase 3 exit (interactive `/video-studio:create`) is verified once M9 lands. Each phase ends demoable, keeps the ≤ 2-agent limit, and needs no API keys unless stated. Phase 6.5 (directed motion) comes next, before Phase 7; its waves follow the "Agent execution model" below.
 
 ### Phase 4: Platform compiler and video engineering (local-first P0)
 - Build **M1–M9** above.
@@ -141,7 +141,190 @@ Phases 0–3 are done. The Phase 3 exit (interactive `/video-studio:create`) is 
   - A founder-interview mp4 becomes 3 candidate shorts.
   - A folder of the user's clips plus a music file becomes a beat-synced `aesthetic-broll` reel. A second reel keeps native sound only (`silent-vlog`).
 
+### Phase 6.5: Directed motion and craft (local, no keys)
+Why: the user rejected the 0.2.0 self-intro reel as "too simple". The reference piece had about one big visual change per second and only 0.5 s frozen; ours was 63 s long with 42.6 s frozen, because every scene had to be one of 15 fixed kinds.
+
+Motion-design research (2026-09-27) found one pattern behind the strongest code-rendered work: Claude writes each scene as code, and every frame is a pure function of time (`seek(t)`). That single rule is what makes exact beat sync, perfect loops, motion blur and parallel rendering possible. The same research supports:
+- measured beat grids;
+- a still-frame review before the full render;
+- a banned-effects taste list;
+- seamless loops;
+- a locally synthesized score;
+- provider-neutral shot cards (Phase 7 step 0).
+
+The work is split into waves for at most 2 agents; see "Agent execution model".
+
+- **1. `motion` scene kind (Claude-authored code):**
+  - **Schema** (`packages/schema/src/video-spec.ts`):
+    - add `motion` to `DeterministicKind`, with props `z.strictObject({ html, text?, effects?, loop?, duration_hint? })`;
+    - `html` is a project-relative file, confined with `resolveInsideProject` (`packages/core/src/project.ts`);
+    - add `html` to `NON_CLAIM_KEYS`. Viewer-facing copy must also sit in `props.text[]`, so grounding, `verify`, `localize` and sound/word cues still see it.
+    - Add the kind in `cues.ts`, `template.ts`, `localize.ts`, `lint.ts` and `renderer/src/footage.ts` (overlay kinds).
+  - **Authoring contract:**
+    - `window.readyForCapture` is a Promise that resolves after fonts and images have decoded;
+    - `window.seek(t)` is synchronous and draws everything from `t` alone;
+    - no CSS transitions or animations, timers, `requestAnimationFrame`, wall clock or unseeded randomness;
+    - physics is closed-form, or pre-simulated and indexed by time;
+    - springs are closed-form step responses, and a value whose target changes several times is the sum of one spring per change.
+  - **Composer** (`hyperframes-compose.ts`): wraps the page and registers a `window.__timelines[id]` adapter whose `seek` calls `window.seek` (same shape as `timelineScript`).
+  - **Runtime library** (`motion-kit.js`, bundled, MIT): `spring`, easings, a seeded `rng`, `lerp`, `stagger`, `beatAt`/`downbeatAt`.
+    - The engine injects `window.__vs = { fps, duration, beats, downbeats, tokens, brand }`, so a piece uses the brand palette and fonts and the measured beat grid instead of hard-coded values.
+  - **Security** (the HTML is untrusted input, and the producer launches Chrome with `--no-sandbox`):
+    - **CSP:** the engine injects `default-src 'none'`, allows local scripts, styles, images and fonts only, and sets no `connect-src`.
+    - **Static lint:** the page is parsed with a small MIT JS parser, e.g. acorn. It rejects:
+      - network access: `fetch`, XHR, WebSocket, remote `import()`, remote `src`/`href`;
+      - clocks: `Date.now`, `performance.now`;
+      - unseeded `Math.random`;
+      - timer- or rAF-driven state;
+      - CSS `transition`/`animation`.
+    - **Assets:** must sit next to the HTML, inside the project.
+  - **Cache:** the HTML bytes and its local assets are hashed into `sceneCacheKey` (`packages/renderer/src/select.ts`, next to `sceneImages`).
+  - **Renderers:**
+    - HyperFrames only;
+    - the ffmpeg renderer draws a labelled stand-in from `props.text` (revive `fallback.ts`) and reports it as a fallback, never silently.
+- **2. Pre-render stills and determinism:**
+  - **`packages/mcp/src/stills.ts`:** opens the composed page with the producer's own puppeteer-core (as `puppeteerLaunchProbe` does), seeks to the given times and takes screenshots.
+  - **`stills` MCP tool:**
+    - times can be explicit, every `beat` or every `downbeat`;
+    - works for every HyperFrames kind, not just `motion`;
+    - tiles the frames with `planSheets`/`tileSheet` from `review.ts`.
+    - Claude views the sheet and fixes cramped, overlapping, off-grid or unreadable moments before the full render.
+  - **Determinism check:**
+    - seek t₁, then t₂, then t₁ again; the frame hashes must match (finding `nondeterministic_scene`);
+    - runs automatically before a `motion` scene renders;
+    - with `loop`, `render(0)` must equal `render(end)`.
+- **3. Beat analysis v2** (`packages/media/src/beats.ts`, backward compatible):
+  - **New optional `BeatAnalysis` fields:** `downbeats_ms`, `bar_energy[]`, `drop_ms`, `alternate_bpm`, `analysis_version`. Bumping `analysis_version` invalidates cached analyses.
+  - **Detection:**
+    - downbeats from low-band linear energy with local normalisation;
+    - an octave check that reports half/double-time as `alternate_bpm`;
+    - trimming grid points before the first onset and after the last (today the grid runs to the end of the file);
+    - excluding a partial final bar from drop detection.
+  - **`audio.beat_sync.snap`:** `beat` (default) or `downbeat`, in `beatSyncDurations` (`pipeline-media.ts`). A cut still never moves into a voiceover.
+  - **SFX peak alignment:** each effect's peak offset is measured once (cached by file hash), so the peak, not the file start, lands on `at_sec`.
+  - **Tests:** synthetic tracks at 75–174 BPM with offsets. Pass: tempo within 1 BPM, downbeat within 20 ms, drop within 30 ms.
+- **4. Motion-density QA and reference metrics:**
+  - **New `technicalQa` checks** (`packages/media/src/qa.ts`):
+    - `motion_density`: big changes per second, from the ffmpeg scene-change score;
+    - `longest_static`: the longest stretch with no change.
+  - **`frozen_frames` becomes a fail above 15% of runtime.**
+  - **Thresholds are data:**
+    - new optional template `pacing.min_changes_per_sec` and `pacing.max_frozen_pct`;
+    - `brief.acceptance` overrides them.
+  - `QA_VERSION` goes to 4.
+  - **`compare`:** gains a `reference` side (any local video file). It reports frozen seconds, changes per second, cut rate and loudness next to ours, in the HTML and in the structured output.
+- **5. Taste guard and acceptance checks:**
+  - **Styles:**
+    - `Style.motion.avoid: EffectId[]`, from a closed enum: `shake, rgb_split, lens_flare, particle_burst, shockwave, neon_glow, grid_floor, flash, bouncy_easing`;
+    - the four packs fill it in, and each pack's `version` is bumped.
+  - **New lint rules** (the usual `checkX(...)` plus one line in `lintProject`):
+    - `banned_effect`: a scene's declared `effects`, transition or motion pattern hits the style's avoid list or `brand.visual.forbidden`;
+    - `acceptance_unmet`, fed by render state;
+    - `loop_seam`.
+  - **Honest limit:** lint only sees declared effects. Visual taste is also reviewed by the `creative-director` agent against the stills sheet.
+- **6. Loop mode:**
+  - `master.loop: boolean`.
+  - **QA:**
+    - first vs last frame SSIM ≥ 0.99, reusing the `golden.ts` SSIM;
+    - the music bed loops at the same seam;
+    - the audio level jump across the seam stays under a threshold.
+  - **Planning rule:** cyclic motion periods must divide the loop length.
+- **7. Original score, synthesized locally:**
+  - **`packages/media/src/score.ts`** (promoted from `scripts/generate-music.mjs`):
+    - `synthScore({ bpm, bars, key, progression, sections, drop_bar, seed })`;
+    - deterministic, using ffmpeg `aevalsrc` only;
+    - no downloads, no GPL.
+  - **`MusicBed`:** `music: "synth:<preset>"` or an inline `synth` block.
+  - **Output:**
+    - cached by parameter hash;
+    - licence "generated (CC0)" in `video.lock`, provenance and `post.json`;
+    - the known grid goes straight into render state, with no detection needed.
+- **8. Motion blur (spike first):**
+  - **Spike:** check whether the pinned HyperFrames producer can capture subframes.
+  - **If it can't:** `quality: final` plus `master.motion_blur: { subframes: 3–6 }`, captured through the `stills.ts` path. Frames are averaged at centred offsets, for `motion` scenes only.
+  - **Order:** added only after a plain render passes review.
+  - **Cost:** seconds × fps × subframes browser renders. If that's too slow, defer it and record why.
+- **9. Planning: inputs interview, beat plan and new formats:**
+  - **Templates:** `inputs[]` (`id, prompt, kind: text|asset|choice|file, required, default`) plus the `pacing` density fields; `template_get` returns them.
+  - **`skills/plan`:**
+    - asks for the required inputs first: reference video, photo, real UI states and data, brand tokens, a licensed track or permission to synthesize one;
+    - turns vague superlatives ("go all out") into `brief.acceptance`: minimum changes per second, maximum frozen %, holds of at least 400 ms, loop, target length.
+  - **`skills/create` §4:** the approval gate shows a beat-level plan (every state or cut on the measured grid) before anything is built.
+  - **`skills/plan/references/code-motion.md`:**
+    - the contract;
+    - lay out the final state first, then tween into it;
+    - content enters after its container starts moving and leaves before the next change, so text never overlaps;
+    - match cuts from measured positions;
+    - at least one deliberate hold;
+    - one accent colour;
+    - no `will-change` on camera-scaled text;
+    - never set opacity on a `preserve-3d` element;
+    - the banned list.
+  - **`agents/creative-director.md`:** also reviews the stills sheet against `brief.acceptance`.
+  - **Six new templates, each with `inputs` and `pacing`:**
+    - `ui-morph-loop`: one shape, never cut; real UI states;
+    - `kinetic-type`: exact words; cue sheet from phrases;
+    - `ambient-loop`;
+    - `slides-narrated`: slide durations from measured audio;
+    - `topic-explainer-9`: 9 shots, about 45 s, one style bible;
+    - `product-hero`.
+  - **Hook check** (`skills/plan/references/hooks.md`): big, relatable, easy, new, safe, built from the genuine promise, never from invented data.
+  - **`variants`:** `durations: [15, 30]` for paired cuts.
+- **10. Series bible (optional, last):**
+  - A `series.yaml` next to the projects, holding characters, style, palette, recurring assets and motifs. `spec.series` references it.
+  - Changing a character re-renders only the scenes that use it, through the cache key.
+- **Standards for every item:**
+  - **Schemas:** zod v4 strict objects. New fields are optional or defaulted, so existing specs stay valid. Semantic checks return a `fix`. Regenerate schemas with `pnpm schemas`.
+  - **Caches:** bump the matching version whenever output changes (`QA_VERSION`, renderer versions, beats `analysis_version`, style `version`).
+  - **Security:** Claude-written HTML is untrusted, and CSP, the static lint and path confinement are all required.
+  - **Facts are data:** platform and provider facts live in versioned YAML with a source URL and verified date.
+  - **Local-first:** no paid key, model download or GPL dependency. New dependencies are MIT/Apache and recorded with their licence.
+  - **Truthful reporting:**
+    - fallbacks are reported;
+    - `stills` and prompt packs are never reported as renders;
+    - QA values are pass, warn, fail or not_run.
+  - **Tests:** written first, in colocated `*.test.ts`.
+  - **Packaging:** skills keep portable frontmatter; `claude plugin validate --strict` passes; the CHANGELOG follows Keep a Changelog; the release is SemVer `0.3.0`.
+- **Exit:**
+  - **The self-intro reel, rebuilt in a new project** (the user's reference and photo are copied in with their permission; their original folder is not touched):
+    - `compare` against the reference shows ≤ 1 s frozen and ≥ 0.8 big changes per second;
+    - 0 `cut_off_beat` findings, with cuts on downbeats;
+    - every `motion` scene passes the determinism check;
+    - the user approves it visually, which is the real bar.
+  - **`examples/code-motion-loop/`:** a 6 s `ui-morph-loop` on a synth score, with seam SSIM ≥ 0.99, lint 0/0 and golden frames.
+  - **Security fixture:** a `motion` page that calls `fetch`, loads a remote image and reads `Date.now` is rejected by lint and blocked by CSP at render time.
+  - **Release:** `node scripts/check.mjs --push` is green, and `CHANGELOG` `0.3.0` is written.
+
 ### Phase 7: Providers, policy and provenance (keys required)
+- **Step 0: shot cards and prompt packs (local, no keys; before any adapter):**
+  - **`ShotCard` schema** (`packages/schema/src/shot-card.ts`), attached to `visual_strategy: generative` scenes:
+    - duration and aspect ratio;
+    - purpose: emotion, plot or pressure (one job per shot);
+    - subject references bound to asset ids;
+    - one action and one camera move (or "locked");
+    - environment, look, and audio (dialogue by speaker id, at most 3 SFX, ambience, music cue);
+    - `on_screen_text: post` by default: logos, prices and UI are composited, never generated;
+    - continuity, end state and `first_frame_from` for chaining;
+    - exclusions.
+  - **Provider facts are data:** `provider-specs/<family>.yaml` for seedance, veo, kling, wan, runway and hailuo. Each records:
+    - duration, aspect and resolution limits;
+    - reference-binding syntax;
+    - audio channels;
+    - negative-prompt support;
+    - source URL and verified date, with `verified: false` until re-checked at the start of this phase.
+    - **Never Sora:** its API was shut down on 2026-09-24.
+  - **`packages/prompts`:**
+    - one pure `compile(card, spec) → { text, params, warnings }` per family;
+    - a director-checks lint: one job and one camera move per shot, brand text in post, cast within the provider's reference limit, limit violations as warnings with a fix.
+  - **`prompt_pack` tool and skill:**
+    - writes `prompts/<provider>/<scene>.{md,json}`;
+    - no network, no spend;
+    - the manifest records it as a prompt package, never a render.
+  - **Consistency plan:**
+    - an approved identity keyframe;
+    - each shot's approved last frame is the next shot's first frame;
+    - the highest-risk shot is generated and inspected before the batch.
+  - **Step 0 exit:** one spec compiles into packs for 3 families with 0 network calls.
 - **Provider SDK:** adapter interface + capability matrix + mock conformance suite.
 - **Adapters:** Runway (`@runwayml/sdk`, router `dryRun`), fal.ai (Kling/Veo/Hailuo), HeyGen v3 (consent-gated), ElevenLabs (already coded; wire it in).
 - **Cost planner:** budgets and retry budget.
@@ -175,6 +358,47 @@ Phases 0–3 are done. The Phase 3 exit (interactive `/video-studio:create`) is 
 ## Immediate next steps
 Updated 2026-09-25. M9 and the Phase 3 exit are done. Phase 4 steps 1–2 are done: M1–M6, M8, platform contracts and lint. See `docs/HANDOFF.md`.
 Phase 4 is done (exit passed 2026-09-25; CI dropped by the user on 2026-09-26: checks run locally). Phases 5 and 6 are done (exits passed 2026-09-25 in the sandbox; the Phase 6 demo-capture exit needs Chrome and is on the user checklist). Phase 8 (local subset) is done; see `docs/HANDOFF.md`. What remains needs the user: `docs/USER_CHECKLIST.md`, Phase 7 (paid provider keys) and Phase 9 (distribution, go/no-go). Progress is in the "Loop state" block of `docs/HANDOFF.md`.
+
+Updated 2026-09-27: next is **Phase 6.5** (directed motion, local, no keys), wave W0 first. Phase 7 step 0 (shot cards and prompt packs) is local too and runs in wave W4. Then Phase 7 adapters (keys) and Phase 9.
+
+## Agent execution model
+Used from Phase 6.5 on. It keeps the user's limit of **at most 2 parallel agents**, with the lead session integrating their work.
+
+- **Lanes:**
+  - A = renderer and engine: `packages/renderer`, `packages/mcp`, skills and agents;
+  - B = media, QA, lint and content: `packages/media`, `lint.ts`, `compare.ts`, `templates/`, `styles/`, `music/`.
+  - Each agent runs in its own git worktree and owns a disjoint set of files in each wave.
+- **Contract first:**
+  - The lead lands every schema change in wave W0 (zod types, `pnpm schemas`, version constants) before the agents start. Agents never edit `packages/schema` at the same time.
+  - If an agent needs a contract change, it stops and reports; the lead makes the change.
+- **Chrome is serialized:** only one lane per wave may start Chrome (HyperFrames renders or `stills`). The other lane uses the ffmpeg renderer, fixtures and unit tests.
+- **Per agent:**
+  - tests first, in colocated `*.test.ts`;
+  - `node scripts/check.mjs --quick` green in its worktree;
+  - never rebuild or commit `dist/mcp.mjs`;
+  - never touch the user's video projects;
+  - end with a report: files changed, tests added, open issues.
+- **Lead, per wave:**
+  - merge both lanes;
+  - rebuild the bundle once;
+  - run `node scripts/check.mjs --push` and wait for it to pass (never `;`-chained into a commit);
+  - update `docs/HANDOFF.md`;
+  - commit and push. The pre-push hook re-runs the checks.
+- **Phase 6.5 and Phase 7 step 0 waves:**
+  - **W0 (lead):** schema contracts for items 1, 3, 4, 5, 6, 7 and 9, plus `ShotCard`; regenerated schemas; version bumps.
+  - **W1:**
+    - A = item 1 (composer adapter, `motion-kit.js`, CSP, static lint, cache key);
+    - B = items 3 and 7 (beats v2, SFX peak alignment, `score.ts`).
+  - **W2:**
+    - A = items 2 and 8 (`stills`, determinism and loop-seam checks, blur spike). **A holds Chrome.**
+    - B = items 4, 5 and 6 (density QA, `compare` reference, lint rules, loop QA).
+  - **W3:**
+    - A = item 9 skills and docs (`plan`/`create` flow, `code-motion.md`, `creative-director`);
+    - B = item 9 content (6 templates, style avoid lists, `variants` durations).
+  - **W4:**
+    - A = Phase 7 step 0 (`packages/prompts`, `provider-specs/`, `prompt_pack`);
+    - B = item 10 (series bible).
+  - **W5 (lead, with the user):** the example project and golden frames, the self-intro rebuild and `compare`, `CHANGELOG` 0.3.0.
 
 ## Verification
 - **Every step:** `npx tsc -b`, full `npx vitest run`, `node scripts/smoke-mcp.mjs`, `claude plugin validate --strict .claude-plugin/plugin.json`, and a rebuilt `dist/mcp.mjs`.

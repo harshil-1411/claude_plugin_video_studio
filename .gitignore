@@ -17,3 +17,5 @@ examples/*/qa/
 msb-docs-ebmr-explainer/
 video-studio-*/
 vs-interview/
+# The user's personal documents (CV, marksheets, certificates, portrait): never commit.
+sbector-self-introduction-video/
