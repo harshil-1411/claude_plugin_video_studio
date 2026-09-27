@@ -12,7 +12,7 @@
 
 **Turn a README, a paper, a web page or a folder of clips into a finished, captioned short video, one package per platform, without leaving Claude Code.**
 
-[Features](#features) · [See what it makes](#see-what-it-makes) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Commands](#commands) · [Limits](#what-it-does-not-do-yet) · [What's new](CHANGELOG.md)
+[Features](#features) · [See what it makes](#see-what-it-makes) · [Quick start](#quick-start) · [Requirements](#requirements) · [How it works](#how-it-works) · [Commands](#commands) · [Limits](#what-it-does-not-do-yet) · [What's new](CHANGELOG.md)
 
 </div>
 
@@ -86,7 +86,7 @@ The strips below are frames from preview renders (built-in ffmpeg renderer) made
 
 ## Quick start
 
-**Requirements:** Node.js 22.13+ and a system FFmpeg with libass and libx264 (`brew install ffmpeg` on macOS). Nothing else to install: the engine is a single bundled file. Check your setup with `/video-studio:doctor`.
+**Requirements:** Claude Code, Node.js 22.13+ and FFmpeg (`brew install ffmpeg` on macOS). Nothing else is required: the engine is a single bundled file. See [Requirements](#requirements) for the full list, and check your machine with `/video-studio:doctor`.
 
 Inside Claude Code:
 
@@ -156,6 +156,47 @@ claude --plugin-dir .
 ```
 
 </details>
+
+## Requirements
+
+`/video-studio:doctor` checks all of this on your machine and says exactly what is missing and how to fix it.
+
+**Operating system**
+
+| OS | Status |
+|---|---|
+| **macOS** (Apple silicon or Intel) | Fully supported and tested. Everything works, including macOS voices and automatic subject tracking (Apple Vision). |
+| **Linux** | Supported. Voice uses `espeak-ng`; subject tracking is done by Claude from shot sheets instead of automatically. |
+| **Windows** | Not tested. There is no built-in system voice (use no voice or ElevenLabs), and Chrome is not found automatically (set `CHROME_PATH`). WSL2 with Linux is the safer route. |
+
+**Required software**
+
+| Tool | Why | Install (macOS) |
+|---|---|---|
+| [Claude Code](https://claude.com/claude-code) | Hosts the plugin; Claude writes the plans and pages | see the Claude Code docs |
+| Node.js **22.13+** | Runs the engine (it uses Node's built-in SQLite) | `brew install node` |
+| FFmpeg and ffprobe, with **libx264** and **libass** | Every render, caption burn-in and QA check. libass (with fribidi) is needed for Arabic, Hebrew and Devanagari captions | `brew install ffmpeg` |
+
+**Optional software** (each unlocks one feature; nothing is installed for you)
+
+| Tool | Unlocks |
+|---|---|
+| Google Chrome + the HyperFrames producer | `motion` scenes (Claude-written code), richer motion graphics, `stills`, and the determinism check. `doctor` prints the one-time install command |
+| whisper.cpp (`brew install whisper-cpp`) + a model (about 148 MB; 488 MB for speaker turns, downloaded only with your approval) | Transcribing your footage, `shorts`, `tighten`, and exact word timings for system voices |
+| yt-dlp (`brew install yt-dlp`) | Ingesting YouTube, Vimeo and Loom links |
+| A macOS Premium or Enhanced voice (System Settings → Accessibility → Spoken Content) | Natural-sounding narration with the free system voice |
+| An ElevenLabs API key | Premium voiceover (optional and policy-gated; see API keys below) |
+| FFmpeg with `zscale` (libzimg) | Tone-mapping HDR phone footage (without it HDR passes through with a warning) |
+
+**Hardware**
+
+| | Minimum | Recommended |
+|---|---|---|
+| CPU | Any 64-bit CPU | 4+ cores (scenes render in parallel, up to 2 at once) |
+| Memory | 8 GB | 16 GB. Each parallel scene render wants about 1.5 GB free, and HyperFrames runs Chrome |
+| Disk | About 25 MB for the plugin | 1–2 GB free for your projects, caches and optional whisper models. A 20 s 1080p reel project is about 50 MB, and the shared cache grows by a few hundred MB over many projects |
+| GPU | Not needed | Not needed: everything renders on the CPU |
+| Internet | Only to install the plugin | Only for URL ingest, optional downloads, and paid providers you enable |
 
 ## How it works
 
