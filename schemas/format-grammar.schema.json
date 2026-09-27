@@ -59,6 +59,131 @@
     "loudness_lufs": {
       "type": "number"
     },
+    "motion_timing": {
+      "description": "How elements move: entrance durations, easing, stagger and holds, measured around each visual change.",
+      "additionalProperties": false,
+      "properties": {
+        "changes_analyzed": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "easing": {
+          "description": "The most common easing class, read from the shape of each change.",
+          "anyOf": [
+            {
+              "enum": [
+                "linear",
+                "ease_out",
+                "ease_in_out",
+                "spring",
+                "snap"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "easing_share": {
+          "description": "Share of changes that had that easing class.",
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enter_ms_median": {
+          "description": "How long an element takes to settle after a change starts.",
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enter_ms_p75": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "holds": {
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "longest_ms": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "median_ms": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "count",
+            "median_ms",
+            "longest_ms"
+          ],
+          "type": "object"
+        },
+        "stagger_ms_median": {
+          "description": "Gap between change onsets inside a burst (changes under 0.8 s apart).",
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "changes_analyzed",
+        "enter_ms_median",
+        "enter_ms_p75",
+        "easing",
+        "easing_share",
+        "stagger_ms_median",
+        "holds"
+      ],
+      "type": "object"
+    },
     "notes": {
       "items": {
         "type": "string"
@@ -98,6 +223,51 @@
         "type": "object"
       },
       "type": "array"
+    },
+    "speech_pacing": {
+      "description": "Pauses in the speech: silence share and pause lengths (for tighten's pacing_from).",
+      "additionalProperties": false,
+      "properties": {
+        "pause_median_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pause_p95_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pauses_analyzed": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "silence_share": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "silence_share",
+        "pauses_analyzed",
+        "pause_median_ms",
+        "pause_p95_ms"
+      ],
+      "type": "object"
     },
     "speech_ratio": {
       "maximum": 1,

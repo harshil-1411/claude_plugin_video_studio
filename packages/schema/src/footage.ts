@@ -46,6 +46,29 @@ export const DemoScript = z
   })
   .meta({ id: "DemoScript", title: "DemoScript", description: "project/demo.json: a scripted walk through the user's running app, recorded by the demo tool." });
 
+/** Motion timing measured from a reference video (structure only; no frames are kept). */
+export const MotionTiming = z.strictObject({
+  changes_analyzed: z.int().min(0),
+  enter_ms_median: z.number().nonnegative().nullable().describe("How long an element takes to settle after a change starts."),
+  enter_ms_p75: z.number().nonnegative().nullable(),
+  easing: z.enum(["linear", "ease_out", "ease_in_out", "spring", "snap"]).nullable().describe("The most common easing class, read from the shape of each change."),
+  easing_share: z.number().min(0).max(1).nullable().describe("Share of changes that had that easing class."),
+  stagger_ms_median: z.number().nonnegative().nullable().describe("Gap between change onsets inside a burst (changes under 0.8 s apart)."),
+  holds: z.strictObject({
+    count: z.int().min(0),
+    median_ms: z.number().nonnegative().nullable(),
+    longest_ms: z.number().nonnegative().nullable(),
+  }),
+});
+
+/** Pauses measured in a video's speech. */
+export const SpeechPacing = z.strictObject({
+  silence_share: z.number().min(0).max(1),
+  pauses_analyzed: z.int().min(0),
+  pause_median_ms: z.number().nonnegative().nullable(),
+  pause_p95_ms: z.number().nonnegative().nullable(),
+});
+
 export const FormatGrammar = z
   .strictObject({
     schema_version: SchemaVersion,
@@ -63,6 +86,8 @@ export const FormatGrammar = z
       .nullable()
       .describe("Where burned-in text most likely sits (normalized), or null when none was found."),
     pacing: z.enum(["slow", "medium", "fast"]),
+    motion_timing: MotionTiming.optional().describe("How elements move: entrance durations, easing, stagger and holds, measured around each visual change."),
+    speech_pacing: SpeechPacing.optional().describe("Pauses in the speech: silence share and pause lengths (for tighten's pacing_from)."),
     notes: z.array(z.string()),
   })
   .meta({
@@ -97,3 +122,6 @@ export type DemoScript = z.infer<typeof DemoScript>;
 export type FormatGrammar = z.infer<typeof FormatGrammar>;
 export type ShortCandidate = z.infer<typeof ShortCandidate>;
 export type ShortCandidates = z.infer<typeof ShortCandidates>;
+
+export type MotionTiming = z.infer<typeof MotionTiming>;
+export type SpeechPacing = z.infer<typeof SpeechPacing>;

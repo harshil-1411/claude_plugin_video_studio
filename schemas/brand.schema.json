@@ -90,6 +90,36 @@
     "language": {
       "additionalProperties": false,
       "properties": {
+        "glossary": {
+          "description": "Names and terms that correct transcripts and captions (not TTS).",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "case_sensitive": {
+                "type": "boolean"
+              },
+              "term": {
+                "description": "The correct spelling, e.g. MSB Docs.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "variants": {
+                "description": "Mishearings to replace, e.g. [\"MSP docs\", \"M S B docks\"]; matching ignores case unless case_sensitive.",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "term"
+            ],
+            "type": "object"
+          },
+          "maxItems": 500,
+          "type": "array"
+        },
         "locale": {
           "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
           "type": "string"

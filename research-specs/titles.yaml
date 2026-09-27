@@ -1,0 +1,12 @@
+# Title heuristics for social copy. Warnings only: these are rules of thumb, not platform limits.
+# Re-check against the user's own YouTube analytics in Phase 9 before relying on them.
+schema_version: "1.0"
+id: titles
+title_length:
+  min_chars: 24
+  max_chars: 58
+basis: heuristic
+verified: false
+notes:
+  - "A common creator rule of thumb: long enough to carry a concrete promise, short enough not to be truncated on mobile. Not a platform limit."
+  - "Platform hard limits (e.g. YouTube's 100-character title) live in platform-specs/, not here."

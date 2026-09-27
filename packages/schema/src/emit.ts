@@ -13,6 +13,7 @@ import { DemoScript, FormatGrammar, ShortCandidates } from "./footage.js";
 import { TranslationSheet } from "./localization.js";
 import { ProviderSpec } from "./provider-spec.js";
 import { Series } from "./series.js";
+import { TitleRules } from "./research-spec.js";
 import { Style } from "./style.js";
 import { Template } from "./template.js";
 import { VideoLock } from "./video-lock.js";
@@ -32,6 +33,7 @@ export const EMITTED_SCHEMAS = {
   style: Style,
   "provider-spec": ProviderSpec,
   series: Series,
+  "title-rules": TitleRules,
   "experiment-plan": ExperimentPlan,
   "experiment-manifest": ExperimentManifest,
   "demo-script": DemoScript,

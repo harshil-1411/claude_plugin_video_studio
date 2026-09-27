@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { FilePath, HexColor, Id, LanguageTag, NonEmptyString } from "./common.js";
+import { GlossaryEntry } from "./craft.js";
 
 /** CSS font weight, 100–900 in steps of 100. */
 export const FontWeight = z.int().min(100).max(900).multipleOf(100);
@@ -87,6 +88,7 @@ export const Brand = z
           .record(z.string(), z.string())
           .optional()
           .describe("Pronunciation or spelling overrides for TTS, e.g. {\"CI/CD\": \"C I C D\"}."),
+        glossary: z.array(GlossaryEntry).max(500).optional().describe("Names and terms that correct transcripts and captions (not TTS)."),
       })
       .optional(),
     claims: z

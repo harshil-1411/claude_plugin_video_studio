@@ -13776,6 +13776,16 @@ const SynthParams = strictObject({
 * The engine still resolves it with symlink checks before reading it.
 */
 const ProjectRelativePath = string().min(1).refine((p) => !/^([a-zA-Z]:)?[\\/]/.test(p), "must be relative to the project folder").refine((p) => !p.split(/[\\/]/).includes(".."), "must not contain `..`").refine((p) => !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p), "must be a project file, not a URL");
+/**
+* A glossary entry: the correct spelling of a name or term, and the ways speech recognition
+* mishears it. Transcripts and captions are corrected to `term` (word timings kept); TTS
+* pronunciation stays in `brand.language.terminology`.
+*/
+const GlossaryEntry = strictObject({
+	term: string().min(1).describe("The correct spelling, e.g. MSB Docs."),
+	variants: array(string().min(1)).optional().describe("Mishearings to replace, e.g. [\"MSP docs\", \"M S B docks\"]; matching ignores case unless case_sensitive."),
+	case_sensitive: boolean().optional()
+});
 //#endregion
 //#region ../schema/dist/credentials.js
 /**
@@ -14132,7 +14142,8 @@ const Series = strictObject({
 	characters: array(SeriesCharacter).optional(),
 	locations: array(SeriesLocation).optional(),
 	motifs: array(SeriesMotif).optional(),
-	rules: array(NonEmptyString).optional().describe("Standards every episode follows, e.g. the intro always opens on the motif.")
+	rules: array(NonEmptyString).optional().describe("Standards every episode follows, e.g. the intro always opens on the motif."),
+	glossary: array(GlossaryEntry).max(500).optional().describe("Channel names and terms that correct transcripts and captions in every episode; the brand's glossary adds to it.")
 }).superRefine((s, ctx) => {
 	const seen = /* @__PURE__ */ new Map();
 	for (const key of [
@@ -14162,6 +14173,22 @@ const Series = strictObject({
 * file sits next to the episodes), no absolute paths or URLs, and a YAML or JSON file.
 */
 const SeriesRef = string().min(1).refine((p) => !/^([a-zA-Z]:)?[\\/]/.test(p), "must be relative to the project folder").refine((p) => !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p), "must be a file, not a URL").refine((p) => /\.(ya?ml|json)$/i.test(p), "must be a .yaml, .yml or .json file");
+strictObject({
+	schema_version: SchemaVersion,
+	id: literal$1("titles"),
+	title_length: strictObject({
+		min_chars: int().positive(),
+		max_chars: int().positive()
+	}).refine((r) => r.min_chars <= r.max_chars, "min_chars must be <= max_chars").describe("Titles outside this band get a title_length warning."),
+	basis: _enum(["heuristic", "measured"]),
+	verified: boolean(),
+	verified_on: date().optional(),
+	notes: array(NonEmptyString).optional()
+}).meta({
+	id: "TitleRules",
+	title: "TitleRules",
+	description: "research-specs/titles.yaml: title heuristics (length band) as dated data; warnings only."
+});
 //#endregion
 //#region ../schema/dist/content-ir.js
 const Source = strictObject({
@@ -16088,6 +16115,33 @@ const DemoScript = strictObject({
 	title: "DemoScript",
 	description: "project/demo.json: a scripted walk through the user's running app, recorded by the demo tool."
 });
+/** Motion timing measured from a reference video (structure only; no frames are kept). */
+const MotionTiming = strictObject({
+	changes_analyzed: int().min(0),
+	enter_ms_median: number().nonnegative().nullable().describe("How long an element takes to settle after a change starts."),
+	enter_ms_p75: number().nonnegative().nullable(),
+	easing: _enum([
+		"linear",
+		"ease_out",
+		"ease_in_out",
+		"spring",
+		"snap"
+	]).nullable().describe("The most common easing class, read from the shape of each change."),
+	easing_share: number().min(0).max(1).nullable().describe("Share of changes that had that easing class."),
+	stagger_ms_median: number().nonnegative().nullable().describe("Gap between change onsets inside a burst (changes under 0.8 s apart)."),
+	holds: strictObject({
+		count: int().min(0),
+		median_ms: number().nonnegative().nullable(),
+		longest_ms: number().nonnegative().nullable()
+	})
+});
+/** Pauses measured in a video's speech. */
+const SpeechPacing = strictObject({
+	silence_share: number().min(0).max(1),
+	pauses_analyzed: int().min(0),
+	pause_median_ms: number().nonnegative().nullable(),
+	pause_p95_ms: number().nonnegative().nullable()
+});
 const FormatGrammar = strictObject({
 	schema_version: SchemaVersion,
 	duration_sec: number().nonnegative(),
@@ -16111,6 +16165,8 @@ const FormatGrammar = strictObject({
 		"medium",
 		"fast"
 	]),
+	motion_timing: MotionTiming.optional().describe("How elements move: entrance durations, easing, stagger and holds, measured around each visual change."),
+	speech_pacing: SpeechPacing.optional().describe("Pauses in the speech: silence share and pause lengths (for tighten's pacing_from)."),
 	notes: array(string())
 }).meta({
 	id: "FormatGrammar",
@@ -16252,7 +16308,8 @@ const Brand = strictObject({
 	}).optional(),
 	language: strictObject({
 		locale: LanguageTag,
-		terminology: record(string(), string()).optional().describe("Pronunciation or spelling overrides for TTS, e.g. {\"CI/CD\": \"C I C D\"}.")
+		terminology: record(string(), string()).optional().describe("Pronunciation or spelling overrides for TTS, e.g. {\"CI/CD\": \"C I C D\"}."),
+		glossary: array(GlossaryEntry).max(500).optional().describe("Names and terms that correct transcripts and captions (not TTS).")
 	}).optional(),
 	claims: strictObject({ prohibited: array(NonEmptyString) }).optional(),
 	cta: strictObject({ allowed: array(NonEmptyString) }).optional()

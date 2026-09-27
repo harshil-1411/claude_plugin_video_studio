@@ -50,6 +50,36 @@
       },
       "type": "array"
     },
+    "glossary": {
+      "description": "Channel names and terms that correct transcripts and captions in every episode; the brand's glossary adds to it.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "term": {
+            "description": "The correct spelling, e.g. MSB Docs.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "variants": {
+            "description": "Mishearings to replace, e.g. [\"MSP docs\", \"M S B docks\"]; matching ignores case unless case_sensitive.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "term"
+        ],
+        "type": "object"
+      },
+      "maxItems": 500,
+      "type": "array"
+    },
     "id": {
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
       "type": "string"

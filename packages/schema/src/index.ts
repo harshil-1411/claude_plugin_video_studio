@@ -4,6 +4,7 @@ export * from "./credentials.js";
 export * from "./shot-card.js";
 export * from "./provider-spec.js";
 export * from "./series.js";
+export * from "./research-spec.js";
 export * from "./content-ir.js";
 export * from "./creative-brief.js";
 export * from "./video-spec.js";

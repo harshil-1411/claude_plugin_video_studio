@@ -206,3 +206,35 @@ describe("W4 contracts: provider specs and the series bible", () => {
     expect(VideoSpec.safeParse(s).success).toBe(false);
   });
 });
+
+describe("Phase 6.6 contracts: glossary, motion timing, speech pacing, title rules", () => {
+  it("brand and series take a glossary; entries need a term", async () => {
+    const { Brand, Series, GlossaryEntry } = await import("./index.js");
+    expect(GlossaryEntry.safeParse({ term: "MSB Docs", variants: ["MSP docs"] }).success).toBe(true);
+    expect(GlossaryEntry.safeParse({ variants: ["x"] }).success).toBe(false);
+    const brand = parseYaml(readFileSync(join(REPO_ROOT, "packages/schema/examples/acme.brand.yaml"), "utf8")) as Record<string, unknown>;
+    const withGlossary = { ...brand, language: { ...((brand.language as object) ?? { locale: "en-US" }), glossary: [{ term: "Acme", variants: ["acne"] }] } };
+    expect(Brand.safeParse(withGlossary).success).toBe(true);
+    expect(Series.safeParse({ schema_version: "1.0", id: "s", name: "S", glossary: [{ term: "RAG" }] }).success).toBe(true);
+  });
+
+  it("FormatGrammar takes motion timing and speech pacing (nullable when unmeasurable)", async () => {
+    const { FormatGrammar } = await import("./index.js");
+    const base = { schema_version: "1.0", duration_sec: 15, aspect_ratio: "9:16", shots: [], avg_shot_sec: 1, cuts_per_10s: 8, hook_shot_sec: 1, caption_band: null, pacing: "fast", notes: [] };
+    const motion_timing = { changes_analyzed: 12, enter_ms_median: 280, enter_ms_p75: 360, easing: "ease_out", easing_share: 0.7, stagger_ms_median: 90, holds: { count: 2, median_ms: 450, longest_ms: 600 } };
+    const speech_pacing = { silence_share: 0.12, pauses_analyzed: 9, pause_median_ms: 240, pause_p95_ms: 610 };
+    expect(FormatGrammar.safeParse({ ...base, motion_timing, speech_pacing }).success).toBe(true);
+    expect(FormatGrammar.safeParse({ ...base, motion_timing: { ...motion_timing, enter_ms_median: null, easing: null, easing_share: null, stagger_ms_median: null } }).success).toBe(true);
+    expect(FormatGrammar.safeParse({ ...base, motion_timing: { ...motion_timing, easing: "bounce" } }).success).toBe(false);
+    expect(FormatGrammar.safeParse(base).success).toBe(true);
+  });
+
+  it("research-specs/titles.yaml parses as TitleRules and stays a heuristic", async () => {
+    const { TitleRules } = await import("./index.js");
+    const raw = parseYaml(readFileSync(join(REPO_ROOT, "research-specs/titles.yaml"), "utf8"));
+    const r = TitleRules.safeParse(raw);
+    expect(r.success).toBe(true);
+    expect(r.data?.basis).toBe("heuristic");
+    expect(TitleRules.safeParse({ ...(raw as object), title_length: { min_chars: 60, max_chars: 20 } }).success).toBe(false);
+  });
+});

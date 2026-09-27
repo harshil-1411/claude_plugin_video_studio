@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { HexColor, Id, NonEmptyString, SchemaVersion } from "./common.js";
-import { ProjectRelativePath } from "./craft.js";
+import { GlossaryEntry, ProjectRelativePath } from "./craft.js";
 
 /**
  * series.yaml: a series bible shared by the episodes (projects) of one series: recurring
@@ -41,6 +41,7 @@ export const Series = z
     locations: z.array(SeriesLocation).optional(),
     motifs: z.array(SeriesMotif).optional(),
     rules: z.array(NonEmptyString).optional().describe("Standards every episode follows, e.g. the intro always opens on the motif."),
+    glossary: z.array(GlossaryEntry).max(500).optional().describe("Channel names and terms that correct transcripts and captions in every episode; the brand's glossary adds to it."),
   })
   .superRefine((s, ctx) => {
     const seen = new Map<string, string>();

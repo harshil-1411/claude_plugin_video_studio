@@ -67,7 +67,19 @@ export const ProjectRelativePath = z
   .refine((p) => !p.split(/[\\/]/).includes(".."), "must not contain `..`")
   .refine((p) => !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p), "must be a project file, not a URL");
 
+/**
+ * A glossary entry: the correct spelling of a name or term, and the ways speech recognition
+ * mishears it. Transcripts and captions are corrected to `term` (word timings kept); TTS
+ * pronunciation stays in `brand.language.terminology`.
+ */
+export const GlossaryEntry = z.strictObject({
+  term: z.string().min(1).describe("The correct spelling, e.g. MSB Docs."),
+  variants: z.array(z.string().min(1)).optional().describe("Mishearings to replace, e.g. [\"MSP docs\", \"M S B docks\"]; matching ignores case unless case_sensitive."),
+  case_sensitive: z.boolean().optional(),
+});
+
 export type EffectId = z.infer<typeof EffectId>;
+export type GlossaryEntry = z.infer<typeof GlossaryEntry>;
 export type Acceptance = z.infer<typeof Acceptance>;
 export type ChordDegree = z.infer<typeof ChordDegree>;
 export type SynthParams = z.infer<typeof SynthParams>;
