@@ -40,6 +40,7 @@ import { COUNT_UP_ENTRANCE_LEAD_S, countUpSpan, countUpSteps, countUpTiming, wit
 import { countUpWindow, cueItemStarts } from "./cue-timing.js";
 import { openingStart, sameTime } from "./entrance.js";
 import { exitFadeMs } from "./tokens.js";
+import { fallbackLines } from "./fallback.js";
 
 /**
  * Chrome-free fallback renderer for deterministic scenes: one `-f lavfi color=` source at the
@@ -82,7 +83,11 @@ export const FFMPEG_RENDERER_KINDS = [
   "lower_third",
   "kinetic_text",
   "map",
+  "motion",
 ] as const satisfies readonly DeterministicKind[];
+
+/** Reported whenever the ffmpeg renderer draws a `motion` scene: its stand-in is not the page. */
+export const MOTION_STAND_IN_WARNING = "motion page drawn as a text stand-in: the real page needs HyperFrames (Chrome)";
 
 export interface FfmpegEncodeSettings {
   /** x264 preset. Default `veryfast` (scene clips are re-encoded at assembly). Tests use `ultrafast`. */
@@ -376,6 +381,21 @@ function typography(p: Record<string, unknown>, c: Ctx): Layout {
   if (em && !hit) warnings.push(`typography: emphasis "${emphasis}" not found in lines`);
   if (em && hit) warnings.push("typography: emphasis colours the whole line containing it (no per-word styling in ffmpeg-drawtext)");
   return { elements: els, warnings };
+}
+
+/**
+ * `motion`: the page is code only a browser can run, so ffmpeg draws its copy (`props.text`, one
+ * line per entry, each its own cue item) as a typography card, labelled as a stand-in, and always
+ * warns (fallbacks are reported, never silent).
+ */
+function motionStandIn(p: Record<string, unknown>, c: Ctx): Layout {
+  const lines = Array.isArray(p.text) ? fallbackLines({ text: p.text }) : [];
+  const card = typography({ lines: lines.filter((l) => l.trim()) }, c);
+  const label = "motion stand-in";
+  const box: Rect = { x: c.safe.x, y: r(c.safe.y + c.safe.h - c.u * 0.05), w: c.safe.w, h: r(c.u * 0.05) };
+  const fit = fitText(label, box, { maxSize: c.u * 0.028, minSize: c.u * 0.018 });
+  const tag = textLines(fit, box, { font: "mono", color: c.colors.primary, beat: 0, align: "center", valign: "bottom" });
+  return { elements: [...card.elements, ...tag], warnings: [MOTION_STAND_IN_WARNING, ...card.warnings.filter((w) => !w.startsWith("typography: emphasis"))] };
 }
 
 function code(p: Record<string, unknown>, c: Ctx): Layout {
@@ -1433,6 +1453,8 @@ function layoutKind(det: NonNullable<Scene["deterministic"]>, c: Ctx, inputs: Co
       return kineticText(p, c);
     case "map":
       return map(p, c);
+    case "motion":
+      return motionStandIn(p, c);
     default:
       throw new Error(`${FFMPEG_RENDERER_ID} cannot draw kind "${String((det as { kind: unknown }).kind)}"`);
   }

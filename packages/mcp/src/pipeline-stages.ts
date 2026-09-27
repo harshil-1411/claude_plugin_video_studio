@@ -40,6 +40,7 @@ import {
   type RendererPreference,
   type RenderTarget,
   type ResolvedCue,
+  type SceneBeats,
   createFootageRenderer,
   type SceneRenderEntry,
   type SceneRenderer,
@@ -329,7 +330,11 @@ export async function stageVoice(run: RenderRun, spec: VideoSpec, brand: Brand |
 /** c0. Footage assets (ContentIR → project files) and the music bed. */
 export async function stageSources(run: RenderRun, spec: VideoSpec, irPath: string): Promise<{ footage: FootageResolution; music: ResolvedMusic | undefined }> {
   const footage = await resolveFootage(run.root, spec, irPath);
-  const music: ResolvedMusic | undefined = spec.audio?.music ? await resolveMusic(spec.audio.music, run.root, run.env) : undefined;
+  // A synthesized score covers the spec's runtime (it loops past overruns on its own phrase).
+  const specSec = spec.scenes.reduce((a, s) => a + s.duration_sec, 0);
+  const music: ResolvedMusic | undefined = spec.audio?.music
+    ? await resolveMusic(spec.audio.music, run.root, run.env, { durationSec: specSec, cacheDir: join(resolveDataDir(run.env).cache, "score"), ...(run.signal ? { signal: run.signal } : {}) })
+    : undefined;
   return { footage, music };
 }
 
@@ -368,7 +373,11 @@ export async function stagePlanTiming(
       warnings.push("beat_sync: no audio.music bed to detect beats in; cuts unchanged");
     } else {
       signal?.throwIfAborted();
-      const r = await beatSyncDurations(spec.scenes, adjusted, music, spec.audio.beat_sync.tolerance_ms ?? 250, trackById, signal);
+      const r = await beatSyncDurations(spec.scenes, adjusted, music, spec.audio.beat_sync.tolerance_ms ?? 250, trackById, {
+        ...(spec.audio.beat_sync.snap ? { snap: spec.audio.beat_sync.snap } : {}),
+        cacheDir: join(resolveDataDir(run.env).cache, "beats"),
+        ...(signal ? { signal } : {}),
+      });
       beatSync = r.summary;
       if (r.warning) warnings.push(r.warning);
       for (const a of r.adjustments) {
@@ -381,7 +390,7 @@ export async function stagePlanTiming(
         }
         adjusted.set(a.scene_id, a.render_duration_sec);
       }
-      if (r.adjustments.length) warnings.push(`timing: beat sync moved ${r.summary.moved_cuts} cut(s) onto beats (${r.summary.bpm ?? "?"} bpm)`);
+      if (r.adjustments.length) warnings.push(`timing: beat sync moved ${r.summary.moved_cuts} cut(s) onto ${r.summary.snap === "downbeat" ? "bar starts" : "beats"} (${r.summary.bpm ?? "?"} bpm)`);
     }
   }
   timing_adjustments.sort((a, b) => spec.scenes.findIndex((s) => s.id === a.scene_id) - spec.scenes.findIndex((s) => s.id === b.scene_id));
@@ -487,6 +496,27 @@ export interface ScenesStage {
 }
 
 /**
+ * The music beat grid inside each `motion` scene of the render plan, in scene-local seconds (the
+ * page reads it as `window.__vs.beats` / `downbeats`). Scene starts are the frame-aligned slots of
+ * `frameTimeline`. Empty without a beat grid; other kinds get none (their clips do not use it).
+ */
+export function sceneBeatGrids(planScenes: readonly Scene[], fps: number, beatSync: RenderState["beat_sync"] | undefined): Map<string, SceneBeats> {
+  const out = new Map<string, SceneBeats>();
+  const beats = beatSync?.beat_times_ms ?? [];
+  const downbeats = beatSync?.downbeat_times_ms ?? [];
+  if (!beats.length && !downbeats.length) return out;
+  const { bounds, frameMs } = frameTimeline(planScenes, fps);
+  planScenes.forEach((s, i) => {
+    if (s.deterministic?.kind !== "motion") return;
+    const start = frameMs(bounds[i]!);
+    const end = frameMs(bounds[i + 1]!);
+    const local = (list: readonly number[]) => list.filter((t) => t >= start && t < end).map((t) => Math.round(t - start) / 1000);
+    out.set(s.id, { beats_s: local(beats), downbeats_s: local(downbeats) });
+  });
+  return out;
+}
+
+/**
  * d. Scene clips: render every plan scene (cached by sidecar keys); with renderer "auto", scenes
  * that fail are retried with ffmpeg. Throws when a scene still has no clip. Also resolves the
  * target contracts and layout zones the scenes (and later captions, logo and cover) use.
@@ -501,6 +531,8 @@ export async function stageScenes(
     tp: TargetPlan;
     footage: FootageResolution;
     sceneCues: Map<string, ResolvedCue[]>;
+    /** The render plan's beat grid (stagePlanTiming); `motion` scenes get their slice of it. */
+    beatSync?: RenderState["beat_sync"];
   },
 ): Promise<ScenesStage> {
   const { o, env, root, quality, preference, placeholder, signal, now, progress, warnings } = run;
@@ -526,6 +558,7 @@ export async function stageScenes(
   for (const s of planScenes) sceneStart.set(s.id, now().toISOString());
   const contracts = await loadTargetContracts(spec);
   const zones = layoutZones(target, contracts);
+  const sceneBeats = sceneBeatGrids(planScenes, target.fps, input.beatSync);
   const baseOpts = {
     project_dir: root,
     dir: scenesDir,
@@ -539,6 +572,7 @@ export async function stageScenes(
     footage: footage.byScene,
     footageRenderer: o.footageRenderer ?? createFootageRenderer({ encodePreset: o.encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") }),
     ...(sceneCues.size ? { cues: sceneCues } : {}),
+    ...(sceneBeats.size ? { beats: sceneBeats } : {}),
   };
   const first = await renderScenes({ scenes: planScenes }, { ...baseOpts, preference, concurrency, onScene });
   const entries = new Map(first.scenes.map((e) => [e.scene_id, e]));
@@ -732,7 +766,8 @@ export async function stageSceneAudio(
 
   // e''. per-scene audio: footage sound (native / mix), crossfades and one-shots
   const useSceneAudio = mode === "native" || planScenes.some((s) => s.footage || s.sfx?.length);
-  const sceneAudio = useSceneAudio ? await buildSceneAudio(run.root, planScenes, placements, slotMs, footage, nativeTracks, run.warnings) : undefined;
+  const sfxCache = { cacheDir: join(resolveDataDir(run.env).cache, "sfx-peak"), ...(run.signal ? { signal: run.signal } : {}) };
+  const sceneAudio = useSceneAudio ? await buildSceneAudio(run.root, planScenes, placements, slotMs, footage, nativeTracks, run.warnings, sfxCache) : undefined;
   const sceneAudioOn = !!sceneAudio && (sceneAudio.slots.some((sl) => sl.layers.length > 0) || sceneAudio.sfx.length > 0);
   const musicSpeech: SpeechInterval[] = useSceneAudio ? [...(hasAudio ? speech : []), ...sceneAudio!.speech] : hasAudio ? speech : [];
   const musicMute = sceneAudio?.mute ?? [];

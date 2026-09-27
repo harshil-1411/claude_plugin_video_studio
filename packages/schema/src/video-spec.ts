@@ -284,7 +284,7 @@ export const MusicBed = z
     loop: z.boolean().optional().describe("Loop the track to cover the video (default true)."),
     start_sec: z.number().min(0).optional().describe("Offset into the track."),
     license: AudioLicense.optional().describe("Required for user files; bundled and synthesized tracks carry their own."),
-    synth: SynthParams.optional().describe("Overrides the preset's parameters when `file` is `synth:<preset>`."),
+    synth: SynthParams.partial().optional().describe("Overrides some of the preset's parameters when `file` is `synth:<preset>` (e.g. just bpm or seed)."),
   })
   .describe("Background music mixed under the voice: a bundled bed, a project file, or a locally synthesized score.");
 
@@ -1070,7 +1070,7 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
   });
 
   const music = spec.audio?.music;
-  if (music && !music.file.startsWith("bundled:") && !music.license) {
+  if (music && !music.file.startsWith("bundled:") && !music.file.startsWith("synth:") && !music.license) {
     warnings.push({
       path: "audio.music.license",
       message: `music file "${music.file}" has no licence recorded`,

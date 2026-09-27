@@ -8,3 +8,4 @@ export * from "./asr.js";
 export * from "./beats.js";
 export * from "./letterbox.js";
 export * from "./subject-detect.js";
+export * from "./score.js";

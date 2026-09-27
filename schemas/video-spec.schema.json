@@ -141,7 +141,7 @@
               "type": "number"
             },
             "synth": {
-              "description": "Overrides the preset's parameters when `file` is `synth:<preset>`.",
+              "description": "Overrides some of the preset's parameters when `file` is `synth:<preset>` (e.g. just bpm or seed).",
               "additionalProperties": false,
               "properties": {
                 "bpm": {
@@ -191,9 +191,6 @@
                   "type": "integer"
                 }
               },
-              "required": [
-                "bpm"
-              ],
               "type": "object"
             },
             "volume_db": {

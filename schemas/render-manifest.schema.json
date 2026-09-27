@@ -325,7 +325,7 @@
       "additionalProperties": false,
       "properties": {
         "file": {
-          "description": "`bundled:<id>` or the project-relative path from spec.audio.music.file.",
+          "description": "`bundled:<id>`, `synth:<preset>` or the project-relative path from spec.audio.music.file.",
           "minLength": 1,
           "type": "string"
         },

@@ -20,3 +20,6 @@ export {
   type HyperframesProducer,
 } from "./hyperframes-renderer.js";
 export * from "./styles.js";
+export { MOTION_KIT_SOURCE, MOTION_KIT_VERSION } from "./motion-kit.js";
+export { composeMotion, splitMotionPage, scriptJson, MOTION_CSP, type MotionComposeOptions } from "./motion-compose.js";
+export { lintMotionPage, loadMotionPage, formatMotionFinding, motionPageDigest, type MotionFile, type MotionLintFinding, type MotionLintResult, type MotionPage, type MotionPageFile } from "./motion-lint.js";

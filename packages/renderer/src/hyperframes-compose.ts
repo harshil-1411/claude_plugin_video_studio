@@ -11,6 +11,7 @@ import { type Script, baseDirection, dominantScript, htmlLang, languageScript, s
 import { applyTextCase, estimateTextWidth, isComplexText, lineUnits, safeArea, wrapText } from "./text-layout.js";
 import { BUNDLED_FONTS, fontFaceCss, withScriptFonts } from "./tokens.js";
 import type { MotionTokens, ResolvedCue, SceneRenderRequest, VisualTokens } from "./types.js";
+import { composeMotion } from "./motion-compose.js";
 import { exitFadeMs } from "./tokens.js";
 
 /**
@@ -65,8 +66,11 @@ export interface BuildCompositionOptions {
    * request's `cues`. Absent or empty: the default timing, byte-identical to a cue-less build.
    */
   cues?: readonly ResolvedCue[];
+  /** The page source of a `motion` scene (motion-lint.ts `loadMotionPage`); required for that kind. */
+  motionHtml?: string;
 }
 
+/** Every kind the HyperFrames renderer draws: the built-in kinds plus Claude-authored `motion` pages (motion-compose.ts). */
 export const HYPERFRAMES_KINDS: readonly DeterministicKind[] = [
   "typography",
   "code",
@@ -83,6 +87,7 @@ export const HYPERFRAMES_KINDS: readonly DeterministicKind[] = [
   "lower_third",
   "kinetic_text",
   "map",
+  "motion",
 ];
 
 const IMAGE_EXT = /^\.(png|jpe?g|webp|gif|avif|svg)$/i;
@@ -1844,7 +1849,11 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
   const { scene, target, project_dir } = req;
   const det = scene.deterministic;
   if (!det) throw new Error(`scene ${scene.id} has no deterministic content`);
-  const render = det.kind === "motion" ? undefined : RENDERERS[det.kind];
+  if (det.kind === "motion") {
+    if (opts.motionHtml === undefined) throw new Error(`scene ${scene.id}: a motion scene needs its page source (motionHtml)`);
+    return composeMotion(req, opts.motionHtml, opts.cues ? { cues: opts.cues } : {});
+  }
+  const render = RENDERERS[det.kind];
   if (!render) throw new Error(`scene ${scene.id}: unsupported deterministic kind "${String(det.kind)}"`);
   const W = Math.round(target.width);
   const H = Math.round(target.height);

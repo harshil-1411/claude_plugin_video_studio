@@ -1,4 +1,6 @@
-import { extname } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { extname, join } from "node:path";
 import { type RunOptions, filterGraph, runFfmpeg } from "./ffmpeg.js";
 
 export const AUDIO_SAMPLE_RATE = 48_000;
@@ -100,6 +102,61 @@ export interface OneShot {
   path: string;
   at_ms: number;
   volume_db?: number;
+  /** Skip this much of the file's head (an effect whose peak lands right after a scene starts). */
+  trim_ms?: number;
+}
+
+/** Bumped whenever the peak measurement changes, so cached offsets are recomputed. */
+export const SFX_PEAK_VERSION = 1;
+/** RMS window for an effect's peak: short enough to find the hit, long enough to ignore one stray sample. */
+export const SFX_PEAK_WINDOW_MS = 10;
+/** Rate effects are decoded at for the peak measurement. */
+const PEAK_SR = 16_000;
+
+/**
+ * Offset (ms) of the loudest {@link SFX_PEAK_WINDOW_MS} RMS window's centre in mono PCM, the
+ * first one on a tie. 0 for silence or a clip shorter than the window.
+ */
+export function peakOffsetMs(pcm: Float32Array, sampleRate: number, windowMs = SFX_PEAK_WINDOW_MS): number {
+  const w = Math.max(1, Math.round((sampleRate * windowMs) / 1000));
+  if (pcm.length < w) return 0;
+  let e = 0;
+  for (let i = 0; i < w; i++) e += pcm[i]! * pcm[i]!;
+  let best = e;
+  let at = 0;
+  for (let i = w; i < pcm.length; i++) {
+    e += pcm[i]! * pcm[i]! - pcm[i - w]! * pcm[i - w]!;
+    // A float running sum drifts a hair; a strict margin keeps the first of equal windows.
+    if (e > best * (1 + 1e-9) + 1e-12) {
+      best = e;
+      at = i - w + 1;
+    }
+  }
+  return best > 0 ? Math.round(((at + w / 2) * 1000) / sampleRate) : 0;
+}
+
+/** Decode an effect to mono PCM with ffmpeg and measure its peak offset (ms from the file start). */
+export async function measurePeakOffset(path: string, opts: RunOptions = {}): Promise<number> {
+  const work = await mkdtemp(join(tmpdir(), "vs-sfx-peak-"));
+  try {
+    const out = join(work, "mono.f32");
+    await runFfmpeg(["-y", "-i", path, "-map", "0:a:0", "-ac", "1", "-ar", String(PEAK_SR), "-f", "f32le", "-c:a", "pcm_f32le", out], opts);
+    const buf = await readFile(out);
+    return peakOffsetMs(new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4)), PEAK_SR);
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Where an effect starts so its peak (not its first sample) lands on `targetMs`: `peakMs` earlier.
+ * If that is before `sceneStartMs`, it starts with the scene and its head is trimmed instead, so
+ * the peak still lands on time. All times are absolute ms.
+ */
+export function alignOneShot(targetMs: number, peakMs: number, sceneStartMs: number): { at_ms: number; trim_ms: number } {
+  const start = targetMs - Math.max(0, peakMs);
+  if (start >= sceneStartMs) return { at_ms: Math.round(start), trim_ms: 0 };
+  return { at_ms: Math.round(sceneStartMs), trim_ms: Math.round(sceneStartMs - start) };
 }
 
 /** `atempo` filters for a rate in 0.25–4 (each atempo takes 0.5–2). */
@@ -196,6 +253,7 @@ export async function mixSceneAudio(
     chains.push([
       `[${nIn}:a:0]aresample=${sr}`,
       fmt,
+      ...(fx.trim_ms ? [`atrim=start_sample=${toS(fx.trim_ms)}`, "asetpts=N/SR/TB"] : []),
       ...(fx.volume_db ? [`volume=${fx.volume_db}dB`] : []),
       `atrim=end_sample=${total - at}`,
       "asetpts=N/SR/TB",

@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ffprobe, type ProbeResult } from "@video-studio/media";
@@ -13,6 +13,8 @@ import {
   type HyperframesProducer,
 } from "./hyperframes-renderer.js";
 import type { SceneRenderRequest, VisualTokens } from "./types.js";
+
+const MOTION_FIXTURES = new URL("./__fixtures__/motion/", import.meta.url);
 
 const TOKENS: VisualTokens = {
   font_heading: "Helvetica, Arial, sans-serif",
@@ -190,6 +192,28 @@ describe("render() with an injected producer", () => {
     expect(await readdir(tmpRoot)).toEqual([]);
   });
 
+  it("draws a motion page: CSP-wrapped composition plus the page's files at the same relative paths", async () => {
+    const { r, seen, tmpRoot, project } = await setup({});
+    await cp(MOTION_FIXTURES, join(project, "motion"), { recursive: true });
+    const motion = { ...scene(1), deterministic: { kind: "motion" as const, props: { html: "motion/morph.html", text: ["Docs in."] } } };
+    const res = await r.render(request(project, { scene: motion, beats: { beats_s: [0.5], downbeats_s: [0.5] } }));
+    expect(res.warnings).toEqual([]);
+    expect(res.text_boxes).toEqual([]);
+    expect(seen.html).toContain("Content-Security-Policy");
+    expect(seen.html).toContain('"beats":[0.5]');
+    expect(seen.files).toEqual(["index.html", "morph.css", "morph.js"]);
+    expect(await readdir(tmpRoot)).toEqual([]);
+  });
+
+  it("refuses a motion page with lint errors (and never starts the producer)", async () => {
+    let started = false;
+    const { r, project } = await setup({ createRenderJob: () => ((started = true), {}) as any });
+    await cp(MOTION_FIXTURES, join(project, "motion"), { recursive: true });
+    const motion = { ...scene(1), deterministic: { kind: "motion" as const, props: { html: "motion/unsafe.html", text: ["x"] } } };
+    await expect(r.render(request(project, { scene: motion }))).rejects.toThrow(/refuses motion page motion\/unsafe\.html .*motion_network.*fetch/);
+    expect(started).toBe(false);
+  });
+
   it("maps producer failures to readable errors and still cleans up", async () => {
     const { r, tmpRoot, project } = await setup({
       executeRenderJob: async (job) => {
@@ -260,6 +284,27 @@ describe.skipIf(process.env.VS_TEST_RENDER !== "1")("real HyperFrames render (VS
         expect(Math.abs(p.duration_s - 1)).toBeLessThanOrEqual(0.1);
         expect(res.duration_ms).toBeGreaterThan(900);
         console.error(`[hyperframes real render] ${outPath}: ${JSON.stringify(p)} warnings=${JSON.stringify(res.warnings)}`);
+      } finally {
+        if (process.env.VS_KEEP_HYPERFRAMES_TMP !== "1") await rm(out, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
+
+  it(
+    "renders the example motion page (CSP, kit, adapter and readiness in real Chrome)",
+    async () => {
+      const out = await mkdtemp(join(tmpdir(), "vs-hf-motion-"));
+      try {
+        await cp(MOTION_FIXTURES, join(out, "motion"), { recursive: true });
+        const r = createHyperframesRenderer({ quality: "draft" });
+        const outPath = join(out, "s01.mp4");
+        const motion = { ...scene(2), deterministic: { kind: "motion" as const, props: { html: "motion/morph.html", text: ["Docs in.", "Video out.", "Done."] } } };
+        const res = await r.render({ scene: motion, target: { width: 180, height: 320, fps: 30, aspect_ratio: "9:16" }, tokens: TOKENS, out_path: outPath, project_dir: out });
+        const p = await ffprobe(outPath);
+        expect([p.width, p.height]).toEqual([180, 320]);
+        expect(Math.abs(p.duration_s - 2)).toBeLessThanOrEqual(0.1);
+        console.error(`[hyperframes motion render] ${outPath}: warnings=${JSON.stringify(res.warnings)}`);
       } finally {
         if (process.env.VS_KEEP_HYPERFRAMES_TMP !== "1") await rm(out, { recursive: true, force: true });
       }

@@ -17,7 +17,7 @@ import {
   voiceMode,
   MIN_CUE_GAP_MS,
 } from "@video-studio/schema";
-import { REFRAME, type Script, dominantScript, fittedFrame, languageScript, scriptsIn, subjectEdgeHits } from "@video-studio/renderer";
+import { REFRAME, type Script, dominantScript, fittedFrame, formatMotionFinding, languageScript, loadMotionPage, scriptsIn, subjectEdgeHits } from "@video-studio/renderer";
 import { projectSpecPaths } from "./spec-validate.js";
 
 /**
@@ -1228,6 +1228,21 @@ export function checkCues(state: Pick<RenderStateView, "cues">, out: LintFinding
   }
 }
 
+/**
+ * `motion` pages that are unsafe or not a pure function of time (network, clocks, randomness,
+ * timers, CSS animation, files outside the page's folder): motion-lint.ts, the same findings
+ * spec_validate reports, warnings included. The HyperFrames renderer refuses a page with errors.
+ */
+export async function checkMotionUnsafe(root: string, spec: VideoSpec, out: LintFinding[]): Promise<void> {
+  for (const s of spec.scenes) {
+    if (s.deterministic?.kind !== "motion") continue;
+    const html = typeof s.deterministic.props.html === "string" ? s.deterministic.props.html : "";
+    for (const f of (await loadMotionPage(root, html)).findings) {
+      out.push({ id: "motion_unsafe", severity: f.severity, scene_id: s.id, message: `${html}: ${formatMotionFinding(f)}`, fix: f.fix });
+    }
+  }
+}
+
 // ------------------------------------------------------------------------------------ entry
 
 function formatMarkdown(r: Omit<LintResult, "report_json" | "report_md">): string {
@@ -1312,6 +1327,7 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
     : manifest?.cover;
   checkCover(spec, contracts, coverView, findings);
   checkBanned(spec, brand, findings);
+  await checkMotionUnsafe(paths.root, spec, findings);
 
   findings.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1));
   const errors = findings.filter((f) => f.severity === "error").length;

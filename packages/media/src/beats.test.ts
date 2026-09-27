@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { detectBeats, snapCuts } from "./beats.js";
+import { BEAT_ANALYSIS_VERSION, BEAT_SAMPLE_RATE, analyzePcm, detectBeats, downbeatPhase, dropBar, snapCuts, trimGrid } from "./beats.js";
 import { runFfmpeg } from "./ffmpeg.js";
 
 let tmp: string;
@@ -46,6 +46,88 @@ describe("detectBeats", () => {
     expect(s.bpm).toBeNull();
     expect(s.beats_ms).toEqual([]);
   }, 30_000);
+});
+
+/**
+ * A synthetic 4/4 track at the analysis rate: `lead` s of silence, a swept-sine kick on every
+ * beat (accented on beat 1), seeded noise hats on the off-beats, a 55 Hz bass from `drop` (bar
+ * index) on, then `tail` s of silence.
+ */
+function song(bpm: number, lead: number, bars: number, drop: number, tail = 1.5): Float32Array {
+  const sr = BEAT_SAMPLE_RATE;
+  const p = 60 / bpm;
+  const n = Math.round((lead + bars * 4 * p + tail) * sr);
+  const x = new Float32Array(n);
+  let seed = 12345;
+  const noise = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32) * 2 - 1;
+  const add = (at: number, len: number, f: (tau: number, k: number) => number) => {
+    const a = Math.round(at * sr);
+    for (let i = 0; i < len * sr && a + i < n; i++) x[a + i]! += f(i / sr, a + i);
+  };
+  for (let b = 0; b < bars * 4; b++) {
+    const t0 = lead + b * p;
+    const amp = b % 4 === 0 ? 0.9 : 0.5;
+    add(t0, 0.25, (tau) => amp * Math.sin(2 * Math.PI * (50 * tau + 2 * (1 - Math.exp(-30 * tau)))) * Math.exp(-9 * tau));
+    add(t0 + p / 2, 0.05, (tau) => 0.4 * noise() * Math.exp(-60 * tau));
+    if (Math.floor(b / 4) >= drop) add(t0, p, (tau, k) => 0.25 * Math.sin((2 * Math.PI * 55 * k) / sr) * Math.min(1, tau / 0.01));
+  }
+  return x;
+}
+
+describe("analyzePcm (beat v2 on synthetic tracks)", () => {
+  const cases = [
+    { bpm: 75, lead: 0.43, bars: 8, drop: 4 },
+    { bpm: 90, lead: 1.21, bars: 8, drop: 4 },
+    { bpm: 120, lead: 0.07, bars: 12, drop: 6 },
+    { bpm: 140, lead: 0.66, bars: 12, drop: 5 },
+    { bpm: 174, lead: 0.29, bars: 12, drop: 6 },
+  ];
+  for (const c of cases) {
+    it(`${c.bpm} bpm: tempo, downbeats on the accented kick, the drop, and no beats in silence`, () => {
+      const p = 60 / c.bpm;
+      const r = analyzePcm(song(c.bpm, c.lead, c.bars, c.drop));
+      expect(r.analysis_version).toBe(BEAT_ANALYSIS_VERSION);
+      const tempoOk = Math.abs(r.bpm! - c.bpm) <= 1 || Math.abs((r.alternate_bpm ?? 0) - c.bpm) <= 1;
+      expect(tempoOk, `bpm ${r.bpm} (alt ${r.alternate_bpm})`).toBe(true);
+      expect(r.downbeats_ms!.length).toBeGreaterThanOrEqual(c.bars - 1);
+      for (const d of r.downbeats_ms!) {
+        const k = Math.round((d / 1000 - c.lead) / (4 * p));
+        expect(Math.abs(d - (c.lead + k * 4 * p) * 1000), `downbeat ${d}`).toBeLessThanOrEqual(20);
+      }
+      expect(Math.abs(r.drop_ms! - (c.lead + c.drop * 4 * p) * 1000)).toBeLessThanOrEqual(30);
+      expect(r.bar_energy!.length).toBe(r.downbeats_ms!.length);
+      expect(Math.max(...r.bar_energy!)).toBe(1);
+      // No phantom beats in the leading silence or after the last kick.
+      expect(r.beats_ms[0]!).toBeGreaterThanOrEqual(c.lead * 1000 - 30);
+      expect(r.beats_ms.at(-1)!).toBeLessThanOrEqual((c.lead + (c.bars * 4 - 1) * p) * 1000 + 30);
+    });
+  }
+
+  it("reads loud off-beat hats as a double-time alternate, not as the pulse", () => {
+    const r = analyzePcm(song(90, 0.2, 8, 4));
+    expect(r.bpm).toBe(90);
+    expect(r.alternate_bpm).toBe(180);
+  });
+});
+
+describe("bar helpers", () => {
+  it("trims grid points outside the onset span", () => {
+    expect(trimGrid([0, 0.5, 1, 1.5, 2, 2.5], [0.52, 1.49, 2.01])).toEqual([0.5, 1, 1.5, 2]);
+    expect(trimGrid([0, 1], [])).toEqual([]);
+  });
+  it("picks the bar phase with the most low-band energy, or none without an accent", () => {
+    const accent = Array.from({ length: 16 }, (_, i) => (i % 4 === 2 ? 3 : 1) * (i >= 8 ? 5 : 1));
+    expect(downbeatPhase(accent)).toBe(2);
+    expect(downbeatPhase(Array(16).fill(1))).toBeNull();
+    expect(downbeatPhase([3, 1, 1])).toBeNull();
+  });
+  it("finds a sustained rise and ignores a partial final bar", () => {
+    expect(dropBar([0.3, 0.3, 0.3, 1, 1, 0.9], 6)).toBe(3);
+    // The loud last bar is partial (only 5 full bars): no drop.
+    expect(dropBar([0.3, 0.3, 0.3, 0.3, 0.3, 1], 5)).toBeNull();
+    // A one-bar hit is not sustained.
+    expect(dropBar([0.3, 0.3, 1, 0.3, 0.3, 0.3], 6)).toBeNull();
+  });
 });
 
 describe("snapCuts", () => {

@@ -71,6 +71,17 @@ export interface SceneRenderRequest {
    * earlier item's cue. Absent or empty: the default timing, byte-identical to before.
    */
   cues?: ResolvedCue[];
+  /**
+   * The music bed's beat grid inside this scene (scene-local seconds, sorted), when the render has
+   * one. `motion` pages read it as `window.__vs.beats` / `downbeats`; other kinds ignore it.
+   */
+  beats?: SceneBeats;
+}
+
+/** Beat and downbeat times inside one scene, in scene-local seconds. */
+export interface SceneBeats {
+  beats_s: number[];
+  downbeats_s: number[];
 }
 
 /** One `scene.cues` entry placed on the scene timeline. */

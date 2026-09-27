@@ -887,7 +887,7 @@ const _parse = (_Err) => {
 	};
 	return fn;
 };
-const parse$5 = /* @__PURE__*/ _parse($ZodRealError);
+const parse$6 = /* @__PURE__*/ _parse($ZodRealError);
 const _parseAsync = (_Err) => {
 	const fn = async (schema, value, _ctx, params) => {
 		const ctx = _ctx ? {
@@ -1471,7 +1471,7 @@ var Doc = class {
 };
 //#endregion
 //#region ../../node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/versions.js
-const version = {
+const version$1 = {
 	major: 4,
 	minor: 6,
 	patch: 5
@@ -1483,7 +1483,7 @@ const $ZodType = /*@__PURE__*/ $constructor("$ZodType", (inst, def) => {
 	inst ?? (inst = {});
 	inst._zod.def = def;
 	inst._zod.bag = inst._zod.bag || {};
-	inst._zod.version = version;
+	inst._zod.version = version$1;
 	const defChecks = inst._zod.def.checks;
 	const checks = inst._zod.traits.has("$ZodCheck") ? [inst, ...defChecks ?? []] : defChecks?.length ? [...defChecks] : [];
 	for (const ch of checks) for (const fn of ch._zod.onattach) fn(inst);
@@ -5114,7 +5114,7 @@ const initializer = (inst, issues) => {
 const ZodRealError = /*@__PURE__*/ $constructor("ZodError", initializer, void 0, { Parent: Error });
 //#endregion
 //#region ../../node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/parse.js
-const parse$4 = /* @__PURE__ */ _parse(ZodRealError);
+const parse$5 = /* @__PURE__ */ _parse(ZodRealError);
 const parseAsync = /* @__PURE__ */ _parseAsync(ZodRealError);
 const safeParse$1 = /* @__PURE__ */ _safeParse(ZodRealError);
 const safeParseAsync$1 = /* @__PURE__ */ _safeParseAsync(ZodRealError);
@@ -5246,7 +5246,7 @@ const ZodType$1 = /*@__PURE__*/ $constructor("ZodType", (inst, def) => {
 		own(this, "~standard", value);
 	},
 	parse: function _parse(data, params) {
-		return parse$4(this, data, params, { callee: _parse });
+		return parse$5(this, data, params, { callee: _parse });
 	},
 	parseAsync: async function _parseAsync(data, params) {
 		return await parseAsync(this, data, params, { callee: _parseAsync });
@@ -5897,7 +5897,7 @@ const ZodLiteral$1 = /*@__PURE__*/ $constructor("ZodLiteral", (inst, def) => {
 		return def.values[0];
 	} });
 });
-function literal(value, params) {
+function literal$1(value, params) {
 	return new ZodLiteral$1({
 		type: "literal",
 		values: Array.isArray(value) ? value : [value],
@@ -6197,7 +6197,7 @@ const RequestIdSchema = union([string(), number().int()]);
 * A request that expects a response.
 */
 const JSONRPCRequestSchema = object$2({
-	jsonrpc: literal("2.0"),
+	jsonrpc: literal$1("2.0"),
 	id: RequestIdSchema,
 	...RequestSchema.shape
 }).strict();
@@ -6206,7 +6206,7 @@ const isJSONRPCRequest = (value) => JSONRPCRequestSchema.safeParse(value).succes
 * A notification which does not expect a response.
 */
 const JSONRPCNotificationSchema = object$2({
-	jsonrpc: literal("2.0"),
+	jsonrpc: literal$1("2.0"),
 	...NotificationSchema.shape
 }).strict();
 const isJSONRPCNotification = (value) => JSONRPCNotificationSchema.safeParse(value).success;
@@ -6214,7 +6214,7 @@ const isJSONRPCNotification = (value) => JSONRPCNotificationSchema.safeParse(val
 * A successful (non-error) response to a request.
 */
 const JSONRPCResultResponseSchema = object$2({
-	jsonrpc: literal("2.0"),
+	jsonrpc: literal$1("2.0"),
 	id: RequestIdSchema,
 	result: ResultSchema
 }).strict();
@@ -6243,7 +6243,7 @@ var ErrorCode;
 * A response to a request that indicates an error occurred.
 */
 const JSONRPCErrorResponseSchema = object$2({
-	jsonrpc: literal("2.0"),
+	jsonrpc: literal$1("2.0"),
 	id: RequestIdSchema.optional(),
 	error: object$2({
 		/**
@@ -6300,7 +6300,7 @@ const CancelledNotificationParamsSchema = NotificationsParamsSchema.extend({
 * A client MUST NOT attempt to cancel its `initialize` request.
 */
 const CancelledNotificationSchema = NotificationSchema.extend({
-	method: literal("notifications/cancelled"),
+	method: literal$1("notifications/cancelled"),
 	params: CancelledNotificationParamsSchema
 });
 /**
@@ -6491,7 +6491,7 @@ const InitializeRequestParamsSchema = BaseRequestParamsSchema.extend({
 * This request is sent from the client to the server when it first connects, asking it to begin initialization.
 */
 const InitializeRequestSchema = RequestSchema.extend({
-	method: literal("initialize"),
+	method: literal$1("initialize"),
 	params: InitializeRequestParamsSchema
 });
 /**
@@ -6569,14 +6569,14 @@ const InitializeResultSchema = ResultSchema.extend({
 * This notification is sent from the client to the server after initialization has finished.
 */
 const InitializedNotificationSchema = NotificationSchema.extend({
-	method: literal("notifications/initialized"),
+	method: literal$1("notifications/initialized"),
 	params: NotificationsParamsSchema.optional()
 });
 /**
 * A ping, issued by either the server or the client, to check that the other party is still alive. The receiver must promptly respond, or else may be disconnected.
 */
 const PingRequestSchema = RequestSchema.extend({
-	method: literal("ping"),
+	method: literal$1("ping"),
 	params: BaseRequestParamsSchema.optional()
 });
 const ProgressSchema = object$2({
@@ -6607,7 +6607,7 @@ const ProgressNotificationParamsSchema = object$2({
 * @category notifications/progress
 */
 const ProgressNotificationSchema = NotificationSchema.extend({
-	method: literal("notifications/progress"),
+	method: literal$1("notifications/progress"),
 	params: ProgressNotificationParamsSchema
 });
 const PaginatedRequestParamsSchema = BaseRequestParamsSchema.extend({ 
@@ -6670,14 +6670,14 @@ const TaskStatusNotificationParamsSchema = NotificationsParamsSchema.merge(TaskS
 * A notification sent when a task's status changes.
 */
 const TaskStatusNotificationSchema = NotificationSchema.extend({
-	method: literal("notifications/tasks/status"),
+	method: literal$1("notifications/tasks/status"),
 	params: TaskStatusNotificationParamsSchema
 });
 /**
 * A request to get the state of a specific task.
 */
 const GetTaskRequestSchema = RequestSchema.extend({
-	method: literal("tasks/get"),
+	method: literal$1("tasks/get"),
 	params: BaseRequestParamsSchema.extend({ taskId: string() })
 });
 /**
@@ -6688,14 +6688,14 @@ const GetTaskResultSchema = ResultSchema.merge(TaskSchema);
 * A request to get the result of a specific task.
 */
 const GetTaskPayloadRequestSchema = RequestSchema.extend({
-	method: literal("tasks/result"),
+	method: literal$1("tasks/result"),
 	params: BaseRequestParamsSchema.extend({ taskId: string() })
 });
 ResultSchema.loose();
 /**
 * A request to list tasks.
 */
-const ListTasksRequestSchema = PaginatedRequestSchema.extend({ method: literal("tasks/list") });
+const ListTasksRequestSchema = PaginatedRequestSchema.extend({ method: literal$1("tasks/list") });
 /**
 * The response to a tasks/list request.
 */
@@ -6704,7 +6704,7 @@ const ListTasksResultSchema = PaginatedResultSchema.extend({ tasks: array(TaskSc
 * A request to cancel a specific task.
 */
 const CancelTaskRequestSchema = RequestSchema.extend({
-	method: literal("tasks/cancel"),
+	method: literal$1("tasks/cancel"),
 	params: BaseRequestParamsSchema.extend({ taskId: string() })
 });
 /**
@@ -6842,7 +6842,7 @@ const ResourceTemplateSchema = object$2({
 /**
 * Sent from the client to request a list of resources the server has.
 */
-const ListResourcesRequestSchema = PaginatedRequestSchema.extend({ method: literal("resources/list") });
+const ListResourcesRequestSchema = PaginatedRequestSchema.extend({ method: literal$1("resources/list") });
 /**
 * The server's response to a resources/list request from the client.
 */
@@ -6850,7 +6850,7 @@ const ListResourcesResultSchema = PaginatedResultSchema.extend({ resources: arra
 /**
 * Sent from the client to request a list of resource templates the server has.
 */
-const ListResourceTemplatesRequestSchema = PaginatedRequestSchema.extend({ method: literal("resources/templates/list") });
+const ListResourceTemplatesRequestSchema = PaginatedRequestSchema.extend({ method: literal$1("resources/templates/list") });
 /**
 * The server's response to a resources/templates/list request from the client.
 */
@@ -6870,7 +6870,7 @@ const ReadResourceRequestParamsSchema = ResourceRequestParamsSchema;
 * Sent from the client to the server, to read a specific resource URI.
 */
 const ReadResourceRequestSchema = RequestSchema.extend({
-	method: literal("resources/read"),
+	method: literal$1("resources/read"),
 	params: ReadResourceRequestParamsSchema
 });
 /**
@@ -6881,7 +6881,7 @@ const ReadResourceResultSchema = ResultSchema.extend({ contents: array(union([Te
 * An optional notification from the server to the client, informing it that the list of resources it can read from has changed. This may be issued by servers without any previous subscription from the client.
 */
 const ResourceListChangedNotificationSchema = NotificationSchema.extend({
-	method: literal("notifications/resources/list_changed"),
+	method: literal$1("notifications/resources/list_changed"),
 	params: NotificationsParamsSchema.optional()
 });
 const SubscribeRequestParamsSchema = ResourceRequestParamsSchema;
@@ -6889,7 +6889,7 @@ const SubscribeRequestParamsSchema = ResourceRequestParamsSchema;
 * Sent from the client to request resources/updated notifications from the server whenever a particular resource changes.
 */
 const SubscribeRequestSchema = RequestSchema.extend({
-	method: literal("resources/subscribe"),
+	method: literal$1("resources/subscribe"),
 	params: SubscribeRequestParamsSchema
 });
 const UnsubscribeRequestParamsSchema = ResourceRequestParamsSchema;
@@ -6897,7 +6897,7 @@ const UnsubscribeRequestParamsSchema = ResourceRequestParamsSchema;
 * Sent from the client to request cancellation of resources/updated notifications from the server. This should follow a previous resources/subscribe request.
 */
 const UnsubscribeRequestSchema = RequestSchema.extend({
-	method: literal("resources/unsubscribe"),
+	method: literal$1("resources/unsubscribe"),
 	params: UnsubscribeRequestParamsSchema
 });
 /**
@@ -6912,7 +6912,7 @@ uri: string() });
 * A notification from the server to the client, informing it that a resource has changed and may need to be read again. This should only be sent if the client previously sent a resources/subscribe request.
 */
 const ResourceUpdatedNotificationSchema = NotificationSchema.extend({
-	method: literal("notifications/resources/updated"),
+	method: literal$1("notifications/resources/updated"),
 	params: ResourceUpdatedNotificationParamsSchema
 });
 /**
@@ -6955,7 +6955,7 @@ const PromptSchema = object$2({
 /**
 * Sent from the client to request a list of prompts and prompt templates the server has.
 */
-const ListPromptsRequestSchema = PaginatedRequestSchema.extend({ method: literal("prompts/list") });
+const ListPromptsRequestSchema = PaginatedRequestSchema.extend({ method: literal$1("prompts/list") });
 /**
 * The server's response to a prompts/list request from the client.
 */
@@ -6977,14 +6977,14 @@ const GetPromptRequestParamsSchema = BaseRequestParamsSchema.extend({
 * Used by the client to get a prompt provided by the server.
 */
 const GetPromptRequestSchema = RequestSchema.extend({
-	method: literal("prompts/get"),
+	method: literal$1("prompts/get"),
 	params: GetPromptRequestParamsSchema
 });
 /**
 * Text provided to or from an LLM.
 */
 const TextContentSchema = object$2({
-	type: literal("text"),
+	type: literal$1("text"),
 	/**
 	* The text content of the message.
 	*/
@@ -7003,7 +7003,7 @@ const TextContentSchema = object$2({
 * An image provided to or from an LLM.
 */
 const ImageContentSchema = object$2({
-	type: literal("image"),
+	type: literal$1("image"),
 	/**
 	* The base64-encoded image data.
 	*/
@@ -7026,7 +7026,7 @@ const ImageContentSchema = object$2({
 * An Audio provided to or from an LLM.
 */
 const AudioContentSchema = object$2({
-	type: literal("audio"),
+	type: literal$1("audio"),
 	/**
 	* The base64-encoded audio data.
 	*/
@@ -7050,7 +7050,7 @@ const AudioContentSchema = object$2({
 * Represents the assistant's request to use a tool.
 */
 const ToolUseContentSchema = object$2({
-	type: literal("tool_use"),
+	type: literal$1("tool_use"),
 	/**
 	* The name of the tool to invoke.
 	* Must match a tool name from the request's tools array.
@@ -7076,7 +7076,7 @@ const ToolUseContentSchema = object$2({
 * The contents of a resource, embedded into a prompt or tool call result.
 */
 const EmbeddedResourceSchema = object$2({
-	type: literal("resource"),
+	type: literal$1("resource"),
 	resource: union([TextResourceContentsSchema, BlobResourceContentsSchema]),
 	/**
 	* Optional annotations for the client.
@@ -7095,7 +7095,7 @@ const ContentBlockSchema = union([
 	TextContentSchema,
 	ImageContentSchema,
 	AudioContentSchema,
-	ResourceSchema.extend({ type: literal("resource_link") }),
+	ResourceSchema.extend({ type: literal$1("resource_link") }),
 	EmbeddedResourceSchema
 ]);
 /**
@@ -7119,7 +7119,7 @@ const GetPromptResultSchema = ResultSchema.extend({
 * An optional notification from the server to the client, informing it that the list of prompts it offers has changed. This may be issued by servers without any previous subscription from the client.
 */
 const PromptListChangedNotificationSchema = NotificationSchema.extend({
-	method: literal("notifications/prompts/list_changed"),
+	method: literal$1("notifications/prompts/list_changed"),
 	params: NotificationsParamsSchema.optional()
 });
 /**
@@ -7203,7 +7203,7 @@ const ToolSchema = object$2({
 	* Must have type: 'object' at the root level per MCP spec.
 	*/
 	inputSchema: object$2({
-		type: literal("object"),
+		type: literal$1("object"),
 		properties: record(string(), AssertObjectSchema).optional(),
 		required: array(string()).optional()
 	}).catchall(unknown()),
@@ -7213,7 +7213,7 @@ const ToolSchema = object$2({
 	* Must have type: 'object' at the root level per MCP spec.
 	*/
 	outputSchema: object$2({
-		type: literal("object"),
+		type: literal$1("object"),
 		properties: record(string(), AssertObjectSchema).optional(),
 		required: array(string()).optional()
 	}).catchall(unknown()).optional(),
@@ -7234,7 +7234,7 @@ const ToolSchema = object$2({
 /**
 * Sent from the client to request a list of tools the server has.
 */
-const ListToolsRequestSchema = PaginatedRequestSchema.extend({ method: literal("tools/list") });
+const ListToolsRequestSchema = PaginatedRequestSchema.extend({ method: literal$1("tools/list") });
 /**
 * The server's response to a tools/list request from the client.
 */
@@ -7290,14 +7290,14 @@ const CallToolRequestParamsSchema = TaskAugmentedRequestParamsSchema.extend({
 * Used by the client to invoke a tool provided by the server.
 */
 const CallToolRequestSchema = RequestSchema.extend({
-	method: literal("tools/call"),
+	method: literal$1("tools/call"),
 	params: CallToolRequestParamsSchema
 });
 /**
 * An optional notification from the server to the client, informing it that the list of tools it offers has changed. This may be issued by servers without any previous subscription from the client.
 */
 const ToolListChangedNotificationSchema = NotificationSchema.extend({
-	method: literal("notifications/tools/list_changed"),
+	method: literal$1("notifications/tools/list_changed"),
 	params: NotificationsParamsSchema.optional()
 });
 object$2({
@@ -7345,7 +7345,7 @@ level: LoggingLevelSchema });
 * A request from the client to the server, to enable or adjust logging.
 */
 const SetLevelRequestSchema = RequestSchema.extend({
-	method: literal("logging/setLevel"),
+	method: literal$1("logging/setLevel"),
 	params: SetLevelRequestParamsSchema
 });
 /**
@@ -7369,7 +7369,7 @@ const LoggingMessageNotificationParamsSchema = NotificationsParamsSchema.extend(
 * Notification of a log message passed from server to client. If no logging/setLevel request has been sent from the client, the server MAY decide which messages to send automatically.
 */
 const LoggingMessageNotificationSchema = NotificationSchema.extend({
-	method: literal("notifications/message"),
+	method: literal$1("notifications/message"),
 	params: LoggingMessageNotificationParamsSchema
 });
 /**
@@ -7417,7 +7417,7 @@ mode: _enum([
 * Represents the outcome of invoking a tool requested via ToolUseContent.
 */
 const ToolResultContentSchema = object$2({
-	type: literal("tool_result"),
+	type: literal$1("tool_result"),
 	toolUseId: string().describe("The unique identifier for the corresponding tool call."),
 	content: array(ContentBlockSchema).default([]),
 	structuredContent: object$2({}).loose().optional(),
@@ -7513,7 +7513,7 @@ const CreateMessageRequestParamsSchema = TaskAugmentedRequestParamsSchema.extend
 * A request from the server to sample an LLM via the client. The client has full discretion over which model to select. The client should also inform the user before beginning sampling, to allow them to inspect the request (human in the loop) and decide whether to approve it.
 */
 const CreateMessageRequestSchema = RequestSchema.extend({
-	method: literal("sampling/createMessage"),
+	method: literal$1("sampling/createMessage"),
 	params: CreateMessageRequestParamsSchema
 });
 /**
@@ -7583,7 +7583,7 @@ const CreateMessageResultWithToolsSchema = ResultSchema.extend({
 * Primitive schema definition for boolean fields.
 */
 const BooleanSchemaSchema = object$2({
-	type: literal("boolean"),
+	type: literal$1("boolean"),
 	title: string().optional(),
 	description: string().optional(),
 	default: boolean().optional()
@@ -7592,7 +7592,7 @@ const BooleanSchemaSchema = object$2({
 * Primitive schema definition for string fields.
 */
 const StringSchemaSchema = object$2({
-	type: literal("string"),
+	type: literal$1("string"),
 	title: string().optional(),
 	description: string().optional(),
 	minLength: number().optional(),
@@ -7620,7 +7620,7 @@ const NumberSchemaSchema = object$2({
 * Schema for single-selection enumeration without display titles for options.
 */
 const UntitledSingleSelectEnumSchemaSchema = object$2({
-	type: literal("string"),
+	type: literal$1("string"),
 	title: string().optional(),
 	description: string().optional(),
 	enum: array(string()),
@@ -7630,7 +7630,7 @@ const UntitledSingleSelectEnumSchemaSchema = object$2({
 * Schema for single-selection enumeration with display titles for each option.
 */
 const TitledSingleSelectEnumSchemaSchema = object$2({
-	type: literal("string"),
+	type: literal$1("string"),
 	title: string().optional(),
 	description: string().optional(),
 	oneOf: array(object$2({
@@ -7645,7 +7645,7 @@ const TitledSingleSelectEnumSchemaSchema = object$2({
 const PrimitiveSchemaDefinitionSchema = union([
 	union([
 		object$2({
-			type: literal("string"),
+			type: literal$1("string"),
 			title: string().optional(),
 			description: string().optional(),
 			enum: array(string()),
@@ -7654,18 +7654,18 @@ const PrimitiveSchemaDefinitionSchema = union([
 		}),
 		union([UntitledSingleSelectEnumSchemaSchema, TitledSingleSelectEnumSchemaSchema]),
 		union([object$2({
-			type: literal("array"),
+			type: literal$1("array"),
 			title: string().optional(),
 			description: string().optional(),
 			minItems: number().optional(),
 			maxItems: number().optional(),
 			items: object$2({
-				type: literal("string"),
+				type: literal$1("string"),
 				enum: array(string())
 			}),
 			default: array(string()).optional()
 		}), object$2({
-			type: literal("array"),
+			type: literal$1("array"),
 			title: string().optional(),
 			description: string().optional(),
 			minItems: number().optional(),
@@ -7690,7 +7690,7 @@ const ElicitRequestParamsSchema = union([TaskAugmentedRequestParamsSchema.extend
 	*
 	* Optional for backward compatibility. Clients MUST treat missing mode as "form".
 	*/
-	mode: literal("form").optional(),
+	mode: literal$1("form").optional(),
 	/**
 	* The message to present to the user describing what information is being requested.
 	*/
@@ -7700,7 +7700,7 @@ const ElicitRequestParamsSchema = union([TaskAugmentedRequestParamsSchema.extend
 	* Only top-level properties are allowed, without nesting.
 	*/
 	requestedSchema: object$2({
-		type: literal("object"),
+		type: literal$1("object"),
 		properties: record(string(), PrimitiveSchemaDefinitionSchema),
 		required: array(string()).optional()
 	})
@@ -7708,7 +7708,7 @@ const ElicitRequestParamsSchema = union([TaskAugmentedRequestParamsSchema.extend
 	/**
 	* The elicitation mode.
 	*/
-	mode: literal("url"),
+	mode: literal$1("url"),
 	/**
 	* The message to present to the user explaining why the interaction is needed.
 	*/
@@ -7729,7 +7729,7 @@ const ElicitRequestParamsSchema = union([TaskAugmentedRequestParamsSchema.extend
 * or navigate to a URL (URL mode).
 */
 const ElicitRequestSchema = RequestSchema.extend({
-	method: literal("elicitation/create"),
+	method: literal$1("elicitation/create"),
 	params: ElicitRequestParamsSchema
 });
 /**
@@ -7748,7 +7748,7 @@ elicitationId: string() });
 * @category notifications/elicitation/complete
 */
 const ElicitationCompleteNotificationSchema = NotificationSchema.extend({
-	method: literal("notifications/elicitation/complete"),
+	method: literal$1("notifications/elicitation/complete"),
 	params: ElicitationCompleteNotificationParamsSchema
 });
 /**
@@ -7783,7 +7783,7 @@ const ElicitResultSchema = ResultSchema.extend({
 * A reference to a resource or resource template definition.
 */
 const ResourceTemplateReferenceSchema = object$2({
-	type: literal("ref/resource"),
+	type: literal$1("ref/resource"),
 	/**
 	* The URI or URI template of the resource.
 	*/
@@ -7793,7 +7793,7 @@ const ResourceTemplateReferenceSchema = object$2({
 * Identifies a prompt.
 */
 const PromptReferenceSchema = object$2({
-	type: literal("ref/prompt"),
+	type: literal$1("ref/prompt"),
 	/**
 	* The name of the prompt or prompt template
 	*/
@@ -7827,7 +7827,7 @@ arguments: record(string(), string()).optional() }).optional()
 * A request from the client to the server, to ask for completion options.
 */
 const CompleteRequestSchema = RequestSchema.extend({
-	method: literal("completion/complete"),
+	method: literal$1("completion/complete"),
 	params: CompleteRequestParamsSchema
 });
 function assertCompleteRequestPrompt(request) {
@@ -7875,7 +7875,7 @@ const RootSchema = object$2({
 * Sent from the server to request a list of root URIs from the client.
 */
 const ListRootsRequestSchema = RequestSchema.extend({
-	method: literal("roots/list"),
+	method: literal$1("roots/list"),
 	params: BaseRequestParamsSchema.optional()
 });
 /**
@@ -7886,7 +7886,7 @@ const ListRootsResultSchema = ResultSchema.extend({ roots: array(RootSchema) });
 * A notification from the client to the server, informing it that the list of roots has changed.
 */
 const RootsListChangedNotificationSchema = NotificationSchema.extend({
-	method: literal("notifications/roots/list_changed"),
+	method: literal$1("notifications/roots/list_changed"),
 	params: NotificationsParamsSchema.optional()
 });
 union([
@@ -9276,6 +9276,74 @@ async function concatAudio(slots, out, opts = {}) {
 		duration_ms: Math.round(totalSamples / sr * 1e3)
 	};
 }
+/** Rate effects are decoded at for the peak measurement. */
+const PEAK_SR = 16e3;
+/**
+* Offset (ms) of the loudest {@link SFX_PEAK_WINDOW_MS} RMS window's centre in mono PCM, the
+* first one on a tie. 0 for silence or a clip shorter than the window.
+*/
+function peakOffsetMs(pcm, sampleRate, windowMs = 10) {
+	const w = Math.max(1, Math.round(sampleRate * windowMs / 1e3));
+	if (pcm.length < w) return 0;
+	let e = 0;
+	for (let i = 0; i < w; i++) e += pcm[i] * pcm[i];
+	let best = e;
+	let at = 0;
+	for (let i = w; i < pcm.length; i++) {
+		e += pcm[i] * pcm[i] - pcm[i - w] * pcm[i - w];
+		if (e > best * (1 + 1e-9) + 1e-12) {
+			best = e;
+			at = i - w + 1;
+		}
+	}
+	return best > 0 ? Math.round((at + w / 2) * 1e3 / sampleRate) : 0;
+}
+/** Decode an effect to mono PCM with ffmpeg and measure its peak offset (ms from the file start). */
+async function measurePeakOffset(path, opts = {}) {
+	const work = await mkdtemp(join(tmpdir(), "vs-sfx-peak-"));
+	try {
+		const out = join(work, "mono.f32");
+		await runFfmpeg([
+			"-y",
+			"-i",
+			path,
+			"-map",
+			"0:a:0",
+			"-ac",
+			"1",
+			"-ar",
+			String(PEAK_SR),
+			"-f",
+			"f32le",
+			"-c:a",
+			"pcm_f32le",
+			out
+		], opts);
+		const buf = await readFile(out);
+		return peakOffsetMs(new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4)), PEAK_SR);
+	} finally {
+		await rm(work, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+/**
+* Where an effect starts so its peak (not its first sample) lands on `targetMs`: `peakMs` earlier.
+* If that is before `sceneStartMs`, it starts with the scene and its head is trimmed instead, so
+* the peak still lands on time. All times are absolute ms.
+*/
+function alignOneShot(targetMs, peakMs, sceneStartMs) {
+	const start = targetMs - Math.max(0, peakMs);
+	if (start >= sceneStartMs) return {
+		at_ms: Math.round(start),
+		trim_ms: 0
+	};
+	return {
+		at_ms: Math.round(sceneStartMs),
+		trim_ms: Math.round(sceneStartMs - start)
+	};
+}
 /** `atempo` filters for a rate in 0.25–4 (each atempo takes 0.5–2). */
 function atempoChain(rate) {
 	if (!(rate > 0) || Math.abs(rate - 1) < 1e-6) return [];
@@ -9363,6 +9431,7 @@ async function mixSceneAudio(slots, out, opts = {}) {
 		chains.push([
 			`[${nIn}:a:0]aresample=${sr}`,
 			fmt,
+			...fx.trim_ms ? [`atrim=start_sample=${toS(fx.trim_ms)}`, "asetpts=N/SR/TB"] : [],
 			...fx.volume_db ? [`volume=${fx.volume_db}dB`] : [],
 			`atrim=end_sample=${total - at}`,
 			"asetpts=N/SR/TB",
@@ -11262,9 +11331,11 @@ function groupSentences(words, opts = {}) {
 	}
 	return out;
 }
-//#endregion
-//#region ../media/dist/beats.js
 const MIN_CONFIDENCE = .6;
+/** Smallest rise in normalised bar energy (0–1) that counts as a drop. */
+const DROP_MIN_RISE = .2;
+/** Grid points further than this outside the first/last onset are dropped (no beats in silence). */
+const TRIM_S = .06;
 /** Strength-weighted share of onsets within 40 ms of a beat. */
 function gridConfidence(times, strengths, beats) {
 	let hit = 0;
@@ -11424,6 +11495,160 @@ function beatGrid(times, strengths, p, durationS) {
 	}
 	return beats;
 }
+/** Grid points within {@link TRIM_S} of the onset span only: a grid never runs into leading or trailing silence. */
+function trimGrid(beats, times) {
+	if (!times.length) return [];
+	const first = times[0] - TRIM_S;
+	const last = times[times.length - 1] + TRIM_S;
+	return beats.filter((b) => b >= first && b <= last);
+}
+/**
+* Least-squares period (s) through the onsets that sit on a grid of period `p` (within 40 ms),
+* against their beat index. Much finer than the 10 ms interval bins over a long track.
+*/
+function refinePeriod(times, beats, p) {
+	if (beats.length < 2) return p;
+	const t0 = beats[0];
+	const xs = [];
+	const ys = [];
+	for (const t of times) {
+		const k = Math.round((t - t0) / p);
+		if (k >= 0 && Math.abs(t - (t0 + k * p)) <= .04) {
+			xs.push(k);
+			ys.push(t);
+		}
+	}
+	if (xs.length < 4 || xs[xs.length - 1] - xs[0] < 4) return p;
+	const n = xs.length;
+	const mx = xs.reduce((a, b) => a + b, 0) / n;
+	const my = ys.reduce((a, b) => a + b, 0) / n;
+	let num = 0;
+	let den = 0;
+	for (let i = 0; i < n; i++) {
+		num += (xs[i] - mx) * (ys[i] - my);
+		den += (xs[i] - mx) ** 2;
+	}
+	const slope = den > 0 ? num / den : p;
+	return Math.abs(slope - p) <= p * .03 ? slope : p;
+}
+/** Share of grid points with an onset within 40 ms (0–1). */
+function gridCoverage(times, beats) {
+	if (!beats.length) return 0;
+	return beats.filter((b) => times.some((t) => Math.abs(t - b) <= .04)).length / beats.length;
+}
+/** In-place 2nd-order Butterworth low-pass (RBJ biquad) at `hz` for sample rate {@link SR}. */
+function lowpass(x, hz) {
+	const w = 2 * Math.PI * hz / SR;
+	const alpha = Math.sin(w) / Math.SQRT2;
+	const cw = Math.cos(w);
+	const a0 = 1 + alpha;
+	const b0 = (1 - cw) / 2 / a0;
+	const b1 = (1 - cw) / a0;
+	const a1 = -2 * cw / a0;
+	const a2 = (1 - alpha) / a0;
+	const y = new Float32Array(x.length);
+	let x1 = 0;
+	let x2 = 0;
+	let y1 = 0;
+	let y2 = 0;
+	for (let i = 0; i < x.length; i++) {
+		const v = x[i];
+		const o = b0 * v + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2;
+		y[i] = o;
+		x2 = x1;
+		x1 = v;
+		y2 = y1;
+		y1 = o;
+	}
+	return y;
+}
+/**
+* Low-band (< {@link LOW_BAND_HZ}) energy per 10 ms frame, linear: a 4th-order low-pass (two
+* biquads), squared and summed per hop. Linear rather than log so a loud kick outweighs a soft one.
+*/
+function lowBandFrames(pcm) {
+	const y = lowpass(lowpass(pcm, 150), 150);
+	const n = Math.floor(y.length / HOP);
+	const out = new Float32Array(n);
+	for (let i = 0; i < n; i++) {
+		let e = 0;
+		for (let k = i * HOP; k < (i + 1) * HOP; k++) e += y[k] * y[k];
+		out[i] = e;
+	}
+	return out;
+}
+/** Sum of frames covering [a, b) seconds. */
+function frameSum(frames, a, b) {
+	const i0 = Math.max(0, Math.floor(a / FRAME_S));
+	const i1 = Math.min(frames.length, Math.ceil(b / FRAME_S));
+	let s = 0;
+	for (let i = i0; i < i1; i++) s += frames[i];
+	return s;
+}
+/** Low-band energy at each beat: from 20 ms before it to 40% of a beat after (the kick and the bass attack). */
+function beatLowEnergy(frames, beats, p) {
+	return beats.map((b) => frameSum(frames, b - .02, b + Math.min(.12, p * .4)));
+}
+/**
+* Bar phase (0–3): each beat's low-band energy is divided by the mean over the two bars around it
+* (so a quiet intro counts as much as a loud chorus), and the phase whose beats carry the most wins.
+* Null when no phase stands out by {@link DOWNBEAT_MIN_CONTRAST} (no accent to read a bar from).
+*/
+function downbeatPhase(energy) {
+	const n = energy.length;
+	if (n < 8) return null;
+	const norm = energy.map((_, i) => {
+		let s = 0;
+		let c = 0;
+		for (let k = Math.max(0, i - 4); k < Math.min(n, i + 4); k++) {
+			s += energy[k];
+			c++;
+		}
+		const mean = s / c;
+		return mean > 0 ? energy[i] / mean : 0;
+	});
+	const score = Array.from({ length: 4 }, (_, ph) => {
+		let s = 0;
+		let c = 0;
+		for (let i = ph; i < n; i += 4) {
+			s += norm[i];
+			c++;
+		}
+		return c ? s / c : 0;
+	});
+	let best = 0;
+	for (let ph = 1; ph < 4; ph++) if (score[ph] > score[best]) best = ph;
+	const others = score.filter((_, ph) => ph !== best);
+	const rest = others.reduce((a, b) => a + b, 0) / others.length;
+	return score[best] > 0 && score[best] >= rest * 1.08 ? best : null;
+}
+/**
+* The drop: the full bar where mean energy over the next two bars rises most above the two before
+* it (at least {@link DROP_MIN_RISE}). `full` bars only, so a partial final bar never counts.
+* Returns the bar index or null.
+*/
+function dropBar(barEnergy, full) {
+	let best = null;
+	let bestRise = DROP_MIN_RISE;
+	for (let i = 1; i + 1 < full; i++) {
+		const before = (barEnergy[i - 1] + barEnergy[Math.max(0, i - 2)]) / 2;
+		const after = (barEnergy[i] + barEnergy[i + 1]) / 2;
+		if (Math.min(barEnergy[i], barEnergy[i + 1]) - before < bestRise / 2) continue;
+		if (after - before > bestRise) {
+			bestRise = after - before;
+			best = i;
+		}
+	}
+	return best;
+}
+/** Beat grid (seconds) for period `p`, trimmed to the onsets and refined once. */
+function fitGrid(times, strengths, p, durationS) {
+	const q = refinePeriod(times, trimGrid(beatGrid(times, strengths, p, durationS), times), p);
+	return {
+		p: q,
+		beats: trimGrid(beatGrid(times, strengths, q, durationS), times)
+	};
+}
 /** Analyse a mono PCM buffer (at {@link SR} Hz). Exported for tests. */
 function analyzePcm(pcm) {
 	const env = onsetEnvelope(pcm);
@@ -11431,26 +11656,70 @@ function analyzePcm(pcm) {
 	const times = idx.map((i) => i * FRAME_S + ONSET_OFFSET_S);
 	const strengths = idx.map((i) => env[i]);
 	const onsets_ms = times.map((t) => Math.max(0, Math.round(t * 1e3)));
-	const p = tempoFromOnsets(times, strengths);
-	if (!p) return {
+	const version = { analysis_version: 2 };
+	const p0 = tempoFromOnsets(times, strengths);
+	if (!p0) return {
 		bpm: null,
 		beats_ms: [],
 		onsets_ms,
-		confidence: 0
+		confidence: 0,
+		...version
 	};
-	const beats = beatGrid(times, strengths, p, pcm.length / SR);
+	const durationS = pcm.length / SR;
+	let { p, beats } = fitGrid(times, strengths, p0, durationS);
 	const confidence = gridConfidence(times, strengths, beats);
-	if (confidence < MIN_CONFIDENCE) return {
+	const fits = (q) => {
+		const g = fitGrid(times, strengths, q, durationS);
+		return {
+			...g,
+			ok: gridConfidence(times, strengths, g.beats) >= .6 && gridCoverage(times, g.beats) >= .6
+		};
+	};
+	const fast = fits(p / 2);
+	if (confidence < MIN_CONFIDENCE && !fast.ok) return {
 		bpm: null,
 		beats_ms: [],
 		onsets_ms,
-		confidence
+		confidence,
+		...version
 	};
-	return {
+	const slow = fits(p * 2);
+	const frames = lowBandFrames(pcm);
+	let alternate;
+	const e = beatLowEnergy(frames, beats, p);
+	const byParity = [0, 1].map((par) => {
+		const v = e.filter((_, i) => i % 2 === par);
+		return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+	});
+	const weak = Math.min(byParity[0], byParity[1]);
+	const strong = Math.max(byParity[0], byParity[1]);
+	if (60 / p > 140 && strong > 0 && weak < strong * .3 && gridCoverage(times, slow.beats) >= .6) {
+		alternate = 60 / p;
+		({p, beats} = slow);
+	} else if (slow.ok && 60 / slow.p >= 30) alternate = 60 / slow.p;
+	else if (fast.ok && 60 / fast.p <= 300) alternate = 60 / fast.p;
+	const out = {
 		bpm: Math.round(60 / p * 10) / 10,
 		beats_ms: beats.map((t) => Math.max(0, Math.round(t * 1e3))),
 		onsets_ms,
-		confidence
+		confidence: gridConfidence(times, strengths, beats),
+		...alternate !== void 0 ? { alternate_bpm: Math.round(alternate * 10) / 10 } : {},
+		...version
+	};
+	const phase = downbeatPhase(beatLowEnergy(frames, beats, p));
+	if (phase === null) return out;
+	const down = beats.filter((_, i) => i % 4 === phase);
+	const barEnd = (k) => k + 1 < down.length ? down[k + 1] : Math.min(durationS, down[k] + 4 * p);
+	const raw = down.map((d, k) => frameSum(frames, d, barEnd(k)) / Math.max(1e-9, barEnd(k) - d));
+	const full = down.filter((_, k) => phase + k * 4 + 4 - 1 < beats.length).length;
+	const peak = Math.max(...raw.slice(0, Math.max(1, full)));
+	const bar_energy = raw.map((v) => peak > 0 ? Math.round(Math.min(1, v / peak) * 1e3) / 1e3 : 0);
+	const drop = dropBar(bar_energy, full);
+	return {
+		...out,
+		downbeats_ms: down.map((t) => Math.max(0, Math.round(t * 1e3))),
+		bar_energy,
+		...drop !== null ? { drop_ms: Math.max(0, Math.round(down[drop] * 1e3)) } : {}
 	};
 }
 async function detectBeats(audioPath, opts = {}) {
@@ -11916,6 +12185,241 @@ async function suggestFocusTrack(video, opts) {
 			force: true
 		});
 	}
+}
+//#endregion
+//#region ../media/dist/score.js
+const SCORE_SAMPLE_RATE = 48e3;
+const SCORE_LICENSE = {
+	id: "CC0-1.0",
+	source: "synthesized locally by video-studio"
+};
+/** Pad attack and release inside each bar, so chord changes don't click (s). */
+const PAD_ATTACK_S = .08;
+const PAD_RELEASE_S = .15;
+/** Presets for `music.file: synth:<preset>`; `music.synth` overrides their parameters. */
+const SCORE_PRESETS = {
+	pulse: {
+		title: "Synth pulse",
+		mood: "confident, driving",
+		params: {
+			bpm: 120,
+			key: "Am",
+			progression: [
+				"i",
+				"VI",
+				"III",
+				"VII"
+			],
+			drop_bar: 3
+		},
+		drums: true
+	},
+	lofi: {
+		title: "Synth lo-fi",
+		mood: "warm, relaxed",
+		params: {
+			bpm: 80,
+			key: "F",
+			progression: [
+				"ii",
+				"V",
+				"I",
+				"vi"
+			],
+			drop_bar: 2
+		},
+		drums: true
+	},
+	ambient: {
+		title: "Synth ambient",
+		mood: "calm, spacious",
+		params: {
+			bpm: 60,
+			key: "C",
+			progression: [
+				"I",
+				"V",
+				"vi",
+				"IV"
+			],
+			drop_bar: 5
+		},
+		drums: false
+	},
+	drive: {
+		title: "Synth drive",
+		mood: "energetic, bright",
+		params: {
+			bpm: 128,
+			key: "Em",
+			progression: [
+				"i",
+				"VII",
+				"VI",
+				"VII"
+			],
+			drop_bar: 5
+		},
+		drums: true
+	}
+};
+/** Preset parameters with `overrides` on top. Throws, listing the presets, for an unknown name. */
+function resolveScorePreset(name, overrides = {}) {
+	const preset = Object.hasOwn(SCORE_PRESETS, name) ? SCORE_PRESETS[name] : void 0;
+	if (!preset) throw new Error(`unknown synth preset "${name}"; use one of ${Object.keys(SCORE_PRESETS).map((k) => `synth:${k}`).join(", ")}`);
+	const merged = {
+		...preset.params,
+		drums: preset.drums
+	};
+	for (const [k, v] of Object.entries(overrides)) if (v !== void 0) merged[k] = v;
+	return {
+		preset,
+		params: merged
+	};
+}
+const PITCH = {
+	C: 0,
+	D: 2,
+	E: 4,
+	F: 5,
+	G: 7,
+	A: 9,
+	B: 11
+};
+const MAJOR = [
+	0,
+	2,
+	4,
+	5,
+	7,
+	9,
+	11
+];
+const MINOR = [
+	0,
+	2,
+	3,
+	5,
+	7,
+	8,
+	10
+];
+const DEGREE = {
+	i: 1,
+	ii: 2,
+	iii: 3,
+	iv: 4,
+	v: 5,
+	vi: 6,
+	vii: 7
+};
+/** Chord of a roman degree in `key`, as MIDI notes: bass, then three pad notes an octave or two up. */
+function chordNotes(key, degree) {
+	const m = /^([A-G])(#|b)?(m?)$/.exec(key);
+	if (!m) throw new Error(`synth key "${key}" is not a key like C, F#, Bb or Am`);
+	const tonic = (PITCH[m[1]] + (m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0) + 12) % 12;
+	const scale = m[3] ? MINOR : MAJOR;
+	const deg = DEGREE[degree.toLowerCase()];
+	let root = 48 + tonic + scale[deg - 1];
+	if (root >= 57) root -= 12;
+	const third = degree === degree.toUpperCase() ? 4 : 3;
+	return {
+		bass: root - 12,
+		pad: [
+			root + 12,
+			root + 12 + third,
+			root + 19
+		]
+	};
+}
+const hz = (midi) => 440 * 2 ** ((midi - 69) / 12);
+const f3 = (x) => (Math.round(x * 1e3) / 1e3).toString();
+/** Whole bars covering `durationS` (at least one). */
+function scoreBars(bpm, durationS) {
+	const bar = 240 / bpm;
+	return Math.max(1, Math.ceil(durationS / bar - 1e-9));
+}
+/** The exact grid of a score: beats and bar starts in ms. */
+function scoreGrid(bpm, bars) {
+	const beats_ms = Array.from({ length: bars * 4 }, (_, k) => Math.round(k * 6e4 / bpm));
+	return {
+		beats_ms,
+		downbeats_ms: beats_ms.filter((_, k) => k % 4 === 0)
+	};
+}
+/**
+* The aevalsrc expression. Each chord's pitches are chosen per bar by a selector (one sine per
+* voice, not one per chord), and the pad envelope closes at each bar line so the jump in phase is
+* silent. Kick: a 110→50 Hz sweep whose phase restarts each beat (accented on beat 1). Hats: a
+* product of high inharmonic sines (aevalsrc has no seeded noise) on the off-beats; the seed
+* shifts their partials and adds soft 16ths on odd seeds.
+*/
+function scoreExpression(p) {
+	const beat = 60 / p.bpm;
+	const bar = beat * 4;
+	const prog = p.progression ?? [
+		"I",
+		"V",
+		"vi",
+		"IV"
+	];
+	const chords = prog.map((d) => chordNotes(p.key ?? "C", d));
+	const idx = `mod(floor(t/${f3(bar)}),${prog.length})`;
+	const pick = (f) => chords.map((c, i) => `eq(${idx},${i})*${f3(hz(f(c)))}`).join("+");
+	const pos = `mod(t,${f3(bar)})`;
+	const padEnv = `min(1,${pos}/${PAD_ATTACK_S})*min(1,(${f3(bar)}-${pos})/${PAD_RELEASE_S})`;
+	const pad = [
+		0,
+		1,
+		2
+	].map((v) => `sin(2*PI*(${pick((c) => c.pad[v])})*t)`).join("+");
+	const bass = `0.22*min(1,${pos}/0.01)*min(1,(${f3(bar)}-${pos})/0.05)*sin(2*PI*(${pick((c) => c.bass)})*t)`;
+	const tau = `mod(t,${f3(beat)})`;
+	const kick = `0.42*${`(1+0.25*eq(mod(floor(t/${f3(beat)}),4),0))`}*sin(2*PI*(50*${tau}+2*(1-exp(-30*${tau}))))*exp(-9*${tau})*min(1,${tau}/0.002)`;
+	const seed = p.seed ?? 0;
+	const shift = seed * 37 % 400;
+	const partials = `(sin(2*PI*${7919 + shift}*t)*sin(2*PI*${5387 + shift}*t)+0.5*sin(2*PI*${9103 - shift}*t))`;
+	const hat = `0.06*(${`gte(${tau},${f3(beat / 2)})*exp(-60*(${tau}-${f3(beat / 2)}))`}${seed % 2 ? `+0.4*exp(-80*mod(t,${f3(beat / 4)}))*(1-gte(${tau},${f3(beat / 2)}))` : ""})*${partials}`;
+	const dropT = f3(Math.max(0, (p.drop_bar ?? 1) - 1) * bar);
+	const drums = p.drums ?? true;
+	return `${`0.045*${padEnv}*(${pad})${drums ? `+${hat}` : ""}`}+gte(t,${dropT})*(${`${bass}${drums ? `+${kick}` : ""}`})`;
+}
+/**
+* Synthesize a score into `outPath` (16-bit mono WAV at {@link SCORE_SAMPLE_RATE}, bitexact, no
+* metadata), long enough to cover `params.duration_s` in whole bars.
+*/
+async function synthScore(params, outPath, opts = {}) {
+	if (!(params.duration_s > 0)) throw new Error(`synth score: duration_s must be positive (got ${params.duration_s})`);
+	const bars = scoreBars(params.bpm, params.duration_s);
+	const duration_s = bars * 4 * 60 / params.bpm;
+	const samples = Math.round(duration_s * SCORE_SAMPLE_RATE);
+	await runFfmpeg([
+		"-y",
+		"-f",
+		"lavfi",
+		"-i",
+		`aevalsrc=exprs=${scoreExpression(params).replace(/,/g, "\\,")}:s=${SCORE_SAMPLE_RATE}:n=1024,atrim=end_sample=${samples}`,
+		"-c:a",
+		"pcm_s16le",
+		"-ac",
+		"1",
+		"-fflags",
+		"+bitexact",
+		"-flags:a",
+		"+bitexact",
+		"-map_metadata",
+		"-1",
+		outPath
+	], opts);
+	return {
+		path: outPath,
+		sha256: createHash("sha256").update(await readFile(outPath)).digest("hex"),
+		bpm: params.bpm,
+		bars,
+		...scoreGrid(params.bpm, bars),
+		duration_s,
+		license: { ...SCORE_LICENSE }
+	};
 }
 //#endregion
 //#region ../renderer/dist/script.js
@@ -12845,7 +13349,7 @@ function exitFadeMs(motion) {
 	if (!motion) return 0;
 	return BLENDING_TRANSITIONS.has(motion.transition) ? 0 : motion.exit_ms;
 }
-const SchemaVersion = literal("1.0").describe("Schema version of this document.");
+const SchemaVersion = literal$1("1.0").describe("Schema version of this document.");
 /** ISO-8601 date-time string (UTC `Z` or explicit offset). Never a Date object. */
 const IsoDateTime = datetime({ offset: true });
 /** Lower-case hex sha256 digest. */
@@ -12916,9 +13420,9 @@ const PRIMARY_TARGET = {
 };
 /** Frame rates every renderer supports (HyperFrames draws only 24, 30 or 60). */
 const Fps = union([
-	literal(24),
-	literal(30),
-	literal(60)
+	literal$1(24),
+	literal$1(30),
+	literal$1(60)
 ]);
 /** A rectangle in normalized frame coordinates: 0–1 from the top-left corner. */
 const NormalizedRect = strictObject({
@@ -13174,10 +13678,10 @@ const MediaInfo = strictObject({
 	}).optional().describe("The real picture inside baked-in black bars (letterbox/pillarbox), in source pixels; the footage renderer crops to it."),
 	notes: array(FootageNote).optional().describe("Per-shot notes Claude wrote after looking at the footage (footage_look → footage_notes): subject, action, on-screen text, b-roll use, quality. Observations, not evidence."),
 	rotation: union([
-		literal(0),
-		literal(90),
-		literal(180),
-		literal(270)
+		literal$1(0),
+		literal$1(90),
+		literal$1(180),
+		literal$1(270)
 	]).optional().describe("Display rotation of the video (degrees, counter-clockwise as ffprobe reports it; phone footage). width/height are the displayed size, after rotation."),
 	color_transfer: string().optional().describe("Video transfer characteristic as probed, e.g. bt709, smpte2084 (PQ), arib-std-b67 (HLG)."),
 	color_primaries: string().optional().describe("Video colour primaries as probed, e.g. bt709, bt2020."),
@@ -13697,7 +14201,7 @@ const AudioSettings = strictObject({
 		loop: boolean().optional().describe("Loop the track to cover the video (default true)."),
 		start_sec: number().min(0).optional().describe("Offset into the track."),
 		license: AudioLicense.optional().describe("Required for user files; bundled and synthesized tracks carry their own."),
-		synth: SynthParams.optional().describe("Overrides the preset's parameters when `file` is `synth:<preset>`.")
+		synth: SynthParams.partial().optional().describe("Overrides some of the preset's parameters when `file` is `synth:<preset>` (e.g. just bpm or seed).")
 	}).describe("Background music mixed under the voice: a bundled bed, a project file, or a locally synthesized score.").optional(),
 	beat_sync: strictObject({
 		enabled: boolean(),
@@ -14474,7 +14978,7 @@ function validateVideoSpecSemantics(spec, ir) {
 		}
 	});
 	const music = spec.audio?.music;
-	if (music && !music.file.startsWith("bundled:") && !music.license) warnings.push({
+	if (music && !music.file.startsWith("bundled:") && !music.file.startsWith("synth:") && !music.license) warnings.push({
 		path: "audio.music.license",
 		message: `music file "${music.file}" has no licence recorded`,
 		fix: "add audio.music.license {id: \"CC0-1.0\" | \"CC-BY-4.0\" | \"user-owned\" | ..., source, attribution?} so the package records its rights"
@@ -14744,7 +15248,7 @@ const RenderManifest = strictObject({
 	captions: CaptionsRender.optional(),
 	cover: CoverRender.optional(),
 	music: strictObject({
-		file: FilePath.describe("`bundled:<id>` or the project-relative path from spec.audio.music.file."),
+		file: FilePath.describe("`bundled:<id>`, `synth:<preset>` or the project-relative path from spec.audio.music.file."),
 		sha256: Sha256,
 		title: string().optional(),
 		license: AudioLicense.optional()
@@ -14912,38 +15416,38 @@ const ExperimentManifest = strictObject({
 */
 const DemoStep = discriminatedUnion("action", [
 	strictObject({
-		action: literal("goto"),
+		action: literal$1("goto"),
 		url: NonEmptyString,
 		wait_ms: int().min(0).max(3e4).optional()
 	}),
 	strictObject({
-		action: literal("click"),
+		action: literal$1("click"),
 		selector: NonEmptyString,
 		wait_ms: int().min(0).max(3e4).optional()
 	}),
 	strictObject({
-		action: literal("type"),
+		action: literal$1("type"),
 		selector: NonEmptyString,
 		text: string(),
 		delay_ms: int().min(0).max(500).optional()
 	}),
 	strictObject({
-		action: literal("hover"),
+		action: literal$1("hover"),
 		selector: NonEmptyString
 	}),
 	strictObject({
-		action: literal("scroll"),
+		action: literal$1("scroll"),
 		y: int(),
 		smooth: boolean().optional()
 	}),
 	strictObject({
-		action: literal("zoom"),
+		action: literal$1("zoom"),
 		selector: NonEmptyString.describe("Element to zoom into (applied in post, from its box)."),
 		scale: number().min(1).max(4).optional(),
 		hold_ms: int().min(0).max(1e4).optional()
 	}),
 	strictObject({
-		action: literal("wait"),
+		action: literal$1("wait"),
 		ms: int().min(0).max(3e4)
 	})
 ]);
@@ -15081,7 +15585,7 @@ const BrandMotion = strictObject({
 	transition_ms: int().min(0).max(2e3).optional()
 }).describe("Motion tokens.");
 const Brand = strictObject({
-	version: union([literal(1), literal(2)]).optional().describe("brand.yaml format version. 2 adds captions, motion, weights, logo placement and banned phrases; 1 files stay valid."),
+	version: union([literal$1(1), literal$1(2)]).optional().describe("brand.yaml format version. 2 adds captions, motion, weights, logo placement and banned phrases; 1 files stay valid."),
 	brand: strictObject({
 		name: NonEmptyString,
 		id: Id.optional()
@@ -15316,7 +15820,7 @@ const Region = _enum([
 	"provider-default"
 ]);
 const Policy = strictObject({
-	version: literal(1),
+	version: literal$1(1),
 	providers: strictObject({
 		allow: array(ProviderGlob).optional(),
 		deny: array(ProviderGlob).optional()
@@ -23173,6 +23677,16 @@ function sameTime(a, b) {
 	return Math.abs(a - b) < 1e-6;
 }
 //#endregion
+//#region ../renderer/dist/fallback.js
+/**
+* Lines for drawing a deterministic kind as a plain typography card, used while a renderer does
+* not implement that kind yet. The renderer adds a warning so QA reports the stand-in.
+*/
+function fallbackLines(props) {
+	const lines = propsText(props).split("\n").map((l) => l.trim()).filter(Boolean);
+	return lines.length ? lines : [" "];
+}
+//#endregion
 //#region ../renderer/dist/ffmpeg-renderer.js
 /**
 * Chrome-free fallback renderer for deterministic scenes: one `-f lavfi color=` source at the
@@ -23212,8 +23726,11 @@ const FFMPEG_RENDERER_KINDS = [
 	"split_screen",
 	"lower_third",
 	"kinetic_text",
-	"map"
+	"map",
+	"motion"
 ];
+/** Reported whenever the ffmpeg renderer draws a `motion` scene: its stand-in is not the page. */
+const MOTION_STAND_IN_WARNING = "motion page drawn as a text stand-in: the real page needs HyperFrames (Chrome)";
 /**
 * x264 threads per scene encode: `clamp(floor(cpus / 3), 1, 4)`, sized for up to three scenes in
 * parallel (see `autoSceneConcurrency`). Determinism: x264 output is byte-identical for a fixed
@@ -23387,6 +23904,35 @@ function typography(p, c) {
 	return {
 		elements: els,
 		warnings
+	};
+}
+/**
+* `motion`: the page is code only a browser can run, so ffmpeg draws its copy (`props.text`, one
+* line per entry, each its own cue item) as a typography card, labelled as a stand-in, and always
+* warns (fallbacks are reported, never silent).
+*/
+function motionStandIn(p, c) {
+	const card = typography({ lines: (Array.isArray(p.text) ? fallbackLines({ text: p.text }) : []).filter((l) => l.trim()) }, c);
+	const label = "motion stand-in";
+	const box = {
+		x: c.safe.x,
+		y: r$1(c.safe.y + c.safe.h - c.u * .05),
+		w: c.safe.w,
+		h: r$1(c.u * .05)
+	};
+	const tag = textLines(fitText(label, box, {
+		maxSize: c.u * .028,
+		minSize: c.u * .018
+	}), box, {
+		font: "mono",
+		color: c.colors.primary,
+		beat: 0,
+		align: "center",
+		valign: "bottom"
+	});
+	return {
+		elements: [...card.elements, ...tag],
+		warnings: [MOTION_STAND_IN_WARNING, ...card.warnings.filter((w) => !w.startsWith("typography: emphasis"))]
 	};
 }
 function code(p, c) {
@@ -25438,6 +25984,7 @@ function layoutKind(det, c, inputs) {
 		case "lower_third": return lowerThird(p, c);
 		case "kinetic_text": return kineticText(p, c);
 		case "map": return map$1(p, c);
+		case "motion": return motionStandIn(p, c);
 		default: throw new Error(`${FFMPEG_RENDERER_ID} cannot draw kind "${String(det.kind)}"`);
 	}
 }
@@ -26854,6 +27401,5926 @@ function createFootageRenderer(opts = {}) {
 	};
 }
 //#endregion
+//#region ../renderer/dist/motion-kit.js
+/**
+* The runtime helpers injected inline into every `motion` page (Phase 6.5), as `window.vs`.
+*
+* Every helper is a pure function of its arguments (and of the injected `window.__vs`), so a
+* page built on them stays a pure function of time: `seek(t)` can jump anywhere, in any order,
+* and draw the same frame. No clocks, timers or unseeded randomness.
+*
+* - `vs.spring(t, { from, to, stiffness, damping, mass, delay })`: the closed-form step response
+*   of a damped harmonic oscillator released at rest from `from` at `delay` seconds. It settles
+*   to exactly `to` (once the envelope is below 1e-4 of the distance). A value whose target
+*   changes several times is the sum of one spring per change (see `springs`).
+* - `vs.springs(t, from, steps, opts)`: `steps` = `[{ at, to }]`; the sum of one spring per change.
+* - Easings on 0..1: `linear`, `easeIn`, `easeOut`, `easeInOut` (cubic), `easeOutQuint`,
+*   `easeInOutQuint`; `vs.progress(t, start, dur)` and `vs.tween(t, start, dur, from, to, ease)`.
+* - `vs.lerp`, `vs.clamp`, `vs.stagger(i, stepS, startS)`.
+* - `vs.rng(seed)`: a mulberry32 generator (numbers or strings as seeds); same seed, same sequence.
+* - `vs.beatAt(t)` / `vs.downbeatAt(t)`: the latest beat (downbeat) at or before `t`, or null;
+*   `vs.beatIndex(t)`: its index, -1 before the first. Times are scene-local seconds from
+*   `window.__vs.beats` / `downbeats` (empty when the video has no beat grid).
+*
+* Bump MOTION_KIT_VERSION on any change to MOTION_KIT_SOURCE: it is part of each motion scene's
+* cache key, so pages re-render with the new helpers.
+*/
+const MOTION_KIT_VERSION = "1.0.0";
+const MOTION_KIT_SOURCE = `/* video-studio motion kit ${MOTION_KIT_VERSION} | SPDX-License-Identifier: MIT */
+(function (g) {
+  "use strict";
+  function clamp(x, lo, hi) { return x < lo ? lo : x > hi ? hi : x; }
+  function lerp(a, b, p) { return a + (b - a) * p; }
+  function num(v, d) { return typeof v === "number" && isFinite(v) ? v : d; }
+
+  function spring(t, o) {
+    o = o || {};
+    var from = num(o.from, 0), to = num(o.to, 1);
+    var k = Math.max(1e-6, num(o.stiffness, 170)), c = Math.max(0, num(o.damping, 26)), m = Math.max(1e-6, num(o.mass, 1));
+    var s = num(t, 0) - num(o.delay, 0);
+    var a = from - to;
+    if (s <= 0 || a === 0) return s <= 0 ? from : to;
+    var w0 = Math.sqrt(k / m), z = c / (2 * Math.sqrt(k * m));
+    var x, env;
+    if (z < 1) {
+      var wd = w0 * Math.sqrt(1 - z * z), b = (z * w0 * a) / wd, e = Math.exp(-z * w0 * s);
+      x = e * (a * Math.cos(wd * s) + b * Math.sin(wd * s));
+      env = e * (Math.abs(a) + Math.abs(b));
+    } else if (z === 1) {
+      var e1 = Math.exp(-w0 * s);
+      x = e1 * (a + w0 * a * s);
+      env = Math.abs(x);
+    } else {
+      var q = Math.sqrt(z * z - 1), r1 = -w0 * (z - q), r2 = -w0 * (z + q);
+      var c1 = (a * r2) / (r2 - r1), c2 = (-a * r1) / (r2 - r1);
+      x = c1 * Math.exp(r1 * s) + c2 * Math.exp(r2 * s);
+      env = Math.abs(c1) * Math.exp(r1 * s) + Math.abs(c2) * Math.exp(r2 * s);
+    }
+    return env < 1e-4 * Math.abs(a) ? to : to + x;
+  }
+
+  function springs(t, from, steps, o) {
+    var v = num(from, 0), prev = v, list = steps || [];
+    for (var i = 0; i < list.length; i++) {
+      var st = list[i], opts = {};
+      for (var key in o || {}) opts[key] = o[key];
+      opts.from = 0; opts.to = num(st.to, prev) - prev; opts.delay = num(st.at, 0);
+      v += spring(t, opts);
+      prev = num(st.to, prev);
+    }
+    return v;
+  }
+
+  var ease = {
+    linear: function (p) { return clamp(p, 0, 1); },
+    easeIn: function (p) { p = clamp(p, 0, 1); return p * p * p; },
+    easeOut: function (p) { p = 1 - clamp(p, 0, 1); return 1 - p * p * p; },
+    easeInOut: function (p) { p = clamp(p, 0, 1); return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; },
+    easeOutQuint: function (p) { p = 1 - clamp(p, 0, 1); return 1 - p * p * p * p * p; },
+    easeInOutQuint: function (p) { p = clamp(p, 0, 1); return p < 0.5 ? 16 * p * p * p * p * p : 1 - Math.pow(-2 * p + 2, 5) / 2; }
+  };
+  function progress(t, start, dur) { return dur > 0 ? clamp((t - start) / dur, 0, 1) : t >= start ? 1 : 0; }
+  function tween(t, start, dur, from, to, fn) { return lerp(from, to, (fn || ease.easeInOut)(progress(t, start, dur))); }
+  function stagger(i, stepS, startS) { return num(startS, 0) + i * num(stepS, 0); }
+
+  function seedOf(seed) {
+    if (typeof seed === "number" && isFinite(seed)) return seed >>> 0;
+    var h = 2166136261, str = String(seed);
+    for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function rng(seed) {
+    var a = seedOf(seed);
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      var r = Math.imul(a ^ (a >>> 15), a | 1);
+      r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function grid(name) { var v = g.__vs && g.__vs[name]; return Array.isArray(v) ? v : []; }
+  function indexIn(list, t) {
+    var lo = 0, hi = list.length - 1, at = -1;
+    while (lo <= hi) { var mid = (lo + hi) >> 1; if (list[mid] <= t + 1e-9) { at = mid; lo = mid + 1; } else hi = mid - 1; }
+    return at;
+  }
+  function beatIndex(t) { return indexIn(grid("beats"), t); }
+  function beatAt(t) { var b = grid("beats"), i = indexIn(b, t); return i < 0 ? null : b[i]; }
+  function downbeatAt(t) { var b = grid("downbeats"), i = indexIn(b, t); return i < 0 ? null : b[i]; }
+
+  var vs = { version: "${MOTION_KIT_VERSION}", spring: spring, springs: springs, ease: ease, linear: ease.linear, easeIn: ease.easeIn, easeOut: ease.easeOut,
+    easeInOut: ease.easeInOut, easeOutQuint: ease.easeOutQuint, easeInOutQuint: ease.easeInOutQuint, progress: progress, tween: tween,
+    lerp: lerp, clamp: clamp, stagger: stagger, rng: rng, beatAt: beatAt, downbeatAt: downbeatAt, beatIndex: beatIndex };
+  g.vs = Object.freeze(vs);
+})(typeof window !== "undefined" ? window : globalThis);
+`;
+//#endregion
+//#region ../../node_modules/.pnpm/acorn@8.18.0/node_modules/acorn/dist/acorn.mjs
+var astralIdentifierCodes = [
+	509,
+	0,
+	227,
+	0,
+	150,
+	4,
+	294,
+	9,
+	1368,
+	2,
+	2,
+	1,
+	6,
+	3,
+	41,
+	2,
+	5,
+	0,
+	166,
+	1,
+	574,
+	3,
+	9,
+	9,
+	7,
+	9,
+	32,
+	4,
+	318,
+	1,
+	78,
+	5,
+	71,
+	10,
+	50,
+	3,
+	123,
+	2,
+	54,
+	14,
+	32,
+	10,
+	3,
+	1,
+	11,
+	3,
+	46,
+	10,
+	8,
+	0,
+	46,
+	9,
+	7,
+	2,
+	37,
+	13,
+	2,
+	9,
+	6,
+	1,
+	45,
+	0,
+	13,
+	2,
+	49,
+	13,
+	9,
+	3,
+	2,
+	11,
+	83,
+	11,
+	7,
+	0,
+	3,
+	0,
+	158,
+	11,
+	6,
+	9,
+	7,
+	3,
+	56,
+	1,
+	2,
+	6,
+	3,
+	1,
+	3,
+	2,
+	10,
+	0,
+	11,
+	1,
+	3,
+	6,
+	4,
+	4,
+	68,
+	8,
+	2,
+	0,
+	3,
+	0,
+	2,
+	3,
+	2,
+	4,
+	2,
+	0,
+	15,
+	1,
+	83,
+	17,
+	10,
+	9,
+	5,
+	0,
+	82,
+	19,
+	13,
+	9,
+	214,
+	6,
+	3,
+	8,
+	28,
+	1,
+	83,
+	16,
+	16,
+	9,
+	82,
+	12,
+	9,
+	9,
+	7,
+	19,
+	58,
+	14,
+	5,
+	9,
+	243,
+	14,
+	166,
+	9,
+	71,
+	5,
+	2,
+	1,
+	3,
+	3,
+	2,
+	0,
+	2,
+	1,
+	13,
+	9,
+	120,
+	6,
+	3,
+	6,
+	4,
+	0,
+	29,
+	9,
+	41,
+	6,
+	2,
+	3,
+	9,
+	0,
+	10,
+	10,
+	47,
+	15,
+	199,
+	7,
+	137,
+	9,
+	54,
+	7,
+	2,
+	7,
+	17,
+	9,
+	57,
+	21,
+	2,
+	13,
+	123,
+	5,
+	4,
+	0,
+	2,
+	1,
+	2,
+	6,
+	2,
+	0,
+	9,
+	9,
+	49,
+	4,
+	2,
+	1,
+	2,
+	4,
+	9,
+	9,
+	55,
+	9,
+	266,
+	3,
+	10,
+	1,
+	2,
+	0,
+	49,
+	6,
+	4,
+	4,
+	14,
+	10,
+	5350,
+	0,
+	7,
+	14,
+	11465,
+	27,
+	2343,
+	9,
+	87,
+	9,
+	39,
+	4,
+	60,
+	6,
+	26,
+	9,
+	535,
+	9,
+	470,
+	0,
+	2,
+	54,
+	8,
+	3,
+	82,
+	0,
+	12,
+	1,
+	19628,
+	1,
+	4178,
+	9,
+	519,
+	45,
+	3,
+	22,
+	543,
+	4,
+	4,
+	5,
+	9,
+	7,
+	3,
+	6,
+	31,
+	3,
+	149,
+	2,
+	1418,
+	49,
+	513,
+	54,
+	5,
+	49,
+	9,
+	0,
+	15,
+	0,
+	23,
+	4,
+	2,
+	14,
+	1361,
+	6,
+	2,
+	16,
+	3,
+	6,
+	2,
+	1,
+	2,
+	4,
+	101,
+	0,
+	161,
+	6,
+	10,
+	9,
+	357,
+	0,
+	62,
+	13,
+	499,
+	13,
+	245,
+	1,
+	2,
+	9,
+	233,
+	0,
+	3,
+	0,
+	8,
+	1,
+	6,
+	0,
+	475,
+	6,
+	110,
+	6,
+	6,
+	9,
+	4759,
+	9,
+	787719,
+	239
+];
+var astralIdentifierStartCodes = [
+	0,
+	11,
+	2,
+	25,
+	2,
+	18,
+	2,
+	1,
+	2,
+	14,
+	3,
+	13,
+	35,
+	122,
+	70,
+	52,
+	268,
+	28,
+	4,
+	48,
+	48,
+	31,
+	14,
+	29,
+	6,
+	37,
+	11,
+	29,
+	3,
+	35,
+	5,
+	7,
+	2,
+	4,
+	43,
+	157,
+	19,
+	35,
+	5,
+	35,
+	5,
+	39,
+	9,
+	51,
+	13,
+	10,
+	2,
+	14,
+	2,
+	6,
+	2,
+	1,
+	2,
+	10,
+	2,
+	14,
+	2,
+	6,
+	2,
+	1,
+	4,
+	51,
+	13,
+	310,
+	10,
+	21,
+	11,
+	7,
+	25,
+	5,
+	2,
+	41,
+	2,
+	8,
+	70,
+	5,
+	3,
+	0,
+	2,
+	43,
+	2,
+	1,
+	4,
+	0,
+	3,
+	22,
+	11,
+	22,
+	10,
+	30,
+	66,
+	18,
+	2,
+	1,
+	11,
+	21,
+	11,
+	25,
+	7,
+	25,
+	39,
+	55,
+	7,
+	1,
+	65,
+	0,
+	16,
+	3,
+	2,
+	2,
+	2,
+	28,
+	43,
+	28,
+	4,
+	28,
+	36,
+	7,
+	2,
+	27,
+	28,
+	53,
+	11,
+	21,
+	11,
+	18,
+	14,
+	17,
+	111,
+	72,
+	56,
+	50,
+	14,
+	50,
+	14,
+	35,
+	39,
+	27,
+	10,
+	22,
+	251,
+	41,
+	7,
+	1,
+	17,
+	5,
+	57,
+	28,
+	11,
+	0,
+	9,
+	21,
+	43,
+	17,
+	47,
+	20,
+	28,
+	22,
+	13,
+	52,
+	58,
+	1,
+	3,
+	0,
+	14,
+	44,
+	33,
+	24,
+	27,
+	35,
+	30,
+	0,
+	3,
+	0,
+	9,
+	34,
+	4,
+	0,
+	13,
+	47,
+	15,
+	3,
+	22,
+	0,
+	2,
+	0,
+	36,
+	17,
+	2,
+	24,
+	20,
+	1,
+	64,
+	6,
+	2,
+	0,
+	2,
+	3,
+	2,
+	14,
+	2,
+	9,
+	8,
+	46,
+	39,
+	7,
+	3,
+	1,
+	3,
+	21,
+	2,
+	6,
+	2,
+	1,
+	2,
+	4,
+	4,
+	0,
+	19,
+	0,
+	13,
+	4,
+	31,
+	9,
+	2,
+	0,
+	3,
+	0,
+	2,
+	37,
+	2,
+	0,
+	26,
+	0,
+	2,
+	0,
+	45,
+	52,
+	19,
+	3,
+	21,
+	2,
+	31,
+	47,
+	21,
+	1,
+	2,
+	0,
+	185,
+	46,
+	42,
+	3,
+	37,
+	47,
+	21,
+	0,
+	60,
+	42,
+	14,
+	0,
+	72,
+	26,
+	38,
+	6,
+	186,
+	43,
+	117,
+	63,
+	32,
+	7,
+	3,
+	0,
+	3,
+	7,
+	2,
+	1,
+	2,
+	23,
+	16,
+	0,
+	2,
+	0,
+	95,
+	7,
+	3,
+	38,
+	17,
+	0,
+	2,
+	0,
+	29,
+	0,
+	11,
+	39,
+	8,
+	0,
+	22,
+	0,
+	12,
+	45,
+	20,
+	0,
+	19,
+	72,
+	200,
+	32,
+	32,
+	8,
+	2,
+	36,
+	18,
+	0,
+	50,
+	29,
+	113,
+	6,
+	2,
+	1,
+	2,
+	37,
+	22,
+	0,
+	26,
+	5,
+	2,
+	1,
+	2,
+	31,
+	15,
+	0,
+	24,
+	43,
+	261,
+	18,
+	16,
+	0,
+	2,
+	12,
+	2,
+	33,
+	125,
+	0,
+	80,
+	921,
+	103,
+	110,
+	18,
+	195,
+	2637,
+	96,
+	16,
+	1071,
+	18,
+	5,
+	26,
+	3994,
+	6,
+	582,
+	6842,
+	29,
+	1763,
+	568,
+	8,
+	30,
+	18,
+	78,
+	18,
+	29,
+	19,
+	47,
+	17,
+	3,
+	32,
+	20,
+	6,
+	18,
+	433,
+	44,
+	212,
+	63,
+	33,
+	24,
+	3,
+	24,
+	45,
+	74,
+	6,
+	0,
+	67,
+	12,
+	65,
+	1,
+	2,
+	0,
+	15,
+	4,
+	10,
+	7381,
+	42,
+	31,
+	98,
+	114,
+	8702,
+	3,
+	2,
+	6,
+	2,
+	1,
+	2,
+	290,
+	16,
+	0,
+	30,
+	2,
+	3,
+	0,
+	15,
+	3,
+	9,
+	395,
+	2309,
+	106,
+	6,
+	12,
+	4,
+	8,
+	8,
+	9,
+	5991,
+	84,
+	2,
+	70,
+	2,
+	1,
+	3,
+	0,
+	3,
+	1,
+	3,
+	3,
+	2,
+	11,
+	2,
+	0,
+	2,
+	6,
+	2,
+	64,
+	2,
+	3,
+	3,
+	7,
+	2,
+	6,
+	2,
+	27,
+	2,
+	3,
+	2,
+	4,
+	2,
+	0,
+	4,
+	6,
+	2,
+	339,
+	3,
+	24,
+	2,
+	24,
+	2,
+	30,
+	2,
+	24,
+	2,
+	30,
+	2,
+	24,
+	2,
+	30,
+	2,
+	24,
+	2,
+	30,
+	2,
+	24,
+	2,
+	7,
+	1845,
+	30,
+	7,
+	5,
+	262,
+	61,
+	147,
+	44,
+	11,
+	6,
+	17,
+	0,
+	322,
+	29,
+	19,
+	43,
+	485,
+	27,
+	229,
+	29,
+	3,
+	0,
+	208,
+	30,
+	2,
+	2,
+	2,
+	1,
+	2,
+	6,
+	3,
+	4,
+	10,
+	1,
+	225,
+	6,
+	2,
+	3,
+	2,
+	1,
+	2,
+	14,
+	2,
+	196,
+	60,
+	67,
+	8,
+	0,
+	1205,
+	3,
+	2,
+	26,
+	2,
+	1,
+	2,
+	0,
+	3,
+	0,
+	2,
+	9,
+	2,
+	3,
+	2,
+	0,
+	2,
+	0,
+	7,
+	0,
+	5,
+	0,
+	2,
+	0,
+	2,
+	0,
+	2,
+	2,
+	2,
+	1,
+	2,
+	0,
+	3,
+	0,
+	2,
+	0,
+	2,
+	0,
+	2,
+	0,
+	2,
+	0,
+	2,
+	1,
+	2,
+	0,
+	3,
+	3,
+	2,
+	6,
+	2,
+	3,
+	2,
+	3,
+	2,
+	0,
+	2,
+	9,
+	2,
+	16,
+	6,
+	2,
+	2,
+	4,
+	2,
+	16,
+	4421,
+	42719,
+	33,
+	4381,
+	3,
+	5773,
+	3,
+	7472,
+	16,
+	621,
+	2467,
+	541,
+	1507,
+	4938,
+	6,
+	8489
+];
+var nonASCIIidentifierChars = "‌‍·̀-ͯ·҃-֑҇-ׇֽֿׁׂׅׄؐ-ًؚ-٩ٰۖ-ۜ۟-۪ۤۧۨ-ۭ۰-۹ܑܰ-݊ަ-ް߀-߉߫-߽߳ࠖ-࠙ࠛ-ࠣࠥ-ࠧࠩ-࡙࠭-࡛ࢗ-࢟࣊-ࣣ࣡-ःऺ-़ा-ॏ॑-ॗॢॣ०-९ঁ-ঃ়া-ৄেৈো-্ৗৢৣ০-৯৾ਁ-ਃ਼ਾ-ੂੇੈੋ-੍ੑ੦-ੱੵઁ-ઃ઼ા-ૅે-ૉો-્ૢૣ૦-૯ૺ-૿ଁ-ଃ଼ା-ୄେୈୋ-୍୕-ୗୢୣ୦-୯ஂா-ூெ-ைொ-்ௗ௦-௯ఀ-ఄ఼ా-ౄె-ైొ-్ౕౖౢౣ౦-౯ಁ-ಃ಼ಾ-ೄೆ-ೈೊ-್ೕೖೢೣ೦-೯ೳഀ-ഃ഻഼ാ-ൄെ-ൈൊ-്ൗൢൣ൦-൯ඁ-ඃ්ා-ුූෘ-ෟ෦-෯ෲෳัิ-ฺ็-๎๐-๙ັິ-ຼ່-໎໐-໙༘༙༠-༩༹༵༷༾༿ཱ-྄྆྇ྍ-ྗྙ-ྼ࿆ါ-ှ၀-၉ၖ-ၙၞ-ၠၢ-ၤၧ-ၭၱ-ၴႂ-ႍႏ-ႝ፝-፟፩-፱ᜒ-᜕ᜲ-᜴ᝒᝓᝲᝳ឴-៓៝០-៩᠋-᠍᠏-᠙ᢩᤠ-ᤫᤰ-᤻᥆-᥏᧐-᧚ᨗ-ᨛᩕ-ᩞ᩠-᩿᩼-᪉᪐-᪙᪰-᪽ᪿ-᫝᫠-᫫ᬀ-ᬄ᬴-᭄᭐-᭙᭫-᭳ᮀ-ᮂᮡ-ᮭ᮰-᮹᯦-᯳ᰤ-᰷᱀-᱉᱐-᱙᳐-᳔᳒-᳨᳭᳴᳷-᳹᷀-᷿‌‍‿⁀⁔⃐-⃥⃜⃡-⃰⳯-⵿⳱ⷠ-〪ⷿ-゙゚〯・꘠-꘩꙯ꙴ-꙽ꚞꚟ꛰꛱ꠂ꠆ꠋꠣ-ꠧ꠬ꢀꢁꢴ-ꣅ꣐-꣙꣠-꣱ꣿ-꤉ꤦ-꤭ꥇ-꥓ꦀ-ꦃ꦳-꧀꧐-꧙ꧥ꧰-꧹ꨩ-ꨶꩃꩌꩍ꩐-꩙ꩻ-ꩽꪰꪲ-ꪴꪷꪸꪾ꪿꫁ꫫ-ꫯꫵ꫶ꯣ-ꯪ꯬꯭꯰-꯹ﬞ︀-️︠-︯︳︴﹍-﹏０-９＿･";
+var nonASCIIidentifierStartChars = "ªµºÀ-ÖØ-öø-ˁˆ-ˑˠ-ˤˬˮͰ-ʹͶͷͺ-ͽͿΆΈ-ΊΌΎ-ΡΣ-ϵϷ-ҁҊ-ԯԱ-Ֆՙՠ-ֈא-תׯ-ײؠ-يٮٯٱ-ۓەۥۦۮۯۺ-ۼۿܐܒ-ܯݍ-ޥޱߊ-ߪߴߵߺࠀ-ࠕࠚࠤࠨࡀ-ࡘࡠ-ࡪࡰ-ࢇࢉ-࢏ࢠ-ࣉऄ-हऽॐक़-ॡॱ-ঀঅ-ঌএঐও-নপ-রলশ-হঽৎড়ঢ়য়-ৡৰৱৼਅ-ਊਏਐਓ-ਨਪ-ਰਲਲ਼ਵਸ਼ਸਹਖ਼-ੜਫ਼ੲ-ੴઅ-ઍએ-ઑઓ-નપ-રલળવ-હઽૐૠૡૹଅ-ଌଏଐଓ-ନପ-ରଲଳଵ-ହଽଡ଼ଢ଼ୟ-ୡୱஃஅ-ஊஎ-ஐஒ-கஙசஜஞடணதந-பம-ஹௐఅ-ఌఎ-ఐఒ-నప-హఽౘ-ౚ౜ౝౠౡಀಅ-ಌಎ-ಐಒ-ನಪ-ಳವ-ಹಽ೜-ೞೠೡೱೲഄ-ഌഎ-ഐഒ-ഺഽൎൔ-ൖൟ-ൡൺ-ൿඅ-ඖක-නඳ-රලව-ෆก-ะาำเ-ๆກຂຄຆ-ຊຌ-ຣລວ-ະາຳຽເ-ໄໆໜ-ໟༀཀ-ཇཉ-ཬྈ-ྌက-ဪဿၐ-ၕၚ-ၝၡၥၦၮ-ၰၵ-ႁႎႠ-ჅჇჍა-ჺჼ-ቈቊ-ቍቐ-ቖቘቚ-ቝበ-ኈኊ-ኍነ-ኰኲ-ኵኸ-ኾዀዂ-ዅወ-ዖዘ-ጐጒ-ጕጘ-ፚᎀ-ᎏᎠ-Ᏽᏸ-ᏽᐁ-ᙬᙯ-ᙿᚁ-ᚚᚠ-ᛪᛮ-ᛸᜀ-ᜑᜟ-ᜱᝀ-ᝑᝠ-ᝬᝮ-ᝰក-ឳៗៜᠠ-ᡸᢀ-ᢨᢪᢰ-ᣵᤀ-ᤞᥐ-ᥭᥰ-ᥴᦀ-ᦫᦰ-ᧉᨀ-ᨖᨠ-ᩔᪧᬅ-ᬳᭅ-ᭌᮃ-ᮠᮮᮯᮺ-ᯥᰀ-ᰣᱍ-ᱏᱚ-ᱽᲀ-ᲊᲐ-ᲺᲽ-Ჿᳩ-ᳬᳮ-ᳳᳵᳶᳺᴀ-ᶿḀ-ἕἘ-Ἕἠ-ὅὈ-Ὅὐ-ὗὙὛὝὟ-ώᾀ-ᾴᾶ-ᾼιῂ-ῄῆ-ῌῐ-ΐῖ-Ίῠ-Ῥῲ-ῴῶ-ῼⁱⁿₐ-ₜℂℇℊ-ℓℕ℘-ℝℤΩℨK-ℹℼ-ℿⅅ-ⅉⅎⅠ-ↈⰀ-ⳤⳫ-ⳮⳲⳳⴀ-ⴥⴧⴭⴰ-ⵧⵯⶀ-ⶖⶠ-ⶦⶨ-ⶮⶰ-ⶶⶸ-ⶾⷀ-ⷆⷈ-ⷎⷐ-ⷖⷘ-ⷞ々-〇〡-〩〱-〵〸-〼ぁ-ゖ゛-ゟァ-ヺー-ヿㄅ-ㄯㄱ-ㆎㆠ-ㆿㇰ-ㇿ㐀-䶿一-ꒌꓐ-ꓽꔀ-ꘌꘐ-ꘟꘪꘫꙀ-ꙮꙿ-ꚝꚠ-ꛯꜗ-ꜟꜢ-ꞈꞋ-Ƛ꟱-ꠁꠃ-ꠅꠇ-ꠊꠌ-ꠢꡀ-ꡳꢂ-ꢳꣲ-ꣷꣻꣽꣾꤊ-ꤥꤰ-ꥆꥠ-ꥼꦄ-ꦲꧏꧠ-ꧤꧦ-ꧯꧺ-ꧾꨀ-ꨨꩀ-ꩂꩄ-ꩋꩠ-ꩶꩺꩾ-ꪯꪱꪵꪶꪹ-ꪽꫀꫂꫛ-ꫝꫠ-ꫪꫲ-ꫴꬁ-ꬆꬉ-ꬎꬑ-ꬖꬠ-ꬦꬨ-ꬮꬰ-ꭚꭜ-ꭩꭰ-ꯢ가-힣ힰ-ퟆퟋ-ퟻ豈-舘並-龎ﬀ-ﬆﬓ-ﬗיִײַ-ﬨשׁ-זּטּ-לּמּנּסּףּפּצּ-ﮱﯓ-ﴽﵐ-ﶏﶒ-ﷇﷰ-ﷻﹰ-ﹴﹶ-ﻼＡ-Ｚａ-ｚｦ-ﾾￂ-ￇￊ-ￏￒ-ￗￚ-ￜ";
+var reservedWords = {
+	3: "abstract boolean byte char class double enum export extends final float goto implements import int interface long native package private protected public short static super synchronized throws transient volatile",
+	5: "class enum extends super const export import",
+	6: "enum",
+	strict: "implements interface let package private protected public static yield",
+	strictBind: "eval arguments"
+};
+var ecma5AndLessKeywords = "break case catch continue debugger default do else finally for function if return switch throw try var while with null true false instanceof typeof void delete new in this";
+var keywords$1 = {
+	5: ecma5AndLessKeywords,
+	"5module": ecma5AndLessKeywords + " export import",
+	6: ecma5AndLessKeywords + " const class extends export import super"
+};
+var keywordRelationalOperator = /^in(stanceof)?$/;
+var nonASCIIidentifierStart = new RegExp("[" + nonASCIIidentifierStartChars + "]");
+var nonASCIIidentifier = new RegExp("[" + nonASCIIidentifierStartChars + nonASCIIidentifierChars + "]");
+function isInAstralSet(code, set) {
+	var pos = 65536;
+	for (var i = 0; i < set.length; i += 2) {
+		pos += set[i];
+		if (pos > code) return false;
+		pos += set[i + 1];
+		if (pos >= code) return true;
+	}
+	return false;
+}
+function isIdentifierStart(code, astral) {
+	if (code < 65) return code === 36;
+	if (code < 91) return true;
+	if (code < 97) return code === 95;
+	if (code < 123) return true;
+	if (code <= 65535) return code >= 170 && nonASCIIidentifierStart.test(String.fromCharCode(code));
+	if (astral === false) return false;
+	return isInAstralSet(code, astralIdentifierStartCodes);
+}
+function isIdentifierChar(code, astral) {
+	if (code < 48) return code === 36;
+	if (code < 58) return true;
+	if (code < 65) return false;
+	if (code < 91) return true;
+	if (code < 97) return code === 95;
+	if (code < 123) return true;
+	if (code <= 65535) return code >= 170 && nonASCIIidentifier.test(String.fromCharCode(code));
+	if (astral === false) return false;
+	return isInAstralSet(code, astralIdentifierStartCodes) || isInAstralSet(code, astralIdentifierCodes);
+}
+var TokenType = function TokenType(label, conf) {
+	if (conf === void 0) conf = {};
+	this.label = label;
+	this.keyword = conf.keyword;
+	this.beforeExpr = !!conf.beforeExpr;
+	this.startsExpr = !!conf.startsExpr;
+	this.isLoop = !!conf.isLoop;
+	this.isAssign = !!conf.isAssign;
+	this.prefix = !!conf.prefix;
+	this.postfix = !!conf.postfix;
+	this.binop = conf.binop || null;
+	this.updateContext = null;
+};
+function binop(name, prec) {
+	return new TokenType(name, {
+		beforeExpr: true,
+		binop: prec
+	});
+}
+var beforeExpr = { beforeExpr: true };
+var startsExpr = { startsExpr: true };
+var keywords = {};
+function kw(name, options) {
+	if (options === void 0) options = {};
+	options.keyword = name;
+	return keywords[name] = new TokenType(name, options);
+}
+var types$1 = {
+	num: new TokenType("num", startsExpr),
+	regexp: new TokenType("regexp", startsExpr),
+	string: new TokenType("string", startsExpr),
+	name: new TokenType("name", startsExpr),
+	privateId: new TokenType("privateId", startsExpr),
+	eof: new TokenType("eof"),
+	bracketL: new TokenType("[", {
+		beforeExpr: true,
+		startsExpr: true
+	}),
+	bracketR: new TokenType("]"),
+	braceL: new TokenType("{", {
+		beforeExpr: true,
+		startsExpr: true
+	}),
+	braceR: new TokenType("}"),
+	parenL: new TokenType("(", {
+		beforeExpr: true,
+		startsExpr: true
+	}),
+	parenR: new TokenType(")"),
+	comma: new TokenType(",", beforeExpr),
+	semi: new TokenType(";", beforeExpr),
+	colon: new TokenType(":", beforeExpr),
+	dot: new TokenType("."),
+	question: new TokenType("?", beforeExpr),
+	questionDot: new TokenType("?."),
+	arrow: new TokenType("=>", beforeExpr),
+	template: new TokenType("template"),
+	invalidTemplate: new TokenType("invalidTemplate"),
+	ellipsis: new TokenType("...", beforeExpr),
+	backQuote: new TokenType("`", startsExpr),
+	dollarBraceL: new TokenType("${", {
+		beforeExpr: true,
+		startsExpr: true
+	}),
+	eq: new TokenType("=", {
+		beforeExpr: true,
+		isAssign: true
+	}),
+	assign: new TokenType("_=", {
+		beforeExpr: true,
+		isAssign: true
+	}),
+	incDec: new TokenType("++/--", {
+		prefix: true,
+		postfix: true,
+		startsExpr: true
+	}),
+	prefix: new TokenType("!/~", {
+		beforeExpr: true,
+		prefix: true,
+		startsExpr: true
+	}),
+	logicalOR: binop("||", 1),
+	logicalAND: binop("&&", 2),
+	bitwiseOR: binop("|", 3),
+	bitwiseXOR: binop("^", 4),
+	bitwiseAND: binop("&", 5),
+	equality: binop("==/!=/===/!==", 6),
+	relational: binop("</>/<=/>=", 7),
+	bitShift: binop("<</>>/>>>", 8),
+	plusMin: new TokenType("+/-", {
+		beforeExpr: true,
+		binop: 9,
+		prefix: true,
+		startsExpr: true
+	}),
+	modulo: binop("%", 10),
+	star: binop("*", 10),
+	slash: binop("/", 10),
+	starstar: new TokenType("**", { beforeExpr: true }),
+	coalesce: binop("??", 1),
+	_break: kw("break"),
+	_case: kw("case", beforeExpr),
+	_catch: kw("catch"),
+	_continue: kw("continue"),
+	_debugger: kw("debugger"),
+	_default: kw("default", beforeExpr),
+	_do: kw("do", {
+		isLoop: true,
+		beforeExpr: true
+	}),
+	_else: kw("else", beforeExpr),
+	_finally: kw("finally"),
+	_for: kw("for", { isLoop: true }),
+	_function: kw("function", startsExpr),
+	_if: kw("if"),
+	_return: kw("return", beforeExpr),
+	_switch: kw("switch"),
+	_throw: kw("throw", beforeExpr),
+	_try: kw("try"),
+	_var: kw("var"),
+	_const: kw("const"),
+	_while: kw("while", { isLoop: true }),
+	_with: kw("with"),
+	_new: kw("new", {
+		beforeExpr: true,
+		startsExpr: true
+	}),
+	_this: kw("this", startsExpr),
+	_super: kw("super", startsExpr),
+	_class: kw("class", startsExpr),
+	_extends: kw("extends", beforeExpr),
+	_export: kw("export"),
+	_import: kw("import", startsExpr),
+	_null: kw("null", startsExpr),
+	_true: kw("true", startsExpr),
+	_false: kw("false", startsExpr),
+	_in: kw("in", {
+		beforeExpr: true,
+		binop: 7
+	}),
+	_instanceof: kw("instanceof", {
+		beforeExpr: true,
+		binop: 7
+	}),
+	_typeof: kw("typeof", {
+		beforeExpr: true,
+		prefix: true,
+		startsExpr: true
+	}),
+	_void: kw("void", {
+		beforeExpr: true,
+		prefix: true,
+		startsExpr: true
+	}),
+	_delete: kw("delete", {
+		beforeExpr: true,
+		prefix: true,
+		startsExpr: true
+	})
+};
+var lineBreak = /\r\n?|\n|\u2028|\u2029/;
+var lineBreakG = new RegExp(lineBreak.source, "g");
+function isNewLine(code) {
+	return code === 10 || code === 13 || code === 8232 || code === 8233;
+}
+function nextLineBreak(code, from, end) {
+	if (end === void 0) end = code.length;
+	for (var i = from; i < end; i++) {
+		var next = code.charCodeAt(i);
+		if (isNewLine(next)) return i < end - 1 && next === 13 && code.charCodeAt(i + 1) === 10 ? i + 2 : i + 1;
+	}
+	return -1;
+}
+var nonASCIIwhitespace = /[\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]/;
+var skipWhiteSpace = /(?:\s|\/\/.*|\/\*[^]*?\*\/)*/g;
+var ref = Object.prototype;
+var hasOwnProperty$1 = ref.hasOwnProperty;
+var toString$2 = ref.toString;
+var hasOwn = Object.hasOwn || (function(obj, propName) {
+	return hasOwnProperty$1.call(obj, propName);
+});
+var isArray$1 = Array.isArray || (function(obj) {
+	return toString$2.call(obj) === "[object Array]";
+});
+var regexpCache = Object.create(null);
+function wordsRegexp(words) {
+	return regexpCache[words] || (regexpCache[words] = new RegExp("^(?:" + words.replace(/ /g, "|") + ")$"));
+}
+function codePointToString(code) {
+	if (code <= 65535) return String.fromCharCode(code);
+	code -= 65536;
+	return String.fromCharCode((code >> 10) + 55296, (code & 1023) + 56320);
+}
+var loneSurrogate = /(?:[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF])/;
+var Position = function Position(line, col) {
+	this.line = line;
+	this.column = col;
+};
+Position.prototype.offset = function offset(n) {
+	return new Position(this.line, this.column + n);
+};
+var SourceLocation = function SourceLocation(p, start, end) {
+	this.start = start;
+	this.end = end;
+	if (p.sourceFile !== null) this.source = p.sourceFile;
+};
+function getLineInfo(input, offset) {
+	for (var line = 1, cur = 0;;) {
+		var nextBreak = nextLineBreak(input, cur, offset);
+		if (nextBreak < 0) return new Position(line, offset - cur);
+		++line;
+		cur = nextBreak;
+	}
+}
+var defaultOptions$2 = {
+	ecmaVersion: null,
+	sourceType: "script",
+	strict: false,
+	onInsertedSemicolon: null,
+	onTrailingComma: null,
+	allowReserved: null,
+	allowReturnOutsideFunction: false,
+	allowImportExportEverywhere: false,
+	allowAwaitOutsideFunction: null,
+	allowSuperOutsideMethod: null,
+	allowHashBang: false,
+	checkPrivateFields: true,
+	locations: false,
+	startLocation: null,
+	onToken: null,
+	onComment: null,
+	ranges: false,
+	program: null,
+	sourceFile: null,
+	directSourceFile: null,
+	preserveParens: false
+};
+var warnedAboutEcmaVersion = false;
+function getOptions(opts) {
+	var options = {};
+	for (var opt in defaultOptions$2) options[opt] = opts && hasOwn(opts, opt) ? opts[opt] : defaultOptions$2[opt];
+	if (options.ecmaVersion === "latest") options.ecmaVersion = 1e8;
+	else if (options.ecmaVersion == null) {
+		if (!warnedAboutEcmaVersion && typeof console === "object" && console.warn) {
+			warnedAboutEcmaVersion = true;
+			console.warn("Since Acorn 8.0.0, options.ecmaVersion is required.\nDefaulting to 2020, but this will stop working in the future.");
+		}
+		options.ecmaVersion = 11;
+	} else if (options.ecmaVersion >= 2015) options.ecmaVersion -= 2009;
+	if (options.allowReserved == null) options.allowReserved = options.ecmaVersion < 5;
+	if (!opts || opts.allowHashBang == null) options.allowHashBang = options.ecmaVersion >= 14;
+	if (isArray$1(options.onToken)) {
+		var tokens = options.onToken;
+		options.onToken = function(token) {
+			return tokens.push(token);
+		};
+	}
+	if (isArray$1(options.onComment)) options.onComment = pushComment(options, options.onComment);
+	if (options.sourceType === "commonjs" && options.allowAwaitOutsideFunction) throw new Error("Cannot use allowAwaitOutsideFunction with sourceType: commonjs");
+	return options;
+}
+function pushComment(options, array) {
+	return function(block, text, start, end, startLoc, endLoc) {
+		var comment = {
+			type: block ? "Block" : "Line",
+			value: text,
+			start,
+			end
+		};
+		if (options.locations) comment.loc = new SourceLocation(this, startLoc, endLoc);
+		if (options.ranges) comment.range = [start, end];
+		array.push(comment);
+	};
+}
+var SCOPE_TOP = 1;
+var SCOPE_FUNCTION = 2;
+var SCOPE_ASYNC = 4;
+var SCOPE_GENERATOR = 8;
+var SCOPE_ARROW = 16;
+var SCOPE_SIMPLE_CATCH = 32;
+var SCOPE_SUPER = 64;
+var SCOPE_DIRECT_SUPER = 128;
+var SCOPE_CLASS_STATIC_BLOCK = 256;
+var SCOPE_CLASS_FIELD_INIT = 512;
+var SCOPE_SWITCH = 1024;
+var SCOPE_VAR = SCOPE_TOP | SCOPE_FUNCTION | SCOPE_CLASS_STATIC_BLOCK;
+function functionFlags(async, generator) {
+	return SCOPE_FUNCTION | (async ? SCOPE_ASYNC : 0) | (generator ? SCOPE_GENERATOR : 0);
+}
+var BIND_NONE = 0;
+var BIND_VAR = 1;
+var BIND_LEXICAL = 2;
+var BIND_FUNCTION = 3;
+var BIND_SIMPLE_CATCH = 4;
+var BIND_OUTSIDE = 5;
+var Parser$3 = function Parser(options, input, startPos) {
+	this.options = options = getOptions(options);
+	this.sourceFile = options.sourceFile;
+	this.keywords = wordsRegexp(keywords$1[options.ecmaVersion >= 6 ? 6 : options.sourceType === "module" ? "5module" : 5]);
+	var reserved = "";
+	if (options.allowReserved !== true) {
+		reserved = reservedWords[options.ecmaVersion >= 6 ? 6 : options.ecmaVersion === 5 ? 5 : 3];
+		if (options.sourceType === "module") reserved += " await";
+	}
+	this.reservedWords = wordsRegexp(reserved);
+	var reservedStrict = (reserved ? reserved + " " : "") + reservedWords.strict;
+	this.reservedWordsStrict = wordsRegexp(reservedStrict);
+	this.reservedWordsStrictBind = wordsRegexp(reservedStrict + " " + reservedWords.strictBind);
+	this.input = String(input);
+	this.containsEsc = false;
+	this.pos = startPos || 0;
+	this.curLine = 1;
+	if (options.startLocation) {
+		this.lineStart = this.pos - options.startLocation.column;
+		this.curLine = options.startLocation.line;
+	} else if (startPos) {
+		this.lineStart = this.input.lastIndexOf("\n", startPos - 1) + 1;
+		if (this.options.locations) this.curLine = this.input.slice(0, this.lineStart).split(lineBreak).length;
+	} else this.lineStart = 0;
+	this.type = types$1.eof;
+	this.value = null;
+	this.start = this.end = this.pos;
+	this.startLoc = this.endLoc = this.curPosition();
+	this.lastTokEndLoc = this.lastTokStartLoc = null;
+	this.lastTokStart = this.lastTokEnd = this.pos;
+	this.context = this.initialContext();
+	this.exprAllowed = true;
+	this.inModule = options.sourceType === "module";
+	this.strict = this.inModule || options.strict === true || this.strictDirective(this.pos);
+	this.potentialArrowAt = -1;
+	this.potentialArrowInForAwait = false;
+	this.yieldPos = this.awaitPos = this.awaitIdentPos = 0;
+	this.labels = [];
+	this.undefinedExports = Object.create(null);
+	if (this.pos === 0 && options.allowHashBang && this.input.slice(0, 2) === "#!") this.skipLineComment(2);
+	this.scopeStack = [];
+	this.enterScope(this.options.sourceType === "commonjs" ? SCOPE_FUNCTION : SCOPE_TOP);
+	this.regexpState = null;
+	this.privateNameStack = [];
+};
+var prototypeAccessors = {
+	inFunction: { configurable: true },
+	inGenerator: { configurable: true },
+	inAsync: { configurable: true },
+	canAwait: { configurable: true },
+	allowReturn: { configurable: true },
+	allowSuper: { configurable: true },
+	allowDirectSuper: { configurable: true },
+	treatFunctionsAsVar: { configurable: true },
+	allowNewDotTarget: { configurable: true },
+	allowUsing: { configurable: true },
+	inClassStaticBlock: { configurable: true }
+};
+Parser$3.prototype.parse = function parse() {
+	var this$1$1 = this;
+	var node = this.options.program || this.startNode();
+	this.nextToken();
+	return this.catchStackOverflow(function() {
+		return this$1$1.parseTopLevel(node);
+	});
+};
+prototypeAccessors.inFunction.get = function() {
+	return (this.currentVarScope().flags & SCOPE_FUNCTION) > 0;
+};
+prototypeAccessors.inGenerator.get = function() {
+	return (this.currentVarScope().flags & SCOPE_GENERATOR) > 0;
+};
+prototypeAccessors.inAsync.get = function() {
+	return (this.currentVarScope().flags & SCOPE_ASYNC) > 0;
+};
+prototypeAccessors.canAwait.get = function() {
+	for (var i = this.scopeStack.length - 1; i >= 0; i--) {
+		var flags = this.scopeStack[i].flags;
+		if (flags & (SCOPE_CLASS_STATIC_BLOCK | SCOPE_CLASS_FIELD_INIT)) return false;
+		if (flags & SCOPE_FUNCTION) return (flags & SCOPE_ASYNC) > 0;
+	}
+	return this.inModule && this.options.ecmaVersion >= 13 || this.options.allowAwaitOutsideFunction;
+};
+prototypeAccessors.allowReturn.get = function() {
+	if (this.inFunction) return true;
+	if (this.options.allowReturnOutsideFunction && this.currentVarScope().flags & SCOPE_TOP) return true;
+	return false;
+};
+prototypeAccessors.allowSuper.get = function() {
+	return (this.currentThisScope().flags & SCOPE_SUPER) > 0 || this.options.allowSuperOutsideMethod;
+};
+prototypeAccessors.allowDirectSuper.get = function() {
+	return (this.currentThisScope().flags & SCOPE_DIRECT_SUPER) > 0;
+};
+prototypeAccessors.treatFunctionsAsVar.get = function() {
+	return this.treatFunctionsAsVarInScope(this.currentScope());
+};
+prototypeAccessors.allowNewDotTarget.get = function() {
+	for (var i = this.scopeStack.length - 1; i >= 0; i--) {
+		var flags = this.scopeStack[i].flags;
+		if (flags & (SCOPE_CLASS_STATIC_BLOCK | SCOPE_CLASS_FIELD_INIT) || flags & SCOPE_FUNCTION && !(flags & SCOPE_ARROW)) return true;
+	}
+	return false;
+};
+prototypeAccessors.allowUsing.get = function() {
+	var flags = this.currentScope().flags;
+	if (flags & SCOPE_SWITCH) return false;
+	if (!this.inModule && flags & SCOPE_TOP) return false;
+	return true;
+};
+prototypeAccessors.inClassStaticBlock.get = function() {
+	return (this.currentVarScope().flags & SCOPE_CLASS_STATIC_BLOCK) > 0;
+};
+Parser$3.extend = function extend() {
+	var plugins = [], len = arguments.length;
+	while (len--) plugins[len] = arguments[len];
+	var cls = this;
+	for (var i = 0; i < plugins.length; i++) cls = plugins[i](cls);
+	return cls;
+};
+Parser$3.parse = function parse(input, options) {
+	return new this(options, input).parse();
+};
+Parser$3.parseExpressionAt = function parseExpressionAt(input, pos, options) {
+	var parser = new this(options, input, pos);
+	parser.nextToken();
+	return parser.parseExpression();
+};
+Parser$3.tokenizer = function tokenizer(input, options) {
+	return new this(options, input);
+};
+Object.defineProperties(Parser$3.prototype, prototypeAccessors);
+var pp$9 = Parser$3.prototype;
+var literal = /^(?:'((?:\\[^]|[^'\\])*?)'|"((?:\\[^]|[^"\\])*?)")/;
+pp$9.strictDirective = function(start) {
+	if (this.options.ecmaVersion < 5) return false;
+	for (;;) {
+		skipWhiteSpace.lastIndex = start;
+		start += skipWhiteSpace.exec(this.input)[0].length;
+		var match = literal.exec(this.input.slice(start));
+		if (!match) return false;
+		if ((match[1] || match[2]) === "use strict") {
+			skipWhiteSpace.lastIndex = start + match[0].length;
+			var spaceAfter = skipWhiteSpace.exec(this.input), end = spaceAfter.index + spaceAfter[0].length;
+			var next = this.input.charAt(end);
+			return next === ";" || next === "}" || lineBreak.test(spaceAfter[0]) && !(/[(`.[+\-/*%<>=,?^&]/.test(next) || next === "!" && this.input.charAt(end + 1) === "=");
+		}
+		start += match[0].length;
+		skipWhiteSpace.lastIndex = start;
+		start += skipWhiteSpace.exec(this.input)[0].length;
+		if (this.input[start] === ";") start++;
+	}
+};
+pp$9.eat = function(type) {
+	if (this.type === type) {
+		this.next();
+		return true;
+	} else return false;
+};
+pp$9.isContextual = function(name) {
+	return this.type === types$1.name && this.value === name && !this.containsEsc;
+};
+pp$9.eatContextual = function(name) {
+	if (!this.isContextual(name)) return false;
+	this.next();
+	return true;
+};
+pp$9.catchStackOverflow = function(f) {
+	try {
+		return f();
+	} catch (e) {
+		if (e instanceof Error && (/\bstack\b.*\b(exceeded|overflow)\b/i.test(e.message) || /\btoo much recursion\b/i.test(e.message))) this.raise(this.start, "Not enough stack space to parse input");
+		else throw e;
+	}
+};
+pp$9.expectContextual = function(name) {
+	if (!this.eatContextual(name)) this.unexpected();
+};
+pp$9.canInsertSemicolon = function() {
+	return this.type === types$1.eof || this.type === types$1.braceR || lineBreak.test(this.input.slice(this.lastTokEnd, this.start));
+};
+pp$9.insertSemicolon = function() {
+	if (this.canInsertSemicolon()) {
+		if (this.options.onInsertedSemicolon) this.options.onInsertedSemicolon(this.lastTokEnd, this.lastTokEndLoc);
+		return true;
+	}
+};
+pp$9.semicolon = function() {
+	if (!this.eat(types$1.semi) && !this.insertSemicolon()) this.unexpected();
+};
+pp$9.afterTrailingComma = function(tokType, notNext) {
+	if (this.type === tokType) {
+		if (this.options.onTrailingComma) this.options.onTrailingComma(this.lastTokStart, this.lastTokStartLoc);
+		if (!notNext) this.next();
+		return true;
+	}
+};
+pp$9.expect = function(type) {
+	this.eat(type) || this.unexpected();
+};
+pp$9.unexpected = function(pos) {
+	this.raise(pos != null ? pos : this.start, "Unexpected token");
+};
+var DestructuringErrors = function DestructuringErrors() {
+	this.shorthandAssign = this.trailingComma = this.parenthesizedAssign = this.parenthesizedBind = this.doubleProto = -1;
+};
+pp$9.checkPatternErrors = function(refDestructuringErrors, isAssign) {
+	if (!refDestructuringErrors) return;
+	if (refDestructuringErrors.trailingComma > -1) this.raiseRecoverable(refDestructuringErrors.trailingComma, "Comma is not permitted after the rest element");
+	var parens = isAssign ? refDestructuringErrors.parenthesizedAssign : refDestructuringErrors.parenthesizedBind;
+	if (parens > -1) this.raiseRecoverable(parens, isAssign ? "Assigning to rvalue" : "Parenthesized pattern");
+};
+pp$9.checkExpressionErrors = function(refDestructuringErrors, andThrow) {
+	if (!refDestructuringErrors) return false;
+	var shorthandAssign = refDestructuringErrors.shorthandAssign;
+	var doubleProto = refDestructuringErrors.doubleProto;
+	if (!andThrow) return shorthandAssign >= 0 || doubleProto >= 0;
+	if (shorthandAssign >= 0) this.raise(shorthandAssign, "Shorthand property assignments are valid only in destructuring patterns");
+	if (doubleProto >= 0) this.raiseRecoverable(doubleProto, "Redefinition of __proto__ property");
+};
+pp$9.checkYieldAwaitInDefaultParams = function() {
+	if (this.yieldPos && (!this.awaitPos || this.yieldPos < this.awaitPos)) this.raise(this.yieldPos, "Yield expression cannot be a default value");
+	if (this.awaitPos) this.raise(this.awaitPos, "Await expression cannot be a default value");
+};
+pp$9.isSimpleAssignTarget = function(expr) {
+	if (expr.type === "ParenthesizedExpression") return this.isSimpleAssignTarget(expr.expression);
+	return expr.type === "Identifier" || expr.type === "MemberExpression";
+};
+var pp$8 = Parser$3.prototype;
+pp$8.parseTopLevel = function(node) {
+	var exports$1 = Object.create(null);
+	if (!node.body) node.body = [];
+	while (this.type !== types$1.eof) {
+		var stmt = this.parseStatement(null, true, exports$1);
+		node.body.push(stmt);
+	}
+	if (this.inModule) for (var i = 0, list = Object.keys(this.undefinedExports); i < list.length; i += 1) {
+		var name = list[i];
+		this.raiseRecoverable(this.undefinedExports[name].start, "Export '" + name + "' is not defined");
+	}
+	this.adaptDirectivePrologue(node.body);
+	this.next();
+	node.sourceType = this.options.sourceType === "commonjs" ? "script" : this.options.sourceType;
+	return this.finishNode(node, "Program");
+};
+var loopLabel = { kind: "loop" };
+var switchLabel = { kind: "switch" };
+pp$8.isLet = function(context) {
+	if (this.options.ecmaVersion < 6 || !this.isContextual("let")) return false;
+	skipWhiteSpace.lastIndex = this.pos;
+	var skip = skipWhiteSpace.exec(this.input);
+	var next = this.pos + skip[0].length, nextCh = this.fullCharCodeAt(next);
+	if (nextCh === 91 || nextCh === 92) return true;
+	if (context) return false;
+	if (nextCh === 123) return true;
+	if (isIdentifierStart(nextCh)) {
+		var start = next;
+		do
+			next += nextCh <= 65535 ? 1 : 2;
+		while (isIdentifierChar(nextCh = this.fullCharCodeAt(next)));
+		if (nextCh === 92) return true;
+		var ident = this.input.slice(start, next);
+		if (!keywordRelationalOperator.test(ident)) return true;
+	}
+	return false;
+};
+pp$8.isAsyncFunction = function() {
+	if (this.options.ecmaVersion < 8 || !this.isContextual("async")) return false;
+	skipWhiteSpace.lastIndex = this.pos;
+	var skip = skipWhiteSpace.exec(this.input);
+	var next = this.pos + skip[0].length, after;
+	return !lineBreak.test(this.input.slice(this.pos, next)) && this.input.slice(next, next + 8) === "function" && (next + 8 === this.input.length || !(isIdentifierChar(after = this.fullCharCodeAt(next + 8)) || after === 92));
+};
+pp$8.isUsingKeyword = function(isAwaitUsing, isFor) {
+	if (this.options.ecmaVersion < 17 || !this.isContextual(isAwaitUsing ? "await" : "using")) return false;
+	skipWhiteSpace.lastIndex = this.pos;
+	var skip = skipWhiteSpace.exec(this.input);
+	var next = this.pos + skip[0].length;
+	if (lineBreak.test(this.input.slice(this.pos, next))) return false;
+	if (isAwaitUsing) {
+		var usingEndPos = next + 5, after;
+		if (this.input.slice(next, usingEndPos) !== "using" || usingEndPos === this.input.length || isIdentifierChar(after = this.fullCharCodeAt(usingEndPos)) || after === 92) return false;
+		skipWhiteSpace.lastIndex = usingEndPos;
+		var skipAfterUsing = skipWhiteSpace.exec(this.input);
+		next = usingEndPos + skipAfterUsing[0].length;
+		if (skipAfterUsing && lineBreak.test(this.input.slice(usingEndPos, next))) return false;
+	}
+	var ch = this.fullCharCodeAt(next);
+	if (!isIdentifierStart(ch) && ch !== 92) return false;
+	var idStart = next;
+	do
+		next += ch <= 65535 ? 1 : 2;
+	while (isIdentifierChar(ch = this.fullCharCodeAt(next)));
+	if (ch === 92) return true;
+	var id = this.input.slice(idStart, next);
+	if (keywordRelationalOperator.test(id)) return false;
+	if (isFor && !isAwaitUsing && id === "of") {
+		skipWhiteSpace.lastIndex = next;
+		var skipAfterOf = skipWhiteSpace.exec(this.input);
+		next = next + skipAfterOf[0].length;
+		if (this.input.charCodeAt(next) !== 61 || (ch = this.input.charCodeAt(next + 1)) === 61 || ch === 62) return false;
+	}
+	return true;
+};
+pp$8.isAwaitUsing = function(isFor) {
+	return this.isUsingKeyword(true, isFor);
+};
+pp$8.isUsing = function(isFor) {
+	return this.isUsingKeyword(false, isFor);
+};
+pp$8.parseStatement = function(context, topLevel, exports$1) {
+	var starttype = this.type, node = this.startNode(), kind;
+	if (this.isLet(context)) {
+		starttype = types$1._var;
+		kind = "let";
+	}
+	switch (starttype) {
+		case types$1._break:
+		case types$1._continue: return this.parseBreakContinueStatement(node, starttype.keyword);
+		case types$1._debugger: return this.parseDebuggerStatement(node);
+		case types$1._do: return this.parseDoStatement(node);
+		case types$1._for: return this.parseForStatement(node);
+		case types$1._function:
+			if (context && (this.strict || context !== "if" && context !== "label") && this.options.ecmaVersion >= 6) this.unexpected();
+			return this.parseFunctionStatement(node, false, !context);
+		case types$1._class:
+			if (context) this.unexpected();
+			return this.parseClass(node, true);
+		case types$1._if: return this.parseIfStatement(node);
+		case types$1._return: return this.parseReturnStatement(node);
+		case types$1._switch: return this.parseSwitchStatement(node);
+		case types$1._throw: return this.parseThrowStatement(node);
+		case types$1._try: return this.parseTryStatement(node);
+		case types$1._const:
+		case types$1._var:
+			kind = kind || this.value;
+			if (context && kind !== "var") this.unexpected();
+			return this.parseVarStatement(node, kind);
+		case types$1._while: return this.parseWhileStatement(node);
+		case types$1._with: return this.parseWithStatement(node);
+		case types$1.braceL: return this.parseBlock(true, node);
+		case types$1.semi: return this.parseEmptyStatement(node);
+		case types$1._export:
+		case types$1._import:
+			if (this.options.ecmaVersion > 10 && starttype === types$1._import) {
+				skipWhiteSpace.lastIndex = this.pos;
+				var skip = skipWhiteSpace.exec(this.input);
+				var next = this.pos + skip[0].length, nextCh = this.input.charCodeAt(next);
+				if (nextCh === 40 || nextCh === 46) return this.parseExpressionStatement(node, this.parseExpression());
+			}
+			if (!this.options.allowImportExportEverywhere) {
+				if (!topLevel) this.raise(this.start, "'import' and 'export' may only appear at the top level");
+				if (!this.inModule) this.raise(this.start, "'import' and 'export' may appear only with 'sourceType: module'");
+			}
+			return starttype === types$1._import ? this.parseImport(node) : this.parseExport(node, exports$1);
+		default:
+			if (this.isAsyncFunction()) {
+				if (context) this.unexpected();
+				this.next();
+				return this.parseFunctionStatement(node, true, !context);
+			}
+			var usingKind = this.isAwaitUsing(false) ? "await using" : this.isUsing(false) ? "using" : null;
+			if (usingKind) {
+				if (!this.allowUsing) this.raise(this.start, "Using declaration cannot appear in the top level when source type is `script` or in the bare case statement");
+				if (context) this.raise(this.start, "Using declaration is not allowed in single-statement positions");
+				if (usingKind === "await using") {
+					if (!this.canAwait) this.raise(this.start, "Await using cannot appear outside of async function");
+					this.next();
+				}
+				this.next();
+				this.parseVar(node, false, usingKind);
+				this.semicolon();
+				return this.finishNode(node, "VariableDeclaration");
+			}
+			var maybeName = this.value, expr = this.parseExpression();
+			if (starttype === types$1.name && expr.type === "Identifier" && this.eat(types$1.colon)) return this.parseLabeledStatement(node, maybeName, expr, context);
+			else return this.parseExpressionStatement(node, expr);
+	}
+};
+pp$8.parseBreakContinueStatement = function(node, keyword) {
+	var isBreak = keyword === "break";
+	this.next();
+	if (this.eat(types$1.semi) || this.insertSemicolon()) node.label = null;
+	else if (this.type !== types$1.name) this.unexpected();
+	else {
+		node.label = this.parseIdent();
+		this.semicolon();
+	}
+	var i = 0;
+	for (; i < this.labels.length; ++i) {
+		var lab = this.labels[i];
+		if (node.label == null || lab.name === node.label.name) {
+			if (lab.kind != null && (isBreak || lab.kind === "loop")) break;
+			if (node.label && isBreak) break;
+		}
+	}
+	if (i === this.labels.length) this.raise(node.start, "Unsyntactic " + keyword);
+	return this.finishNode(node, isBreak ? "BreakStatement" : "ContinueStatement");
+};
+pp$8.parseDebuggerStatement = function(node) {
+	this.next();
+	this.semicolon();
+	return this.finishNode(node, "DebuggerStatement");
+};
+pp$8.parseDoStatement = function(node) {
+	this.next();
+	this.labels.push(loopLabel);
+	node.body = this.parseStatement("do");
+	this.labels.pop();
+	this.expect(types$1._while);
+	node.test = this.parseParenExpression();
+	if (this.options.ecmaVersion >= 6) this.eat(types$1.semi);
+	else this.semicolon();
+	return this.finishNode(node, "DoWhileStatement");
+};
+pp$8.parseForStatement = function(node) {
+	this.next();
+	var awaitAt = this.options.ecmaVersion >= 9 && this.canAwait && this.eatContextual("await") ? this.lastTokStart : -1;
+	this.labels.push(loopLabel);
+	this.enterScope(0);
+	this.expect(types$1.parenL);
+	if (this.type === types$1.semi) {
+		if (awaitAt > -1) this.unexpected(awaitAt);
+		return this.parseFor(node, null);
+	}
+	var isLet = this.isLet();
+	if (this.type === types$1._var || this.type === types$1._const || isLet) {
+		var init$1 = this.startNode(), kind = isLet ? "let" : this.value;
+		this.next();
+		this.parseVar(init$1, true, kind);
+		this.finishNode(init$1, "VariableDeclaration");
+		return this.parseForAfterInit(node, init$1, awaitAt);
+	}
+	var startsWithLet = this.isContextual("let"), isForOf = false;
+	var usingKind = this.isUsing(true) ? "using" : this.isAwaitUsing(true) ? "await using" : null;
+	if (usingKind) {
+		var init$2 = this.startNode();
+		this.next();
+		if (usingKind === "await using") {
+			if (!this.canAwait) this.raise(this.start, "Await using cannot appear outside of async function");
+			this.next();
+		}
+		this.parseVar(init$2, true, usingKind);
+		this.finishNode(init$2, "VariableDeclaration");
+		return this.parseForAfterInit(node, init$2, awaitAt);
+	}
+	var containsEsc = this.containsEsc;
+	var refDestructuringErrors = new DestructuringErrors();
+	var initPos = this.start;
+	var init = awaitAt > -1 ? this.parseExprSubscripts(refDestructuringErrors, "await") : this.parseExpression(true, refDestructuringErrors);
+	if (this.type === types$1._in || (isForOf = this.options.ecmaVersion >= 6 && this.isContextual("of"))) {
+		if (awaitAt > -1) {
+			if (this.type === types$1._in) this.unexpected(awaitAt);
+			node.await = true;
+		} else if (isForOf && this.options.ecmaVersion >= 8) {
+			if (init.start === initPos && !containsEsc && init.type === "Identifier" && init.name === "async") this.unexpected();
+			else if (this.options.ecmaVersion >= 9) node.await = false;
+		}
+		if (startsWithLet && isForOf) this.raise(init.start, "The left-hand side of a for-of loop may not start with 'let'.");
+		this.toAssignable(init, false, refDestructuringErrors);
+		this.checkLValPattern(init);
+		return this.parseForIn(node, init);
+	} else this.checkExpressionErrors(refDestructuringErrors, true);
+	if (awaitAt > -1) this.unexpected(awaitAt);
+	return this.parseFor(node, init);
+};
+pp$8.parseForAfterInit = function(node, init, awaitAt) {
+	if ((this.type === types$1._in || this.options.ecmaVersion >= 6 && this.isContextual("of")) && init.declarations.length === 1) {
+		if (this.type === types$1._in) {
+			if ((init.kind === "using" || init.kind === "await using") && !init.declarations[0].init) this.raise(this.start, "Using declaration is not allowed in for-in loops");
+			if (this.options.ecmaVersion >= 9 && awaitAt > -1) this.unexpected(awaitAt);
+		} else if (this.options.ecmaVersion >= 9) node.await = awaitAt > -1;
+		return this.parseForIn(node, init);
+	}
+	if (awaitAt > -1) this.unexpected(awaitAt);
+	return this.parseFor(node, init);
+};
+pp$8.parseFunctionStatement = function(node, isAsync, declarationPosition) {
+	this.next();
+	return this.parseFunction(node, FUNC_STATEMENT | (declarationPosition ? 0 : FUNC_HANGING_STATEMENT), false, isAsync);
+};
+pp$8.parseIfStatement = function(node) {
+	this.next();
+	node.test = this.parseParenExpression();
+	node.consequent = this.parseStatement("if");
+	node.alternate = this.eat(types$1._else) ? this.parseStatement("if") : null;
+	return this.finishNode(node, "IfStatement");
+};
+pp$8.parseReturnStatement = function(node) {
+	if (!this.allowReturn) this.raise(this.start, "'return' outside of function");
+	this.next();
+	if (this.eat(types$1.semi) || this.insertSemicolon()) node.argument = null;
+	else {
+		node.argument = this.parseExpression();
+		this.semicolon();
+	}
+	return this.finishNode(node, "ReturnStatement");
+};
+pp$8.parseSwitchStatement = function(node) {
+	this.next();
+	node.discriminant = this.parseParenExpression();
+	node.cases = [];
+	this.expect(types$1.braceL);
+	this.labels.push(switchLabel);
+	this.enterScope(SCOPE_SWITCH);
+	var cur;
+	for (var sawDefault = false; this.type !== types$1.braceR;) if (this.type === types$1._case || this.type === types$1._default) {
+		var isCase = this.type === types$1._case;
+		if (cur) this.finishNode(cur, "SwitchCase");
+		node.cases.push(cur = this.startNode());
+		cur.consequent = [];
+		this.next();
+		if (isCase) cur.test = this.parseExpression();
+		else {
+			if (sawDefault) this.raiseRecoverable(this.lastTokStart, "Multiple default clauses");
+			sawDefault = true;
+			cur.test = null;
+		}
+		this.expect(types$1.colon);
+	} else {
+		if (!cur) this.unexpected();
+		cur.consequent.push(this.parseStatement(null));
+	}
+	this.exitScope();
+	if (cur) this.finishNode(cur, "SwitchCase");
+	this.next();
+	this.labels.pop();
+	return this.finishNode(node, "SwitchStatement");
+};
+pp$8.parseThrowStatement = function(node) {
+	this.next();
+	if (lineBreak.test(this.input.slice(this.lastTokEnd, this.start))) this.raise(this.lastTokEnd, "Illegal newline after throw");
+	node.argument = this.parseExpression();
+	this.semicolon();
+	return this.finishNode(node, "ThrowStatement");
+};
+var empty$1 = [];
+pp$8.parseCatchClauseParam = function() {
+	var param = this.parseBindingAtom();
+	var simple = param.type === "Identifier";
+	this.enterScope(simple ? SCOPE_SIMPLE_CATCH : 0);
+	this.checkLValPattern(param, simple ? BIND_SIMPLE_CATCH : BIND_LEXICAL);
+	this.expect(types$1.parenR);
+	return param;
+};
+pp$8.parseTryStatement = function(node) {
+	this.next();
+	node.block = this.parseBlock();
+	node.handler = null;
+	if (this.type === types$1._catch) {
+		var clause = this.startNode();
+		this.next();
+		if (this.eat(types$1.parenL)) clause.param = this.parseCatchClauseParam();
+		else {
+			if (this.options.ecmaVersion < 10) this.unexpected();
+			clause.param = null;
+			this.enterScope(0);
+		}
+		clause.body = this.parseBlock(false);
+		this.exitScope();
+		node.handler = this.finishNode(clause, "CatchClause");
+	}
+	node.finalizer = this.eat(types$1._finally) ? this.parseBlock() : null;
+	if (!node.handler && !node.finalizer) this.raise(node.start, "Missing catch or finally clause");
+	return this.finishNode(node, "TryStatement");
+};
+pp$8.parseVarStatement = function(node, kind, allowMissingInitializer) {
+	this.next();
+	this.parseVar(node, false, kind, allowMissingInitializer);
+	this.semicolon();
+	return this.finishNode(node, "VariableDeclaration");
+};
+pp$8.parseWhileStatement = function(node) {
+	this.next();
+	node.test = this.parseParenExpression();
+	this.labels.push(loopLabel);
+	node.body = this.parseStatement("while");
+	this.labels.pop();
+	return this.finishNode(node, "WhileStatement");
+};
+pp$8.parseWithStatement = function(node) {
+	if (this.strict) this.raise(this.start, "'with' in strict mode");
+	this.next();
+	node.object = this.parseParenExpression();
+	node.body = this.parseStatement("with");
+	return this.finishNode(node, "WithStatement");
+};
+pp$8.parseEmptyStatement = function(node) {
+	this.next();
+	return this.finishNode(node, "EmptyStatement");
+};
+pp$8.parseLabeledStatement = function(node, maybeName, expr, context) {
+	for (var i$1 = 0, list = this.labels; i$1 < list.length; i$1 += 1) if (list[i$1].name === maybeName) this.raise(expr.start, "Label '" + maybeName + "' is already declared");
+	var kind = this.type.isLoop ? "loop" : this.type === types$1._switch ? "switch" : null;
+	for (var i = this.labels.length - 1; i >= 0; i--) {
+		var label$1 = this.labels[i];
+		if (label$1.statementStart === node.start) {
+			label$1.statementStart = this.start;
+			label$1.kind = kind;
+		} else break;
+	}
+	this.labels.push({
+		name: maybeName,
+		kind,
+		statementStart: this.start
+	});
+	node.body = this.parseStatement(context ? context.indexOf("label") === -1 ? context + "label" : context : "label");
+	this.labels.pop();
+	node.label = expr;
+	return this.finishNode(node, "LabeledStatement");
+};
+pp$8.parseExpressionStatement = function(node, expr) {
+	node.expression = expr;
+	this.semicolon();
+	return this.finishNode(node, "ExpressionStatement");
+};
+pp$8.parseBlock = function(createNewLexicalScope, node, exitStrict) {
+	if (createNewLexicalScope === void 0) createNewLexicalScope = true;
+	if (node === void 0) node = this.startNode();
+	node.body = [];
+	this.expect(types$1.braceL);
+	if (createNewLexicalScope) this.enterScope(0);
+	while (this.type !== types$1.braceR) {
+		var stmt = this.parseStatement(null);
+		node.body.push(stmt);
+	}
+	if (exitStrict) this.strict = false;
+	this.next();
+	if (createNewLexicalScope) this.exitScope();
+	return this.finishNode(node, "BlockStatement");
+};
+pp$8.parseFor = function(node, init) {
+	node.init = init;
+	this.expect(types$1.semi);
+	node.test = this.type === types$1.semi ? null : this.parseExpression();
+	this.expect(types$1.semi);
+	node.update = this.type === types$1.parenR ? null : this.parseExpression();
+	this.expect(types$1.parenR);
+	node.body = this.parseStatement("for");
+	this.exitScope();
+	this.labels.pop();
+	return this.finishNode(node, "ForStatement");
+};
+pp$8.parseForIn = function(node, init) {
+	var isForIn = this.type === types$1._in;
+	this.next();
+	if (init.type === "VariableDeclaration" && init.declarations[0].init != null && (!isForIn || this.options.ecmaVersion < 8 || this.strict || init.kind !== "var" || init.declarations[0].id.type !== "Identifier")) this.raise(init.start, (isForIn ? "for-in" : "for-of") + " loop variable declaration may not have an initializer");
+	node.left = init;
+	node.right = isForIn ? this.parseExpression() : this.parseMaybeAssign();
+	this.expect(types$1.parenR);
+	node.body = this.parseStatement("for");
+	this.exitScope();
+	this.labels.pop();
+	return this.finishNode(node, isForIn ? "ForInStatement" : "ForOfStatement");
+};
+pp$8.parseVar = function(node, isFor, kind, allowMissingInitializer) {
+	node.declarations = [];
+	node.kind = kind;
+	for (;;) {
+		var decl = this.startNode();
+		this.parseVarId(decl, kind);
+		if (this.eat(types$1.eq)) decl.init = this.parseMaybeAssign(isFor);
+		else if (!allowMissingInitializer && kind === "const" && !(this.type === types$1._in || this.options.ecmaVersion >= 6 && this.isContextual("of"))) this.unexpected();
+		else if (!allowMissingInitializer && (kind === "using" || kind === "await using") && this.options.ecmaVersion >= 17 && this.type !== types$1._in && !this.isContextual("of")) this.raise(this.lastTokEnd, "Missing initializer in " + kind + " declaration");
+		else if (!allowMissingInitializer && decl.id.type !== "Identifier" && !(isFor && (this.type === types$1._in || this.isContextual("of")))) this.raise(this.lastTokEnd, "Complex binding patterns require an initialization value");
+		else decl.init = null;
+		node.declarations.push(this.finishNode(decl, "VariableDeclarator"));
+		if (!this.eat(types$1.comma)) break;
+	}
+	return node;
+};
+pp$8.parseVarId = function(decl, kind) {
+	decl.id = kind === "using" || kind === "await using" ? this.parseIdent() : this.parseBindingAtom();
+	this.checkLValPattern(decl.id, kind === "var" ? BIND_VAR : BIND_LEXICAL, false);
+};
+var FUNC_STATEMENT = 1;
+var FUNC_HANGING_STATEMENT = 2;
+var FUNC_NULLABLE_ID = 4;
+pp$8.parseFunction = function(node, statement, allowExpressionBody, isAsync, forInit) {
+	this.initFunction(node);
+	if (this.options.ecmaVersion >= 9 || this.options.ecmaVersion >= 6 && !isAsync) {
+		if (this.type === types$1.star && statement & FUNC_HANGING_STATEMENT) this.unexpected();
+		node.generator = this.eat(types$1.star);
+	}
+	if (this.options.ecmaVersion >= 8) node.async = !!isAsync;
+	if (statement & FUNC_STATEMENT) {
+		node.id = statement & FUNC_NULLABLE_ID && this.type !== types$1.name ? null : this.parseIdent();
+		if (node.id && !(statement & FUNC_HANGING_STATEMENT)) this.checkLValSimple(node.id, this.strict || node.generator || node.async ? this.treatFunctionsAsVar ? BIND_VAR : BIND_LEXICAL : BIND_FUNCTION);
+	}
+	var oldYieldPos = this.yieldPos, oldAwaitPos = this.awaitPos, oldAwaitIdentPos = this.awaitIdentPos;
+	this.yieldPos = 0;
+	this.awaitPos = 0;
+	this.awaitIdentPos = 0;
+	this.enterScope(functionFlags(node.async, node.generator));
+	if (!(statement & FUNC_STATEMENT)) node.id = this.type === types$1.name ? this.parseIdent() : null;
+	this.parseFunctionParams(node);
+	this.parseFunctionBody(node, allowExpressionBody, false, forInit);
+	this.yieldPos = oldYieldPos;
+	this.awaitPos = oldAwaitPos;
+	this.awaitIdentPos = oldAwaitIdentPos;
+	return this.finishNode(node, statement & FUNC_STATEMENT ? "FunctionDeclaration" : "FunctionExpression");
+};
+pp$8.parseFunctionParams = function(node) {
+	this.expect(types$1.parenL);
+	node.params = this.parseBindingList(types$1.parenR, false, this.options.ecmaVersion >= 8);
+	this.checkYieldAwaitInDefaultParams();
+};
+pp$8.parseClass = function(node, isStatement) {
+	this.next();
+	var oldStrict = this.strict;
+	this.strict = true;
+	this.parseClassId(node, isStatement);
+	this.parseClassSuper(node);
+	var privateNameMap = this.enterClassBody();
+	var classBody = this.startNode();
+	var hadConstructor = false;
+	classBody.body = [];
+	this.expect(types$1.braceL);
+	while (this.type !== types$1.braceR) {
+		var element = this.parseClassElement(node.superClass !== null);
+		if (element) {
+			classBody.body.push(element);
+			if (element.type === "MethodDefinition" && element.kind === "constructor") {
+				if (hadConstructor) this.raiseRecoverable(element.start, "Duplicate constructor in the same class");
+				hadConstructor = true;
+			} else if (element.key && element.key.type === "PrivateIdentifier" && isPrivateNameConflicted(privateNameMap, element)) this.raiseRecoverable(element.key.start, "Identifier '#" + element.key.name + "' has already been declared");
+		}
+	}
+	this.strict = oldStrict;
+	this.next();
+	node.body = this.finishNode(classBody, "ClassBody");
+	this.exitClassBody();
+	return this.finishNode(node, isStatement ? "ClassDeclaration" : "ClassExpression");
+};
+pp$8.parseClassElement = function(constructorAllowsSuper) {
+	if (this.eat(types$1.semi)) return null;
+	var ecmaVersion = this.options.ecmaVersion;
+	var node = this.startNode();
+	var keyName = "";
+	var isGenerator = false;
+	var isAsync = false;
+	var kind = "method";
+	var isStatic = false;
+	if (this.eatContextual("static")) {
+		if (ecmaVersion >= 13 && this.eat(types$1.braceL)) {
+			this.parseClassStaticBlock(node);
+			return node;
+		}
+		if (this.isClassElementNameStart() || this.type === types$1.star) isStatic = true;
+		else keyName = "static";
+	}
+	node.static = isStatic;
+	if (!keyName && ecmaVersion >= 8 && this.eatContextual("async")) {
+		if ((this.isClassElementNameStart() || this.type === types$1.star) && !this.canInsertSemicolon()) isAsync = true;
+		else keyName = "async";
+	}
+	if (!keyName && (ecmaVersion >= 9 || !isAsync) && this.eat(types$1.star)) isGenerator = true;
+	if (!keyName && !isAsync && !isGenerator) {
+		var lastValue = this.value;
+		if (this.eatContextual("get") || this.eatContextual("set")) {
+			if (this.isClassElementNameStart()) kind = lastValue;
+			else keyName = lastValue;
+		}
+	}
+	if (keyName) {
+		node.computed = false;
+		node.key = this.startNodeAt(this.lastTokStart, this.lastTokStartLoc);
+		node.key.name = keyName;
+		this.finishNode(node.key, "Identifier");
+	} else this.parseClassElementName(node);
+	if (ecmaVersion < 13 || this.type === types$1.parenL || kind !== "method" || isGenerator || isAsync) {
+		var isConstructor = !node.static && checkKeyName(node, "constructor");
+		var allowsDirectSuper = isConstructor && constructorAllowsSuper;
+		if (isConstructor && kind !== "method") this.raise(node.key.start, "Constructor can't have get/set modifier");
+		node.kind = isConstructor ? "constructor" : kind;
+		this.parseClassMethod(node, isGenerator, isAsync, allowsDirectSuper);
+	} else this.parseClassField(node);
+	return node;
+};
+pp$8.isClassElementNameStart = function() {
+	return this.type === types$1.name || this.type === types$1.privateId || this.type === types$1.num || this.type === types$1.string || this.type === types$1.bracketL || this.type.keyword;
+};
+pp$8.parseClassElementName = function(element) {
+	if (this.type === types$1.privateId) {
+		if (this.value === "constructor") this.raise(this.start, "Classes can't have an element named '#constructor'");
+		element.computed = false;
+		element.key = this.parsePrivateIdent();
+	} else this.parsePropertyName(element);
+};
+pp$8.parseClassMethod = function(method, isGenerator, isAsync, allowsDirectSuper) {
+	var key = method.key;
+	if (method.kind === "constructor") {
+		if (isGenerator) this.raise(key.start, "Constructor can't be a generator");
+		if (isAsync) this.raise(key.start, "Constructor can't be an async method");
+	} else if (method.static && checkKeyName(method, "prototype")) this.raise(key.start, "Classes may not have a static property named prototype");
+	var value = method.value = this.parseMethod(isGenerator, isAsync, allowsDirectSuper);
+	if (method.kind === "get" && value.params.length !== 0) this.raiseRecoverable(value.start, "getter should have no params");
+	if (method.kind === "set" && value.params.length !== 1) this.raiseRecoverable(value.start, "setter should have exactly one param");
+	if (method.kind === "set" && value.params[0].type === "RestElement") this.raiseRecoverable(value.params[0].start, "Setter cannot use rest params");
+	return this.finishNode(method, "MethodDefinition");
+};
+pp$8.parseClassField = function(field) {
+	if (checkKeyName(field, "constructor")) this.raise(field.key.start, "Classes can't have a field named 'constructor'");
+	else if (field.static && checkKeyName(field, "prototype")) this.raise(field.key.start, "Classes can't have a static field named 'prototype'");
+	if (this.eat(types$1.eq)) {
+		this.enterScope(SCOPE_CLASS_FIELD_INIT | SCOPE_SUPER);
+		field.value = this.parseMaybeAssign();
+		this.exitScope();
+	} else field.value = null;
+	this.semicolon();
+	return this.finishNode(field, "PropertyDefinition");
+};
+pp$8.parseClassStaticBlock = function(node) {
+	node.body = [];
+	var oldLabels = this.labels;
+	this.labels = [];
+	this.enterScope(SCOPE_CLASS_STATIC_BLOCK | SCOPE_SUPER);
+	while (this.type !== types$1.braceR) {
+		var stmt = this.parseStatement(null);
+		node.body.push(stmt);
+	}
+	this.next();
+	this.exitScope();
+	this.labels = oldLabels;
+	return this.finishNode(node, "StaticBlock");
+};
+pp$8.parseClassId = function(node, isStatement) {
+	if (this.type === types$1.name) {
+		node.id = this.parseIdent();
+		if (isStatement) this.checkLValSimple(node.id, BIND_LEXICAL, false);
+	} else {
+		if (isStatement === true) this.unexpected();
+		node.id = null;
+	}
+};
+pp$8.parseClassSuper = function(node) {
+	node.superClass = this.eat(types$1._extends) ? this.parseExprSubscripts(null, false) : null;
+};
+pp$8.enterClassBody = function() {
+	var element = {
+		declared: Object.create(null),
+		used: []
+	};
+	this.privateNameStack.push(element);
+	return element.declared;
+};
+pp$8.exitClassBody = function() {
+	var ref = this.privateNameStack.pop();
+	var declared = ref.declared;
+	var used = ref.used;
+	if (!this.options.checkPrivateFields) return;
+	var len = this.privateNameStack.length;
+	var parent = len === 0 ? null : this.privateNameStack[len - 1];
+	for (var i = 0; i < used.length; ++i) {
+		var id = used[i];
+		if (!hasOwn(declared, id.name)) {
+			if (parent) parent.used.push(id);
+			else this.raiseRecoverable(id.start, "Private field '#" + id.name + "' must be declared in an enclosing class");
+		}
+	}
+};
+function isPrivateNameConflicted(privateNameMap, element) {
+	var name = element.key.name;
+	var curr = privateNameMap[name];
+	var next = "true";
+	if (element.type === "MethodDefinition" && (element.kind === "get" || element.kind === "set")) next = (element.static ? "s" : "i") + element.kind;
+	if (curr === "iget" && next === "iset" || curr === "iset" && next === "iget" || curr === "sget" && next === "sset" || curr === "sset" && next === "sget") {
+		privateNameMap[name] = "true";
+		return false;
+	} else if (!curr) {
+		privateNameMap[name] = next;
+		return false;
+	} else return true;
+}
+function checkKeyName(node, name) {
+	var computed = node.computed;
+	var key = node.key;
+	return !computed && (key.type === "Identifier" && key.name === name || key.type === "Literal" && key.value === name);
+}
+pp$8.parseExportAllDeclaration = function(node, exports$1) {
+	if (this.options.ecmaVersion >= 11) {
+		if (this.eatContextual("as")) {
+			node.exported = this.parseModuleExportName();
+			this.checkExport(exports$1, node.exported, this.lastTokStart);
+		} else node.exported = null;
+	}
+	this.expectContextual("from");
+	if (this.type !== types$1.string) this.unexpected();
+	node.source = this.parseExprAtom();
+	if (this.options.ecmaVersion >= 16) node.attributes = this.parseWithClause();
+	this.semicolon();
+	return this.finishNode(node, "ExportAllDeclaration");
+};
+pp$8.parseExport = function(node, exports$1) {
+	this.next();
+	if (this.eat(types$1.star)) return this.parseExportAllDeclaration(node, exports$1);
+	if (this.eat(types$1._default)) {
+		this.checkExport(exports$1, "default", this.lastTokStart);
+		node.declaration = this.parseExportDefaultDeclaration();
+		return this.finishNode(node, "ExportDefaultDeclaration");
+	}
+	if (this.shouldParseExportStatement()) {
+		node.declaration = this.parseExportDeclaration(node);
+		if (node.declaration.type === "VariableDeclaration") this.checkVariableExport(exports$1, node.declaration.declarations);
+		else this.checkExport(exports$1, node.declaration.id, node.declaration.id.start);
+		node.specifiers = [];
+		node.source = null;
+		if (this.options.ecmaVersion >= 16) node.attributes = [];
+	} else {
+		node.declaration = null;
+		node.specifiers = this.parseExportSpecifiers(exports$1);
+		if (this.eatContextual("from")) {
+			if (this.type !== types$1.string) this.unexpected();
+			node.source = this.parseExprAtom();
+			if (this.options.ecmaVersion >= 16) node.attributes = this.parseWithClause();
+		} else {
+			for (var i = 0, list = node.specifiers; i < list.length; i += 1) {
+				var spec = list[i];
+				this.checkUnreserved(spec.local);
+				this.checkLocalExport(spec.local);
+				if (spec.local.type === "Literal") this.raise(spec.local.start, "A string literal cannot be used as an exported binding without `from`.");
+			}
+			node.source = null;
+			if (this.options.ecmaVersion >= 16) node.attributes = [];
+		}
+		this.semicolon();
+	}
+	return this.finishNode(node, "ExportNamedDeclaration");
+};
+pp$8.parseExportDeclaration = function(node) {
+	return this.parseStatement(null);
+};
+pp$8.parseExportDefaultDeclaration = function() {
+	var isAsync;
+	if (this.type === types$1._function || (isAsync = this.isAsyncFunction())) {
+		var fNode = this.startNode();
+		this.next();
+		if (isAsync) this.next();
+		return this.parseFunction(fNode, FUNC_STATEMENT | FUNC_NULLABLE_ID, false, isAsync);
+	} else if (this.type === types$1._class) {
+		var cNode = this.startNode();
+		return this.parseClass(cNode, "nullableID");
+	} else {
+		var declaration = this.parseMaybeAssign();
+		this.semicolon();
+		return declaration;
+	}
+};
+pp$8.checkExport = function(exports$1, name, pos) {
+	if (!exports$1) return;
+	if (typeof name !== "string") name = name.type === "Identifier" ? name.name : name.value;
+	if (hasOwn(exports$1, name)) this.raiseRecoverable(pos, "Duplicate export '" + name + "'");
+	exports$1[name] = true;
+};
+pp$8.checkPatternExport = function(exports$1, pat) {
+	var type = pat.type;
+	if (type === "Identifier") this.checkExport(exports$1, pat, pat.start);
+	else if (type === "ObjectPattern") for (var i = 0, list = pat.properties; i < list.length; i += 1) {
+		var prop = list[i];
+		this.checkPatternExport(exports$1, prop);
+	}
+	else if (type === "ArrayPattern") for (var i$1 = 0, list$1 = pat.elements; i$1 < list$1.length; i$1 += 1) {
+		var elt = list$1[i$1];
+		if (elt) this.checkPatternExport(exports$1, elt);
+	}
+	else if (type === "Property") this.checkPatternExport(exports$1, pat.value);
+	else if (type === "AssignmentPattern") this.checkPatternExport(exports$1, pat.left);
+	else if (type === "RestElement") this.checkPatternExport(exports$1, pat.argument);
+};
+pp$8.checkVariableExport = function(exports$1, decls) {
+	if (!exports$1) return;
+	for (var i = 0, list = decls; i < list.length; i += 1) {
+		var decl = list[i];
+		this.checkPatternExport(exports$1, decl.id);
+	}
+};
+pp$8.shouldParseExportStatement = function() {
+	return this.type.keyword === "var" || this.type.keyword === "const" || this.type.keyword === "class" || this.type.keyword === "function" || this.isLet() || this.isAsyncFunction();
+};
+pp$8.parseExportSpecifier = function(exports$1) {
+	var node = this.startNode();
+	node.local = this.parseModuleExportName();
+	node.exported = this.eatContextual("as") ? this.parseModuleExportName() : node.local;
+	this.checkExport(exports$1, node.exported, node.exported.start);
+	return this.finishNode(node, "ExportSpecifier");
+};
+pp$8.parseExportSpecifiers = function(exports$1) {
+	var nodes = [], first = true;
+	this.expect(types$1.braceL);
+	while (!this.eat(types$1.braceR)) {
+		if (!first) {
+			this.expect(types$1.comma);
+			if (this.afterTrailingComma(types$1.braceR)) break;
+		} else first = false;
+		nodes.push(this.parseExportSpecifier(exports$1));
+	}
+	return nodes;
+};
+pp$8.parseImport = function(node) {
+	this.next();
+	if (this.type === types$1.string) {
+		node.specifiers = empty$1;
+		node.source = this.parseExprAtom();
+	} else {
+		node.specifiers = this.parseImportSpecifiers();
+		this.expectContextual("from");
+		node.source = this.type === types$1.string ? this.parseExprAtom() : this.unexpected();
+	}
+	if (this.options.ecmaVersion >= 16) node.attributes = this.parseWithClause();
+	this.semicolon();
+	return this.finishNode(node, "ImportDeclaration");
+};
+pp$8.parseImportSpecifier = function() {
+	var node = this.startNode();
+	node.imported = this.parseModuleExportName();
+	if (this.eatContextual("as")) node.local = this.parseIdent();
+	else {
+		this.checkUnreserved(node.imported);
+		node.local = node.imported;
+	}
+	this.checkLValSimple(node.local, BIND_LEXICAL);
+	return this.finishNode(node, "ImportSpecifier");
+};
+pp$8.parseImportDefaultSpecifier = function() {
+	var node = this.startNode();
+	node.local = this.parseIdent();
+	this.checkLValSimple(node.local, BIND_LEXICAL);
+	return this.finishNode(node, "ImportDefaultSpecifier");
+};
+pp$8.parseImportNamespaceSpecifier = function() {
+	var node = this.startNode();
+	this.next();
+	this.expectContextual("as");
+	node.local = this.parseIdent();
+	this.checkLValSimple(node.local, BIND_LEXICAL);
+	return this.finishNode(node, "ImportNamespaceSpecifier");
+};
+pp$8.parseImportSpecifiers = function() {
+	var nodes = [], first = true;
+	if (this.type === types$1.name) {
+		nodes.push(this.parseImportDefaultSpecifier());
+		if (!this.eat(types$1.comma)) return nodes;
+	}
+	if (this.type === types$1.star) {
+		nodes.push(this.parseImportNamespaceSpecifier());
+		return nodes;
+	}
+	this.expect(types$1.braceL);
+	while (!this.eat(types$1.braceR)) {
+		if (!first) {
+			this.expect(types$1.comma);
+			if (this.afterTrailingComma(types$1.braceR)) break;
+		} else first = false;
+		nodes.push(this.parseImportSpecifier());
+	}
+	return nodes;
+};
+pp$8.parseWithClause = function() {
+	var nodes = [];
+	if (!this.eat(types$1._with)) return nodes;
+	this.expect(types$1.braceL);
+	var attributeKeys = {};
+	var first = true;
+	while (!this.eat(types$1.braceR)) {
+		if (!first) {
+			this.expect(types$1.comma);
+			if (this.afterTrailingComma(types$1.braceR)) break;
+		} else first = false;
+		var attr = this.parseImportAttribute();
+		var keyName = attr.key.type === "Identifier" ? attr.key.name : attr.key.value;
+		if (hasOwn(attributeKeys, keyName)) this.raiseRecoverable(attr.key.start, "Duplicate attribute key '" + keyName + "'");
+		attributeKeys[keyName] = true;
+		nodes.push(attr);
+	}
+	return nodes;
+};
+pp$8.parseImportAttribute = function() {
+	var node = this.startNode();
+	node.key = this.type === types$1.string ? this.parseExprAtom() : this.parseIdent(this.options.allowReserved !== "never");
+	this.expect(types$1.colon);
+	if (this.type !== types$1.string) this.unexpected();
+	node.value = this.parseExprAtom();
+	return this.finishNode(node, "ImportAttribute");
+};
+pp$8.parseModuleExportName = function() {
+	if (this.options.ecmaVersion >= 13 && this.type === types$1.string) {
+		var stringLiteral = this.parseLiteral(this.value);
+		if (loneSurrogate.test(stringLiteral.value)) this.raise(stringLiteral.start, "An export name cannot include a lone surrogate.");
+		return stringLiteral;
+	}
+	return this.parseIdent(true);
+};
+pp$8.adaptDirectivePrologue = function(statements) {
+	for (var i = 0; i < statements.length && this.isDirectiveCandidate(statements[i]); ++i) statements[i].directive = statements[i].expression.raw.slice(1, -1);
+};
+pp$8.isDirectiveCandidate = function(statement) {
+	return this.options.ecmaVersion >= 5 && statement.type === "ExpressionStatement" && statement.expression.type === "Literal" && typeof statement.expression.value === "string" && (this.input[statement.start] === "\"" || this.input[statement.start] === "'");
+};
+var pp$7 = Parser$3.prototype;
+pp$7.toAssignable = function(node, isBinding, refDestructuringErrors) {
+	if (this.options.ecmaVersion >= 6 && node) switch (node.type) {
+		case "Identifier":
+			if (this.inAsync && node.name === "await") this.raise(node.start, "Cannot use 'await' as identifier inside an async function");
+			break;
+		case "ObjectPattern":
+		case "ArrayPattern":
+		case "AssignmentPattern":
+		case "RestElement": break;
+		case "ObjectExpression":
+			node.type = "ObjectPattern";
+			if (refDestructuringErrors) this.checkPatternErrors(refDestructuringErrors, true);
+			for (var i = 0, list = node.properties; i < list.length; i += 1) {
+				var prop = list[i];
+				this.toAssignable(prop, isBinding);
+				if (prop.type === "RestElement" && (prop.argument.type === "ArrayPattern" || prop.argument.type === "ObjectPattern")) this.raise(prop.argument.start, "Unexpected token");
+			}
+			break;
+		case "Property":
+			if (node.kind !== "init") this.raise(node.key.start, "Object pattern can't contain getter or setter");
+			this.toAssignable(node.value, isBinding);
+			break;
+		case "ArrayExpression":
+			node.type = "ArrayPattern";
+			if (refDestructuringErrors) this.checkPatternErrors(refDestructuringErrors, true);
+			this.toAssignableList(node.elements, isBinding);
+			break;
+		case "SpreadElement":
+			node.type = "RestElement";
+			this.toAssignable(node.argument, isBinding);
+			if (node.argument.type === "AssignmentPattern") this.raise(node.argument.start, "Rest elements cannot have a default value");
+			break;
+		case "AssignmentExpression":
+			if (node.operator !== "=") this.raise(node.left.end, "Only '=' operator can be used for specifying default value.");
+			node.type = "AssignmentPattern";
+			delete node.operator;
+			this.toAssignable(node.left, isBinding);
+			break;
+		case "ParenthesizedExpression":
+			this.toAssignable(node.expression, isBinding, refDestructuringErrors);
+			break;
+		case "ChainExpression":
+			this.raiseRecoverable(node.start, "Optional chaining cannot appear in left-hand side");
+			break;
+		case "MemberExpression": if (!isBinding) break;
+		default: this.raise(node.start, "Assigning to rvalue");
+	}
+	else if (refDestructuringErrors) this.checkPatternErrors(refDestructuringErrors, true);
+	return node;
+};
+pp$7.toAssignableList = function(exprList, isBinding) {
+	var end = exprList.length;
+	for (var i = 0; i < end; i++) {
+		var elt = exprList[i];
+		if (elt) this.toAssignable(elt, isBinding);
+	}
+	if (end) {
+		var last = exprList[end - 1];
+		if (this.options.ecmaVersion === 6 && isBinding && last && last.type === "RestElement" && last.argument.type !== "Identifier") this.unexpected(last.argument.start);
+	}
+	return exprList;
+};
+pp$7.parseSpread = function(refDestructuringErrors) {
+	var node = this.startNode();
+	this.next();
+	node.argument = this.parseMaybeAssign(false, refDestructuringErrors);
+	return this.finishNode(node, "SpreadElement");
+};
+pp$7.parseRestBinding = function() {
+	var node = this.startNode();
+	this.next();
+	if (this.options.ecmaVersion === 6 && this.type !== types$1.name) this.unexpected();
+	node.argument = this.parseBindingAtom();
+	return this.finishNode(node, "RestElement");
+};
+pp$7.parseBindingAtom = function() {
+	if (this.options.ecmaVersion >= 6) switch (this.type) {
+		case types$1.bracketL:
+			var node = this.startNode();
+			this.next();
+			node.elements = this.parseBindingList(types$1.bracketR, true, true);
+			return this.finishNode(node, "ArrayPattern");
+		case types$1.braceL: return this.parseObj(true);
+	}
+	return this.parseIdent();
+};
+pp$7.parseBindingList = function(close, allowEmpty, allowTrailingComma, allowModifiers) {
+	var elts = [], first = true;
+	while (!this.eat(close)) {
+		if (first) first = false;
+		else this.expect(types$1.comma);
+		if (allowEmpty && this.type === types$1.comma) elts.push(null);
+		else if (allowTrailingComma && this.afterTrailingComma(close)) break;
+		else if (this.type === types$1.ellipsis) {
+			var rest = this.parseRestBinding();
+			this.parseBindingListItem(rest);
+			elts.push(rest);
+			if (this.type === types$1.comma) this.raiseRecoverable(this.start, "Comma is not permitted after the rest element");
+			this.expect(close);
+			break;
+		} else elts.push(this.parseAssignableListItem(allowModifiers));
+	}
+	return elts;
+};
+pp$7.parseAssignableListItem = function(allowModifiers) {
+	var elem = this.parseMaybeDefault(this.start, this.startLoc);
+	this.parseBindingListItem(elem);
+	return elem;
+};
+pp$7.parseBindingListItem = function(param) {
+	return param;
+};
+pp$7.parseMaybeDefault = function(startPos, startLoc, left) {
+	left = left || this.parseBindingAtom();
+	if (this.options.ecmaVersion < 6 || !this.eat(types$1.eq)) return left;
+	var node = this.startNodeAt(startPos, startLoc);
+	node.left = left;
+	node.right = this.parseMaybeAssign();
+	return this.finishNode(node, "AssignmentPattern");
+};
+pp$7.checkLValSimple = function(expr, bindingType, checkClashes) {
+	if (bindingType === void 0) bindingType = BIND_NONE;
+	var isBind = bindingType !== BIND_NONE;
+	switch (expr.type) {
+		case "Identifier":
+			if (this.strict && this.reservedWordsStrictBind.test(expr.name)) this.raiseRecoverable(expr.start, (isBind ? "Binding " : "Assigning to ") + expr.name + " in strict mode");
+			if (isBind) {
+				if (bindingType === BIND_LEXICAL && expr.name === "let") this.raiseRecoverable(expr.start, "let is disallowed as a lexically bound name");
+				if (checkClashes) {
+					if (hasOwn(checkClashes, expr.name)) this.raiseRecoverable(expr.start, "Argument name clash");
+					checkClashes[expr.name] = true;
+				}
+				if (bindingType !== BIND_OUTSIDE) this.declareName(expr.name, bindingType, expr.start);
+			}
+			break;
+		case "ChainExpression":
+			this.raiseRecoverable(expr.start, "Optional chaining cannot appear in left-hand side");
+			break;
+		case "MemberExpression":
+			if (isBind) this.raiseRecoverable(expr.start, "Binding member expression");
+			break;
+		case "ParenthesizedExpression":
+			if (isBind) this.raiseRecoverable(expr.start, "Binding parenthesized expression");
+			return this.checkLValSimple(expr.expression, bindingType, checkClashes);
+		default: this.raise(expr.start, (isBind ? "Binding" : "Assigning to") + " rvalue");
+	}
+};
+pp$7.checkLValPattern = function(expr, bindingType, checkClashes) {
+	if (bindingType === void 0) bindingType = BIND_NONE;
+	switch (expr.type) {
+		case "ObjectPattern":
+			for (var i = 0, list = expr.properties; i < list.length; i += 1) {
+				var prop = list[i];
+				this.checkLValInnerPattern(prop, bindingType, checkClashes);
+			}
+			break;
+		case "ArrayPattern":
+			for (var i$1 = 0, list$1 = expr.elements; i$1 < list$1.length; i$1 += 1) {
+				var elem = list$1[i$1];
+				if (elem) this.checkLValInnerPattern(elem, bindingType, checkClashes);
+			}
+			break;
+		default: this.checkLValSimple(expr, bindingType, checkClashes);
+	}
+};
+pp$7.checkLValInnerPattern = function(expr, bindingType, checkClashes) {
+	if (bindingType === void 0) bindingType = BIND_NONE;
+	switch (expr.type) {
+		case "Property":
+			this.checkLValInnerPattern(expr.value, bindingType, checkClashes);
+			break;
+		case "AssignmentPattern":
+			this.checkLValPattern(expr.left, bindingType, checkClashes);
+			break;
+		case "RestElement":
+			this.checkLValPattern(expr.argument, bindingType, checkClashes);
+			break;
+		default: this.checkLValPattern(expr, bindingType, checkClashes);
+	}
+};
+var TokContext = function TokContext(token, isExpr, preserveSpace, override, generator) {
+	this.token = token;
+	this.isExpr = !!isExpr;
+	this.preserveSpace = !!preserveSpace;
+	this.override = override;
+	this.generator = !!generator;
+};
+var types$2 = {
+	b_stat: new TokContext("{", false),
+	b_expr: new TokContext("{", true),
+	b_tmpl: new TokContext("${", false),
+	p_stat: new TokContext("(", false),
+	p_expr: new TokContext("(", true),
+	q_tmpl: new TokContext("`", true, true, function(p) {
+		return p.tryReadTemplateToken();
+	}),
+	f_stat: new TokContext("function", false),
+	f_expr: new TokContext("function", true),
+	f_expr_gen: new TokContext("function", true, false, null, true),
+	f_gen: new TokContext("function", false, false, null, true)
+};
+var pp$6 = Parser$3.prototype;
+pp$6.initialContext = function() {
+	return [types$2.b_stat];
+};
+pp$6.curContext = function() {
+	return this.context[this.context.length - 1];
+};
+pp$6.braceIsBlock = function(prevType) {
+	var parent = this.curContext();
+	if (parent === types$2.f_expr || parent === types$2.f_stat) return true;
+	if (prevType === types$1.colon && (parent === types$2.b_stat || parent === types$2.b_expr)) return !parent.isExpr;
+	if (prevType === types$1._return || prevType === types$1.name && this.exprAllowed) return lineBreak.test(this.input.slice(this.lastTokEnd, this.start));
+	if (prevType === types$1._else || prevType === types$1.semi || prevType === types$1.eof || prevType === types$1.parenR || prevType === types$1.arrow) return true;
+	if (prevType === types$1.braceL) return parent === types$2.b_stat;
+	if (prevType === types$1._var || prevType === types$1._const || prevType === types$1.name) return false;
+	return !this.exprAllowed;
+};
+pp$6.inGeneratorContext = function() {
+	for (var i = this.context.length - 1; i >= 1; i--) {
+		var context = this.context[i];
+		if (context.token === "function") return context.generator;
+	}
+	return false;
+};
+pp$6.updateContext = function(prevType) {
+	var update, type = this.type;
+	if (type.keyword && prevType === types$1.dot) this.exprAllowed = false;
+	else if (update = type.updateContext) update.call(this, prevType);
+	else this.exprAllowed = type.beforeExpr;
+};
+pp$6.overrideContext = function(tokenCtx) {
+	if (this.curContext() !== tokenCtx) this.context[this.context.length - 1] = tokenCtx;
+};
+types$1.parenR.updateContext = types$1.braceR.updateContext = function() {
+	if (this.context.length === 1) {
+		this.exprAllowed = true;
+		return;
+	}
+	var out = this.context.pop();
+	if (out === types$2.b_stat && this.curContext().token === "function") out = this.context.pop();
+	this.exprAllowed = !out.isExpr;
+};
+types$1.braceL.updateContext = function(prevType) {
+	this.context.push(this.braceIsBlock(prevType) ? types$2.b_stat : types$2.b_expr);
+	this.exprAllowed = true;
+};
+types$1.dollarBraceL.updateContext = function() {
+	this.context.push(types$2.b_tmpl);
+	this.exprAllowed = true;
+};
+types$1.parenL.updateContext = function(prevType) {
+	var statementParens = prevType === types$1._if || prevType === types$1._for || prevType === types$1._with || prevType === types$1._while;
+	this.context.push(statementParens ? types$2.p_stat : types$2.p_expr);
+	this.exprAllowed = true;
+};
+types$1.incDec.updateContext = function() {};
+types$1._function.updateContext = types$1._class.updateContext = function(prevType) {
+	if (prevType.beforeExpr && prevType !== types$1._else && !(prevType === types$1.semi && this.curContext() !== types$2.p_stat) && !(prevType === types$1._return && lineBreak.test(this.input.slice(this.lastTokEnd, this.start))) && !((prevType === types$1.colon || prevType === types$1.braceL) && this.curContext() === types$2.b_stat)) this.context.push(types$2.f_expr);
+	else this.context.push(types$2.f_stat);
+	this.exprAllowed = false;
+};
+types$1.colon.updateContext = function() {
+	if (this.curContext().token === "function") this.context.pop();
+	this.exprAllowed = true;
+};
+types$1.backQuote.updateContext = function() {
+	if (this.curContext() === types$2.q_tmpl) this.context.pop();
+	else this.context.push(types$2.q_tmpl);
+	this.exprAllowed = false;
+};
+types$1.star.updateContext = function(prevType) {
+	if (prevType === types$1._function) {
+		var index = this.context.length - 1;
+		if (this.context[index] === types$2.f_expr) this.context[index] = types$2.f_expr_gen;
+		else this.context[index] = types$2.f_gen;
+	}
+	this.exprAllowed = true;
+};
+types$1.name.updateContext = function(prevType) {
+	var allowed = false;
+	if (this.options.ecmaVersion >= 6 && prevType !== types$1.dot) {
+		if (this.value === "of" && !this.exprAllowed || this.value === "yield" && this.inGeneratorContext()) allowed = true;
+	}
+	this.exprAllowed = allowed;
+};
+var pp$5 = Parser$3.prototype;
+pp$5.checkPropClash = function(prop, propHash, refDestructuringErrors) {
+	if (this.options.ecmaVersion >= 9 && prop.type === "SpreadElement") return;
+	if (this.options.ecmaVersion >= 6 && (prop.computed || prop.method || prop.shorthand)) return;
+	var key = prop.key;
+	var name;
+	switch (key.type) {
+		case "Identifier":
+			name = key.name;
+			break;
+		case "Literal":
+			name = String(key.value);
+			break;
+		default: return;
+	}
+	var kind = prop.kind;
+	if (this.options.ecmaVersion >= 6) {
+		if (name === "__proto__" && kind === "init") {
+			if (propHash.proto) {
+				if (refDestructuringErrors) {
+					if (refDestructuringErrors.doubleProto < 0) refDestructuringErrors.doubleProto = key.start;
+				} else this.raiseRecoverable(key.start, "Redefinition of __proto__ property");
+			}
+			propHash.proto = true;
+		}
+		return;
+	}
+	name = "$" + name;
+	var other = propHash[name];
+	if (other) {
+		var redefinition;
+		if (kind === "init") redefinition = this.strict && other.init || other.get || other.set;
+		else redefinition = other.init || other[kind];
+		if (redefinition) this.raiseRecoverable(key.start, "Redefinition of property");
+	} else other = propHash[name] = {
+		init: false,
+		get: false,
+		set: false
+	};
+	other[kind] = true;
+};
+pp$5.parseExpression = function(forInit, refDestructuringErrors) {
+	var this$1$1 = this;
+	return this.catchStackOverflow(function() {
+		var startPos = this$1$1.start, startLoc = this$1$1.startLoc;
+		var expr = this$1$1.parseMaybeAssign(forInit, refDestructuringErrors);
+		if (this$1$1.type === types$1.comma) {
+			var node = this$1$1.startNodeAt(startPos, startLoc);
+			node.expressions = [expr];
+			while (this$1$1.eat(types$1.comma)) node.expressions.push(this$1$1.parseMaybeAssign(forInit, refDestructuringErrors));
+			return this$1$1.finishNode(node, "SequenceExpression");
+		}
+		return expr;
+	});
+};
+pp$5.parseMaybeAssign = function(forInit, refDestructuringErrors, afterLeftParse) {
+	if (this.isContextual("yield")) {
+		if (this.inGenerator) return this.parseYield(forInit);
+		else this.exprAllowed = false;
+	}
+	var ownDestructuringErrors = false, oldParenAssign = -1, oldTrailingComma = -1, oldDoubleProto = -1;
+	if (refDestructuringErrors) {
+		oldParenAssign = refDestructuringErrors.parenthesizedAssign;
+		oldTrailingComma = refDestructuringErrors.trailingComma;
+		oldDoubleProto = refDestructuringErrors.doubleProto;
+		refDestructuringErrors.parenthesizedAssign = refDestructuringErrors.trailingComma = -1;
+	} else {
+		refDestructuringErrors = new DestructuringErrors();
+		ownDestructuringErrors = true;
+	}
+	var startPos = this.start, startLoc = this.startLoc;
+	if (this.type === types$1.parenL || this.type === types$1.name) {
+		this.potentialArrowAt = this.start;
+		this.potentialArrowInForAwait = forInit === "await";
+	}
+	var left = this.parseMaybeConditional(forInit, refDestructuringErrors);
+	if (afterLeftParse) left = afterLeftParse.call(this, left, startPos, startLoc);
+	if (this.type.isAssign) {
+		var node = this.startNodeAt(startPos, startLoc);
+		node.operator = this.value;
+		if (this.type === types$1.eq) left = this.toAssignable(left, false, refDestructuringErrors);
+		if (!ownDestructuringErrors) refDestructuringErrors.parenthesizedAssign = refDestructuringErrors.trailingComma = refDestructuringErrors.doubleProto = -1;
+		if (refDestructuringErrors.shorthandAssign >= left.start) refDestructuringErrors.shorthandAssign = -1;
+		if (this.type === types$1.eq) this.checkLValPattern(left);
+		else this.checkLValSimple(left);
+		node.left = left;
+		this.next();
+		node.right = this.parseMaybeAssign(forInit);
+		if (oldDoubleProto > -1) refDestructuringErrors.doubleProto = oldDoubleProto;
+		return this.finishNode(node, "AssignmentExpression");
+	} else if (ownDestructuringErrors) this.checkExpressionErrors(refDestructuringErrors, true);
+	if (oldParenAssign > -1) refDestructuringErrors.parenthesizedAssign = oldParenAssign;
+	if (oldTrailingComma > -1) refDestructuringErrors.trailingComma = oldTrailingComma;
+	return left;
+};
+pp$5.parseMaybeConditional = function(forInit, refDestructuringErrors) {
+	var startPos = this.start, startLoc = this.startLoc;
+	var expr = this.parseExprOps(forInit, refDestructuringErrors);
+	if (this.checkExpressionErrors(refDestructuringErrors)) return expr;
+	if (!(expr.type === "ArrowFunctionExpression" && expr.start === startPos) && this.eat(types$1.question)) {
+		var node = this.startNodeAt(startPos, startLoc);
+		node.test = expr;
+		node.consequent = this.parseMaybeAssign();
+		this.expect(types$1.colon);
+		node.alternate = this.parseMaybeAssign(forInit);
+		return this.finishNode(node, "ConditionalExpression");
+	}
+	return expr;
+};
+pp$5.parseExprOps = function(forInit, refDestructuringErrors) {
+	var startPos = this.start, startLoc = this.startLoc;
+	var expr = this.parseMaybeUnary(refDestructuringErrors, false, false, forInit);
+	if (this.checkExpressionErrors(refDestructuringErrors)) return expr;
+	return expr.start === startPos && expr.type === "ArrowFunctionExpression" ? expr : this.parseExprOp(expr, startPos, startLoc, -1, forInit);
+};
+pp$5.parseExprOp = function(left, leftStartPos, leftStartLoc, minPrec, forInit) {
+	var prec = this.type.binop;
+	if (prec != null && (!forInit || this.type !== types$1._in)) {
+		if (prec > minPrec) {
+			var logical = this.type === types$1.logicalOR || this.type === types$1.logicalAND;
+			var coalesce = this.type === types$1.coalesce;
+			if (coalesce) prec = types$1.logicalAND.binop;
+			var op = this.value;
+			this.next();
+			var startPos = this.start, startLoc = this.startLoc;
+			var right = this.parseExprOp(this.parseMaybeUnary(null, false, false, forInit), startPos, startLoc, prec, forInit);
+			var node = this.buildBinary(leftStartPos, leftStartLoc, left, right, op, logical || coalesce);
+			if (logical && this.type === types$1.coalesce || coalesce && (this.type === types$1.logicalOR || this.type === types$1.logicalAND)) this.raiseRecoverable(this.start, "Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses");
+			return this.parseExprOp(node, leftStartPos, leftStartLoc, minPrec, forInit);
+		}
+	}
+	return left;
+};
+pp$5.buildBinary = function(startPos, startLoc, left, right, op, logical) {
+	if (right.type === "PrivateIdentifier") this.raise(right.start, "Private identifier can only be left side of binary expression");
+	var node = this.startNodeAt(startPos, startLoc);
+	node.left = left;
+	node.operator = op;
+	node.right = right;
+	return this.finishNode(node, logical ? "LogicalExpression" : "BinaryExpression");
+};
+pp$5.parseMaybeUnary = function(refDestructuringErrors, sawUnary, incDec, forInit) {
+	var startPos = this.start, startLoc = this.startLoc, expr;
+	if (this.isContextual("await") && this.canAwait) {
+		expr = this.parseAwait(forInit);
+		sawUnary = true;
+	} else if (this.type.prefix) {
+		var node = this.startNode(), update = this.type === types$1.incDec;
+		node.operator = this.value;
+		node.prefix = true;
+		this.next();
+		node.argument = this.parseMaybeUnary(null, true, update, forInit);
+		this.checkExpressionErrors(refDestructuringErrors, true);
+		if (update) this.checkLValSimple(node.argument);
+		else if (this.strict && node.operator === "delete" && isLocalVariableAccess(node.argument)) this.raiseRecoverable(node.start, "Deleting local variable in strict mode");
+		else if (node.operator === "delete" && isPrivateFieldAccess(node.argument)) this.raiseRecoverable(node.start, "Private fields can not be deleted");
+		else sawUnary = true;
+		expr = this.finishNode(node, update ? "UpdateExpression" : "UnaryExpression");
+	} else if (!sawUnary && this.type === types$1.privateId) {
+		if ((forInit || this.privateNameStack.length === 0) && this.options.checkPrivateFields) this.unexpected();
+		expr = this.parsePrivateIdent();
+		if (this.type !== types$1._in) this.unexpected();
+	} else {
+		expr = this.parseExprSubscripts(refDestructuringErrors, forInit);
+		if (this.checkExpressionErrors(refDestructuringErrors)) return expr;
+		while (this.type.postfix && !this.canInsertSemicolon()) {
+			var node$1 = this.startNodeAt(startPos, startLoc);
+			node$1.operator = this.value;
+			node$1.prefix = false;
+			node$1.argument = expr;
+			this.checkLValSimple(expr);
+			this.next();
+			expr = this.finishNode(node$1, "UpdateExpression");
+		}
+	}
+	if (!incDec && !(expr.type === "ArrowFunctionExpression" && expr.start === startPos) && this.eat(types$1.starstar)) {
+		if (sawUnary) this.unexpected(this.lastTokStart);
+		else return this.buildBinary(startPos, startLoc, expr, this.parseMaybeUnary(null, false, false, forInit), "**", false);
+	} else return expr;
+};
+function isLocalVariableAccess(node) {
+	return node.type === "Identifier" || node.type === "ParenthesizedExpression" && isLocalVariableAccess(node.expression);
+}
+function isPrivateFieldAccess(node) {
+	return node.type === "MemberExpression" && node.property.type === "PrivateIdentifier" || node.type === "ChainExpression" && isPrivateFieldAccess(node.expression) || node.type === "ParenthesizedExpression" && isPrivateFieldAccess(node.expression);
+}
+pp$5.parseExprSubscripts = function(refDestructuringErrors, forInit) {
+	var startPos = this.start, startLoc = this.startLoc;
+	var expr = this.parseExprAtom(refDestructuringErrors, forInit);
+	if (expr.type === "ArrowFunctionExpression" && this.input.slice(this.lastTokStart, this.lastTokEnd) !== ")") return expr;
+	var result = this.parseSubscripts(expr, startPos, startLoc, false, forInit);
+	if (refDestructuringErrors && result.type === "MemberExpression") {
+		if (refDestructuringErrors.parenthesizedAssign >= result.start) refDestructuringErrors.parenthesizedAssign = -1;
+		if (refDestructuringErrors.parenthesizedBind >= result.start) refDestructuringErrors.parenthesizedBind = -1;
+		if (refDestructuringErrors.trailingComma >= result.start) refDestructuringErrors.trailingComma = -1;
+	}
+	return result;
+};
+pp$5.parseSubscripts = function(base, startPos, startLoc, noCalls, forInit) {
+	var maybeAsyncArrow = this.options.ecmaVersion >= 8 && base.type === "Identifier" && base.name === "async" && this.lastTokEnd === base.end && !this.canInsertSemicolon() && base.end - base.start === 5 && this.potentialArrowAt === base.start;
+	var optionalChained = false;
+	while (true) {
+		var element = this.parseSubscript(base, startPos, startLoc, noCalls, maybeAsyncArrow, optionalChained, forInit);
+		if (element.optional) optionalChained = true;
+		if (element === base || element.type === "ArrowFunctionExpression") {
+			if (optionalChained) {
+				var chainNode = this.startNodeAt(startPos, startLoc);
+				chainNode.expression = element;
+				element = this.finishNode(chainNode, "ChainExpression");
+			}
+			return element;
+		}
+		base = element;
+	}
+};
+pp$5.shouldParseAsyncArrow = function() {
+	return !this.canInsertSemicolon() && this.eat(types$1.arrow);
+};
+pp$5.parseSubscriptAsyncArrow = function(startPos, startLoc, exprList, forInit) {
+	return this.parseArrowExpression(this.startNodeAt(startPos, startLoc), exprList, true, forInit);
+};
+pp$5.parseSubscript = function(base, startPos, startLoc, noCalls, maybeAsyncArrow, optionalChained, forInit) {
+	var optionalSupported = this.options.ecmaVersion >= 11;
+	var optional = optionalSupported && this.eat(types$1.questionDot);
+	if (noCalls && optional) this.raise(this.lastTokStart, "Optional chaining cannot appear in the callee of new expressions");
+	var computed = this.eat(types$1.bracketL);
+	if (computed || optional && this.type !== types$1.parenL && this.type !== types$1.backQuote || this.eat(types$1.dot)) {
+		var node = this.startNodeAt(startPos, startLoc);
+		node.object = base;
+		if (computed) {
+			node.property = this.parseExpression();
+			this.expect(types$1.bracketR);
+		} else if (this.type === types$1.privateId && base.type !== "Super") node.property = this.parsePrivateIdent();
+		else node.property = this.parseIdent(this.options.allowReserved !== "never");
+		node.computed = !!computed;
+		if (optionalSupported) node.optional = optional;
+		base = this.finishNode(node, "MemberExpression");
+	} else if (!noCalls && this.eat(types$1.parenL)) {
+		var refDestructuringErrors = new DestructuringErrors(), oldYieldPos = this.yieldPos, oldAwaitPos = this.awaitPos, oldAwaitIdentPos = this.awaitIdentPos;
+		this.yieldPos = 0;
+		this.awaitPos = 0;
+		this.awaitIdentPos = 0;
+		var exprList = this.parseExprList(types$1.parenR, this.options.ecmaVersion >= 8, false, refDestructuringErrors);
+		if (maybeAsyncArrow && !optional && this.shouldParseAsyncArrow()) {
+			this.checkPatternErrors(refDestructuringErrors, false);
+			this.checkYieldAwaitInDefaultParams();
+			if (this.awaitIdentPos > 0) this.raise(this.awaitIdentPos, "Cannot use 'await' as identifier inside an async function");
+			this.yieldPos = oldYieldPos;
+			this.awaitPos = oldAwaitPos;
+			this.awaitIdentPos = oldAwaitIdentPos;
+			return this.parseSubscriptAsyncArrow(startPos, startLoc, exprList, forInit);
+		}
+		this.checkExpressionErrors(refDestructuringErrors, true);
+		this.yieldPos = oldYieldPos || this.yieldPos;
+		this.awaitPos = oldAwaitPos || this.awaitPos;
+		this.awaitIdentPos = oldAwaitIdentPos || this.awaitIdentPos;
+		var node$1 = this.startNodeAt(startPos, startLoc);
+		node$1.callee = base;
+		node$1.arguments = exprList;
+		if (optionalSupported) node$1.optional = optional;
+		base = this.finishNode(node$1, "CallExpression");
+	} else if (this.type === types$1.backQuote) {
+		if (optional || optionalChained) this.raise(this.start, "Optional chaining cannot appear in the tag of tagged template expressions");
+		var node$2 = this.startNodeAt(startPos, startLoc);
+		node$2.tag = base;
+		node$2.quasi = this.parseTemplate({ isTagged: true });
+		base = this.finishNode(node$2, "TaggedTemplateExpression");
+	}
+	return base;
+};
+pp$5.parseExprAtom = function(refDestructuringErrors, forInit, forNew) {
+	if (this.type === types$1.slash) this.readRegexp();
+	var node, canBeArrow = this.potentialArrowAt === this.start;
+	switch (this.type) {
+		case types$1._super:
+			if (!this.allowSuper) this.raise(this.start, "'super' keyword outside a method");
+			node = this.startNode();
+			this.next();
+			if (this.type === types$1.parenL && !this.allowDirectSuper) this.raise(node.start, "super() call outside constructor of a subclass");
+			if (this.type !== types$1.dot && this.type !== types$1.bracketL && this.type !== types$1.parenL) this.unexpected();
+			return this.finishNode(node, "Super");
+		case types$1._this:
+			node = this.startNode();
+			this.next();
+			return this.finishNode(node, "ThisExpression");
+		case types$1.name:
+			var startPos = this.start, startLoc = this.startLoc, containsEsc = this.containsEsc;
+			var id = this.parseIdent(false);
+			if (this.options.ecmaVersion >= 8 && !containsEsc && id.name === "async" && !this.canInsertSemicolon() && this.eat(types$1._function)) {
+				this.overrideContext(types$2.f_expr);
+				return this.parseFunction(this.startNodeAt(startPos, startLoc), 0, false, true, forInit);
+			}
+			if (canBeArrow && !this.canInsertSemicolon()) {
+				if (this.eat(types$1.arrow)) return this.parseArrowExpression(this.startNodeAt(startPos, startLoc), [id], false, forInit);
+				if (this.options.ecmaVersion >= 8 && id.name === "async" && this.type === types$1.name && !containsEsc && (!this.potentialArrowInForAwait || this.value !== "of" || this.containsEsc)) {
+					id = this.parseIdent(false);
+					if (this.canInsertSemicolon() || !this.eat(types$1.arrow)) this.unexpected();
+					return this.parseArrowExpression(this.startNodeAt(startPos, startLoc), [id], true, forInit);
+				}
+			}
+			return id;
+		case types$1.regexp:
+			var value = this.value;
+			node = this.parseLiteral(value.value);
+			node.regex = {
+				pattern: value.pattern,
+				flags: value.flags
+			};
+			return node;
+		case types$1.num:
+		case types$1.string: return this.parseLiteral(this.value);
+		case types$1._null:
+		case types$1._true:
+		case types$1._false:
+			node = this.startNode();
+			node.value = this.type === types$1._null ? null : this.type === types$1._true;
+			node.raw = this.type.keyword;
+			this.next();
+			return this.finishNode(node, "Literal");
+		case types$1.parenL:
+			var start = this.start, expr = this.parseParenAndDistinguishExpression(canBeArrow, forInit);
+			if (refDestructuringErrors) {
+				if (refDestructuringErrors.parenthesizedAssign < 0 && !this.isSimpleAssignTarget(expr)) refDestructuringErrors.parenthesizedAssign = start;
+				if (refDestructuringErrors.parenthesizedBind < 0) refDestructuringErrors.parenthesizedBind = start;
+			}
+			return expr;
+		case types$1.bracketL:
+			node = this.startNode();
+			this.next();
+			node.elements = this.parseExprList(types$1.bracketR, true, true, refDestructuringErrors);
+			return this.finishNode(node, "ArrayExpression");
+		case types$1.braceL:
+			this.overrideContext(types$2.b_expr);
+			return this.parseObj(false, refDestructuringErrors);
+		case types$1._function:
+			node = this.startNode();
+			this.next();
+			return this.parseFunction(node, 0);
+		case types$1._class: return this.parseClass(this.startNode(), false);
+		case types$1._new: return this.parseNew();
+		case types$1.backQuote: return this.parseTemplate();
+		case types$1._import: if (this.options.ecmaVersion >= 11) return this.parseExprImport(forNew);
+		else return this.unexpected();
+		default: return this.parseExprAtomDefault();
+	}
+};
+pp$5.parseExprAtomDefault = function() {
+	this.unexpected();
+};
+pp$5.parseExprImport = function(forNew) {
+	var node = this.startNode();
+	if (this.containsEsc) this.raiseRecoverable(this.start, "Escape sequence in keyword import");
+	this.next();
+	if (this.type === types$1.parenL && !forNew) return this.parseDynamicImport(node);
+	else if (this.type === types$1.dot) {
+		var meta = this.startNodeAt(node.start, node.loc && node.loc.start);
+		meta.name = "import";
+		node.meta = this.finishNode(meta, "Identifier");
+		return this.parseImportMeta(node);
+	} else this.unexpected();
+};
+pp$5.parseDynamicImport = function(node) {
+	this.next();
+	node.source = this.parseMaybeAssign();
+	if (this.options.ecmaVersion >= 16) {
+		if (!this.eat(types$1.parenR)) {
+			this.expect(types$1.comma);
+			if (!this.afterTrailingComma(types$1.parenR)) {
+				node.options = this.parseMaybeAssign();
+				if (!this.eat(types$1.parenR)) {
+					this.expect(types$1.comma);
+					if (!this.afterTrailingComma(types$1.parenR)) this.unexpected();
+				}
+			} else node.options = null;
+		} else node.options = null;
+	} else if (!this.eat(types$1.parenR)) {
+		var errorPos = this.start;
+		if (this.eat(types$1.comma) && this.eat(types$1.parenR)) this.raiseRecoverable(errorPos, "Trailing comma is not allowed in import()");
+		else this.unexpected(errorPos);
+	}
+	return this.finishNode(node, "ImportExpression");
+};
+pp$5.parseImportMeta = function(node) {
+	this.next();
+	var containsEsc = this.containsEsc;
+	node.property = this.parseIdent(true);
+	if (node.property.name !== "meta") this.raiseRecoverable(node.property.start, "The only valid meta property for import is 'import.meta'");
+	if (containsEsc) this.raiseRecoverable(node.start, "'import.meta' must not contain escaped characters");
+	if (this.options.sourceType !== "module" && !this.options.allowImportExportEverywhere) this.raiseRecoverable(node.start, "Cannot use 'import.meta' outside a module");
+	return this.finishNode(node, "MetaProperty");
+};
+pp$5.parseLiteral = function(value) {
+	var node = this.startNode();
+	node.value = value;
+	node.raw = this.input.slice(this.start, this.end);
+	if (node.raw.charCodeAt(node.raw.length - 1) === 110) node.bigint = node.value != null ? node.value.toString() : node.raw.slice(0, -1).replace(/_/g, "");
+	this.next();
+	return this.finishNode(node, "Literal");
+};
+pp$5.parseParenExpression = function() {
+	this.expect(types$1.parenL);
+	var val = this.parseExpression();
+	this.expect(types$1.parenR);
+	return val;
+};
+pp$5.shouldParseArrow = function(exprList) {
+	return !this.canInsertSemicolon();
+};
+pp$5.parseParenAndDistinguishExpression = function(canBeArrow, forInit) {
+	var startPos = this.start, startLoc = this.startLoc, val, allowTrailingComma = this.options.ecmaVersion >= 8;
+	if (this.options.ecmaVersion >= 6) {
+		this.next();
+		var innerStartPos = this.start, innerStartLoc = this.startLoc;
+		var exprList = [], first = true, lastIsComma = false;
+		var refDestructuringErrors = new DestructuringErrors(), oldYieldPos = this.yieldPos, oldAwaitPos = this.awaitPos, spreadStart;
+		this.yieldPos = 0;
+		this.awaitPos = 0;
+		while (this.type !== types$1.parenR) {
+			first ? first = false : this.expect(types$1.comma);
+			if (allowTrailingComma && this.afterTrailingComma(types$1.parenR, true)) {
+				lastIsComma = true;
+				break;
+			} else if (this.type === types$1.ellipsis) {
+				spreadStart = this.start;
+				exprList.push(this.parseParenItem(this.parseRestBinding()));
+				if (this.type === types$1.comma) this.raiseRecoverable(this.start, "Comma is not permitted after the rest element");
+				break;
+			} else exprList.push(this.parseMaybeAssign(false, refDestructuringErrors, this.parseParenItem));
+		}
+		var innerEndPos = this.lastTokEnd, innerEndLoc = this.lastTokEndLoc;
+		this.expect(types$1.parenR);
+		if (canBeArrow && this.shouldParseArrow(exprList) && this.eat(types$1.arrow)) {
+			this.checkPatternErrors(refDestructuringErrors, false);
+			this.checkYieldAwaitInDefaultParams();
+			this.yieldPos = oldYieldPos;
+			this.awaitPos = oldAwaitPos;
+			return this.parseParenArrowList(startPos, startLoc, exprList, forInit);
+		}
+		if (!exprList.length || lastIsComma) this.unexpected(this.lastTokStart);
+		if (spreadStart) this.unexpected(spreadStart);
+		this.checkExpressionErrors(refDestructuringErrors, true);
+		this.yieldPos = oldYieldPos || this.yieldPos;
+		this.awaitPos = oldAwaitPos || this.awaitPos;
+		if (exprList.length > 1) {
+			val = this.startNodeAt(innerStartPos, innerStartLoc);
+			val.expressions = exprList;
+			this.finishNodeAt(val, "SequenceExpression", innerEndPos, innerEndLoc);
+		} else val = exprList[0];
+	} else val = this.parseParenExpression();
+	if (this.options.preserveParens) {
+		var par = this.startNodeAt(startPos, startLoc);
+		par.expression = val;
+		return this.finishNode(par, "ParenthesizedExpression");
+	} else return val;
+};
+pp$5.parseParenItem = function(item) {
+	return item;
+};
+pp$5.parseParenArrowList = function(startPos, startLoc, exprList, forInit) {
+	return this.parseArrowExpression(this.startNodeAt(startPos, startLoc), exprList, false, forInit);
+};
+var empty = [];
+pp$5.parseNew = function() {
+	if (this.containsEsc) this.raiseRecoverable(this.start, "Escape sequence in keyword new");
+	var node = this.startNode();
+	this.next();
+	if (this.options.ecmaVersion >= 6 && this.type === types$1.dot) {
+		var meta = this.startNodeAt(node.start, node.loc && node.loc.start);
+		meta.name = "new";
+		node.meta = this.finishNode(meta, "Identifier");
+		this.next();
+		var containsEsc = this.containsEsc;
+		node.property = this.parseIdent(true);
+		if (node.property.name !== "target") this.raiseRecoverable(node.property.start, "The only valid meta property for new is 'new.target'");
+		if (containsEsc) this.raiseRecoverable(node.start, "'new.target' must not contain escaped characters");
+		if (!this.allowNewDotTarget) this.raiseRecoverable(node.start, "'new.target' can only be used in functions and class static block");
+		return this.finishNode(node, "MetaProperty");
+	}
+	var startPos = this.start, startLoc = this.startLoc;
+	node.callee = this.parseSubscripts(this.parseExprAtom(null, false, true), startPos, startLoc, true, false);
+	if (node.callee.type === "Super") this.raiseRecoverable(startPos, "Invalid use of 'super'");
+	if (this.eat(types$1.parenL)) node.arguments = this.parseExprList(types$1.parenR, this.options.ecmaVersion >= 8, false);
+	else node.arguments = empty;
+	return this.finishNode(node, "NewExpression");
+};
+pp$5.parseTemplateElement = function(ref) {
+	var isTagged = ref.isTagged;
+	var elem = this.startNode();
+	if (this.type === types$1.invalidTemplate) {
+		if (!isTagged) this.raiseRecoverable(this.start, "Bad escape sequence in untagged template literal");
+		elem.value = {
+			raw: this.value.replace(/\r\n?/g, "\n"),
+			cooked: null
+		};
+	} else elem.value = {
+		raw: this.input.slice(this.start, this.end).replace(/\r\n?/g, "\n"),
+		cooked: this.value
+	};
+	this.next();
+	elem.tail = this.type === types$1.backQuote;
+	return this.finishNode(elem, "TemplateElement");
+};
+pp$5.parseTemplate = function(ref) {
+	if (ref === void 0) ref = {};
+	var isTagged = ref.isTagged;
+	if (isTagged === void 0) isTagged = false;
+	var node = this.startNode();
+	this.next();
+	node.expressions = [];
+	var curElt = this.parseTemplateElement({ isTagged });
+	node.quasis = [curElt];
+	while (!curElt.tail) {
+		if (this.type === types$1.eof) this.raise(this.pos, "Unterminated template literal");
+		this.expect(types$1.dollarBraceL);
+		node.expressions.push(this.parseExpression());
+		this.expect(types$1.braceR);
+		node.quasis.push(curElt = this.parseTemplateElement({ isTagged }));
+	}
+	this.next();
+	return this.finishNode(node, "TemplateLiteral");
+};
+pp$5.isAsyncProp = function(prop) {
+	return !prop.computed && prop.key.type === "Identifier" && prop.key.name === "async" && (this.type === types$1.name || this.type === types$1.num || this.type === types$1.string || this.type === types$1.bracketL || this.type.keyword || this.options.ecmaVersion >= 9 && this.type === types$1.star) && !lineBreak.test(this.input.slice(this.lastTokEnd, this.start));
+};
+pp$5.parseObj = function(isPattern, refDestructuringErrors) {
+	var node = this.startNode(), first = true, propHash = {};
+	node.properties = [];
+	this.next();
+	while (!this.eat(types$1.braceR)) {
+		if (!first) {
+			this.expect(types$1.comma);
+			if (this.options.ecmaVersion >= 5 && this.afterTrailingComma(types$1.braceR)) break;
+		} else first = false;
+		var prop = this.parseProperty(isPattern, refDestructuringErrors);
+		if (!isPattern) this.checkPropClash(prop, propHash, refDestructuringErrors);
+		node.properties.push(prop);
+	}
+	return this.finishNode(node, isPattern ? "ObjectPattern" : "ObjectExpression");
+};
+pp$5.parseProperty = function(isPattern, refDestructuringErrors) {
+	var prop = this.startNode(), isGenerator, isAsync, startPos, startLoc;
+	if (this.options.ecmaVersion >= 9 && this.eat(types$1.ellipsis)) {
+		if (isPattern) {
+			prop.argument = this.parseIdent(false);
+			if (this.type === types$1.comma) this.raiseRecoverable(this.start, "Comma is not permitted after the rest element");
+			return this.finishNode(prop, "RestElement");
+		}
+		prop.argument = this.parseMaybeAssign(false, refDestructuringErrors);
+		if (this.type === types$1.comma && refDestructuringErrors && refDestructuringErrors.trailingComma < 0) refDestructuringErrors.trailingComma = this.start;
+		return this.finishNode(prop, "SpreadElement");
+	}
+	if (this.options.ecmaVersion >= 6) {
+		prop.method = false;
+		prop.shorthand = false;
+		if (isPattern || refDestructuringErrors) {
+			startPos = this.start;
+			startLoc = this.startLoc;
+		}
+		if (!isPattern) isGenerator = this.eat(types$1.star);
+	}
+	var containsEsc = this.containsEsc;
+	this.parsePropertyName(prop);
+	if (!isPattern && !containsEsc && this.options.ecmaVersion >= 8 && !isGenerator && this.isAsyncProp(prop)) {
+		isAsync = true;
+		isGenerator = this.options.ecmaVersion >= 9 && this.eat(types$1.star);
+		this.parsePropertyName(prop);
+	} else isAsync = false;
+	this.parsePropertyValue(prop, isPattern, isGenerator, isAsync, startPos, startLoc, refDestructuringErrors, containsEsc);
+	return this.finishNode(prop, "Property");
+};
+pp$5.parseGetterSetter = function(prop) {
+	var kind = prop.key.name;
+	this.parsePropertyName(prop);
+	prop.value = this.parseMethod(false);
+	prop.kind = kind;
+	var paramCount = prop.kind === "get" ? 0 : 1;
+	if (prop.value.params.length !== paramCount) {
+		var start = prop.value.start;
+		if (prop.kind === "get") this.raiseRecoverable(start, "getter should have no params");
+		else this.raiseRecoverable(start, "setter should have exactly one param");
+	} else if (prop.kind === "set" && prop.value.params[0].type === "RestElement") this.raiseRecoverable(prop.value.params[0].start, "Setter cannot use rest params");
+};
+pp$5.parsePropertyValue = function(prop, isPattern, isGenerator, isAsync, startPos, startLoc, refDestructuringErrors, containsEsc) {
+	if ((isGenerator || isAsync) && this.type === types$1.colon) this.unexpected();
+	if (this.eat(types$1.colon)) {
+		prop.value = isPattern ? this.parseMaybeDefault(this.start, this.startLoc) : this.parseMaybeAssign(false, refDestructuringErrors);
+		prop.kind = "init";
+	} else if (this.options.ecmaVersion >= 6 && this.type === types$1.parenL) {
+		if (isPattern) this.unexpected();
+		prop.method = true;
+		prop.value = this.parseMethod(isGenerator, isAsync);
+		prop.kind = "init";
+	} else if (!isPattern && !containsEsc && this.options.ecmaVersion >= 5 && !prop.computed && prop.key.type === "Identifier" && (prop.key.name === "get" || prop.key.name === "set") && this.type !== types$1.comma && this.type !== types$1.braceR && this.type !== types$1.eq) {
+		if (isGenerator || isAsync) this.unexpected();
+		this.parseGetterSetter(prop);
+	} else if (this.options.ecmaVersion >= 6 && !prop.computed && prop.key.type === "Identifier") {
+		if (isGenerator || isAsync) this.unexpected();
+		this.checkUnreserved(prop.key);
+		if (prop.key.name === "await" && !this.awaitIdentPos) this.awaitIdentPos = startPos;
+		if (isPattern) prop.value = this.parseMaybeDefault(startPos, startLoc, this.copyNode(prop.key));
+		else if (this.type === types$1.eq && refDestructuringErrors) {
+			if (refDestructuringErrors.shorthandAssign < 0) refDestructuringErrors.shorthandAssign = this.start;
+			prop.value = this.parseMaybeDefault(startPos, startLoc, this.copyNode(prop.key));
+		} else prop.value = this.copyNode(prop.key);
+		prop.kind = "init";
+		prop.shorthand = true;
+	} else this.unexpected();
+};
+pp$5.parsePropertyName = function(prop) {
+	if (this.options.ecmaVersion >= 6) {
+		if (this.eat(types$1.bracketL)) {
+			prop.computed = true;
+			prop.key = this.parseMaybeAssign();
+			this.expect(types$1.bracketR);
+			return prop.key;
+		} else prop.computed = false;
+	}
+	return prop.key = this.type === types$1.num || this.type === types$1.string ? this.parseExprAtom() : this.parseIdent(this.options.allowReserved !== "never");
+};
+pp$5.initFunction = function(node) {
+	node.id = null;
+	if (this.options.ecmaVersion >= 6) node.generator = node.expression = false;
+	if (this.options.ecmaVersion >= 8) node.async = false;
+};
+pp$5.parseMethod = function(isGenerator, isAsync, allowDirectSuper) {
+	var node = this.startNode(), oldYieldPos = this.yieldPos, oldAwaitPos = this.awaitPos, oldAwaitIdentPos = this.awaitIdentPos;
+	this.initFunction(node);
+	if (this.options.ecmaVersion >= 6) node.generator = isGenerator;
+	if (this.options.ecmaVersion >= 8) node.async = !!isAsync;
+	this.yieldPos = 0;
+	this.awaitPos = 0;
+	this.awaitIdentPos = 0;
+	this.enterScope(functionFlags(isAsync, node.generator) | SCOPE_SUPER | (allowDirectSuper ? SCOPE_DIRECT_SUPER : 0));
+	this.expect(types$1.parenL);
+	node.params = this.parseBindingList(types$1.parenR, false, this.options.ecmaVersion >= 8);
+	this.checkYieldAwaitInDefaultParams();
+	this.parseFunctionBody(node, false, true, false);
+	this.yieldPos = oldYieldPos;
+	this.awaitPos = oldAwaitPos;
+	this.awaitIdentPos = oldAwaitIdentPos;
+	return this.finishNode(node, "FunctionExpression");
+};
+pp$5.parseArrowExpression = function(node, params, isAsync, forInit) {
+	var oldYieldPos = this.yieldPos, oldAwaitPos = this.awaitPos, oldAwaitIdentPos = this.awaitIdentPos;
+	this.enterScope(functionFlags(isAsync, false) | SCOPE_ARROW);
+	this.initFunction(node);
+	if (this.options.ecmaVersion >= 8) node.async = !!isAsync;
+	this.yieldPos = 0;
+	this.awaitPos = 0;
+	this.awaitIdentPos = 0;
+	node.params = this.toAssignableList(params, true);
+	this.parseFunctionBody(node, true, false, forInit);
+	this.yieldPos = oldYieldPos;
+	this.awaitPos = oldAwaitPos;
+	this.awaitIdentPos = oldAwaitIdentPos;
+	return this.finishNode(node, "ArrowFunctionExpression");
+};
+pp$5.parseFunctionBody = function(node, isArrowFunction, isMethod, forInit) {
+	var isExpression = isArrowFunction && this.type !== types$1.braceL;
+	var oldStrict = this.strict, useStrict = false;
+	if (isExpression) {
+		node.body = this.parseMaybeAssign(forInit);
+		node.expression = true;
+		this.checkParams(node, false);
+	} else {
+		var nonSimple = this.options.ecmaVersion >= 7 && !this.isSimpleParamList(node.params);
+		if (!oldStrict || nonSimple) {
+			useStrict = this.strictDirective(this.end);
+			if (useStrict && nonSimple) this.raiseRecoverable(node.start, "Illegal 'use strict' directive in function with non-simple parameter list");
+		}
+		var oldLabels = this.labels;
+		this.labels = [];
+		if (useStrict) this.strict = true;
+		this.checkParams(node, !oldStrict && !useStrict && !isArrowFunction && !isMethod && this.isSimpleParamList(node.params));
+		if (this.strict && node.id) this.checkLValSimple(node.id, BIND_OUTSIDE);
+		node.body = this.parseBlock(false, void 0, useStrict && !oldStrict);
+		node.expression = false;
+		this.adaptDirectivePrologue(node.body.body);
+		this.labels = oldLabels;
+	}
+	this.exitScope();
+};
+pp$5.isSimpleParamList = function(params) {
+	for (var i = 0, list = params; i < list.length; i += 1) if (list[i].type !== "Identifier") return false;
+	return true;
+};
+pp$5.checkParams = function(node, allowDuplicates) {
+	var nameHash = Object.create(null);
+	for (var i = 0, list = node.params; i < list.length; i += 1) {
+		var param = list[i];
+		this.checkLValInnerPattern(param, BIND_VAR, allowDuplicates ? null : nameHash);
+	}
+};
+pp$5.parseExprList = function(close, allowTrailingComma, allowEmpty, refDestructuringErrors) {
+	var elts = [], first = true;
+	while (!this.eat(close)) {
+		if (!first) {
+			this.expect(types$1.comma);
+			if (allowTrailingComma && this.afterTrailingComma(close)) break;
+		} else first = false;
+		var elt = void 0;
+		if (allowEmpty && this.type === types$1.comma) elt = null;
+		else if (this.type === types$1.ellipsis) {
+			elt = this.parseSpread(refDestructuringErrors);
+			if (refDestructuringErrors && this.type === types$1.comma && refDestructuringErrors.trailingComma < 0) refDestructuringErrors.trailingComma = this.start;
+		} else elt = this.parseMaybeAssign(false, refDestructuringErrors);
+		elts.push(elt);
+	}
+	return elts;
+};
+pp$5.checkUnreserved = function(ref) {
+	var start = ref.start;
+	var end = ref.end;
+	var name = ref.name;
+	if (this.inGenerator && name === "yield") this.raiseRecoverable(start, "Cannot use 'yield' as identifier inside a generator");
+	if (this.inAsync && name === "await") this.raiseRecoverable(start, "Cannot use 'await' as identifier inside an async function");
+	if (!(this.currentThisScope().flags & SCOPE_VAR) && name === "arguments") this.raiseRecoverable(start, "Cannot use 'arguments' in class field initializer");
+	if (this.inClassStaticBlock && (name === "arguments" || name === "await")) this.raise(start, "Cannot use " + name + " in class static initialization block");
+	if (this.keywords.test(name)) this.raise(start, "Unexpected keyword '" + name + "'");
+	if (this.options.ecmaVersion < 6 && this.input.slice(start, end).indexOf("\\") !== -1) return;
+	if ((this.strict ? this.reservedWordsStrict : this.reservedWords).test(name)) {
+		if (!this.inAsync && name === "await") this.raiseRecoverable(start, "Cannot use keyword 'await' outside an async function");
+		this.raiseRecoverable(start, "The keyword '" + name + "' is reserved");
+	}
+};
+pp$5.parseIdent = function(liberal) {
+	var node = this.parseIdentNode();
+	this.next(!!liberal);
+	this.finishNode(node, "Identifier");
+	if (!liberal) {
+		this.checkUnreserved(node);
+		if (node.name === "await" && !this.awaitIdentPos) this.awaitIdentPos = node.start;
+	}
+	return node;
+};
+pp$5.parseIdentNode = function() {
+	var node = this.startNode();
+	if (this.type === types$1.name) node.name = this.value;
+	else if (this.type.keyword) {
+		node.name = this.type.keyword;
+		if ((node.name === "class" || node.name === "function") && (this.lastTokEnd !== this.lastTokStart + 1 || this.input.charCodeAt(this.lastTokStart) !== 46)) this.context.pop();
+		this.type = types$1.name;
+	} else this.unexpected();
+	return node;
+};
+pp$5.parsePrivateIdent = function() {
+	var node = this.startNode();
+	if (this.type === types$1.privateId) node.name = this.value;
+	else this.unexpected();
+	this.next();
+	this.finishNode(node, "PrivateIdentifier");
+	if (this.options.checkPrivateFields) {
+		if (this.privateNameStack.length === 0) this.raise(node.start, "Private field '#" + node.name + "' must be declared in an enclosing class");
+		else this.privateNameStack[this.privateNameStack.length - 1].used.push(node);
+	}
+	return node;
+};
+pp$5.parseYield = function(forInit) {
+	if (!this.yieldPos) this.yieldPos = this.start;
+	var node = this.startNode();
+	this.next();
+	if (this.type === types$1.semi || this.canInsertSemicolon() || this.type !== types$1.star && !this.type.startsExpr) {
+		node.delegate = false;
+		node.argument = null;
+	} else {
+		node.delegate = this.eat(types$1.star);
+		node.argument = this.parseMaybeAssign(forInit);
+	}
+	return this.finishNode(node, "YieldExpression");
+};
+pp$5.parseAwait = function(forInit) {
+	if (!this.awaitPos) this.awaitPos = this.start;
+	var node = this.startNode();
+	this.next();
+	node.argument = this.parseMaybeUnary(null, true, false, forInit);
+	return this.finishNode(node, "AwaitExpression");
+};
+var pp$4 = Parser$3.prototype;
+pp$4.raise = function(pos, message) {
+	var loc = getLineInfo(this.input, pos);
+	message += " (" + loc.line + ":" + loc.column + ")";
+	if (this.sourceFile) message += " in " + this.sourceFile;
+	var err = new SyntaxError(message);
+	err.pos = pos;
+	err.loc = loc;
+	err.raisedAt = this.pos;
+	throw err;
+};
+pp$4.raiseRecoverable = pp$4.raise;
+pp$4.curPosition = function() {
+	if (this.options.locations) return new Position(this.curLine, this.pos - this.lineStart);
+};
+var pp$3 = Parser$3.prototype;
+var Scope = function Scope(flags) {
+	this.flags = flags;
+	this.var = [];
+	this.lexical = [];
+	this.functions = [];
+};
+pp$3.enterScope = function(flags) {
+	this.scopeStack.push(new Scope(flags));
+};
+pp$3.exitScope = function() {
+	this.scopeStack.pop();
+};
+pp$3.treatFunctionsAsVarInScope = function(scope) {
+	return scope.flags & SCOPE_FUNCTION || !this.inModule && scope.flags & SCOPE_TOP;
+};
+pp$3.declareName = function(name, bindingType, pos) {
+	var redeclared = false;
+	if (bindingType === BIND_LEXICAL) {
+		var scope = this.currentScope();
+		redeclared = scope.lexical.indexOf(name) > -1 || scope.functions.indexOf(name) > -1 || scope.var.indexOf(name) > -1;
+		scope.lexical.push(name);
+		if (this.inModule && scope.flags & SCOPE_TOP) delete this.undefinedExports[name];
+	} else if (bindingType === BIND_SIMPLE_CATCH) this.currentScope().lexical.push(name);
+	else if (bindingType === BIND_FUNCTION) {
+		var scope$2 = this.currentScope();
+		if (this.treatFunctionsAsVar) redeclared = scope$2.lexical.indexOf(name) > -1;
+		else redeclared = scope$2.lexical.indexOf(name) > -1 || scope$2.var.indexOf(name) > -1;
+		scope$2.functions.push(name);
+	} else for (var i = this.scopeStack.length - 1; i >= 0; --i) {
+		var scope$3 = this.scopeStack[i];
+		if (scope$3.lexical.indexOf(name) > -1 && !(scope$3.flags & SCOPE_SIMPLE_CATCH && scope$3.lexical[0] === name) || !this.treatFunctionsAsVarInScope(scope$3) && scope$3.functions.indexOf(name) > -1) {
+			redeclared = true;
+			break;
+		}
+		scope$3.var.push(name);
+		if (this.inModule && scope$3.flags & SCOPE_TOP) delete this.undefinedExports[name];
+		if (scope$3.flags & SCOPE_VAR) break;
+	}
+	if (redeclared) this.raiseRecoverable(pos, "Identifier '" + name + "' has already been declared");
+};
+pp$3.checkLocalExport = function(id) {
+	if (this.scopeStack[0].lexical.indexOf(id.name) === -1 && this.scopeStack[0].var.indexOf(id.name) === -1) this.undefinedExports[id.name] = id;
+};
+pp$3.currentScope = function() {
+	return this.scopeStack[this.scopeStack.length - 1];
+};
+pp$3.currentVarScope = function() {
+	for (var i = this.scopeStack.length - 1;; i--) {
+		var scope = this.scopeStack[i];
+		if (scope.flags & (SCOPE_VAR | SCOPE_CLASS_FIELD_INIT | SCOPE_CLASS_STATIC_BLOCK)) return scope;
+	}
+};
+pp$3.currentThisScope = function() {
+	for (var i = this.scopeStack.length - 1;; i--) {
+		var scope = this.scopeStack[i];
+		if (scope.flags & (SCOPE_VAR | SCOPE_CLASS_FIELD_INIT | SCOPE_CLASS_STATIC_BLOCK) && !(scope.flags & SCOPE_ARROW)) return scope;
+	}
+};
+var Node$4 = function Node(parser, pos, loc) {
+	this.type = "";
+	this.start = pos;
+	this.end = 0;
+	if (parser.options.locations) this.loc = new SourceLocation(parser, loc);
+	if (parser.options.directSourceFile) this.sourceFile = parser.options.directSourceFile;
+	if (parser.options.ranges) this.range = [pos, 0];
+};
+var pp$2 = Parser$3.prototype;
+pp$2.startNode = function() {
+	return new Node$4(this, this.start, this.startLoc);
+};
+pp$2.startNodeAt = function(pos, loc) {
+	return new Node$4(this, pos, loc);
+};
+function finishNodeAt(node, type, pos, loc) {
+	node.type = type;
+	node.end = pos;
+	if (this.options.locations) node.loc.end = loc;
+	if (this.options.ranges) node.range[1] = pos;
+	return node;
+}
+pp$2.finishNode = function(node, type) {
+	return finishNodeAt.call(this, node, type, this.lastTokEnd, this.lastTokEndLoc);
+};
+pp$2.finishNodeAt = function(node, type, pos, loc) {
+	return finishNodeAt.call(this, node, type, pos, loc);
+};
+pp$2.copyNode = function(node) {
+	var newNode = new Node$4(this, node.start, this.startLoc);
+	for (var prop in node) newNode[prop] = node[prop];
+	return newNode;
+};
+var scriptValuesAddedInUnicode = "Berf Beria_Erfe Gara Garay Gukh Gurung_Khema Hrkt Katakana_Or_Hiragana Kawi Kirat_Rai Krai Nag_Mundari Nagm Ol_Onal Onao Sidetic Sidt Sunu Sunuwar Tai_Yo Tayo Todhri Todr Tolong_Siki Tols Tulu_Tigalari Tutg Unknown Zzzz";
+var ecma9BinaryProperties = "ASCII ASCII_Hex_Digit AHex Alphabetic Alpha Any Assigned Bidi_Control Bidi_C Bidi_Mirrored Bidi_M Case_Ignorable CI Cased Changes_When_Casefolded CWCF Changes_When_Casemapped CWCM Changes_When_Lowercased CWL Changes_When_NFKC_Casefolded CWKCF Changes_When_Titlecased CWT Changes_When_Uppercased CWU Dash Default_Ignorable_Code_Point DI Deprecated Dep Diacritic Dia Emoji Emoji_Component Emoji_Modifier Emoji_Modifier_Base Emoji_Presentation Extender Ext Grapheme_Base Gr_Base Grapheme_Extend Gr_Ext Hex_Digit Hex IDS_Binary_Operator IDSB IDS_Trinary_Operator IDST ID_Continue IDC ID_Start IDS Ideographic Ideo Join_Control Join_C Logical_Order_Exception LOE Lowercase Lower Math Noncharacter_Code_Point NChar Pattern_Syntax Pat_Syn Pattern_White_Space Pat_WS Quotation_Mark QMark Radical Regional_Indicator RI Sentence_Terminal STerm Soft_Dotted SD Terminal_Punctuation Term Unified_Ideograph UIdeo Uppercase Upper Variation_Selector VS White_Space space XID_Continue XIDC XID_Start XIDS";
+var ecma10BinaryProperties = ecma9BinaryProperties + " Extended_Pictographic";
+var ecma11BinaryProperties = ecma10BinaryProperties;
+var ecma12BinaryProperties = ecma11BinaryProperties + " EBase EComp EMod EPres ExtPict";
+var ecma13BinaryProperties = ecma12BinaryProperties;
+var unicodeBinaryProperties = {
+	9: ecma9BinaryProperties,
+	10: ecma10BinaryProperties,
+	11: ecma11BinaryProperties,
+	12: ecma12BinaryProperties,
+	13: ecma13BinaryProperties,
+	14: ecma13BinaryProperties
+};
+var unicodeBinaryPropertiesOfStrings = {
+	9: "",
+	10: "",
+	11: "",
+	12: "",
+	13: "",
+	14: "Basic_Emoji Emoji_Keycap_Sequence RGI_Emoji_Modifier_Sequence RGI_Emoji_Flag_Sequence RGI_Emoji_Tag_Sequence RGI_Emoji_ZWJ_Sequence RGI_Emoji"
+};
+var unicodeGeneralCategoryValues = "Cased_Letter LC Close_Punctuation Pe Connector_Punctuation Pc Control Cc cntrl Currency_Symbol Sc Dash_Punctuation Pd Decimal_Number Nd digit Enclosing_Mark Me Final_Punctuation Pf Format Cf Initial_Punctuation Pi Letter L Letter_Number Nl Line_Separator Zl Lowercase_Letter Ll Mark M Combining_Mark Math_Symbol Sm Modifier_Letter Lm Modifier_Symbol Sk Nonspacing_Mark Mn Number N Open_Punctuation Ps Other C Other_Letter Lo Other_Number No Other_Punctuation Po Other_Symbol So Paragraph_Separator Zp Private_Use Co Punctuation P punct Separator Z Space_Separator Zs Spacing_Mark Mc Surrogate Cs Symbol S Titlecase_Letter Lt Unassigned Cn Uppercase_Letter Lu";
+var ecma9ScriptValues = "Adlam Adlm Ahom Anatolian_Hieroglyphs Hluw Arabic Arab Armenian Armn Avestan Avst Balinese Bali Bamum Bamu Bassa_Vah Bass Batak Batk Bengali Beng Bhaiksuki Bhks Bopomofo Bopo Brahmi Brah Braille Brai Buginese Bugi Buhid Buhd Canadian_Aboriginal Cans Carian Cari Caucasian_Albanian Aghb Chakma Cakm Cham Cham Cherokee Cher Common Zyyy Coptic Copt Qaac Cuneiform Xsux Cypriot Cprt Cyrillic Cyrl Deseret Dsrt Devanagari Deva Duployan Dupl Egyptian_Hieroglyphs Egyp Elbasan Elba Ethiopic Ethi Georgian Geor Glagolitic Glag Gothic Goth Grantha Gran Greek Grek Gujarati Gujr Gurmukhi Guru Han Hani Hangul Hang Hanunoo Hano Hatran Hatr Hebrew Hebr Hiragana Hira Imperial_Aramaic Armi Inherited Zinh Qaai Inscriptional_Pahlavi Phli Inscriptional_Parthian Prti Javanese Java Kaithi Kthi Kannada Knda Katakana Kana Kayah_Li Kali Kharoshthi Khar Khmer Khmr Khojki Khoj Khudawadi Sind Lao Laoo Latin Latn Lepcha Lepc Limbu Limb Linear_A Lina Linear_B Linb Lisu Lisu Lycian Lyci Lydian Lydi Mahajani Mahj Malayalam Mlym Mandaic Mand Manichaean Mani Marchen Marc Masaram_Gondi Gonm Meetei_Mayek Mtei Mende_Kikakui Mend Meroitic_Cursive Merc Meroitic_Hieroglyphs Mero Miao Plrd Modi Mongolian Mong Mro Mroo Multani Mult Myanmar Mymr Nabataean Nbat New_Tai_Lue Talu Newa Newa Nko Nkoo Nushu Nshu Ogham Ogam Ol_Chiki Olck Old_Hungarian Hung Old_Italic Ital Old_North_Arabian Narb Old_Permic Perm Old_Persian Xpeo Old_South_Arabian Sarb Old_Turkic Orkh Oriya Orya Osage Osge Osmanya Osma Pahawh_Hmong Hmng Palmyrene Palm Pau_Cin_Hau Pauc Phags_Pa Phag Phoenician Phnx Psalter_Pahlavi Phlp Rejang Rjng Runic Runr Samaritan Samr Saurashtra Saur Sharada Shrd Shavian Shaw Siddham Sidd SignWriting Sgnw Sinhala Sinh Sora_Sompeng Sora Soyombo Soyo Sundanese Sund Syloti_Nagri Sylo Syriac Syrc Tagalog Tglg Tagbanwa Tagb Tai_Le Tale Tai_Tham Lana Tai_Viet Tavt Takri Takr Tamil Taml Tangut Tang Telugu Telu Thaana Thaa Thai Thai Tibetan Tibt Tifinagh Tfng Tirhuta Tirh Ugaritic Ugar Vai Vaii Warang_Citi Wara Yi Yiii Zanabazar_Square Zanb";
+var ecma10ScriptValues = ecma9ScriptValues + " Dogra Dogr Gunjala_Gondi Gong Hanifi_Rohingya Rohg Makasar Maka Medefaidrin Medf Old_Sogdian Sogo Sogdian Sogd";
+var ecma11ScriptValues = ecma10ScriptValues + " Elymaic Elym Nandinagari Nand Nyiakeng_Puachue_Hmong Hmnp Wancho Wcho";
+var ecma12ScriptValues = ecma11ScriptValues + " Chorasmian Chrs Diak Dives_Akuru Khitan_Small_Script Kits Yezi Yezidi";
+var ecma13ScriptValues = ecma12ScriptValues + " Cypro_Minoan Cpmn Old_Uyghur Ougr Tangsa Tnsa Toto Vithkuqi Vith";
+var unicodeScriptValues = {
+	9: ecma9ScriptValues,
+	10: ecma10ScriptValues,
+	11: ecma11ScriptValues,
+	12: ecma12ScriptValues,
+	13: ecma13ScriptValues,
+	14: ecma13ScriptValues + " " + scriptValuesAddedInUnicode
+};
+var data = {};
+function buildUnicodeData(ecmaVersion) {
+	var d = data[ecmaVersion] = {
+		binary: wordsRegexp(unicodeBinaryProperties[ecmaVersion] + " " + unicodeGeneralCategoryValues),
+		binaryOfStrings: wordsRegexp(unicodeBinaryPropertiesOfStrings[ecmaVersion]),
+		nonBinary: {
+			General_Category: wordsRegexp(unicodeGeneralCategoryValues),
+			Script: wordsRegexp(unicodeScriptValues[ecmaVersion])
+		}
+	};
+	d.nonBinary.Script_Extensions = d.nonBinary.Script;
+	d.nonBinary.gc = d.nonBinary.General_Category;
+	d.nonBinary.sc = d.nonBinary.Script;
+	d.nonBinary.scx = d.nonBinary.Script_Extensions;
+}
+for (var i$2 = 0, list = [
+	9,
+	10,
+	11,
+	12,
+	13,
+	14
+]; i$2 < list.length; i$2 += 1) {
+	var ecmaVersion = list[i$2];
+	buildUnicodeData(ecmaVersion);
+}
+var pp$1 = Parser$3.prototype;
+var BranchID = function BranchID(parent, base) {
+	this.parent = parent;
+	this.base = base || this;
+};
+BranchID.prototype.separatedFrom = function separatedFrom(alt) {
+	for (var self = this; self; self = self.parent) for (var other = alt; other; other = other.parent) if (self.base === other.base && self !== other) return true;
+	return false;
+};
+BranchID.prototype.sibling = function sibling() {
+	return new BranchID(this.parent, this.base);
+};
+var RegExpValidationState = function RegExpValidationState(parser) {
+	this.parser = parser;
+	this.validFlags = "gim" + (parser.options.ecmaVersion >= 6 ? "uy" : "") + (parser.options.ecmaVersion >= 9 ? "s" : "") + (parser.options.ecmaVersion >= 13 ? "d" : "") + (parser.options.ecmaVersion >= 15 ? "v" : "");
+	this.unicodeProperties = data[parser.options.ecmaVersion >= 14 ? 14 : parser.options.ecmaVersion];
+	this.source = "";
+	this.flags = "";
+	this.start = 0;
+	this.switchU = false;
+	this.switchV = false;
+	this.switchN = false;
+	this.pos = 0;
+	this.lastIntValue = 0;
+	this.lastStringValue = "";
+	this.lastAssertionIsQuantifiable = false;
+	this.numCapturingParens = 0;
+	this.maxBackReference = 0;
+	this.groupNames = Object.create(null);
+	this.backReferenceNames = [];
+	this.branchID = null;
+};
+RegExpValidationState.prototype.reset = function reset(start, pattern, flags) {
+	var unicodeSets = flags.indexOf("v") !== -1;
+	var unicode = flags.indexOf("u") !== -1;
+	this.start = start | 0;
+	this.source = pattern + "";
+	this.flags = flags;
+	if (unicodeSets && this.parser.options.ecmaVersion >= 15) {
+		this.switchU = true;
+		this.switchV = true;
+		this.switchN = true;
+	} else {
+		this.switchU = unicode && this.parser.options.ecmaVersion >= 6;
+		this.switchV = false;
+		this.switchN = unicode && this.parser.options.ecmaVersion >= 9;
+	}
+};
+RegExpValidationState.prototype.raise = function raise(message) {
+	this.parser.raiseRecoverable(this.start, "Invalid regular expression: /" + this.source + "/: " + message);
+};
+RegExpValidationState.prototype.at = function at(i, forceU) {
+	if (forceU === void 0) forceU = false;
+	var s = this.source;
+	var l = s.length;
+	if (i >= l) return -1;
+	var c = s.charCodeAt(i);
+	if (!(forceU || this.switchU) || c <= 55295 || c >= 57344 || i + 1 >= l) return c;
+	var next = s.charCodeAt(i + 1);
+	return next >= 56320 && next <= 57343 ? (c << 10) + next - 56613888 : c;
+};
+RegExpValidationState.prototype.nextIndex = function nextIndex(i, forceU) {
+	if (forceU === void 0) forceU = false;
+	var s = this.source;
+	var l = s.length;
+	if (i >= l) return l;
+	var c = s.charCodeAt(i), next;
+	if (!(forceU || this.switchU) || c <= 55295 || c >= 57344 || i + 1 >= l || (next = s.charCodeAt(i + 1)) < 56320 || next > 57343) return i + 1;
+	return i + 2;
+};
+RegExpValidationState.prototype.current = function current(forceU) {
+	if (forceU === void 0) forceU = false;
+	return this.at(this.pos, forceU);
+};
+RegExpValidationState.prototype.lookahead = function lookahead(forceU) {
+	if (forceU === void 0) forceU = false;
+	return this.at(this.nextIndex(this.pos, forceU), forceU);
+};
+RegExpValidationState.prototype.advance = function advance(forceU) {
+	if (forceU === void 0) forceU = false;
+	this.pos = this.nextIndex(this.pos, forceU);
+};
+RegExpValidationState.prototype.eat = function eat(ch, forceU) {
+	if (forceU === void 0) forceU = false;
+	if (this.current(forceU) === ch) {
+		this.advance(forceU);
+		return true;
+	}
+	return false;
+};
+RegExpValidationState.prototype.eatChars = function eatChars(chs, forceU) {
+	if (forceU === void 0) forceU = false;
+	var pos = this.pos;
+	for (var i = 0, list = chs; i < list.length; i += 1) {
+		var ch = list[i];
+		var current = this.at(pos, forceU);
+		if (current === -1 || current !== ch) return false;
+		pos = this.nextIndex(pos, forceU);
+	}
+	this.pos = pos;
+	return true;
+};
+/**
+* Validate the flags part of a given RegExpLiteral.
+*
+* @param {RegExpValidationState} state The state to validate RegExp.
+* @returns {void}
+*/
+pp$1.validateRegExpFlags = function(state) {
+	var validFlags = state.validFlags;
+	var flags = state.flags;
+	var u = false;
+	var v = false;
+	for (var i = 0; i < flags.length; i++) {
+		var flag = flags.charAt(i);
+		if (validFlags.indexOf(flag) === -1) this.raise(state.start, "Invalid regular expression flag");
+		if (flags.indexOf(flag, i + 1) > -1) this.raise(state.start, "Duplicate regular expression flag");
+		if (flag === "u") u = true;
+		if (flag === "v") v = true;
+	}
+	if (this.options.ecmaVersion >= 15 && u && v) this.raise(state.start, "Invalid regular expression flag");
+};
+function hasProp(obj) {
+	for (var _ in obj) return true;
+	return false;
+}
+/**
+* Validate the pattern part of a given RegExpLiteral.
+*
+* @param {RegExpValidationState} state The state to validate RegExp.
+* @returns {void}
+*/
+pp$1.validateRegExpPattern = function(state) {
+	this.regexp_pattern(state);
+	if (!state.switchN && this.options.ecmaVersion >= 9 && hasProp(state.groupNames)) {
+		state.switchN = true;
+		this.regexp_pattern(state);
+	}
+};
+pp$1.regexp_pattern = function(state) {
+	state.pos = 0;
+	state.lastIntValue = 0;
+	state.lastStringValue = "";
+	state.lastAssertionIsQuantifiable = false;
+	state.numCapturingParens = 0;
+	state.maxBackReference = 0;
+	state.groupNames = Object.create(null);
+	state.backReferenceNames.length = 0;
+	state.branchID = null;
+	this.regexp_disjunction(state);
+	if (state.pos !== state.source.length) {
+		if (state.eat(41)) state.raise("Unmatched ')'");
+		if (state.eat(93) || state.eat(125)) state.raise("Lone quantifier brackets");
+	}
+	if (state.maxBackReference > state.numCapturingParens) state.raise("Invalid escape");
+	for (var i = 0, list = state.backReferenceNames; i < list.length; i += 1) {
+		var name = list[i];
+		if (!state.groupNames[name]) state.raise("Invalid named capture referenced");
+	}
+};
+pp$1.regexp_disjunction = function(state) {
+	var trackDisjunction = this.options.ecmaVersion >= 16;
+	if (trackDisjunction) state.branchID = new BranchID(state.branchID, null);
+	this.regexp_alternative(state);
+	while (state.eat(124)) {
+		if (trackDisjunction) state.branchID = state.branchID.sibling();
+		this.regexp_alternative(state);
+	}
+	if (trackDisjunction) state.branchID = state.branchID.parent;
+	if (this.regexp_eatQuantifier(state, true)) state.raise("Nothing to repeat");
+	if (state.eat(123)) state.raise("Lone quantifier brackets");
+};
+pp$1.regexp_alternative = function(state) {
+	while (state.pos < state.source.length && this.regexp_eatTerm(state));
+};
+pp$1.regexp_eatTerm = function(state) {
+	if (this.regexp_eatAssertion(state)) {
+		if (state.lastAssertionIsQuantifiable && this.regexp_eatQuantifier(state)) {
+			if (state.switchU) state.raise("Invalid quantifier");
+		}
+		return true;
+	}
+	if (state.switchU ? this.regexp_eatAtom(state) : this.regexp_eatExtendedAtom(state)) {
+		this.regexp_eatQuantifier(state);
+		return true;
+	}
+	return false;
+};
+pp$1.regexp_eatAssertion = function(state) {
+	var start = state.pos;
+	state.lastAssertionIsQuantifiable = false;
+	if (state.eat(94) || state.eat(36)) return true;
+	if (state.eat(92)) {
+		if (state.eat(66) || state.eat(98)) return true;
+		state.pos = start;
+	}
+	if (state.eat(40) && state.eat(63)) {
+		var lookbehind = false;
+		if (this.options.ecmaVersion >= 9) lookbehind = state.eat(60);
+		if (state.eat(61) || state.eat(33)) {
+			this.regexp_disjunction(state);
+			if (!state.eat(41)) state.raise("Unterminated group");
+			state.lastAssertionIsQuantifiable = !lookbehind;
+			return true;
+		}
+	}
+	state.pos = start;
+	return false;
+};
+pp$1.regexp_eatQuantifier = function(state, noError) {
+	if (noError === void 0) noError = false;
+	if (this.regexp_eatQuantifierPrefix(state, noError)) {
+		state.eat(63);
+		return true;
+	}
+	return false;
+};
+pp$1.regexp_eatQuantifierPrefix = function(state, noError) {
+	return state.eat(42) || state.eat(43) || state.eat(63) || this.regexp_eatBracedQuantifier(state, noError);
+};
+pp$1.regexp_eatBracedQuantifier = function(state, noError) {
+	var start = state.pos;
+	if (state.eat(123)) {
+		var min = 0, max = -1;
+		if (this.regexp_eatDecimalDigits(state)) {
+			min = state.lastIntValue;
+			if (state.eat(44) && this.regexp_eatDecimalDigits(state)) max = state.lastIntValue;
+			if (state.eat(125)) {
+				if (max !== -1 && max < min && !noError) state.raise("numbers out of order in {} quantifier");
+				return true;
+			}
+		}
+		if (state.switchU && !noError) state.raise("Incomplete quantifier");
+		state.pos = start;
+	}
+	return false;
+};
+pp$1.regexp_eatAtom = function(state) {
+	return this.regexp_eatPatternCharacters(state) || state.eat(46) || this.regexp_eatReverseSolidusAtomEscape(state) || this.regexp_eatCharacterClass(state) || this.regexp_eatUncapturingGroup(state) || this.regexp_eatCapturingGroup(state);
+};
+pp$1.regexp_eatReverseSolidusAtomEscape = function(state) {
+	var start = state.pos;
+	if (state.eat(92)) {
+		if (this.regexp_eatAtomEscape(state)) return true;
+		state.pos = start;
+	}
+	return false;
+};
+pp$1.regexp_eatUncapturingGroup = function(state) {
+	var start = state.pos;
+	if (state.eat(40)) {
+		if (state.eat(63)) {
+			if (this.options.ecmaVersion >= 16) {
+				var addModifiers = this.regexp_eatModifiers(state);
+				var hasHyphen = state.eat(45);
+				if (addModifiers || hasHyphen) {
+					for (var i = 0; i < addModifiers.length; i++) {
+						var modifier = addModifiers.charAt(i);
+						if (addModifiers.indexOf(modifier, i + 1) > -1) state.raise("Duplicate regular expression modifiers");
+					}
+					if (hasHyphen) {
+						var removeModifiers = this.regexp_eatModifiers(state);
+						if (!addModifiers && !removeModifiers && state.current() === 58) state.raise("Invalid regular expression modifiers");
+						for (var i$1 = 0; i$1 < removeModifiers.length; i$1++) {
+							var modifier$1 = removeModifiers.charAt(i$1);
+							if (removeModifiers.indexOf(modifier$1, i$1 + 1) > -1 || addModifiers.indexOf(modifier$1) > -1) state.raise("Duplicate regular expression modifiers");
+						}
+					}
+				}
+			}
+			if (state.eat(58)) {
+				this.regexp_disjunction(state);
+				if (state.eat(41)) return true;
+				state.raise("Unterminated group");
+			}
+		}
+		state.pos = start;
+	}
+	return false;
+};
+pp$1.regexp_eatCapturingGroup = function(state) {
+	if (state.eat(40)) {
+		if (this.options.ecmaVersion >= 9) this.regexp_groupSpecifier(state);
+		else if (state.current() === 63) state.raise("Invalid group");
+		this.regexp_disjunction(state);
+		if (state.eat(41)) {
+			state.numCapturingParens += 1;
+			return true;
+		}
+		state.raise("Unterminated group");
+	}
+	return false;
+};
+pp$1.regexp_eatModifiers = function(state) {
+	var modifiers = "";
+	var ch = 0;
+	while ((ch = state.current()) !== -1 && isRegularExpressionModifier(ch)) {
+		modifiers += codePointToString(ch);
+		state.advance();
+	}
+	return modifiers;
+};
+function isRegularExpressionModifier(ch) {
+	return ch === 105 || ch === 109 || ch === 115;
+}
+pp$1.regexp_eatExtendedAtom = function(state) {
+	return state.eat(46) || this.regexp_eatReverseSolidusAtomEscape(state) || this.regexp_eatCharacterClass(state) || this.regexp_eatUncapturingGroup(state) || this.regexp_eatCapturingGroup(state) || this.regexp_eatInvalidBracedQuantifier(state) || this.regexp_eatExtendedPatternCharacter(state);
+};
+pp$1.regexp_eatInvalidBracedQuantifier = function(state) {
+	if (this.regexp_eatBracedQuantifier(state, true)) state.raise("Nothing to repeat");
+	return false;
+};
+pp$1.regexp_eatSyntaxCharacter = function(state) {
+	var ch = state.current();
+	if (isSyntaxCharacter(ch)) {
+		state.lastIntValue = ch;
+		state.advance();
+		return true;
+	}
+	return false;
+};
+function isSyntaxCharacter(ch) {
+	return ch === 36 || ch >= 40 && ch <= 43 || ch === 46 || ch === 63 || ch >= 91 && ch <= 94 || ch >= 123 && ch <= 125;
+}
+pp$1.regexp_eatPatternCharacters = function(state) {
+	var start = state.pos;
+	var ch = 0;
+	while ((ch = state.current()) !== -1 && !isSyntaxCharacter(ch)) state.advance();
+	return state.pos !== start;
+};
+pp$1.regexp_eatExtendedPatternCharacter = function(state) {
+	var ch = state.current();
+	if (ch !== -1 && ch !== 36 && !(ch >= 40 && ch <= 43) && ch !== 46 && ch !== 63 && ch !== 91 && ch !== 94 && ch !== 124) {
+		state.advance();
+		return true;
+	}
+	return false;
+};
+pp$1.regexp_groupSpecifier = function(state) {
+	if (state.eat(63)) {
+		if (!this.regexp_eatGroupName(state)) state.raise("Invalid group");
+		var trackDisjunction = this.options.ecmaVersion >= 16;
+		var known = state.groupNames[state.lastStringValue];
+		if (known) {
+			if (trackDisjunction) {
+				for (var i = 0, list = known; i < list.length; i += 1) if (!list[i].separatedFrom(state.branchID)) state.raise("Duplicate capture group name");
+			} else state.raise("Duplicate capture group name");
+		}
+		if (trackDisjunction) (known || (state.groupNames[state.lastStringValue] = [])).push(state.branchID);
+		else state.groupNames[state.lastStringValue] = true;
+	}
+};
+pp$1.regexp_eatGroupName = function(state) {
+	state.lastStringValue = "";
+	if (state.eat(60)) {
+		if (this.regexp_eatRegExpIdentifierName(state) && state.eat(62)) return true;
+		state.raise("Invalid capture group name");
+	}
+	return false;
+};
+pp$1.regexp_eatRegExpIdentifierName = function(state) {
+	state.lastStringValue = "";
+	if (this.regexp_eatRegExpIdentifierStart(state)) {
+		state.lastStringValue += codePointToString(state.lastIntValue);
+		while (this.regexp_eatRegExpIdentifierPart(state)) state.lastStringValue += codePointToString(state.lastIntValue);
+		return true;
+	}
+	return false;
+};
+pp$1.regexp_eatRegExpIdentifierStart = function(state) {
+	var start = state.pos;
+	var forceU = this.options.ecmaVersion >= 11;
+	var ch = state.current(forceU);
+	state.advance(forceU);
+	if (ch === 92 && this.regexp_eatRegExpUnicodeEscapeSequence(state, forceU)) ch = state.lastIntValue;
+	if (isRegExpIdentifierStart(ch)) {
+		state.lastIntValue = ch;
+		return true;
+	}
+	state.pos = start;
+	return false;
+};
+function isRegExpIdentifierStart(ch) {
+	return isIdentifierStart(ch, true) || ch === 36 || ch === 95;
+}
+pp$1.regexp_eatRegExpIdentifierPart = function(state) {
+	var start = state.pos;
+	var forceU = this.options.ecmaVersion >= 11;
+	var ch = state.current(forceU);
+	state.advance(forceU);
+	if (ch === 92 && this.regexp_eatRegExpUnicodeEscapeSequence(state, forceU)) ch = state.lastIntValue;
+	if (isRegExpIdentifierPart(ch)) {
+		state.lastIntValue = ch;
+		return true;
+	}
+	state.pos = start;
+	return false;
+};
+function isRegExpIdentifierPart(ch) {
+	return isIdentifierChar(ch, true) || ch === 36 || ch === 95 || ch === 8204 || ch === 8205;
+}
+pp$1.regexp_eatAtomEscape = function(state) {
+	if (this.regexp_eatBackReference(state) || this.regexp_eatCharacterClassEscape(state) || this.regexp_eatCharacterEscape(state) || state.switchN && this.regexp_eatKGroupName(state)) return true;
+	if (state.switchU) {
+		if (state.current() === 99) state.raise("Invalid unicode escape");
+		state.raise("Invalid escape");
+	}
+	return false;
+};
+pp$1.regexp_eatBackReference = function(state) {
+	var start = state.pos;
+	if (this.regexp_eatDecimalEscape(state)) {
+		var n = state.lastIntValue;
+		if (state.switchU) {
+			if (n > state.maxBackReference) state.maxBackReference = n;
+			return true;
+		}
+		if (n <= state.numCapturingParens) return true;
+		state.pos = start;
+	}
+	return false;
+};
+pp$1.regexp_eatKGroupName = function(state) {
+	if (state.eat(107)) {
+		if (this.regexp_eatGroupName(state)) {
+			state.backReferenceNames.push(state.lastStringValue);
+			return true;
+		}
+		state.raise("Invalid named reference");
+	}
+	return false;
+};
+pp$1.regexp_eatCharacterEscape = function(state) {
+	return this.regexp_eatControlEscape(state) || this.regexp_eatCControlLetter(state) || this.regexp_eatZero(state) || this.regexp_eatHexEscapeSequence(state) || this.regexp_eatRegExpUnicodeEscapeSequence(state, false) || !state.switchU && this.regexp_eatLegacyOctalEscapeSequence(state) || this.regexp_eatIdentityEscape(state);
+};
+pp$1.regexp_eatCControlLetter = function(state) {
+	var start = state.pos;
+	if (state.eat(99)) {
+		if (this.regexp_eatControlLetter(state)) return true;
+		state.pos = start;
+	}
+	return false;
+};
+pp$1.regexp_eatZero = function(state) {
+	if (state.current() === 48 && !isDecimalDigit(state.lookahead())) {
+		state.lastIntValue = 0;
+		state.advance();
+		return true;
+	}
+	return false;
+};
+pp$1.regexp_eatControlEscape = function(state) {
+	var ch = state.current();
+	if (ch === 116) {
+		state.lastIntValue = 9;
+		state.advance();
+		return true;
+	}
+	if (ch === 110) {
+		state.lastIntValue = 10;
+		state.advance();
+		return true;
+	}
+	if (ch === 118) {
+		state.lastIntValue = 11;
+		state.advance();
+		return true;
+	}
+	if (ch === 102) {
+		state.lastIntValue = 12;
+		state.advance();
+		return true;
+	}
+	if (ch === 114) {
+		state.lastIntValue = 13;
+		state.advance();
+		return true;
+	}
+	return false;
+};
+pp$1.regexp_eatControlLetter = function(state) {
+	var ch = state.current();
+	if (isControlLetter(ch)) {
+		state.lastIntValue = ch % 32;
+		state.advance();
+		return true;
+	}
+	return false;
+};
+function isControlLetter(ch) {
+	return ch >= 65 && ch <= 90 || ch >= 97 && ch <= 122;
+}
+pp$1.regexp_eatRegExpUnicodeEscapeSequence = function(state, forceU) {
+	if (forceU === void 0) forceU = false;
+	var start = state.pos;
+	var switchU = forceU || state.switchU;
+	if (state.eat(117)) {
+		if (this.regexp_eatFixedHexDigits(state, 4)) {
+			var lead = state.lastIntValue;
+			if (switchU && lead >= 55296 && lead <= 56319) {
+				var leadSurrogateEnd = state.pos;
+				if (state.eat(92) && state.eat(117) && this.regexp_eatFixedHexDigits(state, 4)) {
+					var trail = state.lastIntValue;
+					if (trail >= 56320 && trail <= 57343) {
+						state.lastIntValue = (lead - 55296) * 1024 + (trail - 56320) + 65536;
+						return true;
+					}
+				}
+				state.pos = leadSurrogateEnd;
+				state.lastIntValue = lead;
+			}
+			return true;
+		}
+		if (switchU && state.eat(123) && this.regexp_eatHexDigits(state) && state.eat(125) && isValidUnicode(state.lastIntValue)) return true;
+		if (switchU) state.raise("Invalid unicode escape");
+		state.pos = start;
+	}
+	return false;
+};
+function isValidUnicode(ch) {
+	return ch >= 0 && ch <= 1114111;
+}
+pp$1.regexp_eatIdentityEscape = function(state) {
+	if (state.switchU) {
+		if (this.regexp_eatSyntaxCharacter(state)) return true;
+		if (state.eat(47)) {
+			state.lastIntValue = 47;
+			return true;
+		}
+		return false;
+	}
+	var ch = state.current();
+	if (ch !== 99 && (!state.switchN || ch !== 107)) {
+		state.lastIntValue = ch;
+		state.advance();
+		return true;
+	}
+	return false;
+};
+pp$1.regexp_eatDecimalEscape = function(state) {
+	state.lastIntValue = 0;
+	var ch = state.current();
+	if (ch >= 49 && ch <= 57) {
+		do {
+			state.lastIntValue = 10 * state.lastIntValue + (ch - 48);
+			state.advance();
+		} while ((ch = state.current()) >= 48 && ch <= 57);
+		return true;
+	}
+	return false;
+};
+var CharSetNone = 0;
+var CharSetOk = 1;
+var CharSetString = 2;
+pp$1.regexp_eatCharacterClassEscape = function(state) {
+	var ch = state.current();
+	if (isCharacterClassEscape(ch)) {
+		state.lastIntValue = -1;
+		state.advance();
+		return CharSetOk;
+	}
+	var negate = false;
+	if (state.switchU && this.options.ecmaVersion >= 9 && ((negate = ch === 80) || ch === 112)) {
+		state.lastIntValue = -1;
+		state.advance();
+		var result;
+		if (state.eat(123) && (result = this.regexp_eatUnicodePropertyValueExpression(state)) && state.eat(125)) {
+			if (negate && result === CharSetString) state.raise("Invalid property name");
+			return result;
+		}
+		state.raise("Invalid property name");
+	}
+	return CharSetNone;
+};
+function isCharacterClassEscape(ch) {
+	return ch === 100 || ch === 68 || ch === 115 || ch === 83 || ch === 119 || ch === 87;
+}
+pp$1.regexp_eatUnicodePropertyValueExpression = function(state) {
+	var start = state.pos;
+	if (this.regexp_eatUnicodePropertyName(state) && state.eat(61)) {
+		var name = state.lastStringValue;
+		if (this.regexp_eatUnicodePropertyValue(state)) {
+			var value = state.lastStringValue;
+			this.regexp_validateUnicodePropertyNameAndValue(state, name, value);
+			return CharSetOk;
+		}
+	}
+	state.pos = start;
+	if (this.regexp_eatLoneUnicodePropertyNameOrValue(state)) {
+		var nameOrValue = state.lastStringValue;
+		return this.regexp_validateUnicodePropertyNameOrValue(state, nameOrValue);
+	}
+	return CharSetNone;
+};
+pp$1.regexp_validateUnicodePropertyNameAndValue = function(state, name, value) {
+	if (!hasOwn(state.unicodeProperties.nonBinary, name)) state.raise("Invalid property name");
+	if (!state.unicodeProperties.nonBinary[name].test(value)) state.raise("Invalid property value");
+};
+pp$1.regexp_validateUnicodePropertyNameOrValue = function(state, nameOrValue) {
+	if (state.unicodeProperties.binary.test(nameOrValue)) return CharSetOk;
+	if (state.switchV && state.unicodeProperties.binaryOfStrings.test(nameOrValue)) return CharSetString;
+	state.raise("Invalid property name");
+};
+pp$1.regexp_eatUnicodePropertyName = function(state) {
+	var ch = 0;
+	state.lastStringValue = "";
+	while (isUnicodePropertyNameCharacter(ch = state.current())) {
+		state.lastStringValue += codePointToString(ch);
+		state.advance();
+	}
+	return state.lastStringValue !== "";
+};
+function isUnicodePropertyNameCharacter(ch) {
+	return isControlLetter(ch) || ch === 95;
+}
+pp$1.regexp_eatUnicodePropertyValue = function(state) {
+	var ch = 0;
+	state.lastStringValue = "";
+	while (isUnicodePropertyValueCharacter(ch = state.current())) {
+		state.lastStringValue += codePointToString(ch);
+		state.advance();
+	}
+	return state.lastStringValue !== "";
+};
+function isUnicodePropertyValueCharacter(ch) {
+	return isUnicodePropertyNameCharacter(ch) || isDecimalDigit(ch);
+}
+pp$1.regexp_eatLoneUnicodePropertyNameOrValue = function(state) {
+	return this.regexp_eatUnicodePropertyValue(state);
+};
+pp$1.regexp_eatCharacterClass = function(state) {
+	if (state.eat(91)) {
+		var negate = state.eat(94);
+		var result = this.regexp_classContents(state);
+		if (!state.eat(93)) state.raise("Unterminated character class");
+		if (negate && result === CharSetString) state.raise("Negated character class may contain strings");
+		return true;
+	}
+	return false;
+};
+pp$1.regexp_classContents = function(state) {
+	if (state.current() === 93) return CharSetOk;
+	if (state.switchV) return this.regexp_classSetExpression(state);
+	this.regexp_nonEmptyClassRanges(state);
+	return CharSetOk;
+};
+pp$1.regexp_nonEmptyClassRanges = function(state) {
+	while (this.regexp_eatClassAtom(state)) {
+		var left = state.lastIntValue;
+		if (state.eat(45) && this.regexp_eatClassAtom(state)) {
+			var right = state.lastIntValue;
+			if (state.switchU && (left === -1 || right === -1)) state.raise("Invalid character class");
+			if (left !== -1 && right !== -1 && left > right) state.raise("Range out of order in character class");
+		}
+	}
+};
+pp$1.regexp_eatClassAtom = function(state) {
+	var start = state.pos;
+	if (state.eat(92)) {
+		if (this.regexp_eatClassEscape(state)) return true;
+		if (state.switchU) {
+			var ch$1 = state.current();
+			if (ch$1 === 99 || isOctalDigit(ch$1)) state.raise("Invalid class escape");
+			state.raise("Invalid escape");
+		}
+		state.pos = start;
+	}
+	var ch = state.current();
+	if (ch !== 93) {
+		state.lastIntValue = ch;
+		state.advance();
+		return true;
+	}
+	return false;
+};
+pp$1.regexp_eatClassEscape = function(state) {
+	var start = state.pos;
+	if (state.eat(98)) {
+		state.lastIntValue = 8;
+		return true;
+	}
+	if (state.switchU && state.eat(45)) {
+		state.lastIntValue = 45;
+		return true;
+	}
+	if (!state.switchU && state.eat(99)) {
+		if (this.regexp_eatClassControlLetter(state)) return true;
+		state.pos = start;
+	}
+	return this.regexp_eatCharacterClassEscape(state) || this.regexp_eatCharacterEscape(state);
+};
+pp$1.regexp_classSetExpression = function(state) {
+	var result = CharSetOk, subResult;
+	if (this.regexp_eatClassSetRange(state));
+	else if (subResult = this.regexp_eatClassSetOperand(state)) {
+		if (subResult === CharSetString) result = CharSetString;
+		var start = state.pos;
+		while (state.eatChars([38, 38])) {
+			if (state.current() !== 38 && (subResult = this.regexp_eatClassSetOperand(state))) {
+				if (subResult !== CharSetString) result = CharSetOk;
+				continue;
+			}
+			state.raise("Invalid character in character class");
+		}
+		if (start !== state.pos) return result;
+		while (state.eatChars([45, 45])) {
+			if (this.regexp_eatClassSetOperand(state)) continue;
+			state.raise("Invalid character in character class");
+		}
+		if (start !== state.pos) return result;
+	} else state.raise("Invalid character in character class");
+	for (;;) {
+		if (this.regexp_eatClassSetRange(state)) continue;
+		subResult = this.regexp_eatClassSetOperand(state);
+		if (!subResult) return result;
+		if (subResult === CharSetString) result = CharSetString;
+	}
+};
+pp$1.regexp_eatClassSetRange = function(state) {
+	var start = state.pos;
+	if (this.regexp_eatClassSetCharacter(state)) {
+		var left = state.lastIntValue;
+		if (state.eat(45) && this.regexp_eatClassSetCharacter(state)) {
+			var right = state.lastIntValue;
+			if (left !== -1 && right !== -1 && left > right) state.raise("Range out of order in character class");
+			return true;
+		}
+		state.pos = start;
+	}
+	return false;
+};
+pp$1.regexp_eatClassSetOperand = function(state) {
+	if (this.regexp_eatClassSetCharacter(state)) return CharSetOk;
+	return this.regexp_eatClassStringDisjunction(state) || this.regexp_eatNestedClass(state);
+};
+pp$1.regexp_eatNestedClass = function(state) {
+	var start = state.pos;
+	if (state.eat(91)) {
+		var negate = state.eat(94);
+		var result = this.regexp_classContents(state);
+		if (state.eat(93)) {
+			if (negate && result === CharSetString) state.raise("Negated character class may contain strings");
+			return result;
+		}
+		state.pos = start;
+	}
+	if (state.eat(92)) {
+		var result$1 = this.regexp_eatCharacterClassEscape(state);
+		if (result$1) return result$1;
+		state.pos = start;
+	}
+	return null;
+};
+pp$1.regexp_eatClassStringDisjunction = function(state) {
+	var start = state.pos;
+	if (state.eatChars([92, 113])) {
+		if (state.eat(123)) {
+			var result = this.regexp_classStringDisjunctionContents(state);
+			if (state.eat(125)) return result;
+		} else state.raise("Invalid escape");
+		state.pos = start;
+	}
+	return null;
+};
+pp$1.regexp_classStringDisjunctionContents = function(state) {
+	var result = this.regexp_classString(state);
+	while (state.eat(124)) if (this.regexp_classString(state) === CharSetString) result = CharSetString;
+	return result;
+};
+pp$1.regexp_classString = function(state) {
+	var count = 0;
+	while (this.regexp_eatClassSetCharacter(state)) count++;
+	return count === 1 ? CharSetOk : CharSetString;
+};
+pp$1.regexp_eatClassSetCharacter = function(state) {
+	var start = state.pos;
+	if (state.eat(92)) {
+		if (this.regexp_eatCharacterEscape(state) || this.regexp_eatClassSetReservedPunctuator(state)) return true;
+		if (state.eat(98)) {
+			state.lastIntValue = 8;
+			return true;
+		}
+		state.pos = start;
+		return false;
+	}
+	var ch = state.current();
+	if (ch < 0 || ch === state.lookahead() && isClassSetReservedDoublePunctuatorCharacter(ch)) return false;
+	if (isClassSetSyntaxCharacter(ch)) return false;
+	state.advance();
+	state.lastIntValue = ch;
+	return true;
+};
+function isClassSetReservedDoublePunctuatorCharacter(ch) {
+	return ch === 33 || ch >= 35 && ch <= 38 || ch >= 42 && ch <= 44 || ch === 46 || ch >= 58 && ch <= 64 || ch === 94 || ch === 96 || ch === 126;
+}
+function isClassSetSyntaxCharacter(ch) {
+	return ch === 40 || ch === 41 || ch === 45 || ch === 47 || ch >= 91 && ch <= 93 || ch >= 123 && ch <= 125;
+}
+pp$1.regexp_eatClassSetReservedPunctuator = function(state) {
+	var ch = state.current();
+	if (isClassSetReservedPunctuator(ch)) {
+		state.lastIntValue = ch;
+		state.advance();
+		return true;
+	}
+	return false;
+};
+function isClassSetReservedPunctuator(ch) {
+	return ch === 33 || ch === 35 || ch === 37 || ch === 38 || ch === 44 || ch === 45 || ch >= 58 && ch <= 62 || ch === 64 || ch === 96 || ch === 126;
+}
+pp$1.regexp_eatClassControlLetter = function(state) {
+	var ch = state.current();
+	if (isDecimalDigit(ch) || ch === 95) {
+		state.lastIntValue = ch % 32;
+		state.advance();
+		return true;
+	}
+	return false;
+};
+pp$1.regexp_eatHexEscapeSequence = function(state) {
+	var start = state.pos;
+	if (state.eat(120)) {
+		if (this.regexp_eatFixedHexDigits(state, 2)) return true;
+		if (state.switchU) state.raise("Invalid escape");
+		state.pos = start;
+	}
+	return false;
+};
+pp$1.regexp_eatDecimalDigits = function(state) {
+	var start = state.pos;
+	var ch = 0;
+	state.lastIntValue = 0;
+	while (isDecimalDigit(ch = state.current())) {
+		state.lastIntValue = 10 * state.lastIntValue + (ch - 48);
+		state.advance();
+	}
+	return state.pos !== start;
+};
+function isDecimalDigit(ch) {
+	return ch >= 48 && ch <= 57;
+}
+pp$1.regexp_eatHexDigits = function(state) {
+	var start = state.pos;
+	var ch = 0;
+	state.lastIntValue = 0;
+	while (isHexDigit$1(ch = state.current())) {
+		state.lastIntValue = 16 * state.lastIntValue + hexToInt$1(ch);
+		state.advance();
+	}
+	return state.pos !== start;
+};
+function isHexDigit$1(ch) {
+	return ch >= 48 && ch <= 57 || ch >= 65 && ch <= 70 || ch >= 97 && ch <= 102;
+}
+function hexToInt$1(ch) {
+	if (ch >= 65 && ch <= 70) return 10 + (ch - 65);
+	if (ch >= 97 && ch <= 102) return 10 + (ch - 97);
+	return ch - 48;
+}
+pp$1.regexp_eatLegacyOctalEscapeSequence = function(state) {
+	if (this.regexp_eatOctalDigit(state)) {
+		var n1 = state.lastIntValue;
+		if (this.regexp_eatOctalDigit(state)) {
+			var n2 = state.lastIntValue;
+			if (n1 <= 3 && this.regexp_eatOctalDigit(state)) state.lastIntValue = n1 * 64 + n2 * 8 + state.lastIntValue;
+			else state.lastIntValue = n1 * 8 + n2;
+		} else state.lastIntValue = n1;
+		return true;
+	}
+	return false;
+};
+pp$1.regexp_eatOctalDigit = function(state) {
+	var ch = state.current();
+	if (isOctalDigit(ch)) {
+		state.lastIntValue = ch - 48;
+		state.advance();
+		return true;
+	}
+	state.lastIntValue = 0;
+	return false;
+};
+function isOctalDigit(ch) {
+	return ch >= 48 && ch <= 55;
+}
+pp$1.regexp_eatFixedHexDigits = function(state, length) {
+	var start = state.pos;
+	state.lastIntValue = 0;
+	for (var i = 0; i < length; ++i) {
+		var ch = state.current();
+		if (!isHexDigit$1(ch)) {
+			state.pos = start;
+			return false;
+		}
+		state.lastIntValue = 16 * state.lastIntValue + hexToInt$1(ch);
+		state.advance();
+	}
+	return true;
+};
+var Token$1 = function Token(p) {
+	this.type = p.type;
+	this.value = p.value;
+	this.start = p.start;
+	this.end = p.end;
+	if (p.options.locations) this.loc = new SourceLocation(p, p.startLoc, p.endLoc);
+	if (p.options.ranges) this.range = [p.start, p.end];
+};
+var pp = Parser$3.prototype;
+pp.next = function(ignoreEscapeSequenceInKeyword) {
+	if (!ignoreEscapeSequenceInKeyword && this.type.keyword && this.containsEsc) this.raiseRecoverable(this.start, "Escape sequence in keyword " + this.type.keyword);
+	if (this.options.onToken) this.options.onToken(new Token$1(this));
+	this.lastTokEnd = this.end;
+	this.lastTokStart = this.start;
+	this.lastTokEndLoc = this.endLoc;
+	this.lastTokStartLoc = this.startLoc;
+	this.nextToken();
+};
+pp.getToken = function() {
+	this.next();
+	return new Token$1(this);
+};
+if (typeof Symbol !== "undefined") pp[Symbol.iterator] = function() {
+	var this$1$1 = this;
+	return { next: function() {
+		var token = this$1$1.getToken();
+		return {
+			done: token.type === types$1.eof,
+			value: token
+		};
+	} };
+};
+pp.nextToken = function() {
+	var curContext = this.curContext();
+	if (!curContext || !curContext.preserveSpace) this.skipSpace();
+	this.start = this.pos;
+	if (this.options.locations) this.startLoc = this.curPosition();
+	if (this.pos >= this.input.length) return this.finishToken(types$1.eof);
+	if (curContext.override) return curContext.override(this);
+	else this.readToken(this.fullCharCodeAtPos());
+};
+pp.readToken = function(code) {
+	if (isIdentifierStart(code, this.options.ecmaVersion >= 6) || code === 92) return this.readWord();
+	return this.getTokenFromCode(code);
+};
+pp.fullCharCodeAt = function(pos) {
+	var code = this.input.charCodeAt(pos);
+	if (code <= 55295 || code >= 56320) return code;
+	var next = this.input.charCodeAt(pos + 1);
+	return next <= 56319 || next >= 57344 ? code : (code << 10) + next - 56613888;
+};
+pp.fullCharCodeAtPos = function() {
+	return this.fullCharCodeAt(this.pos);
+};
+pp.skipBlockComment = function() {
+	var startLoc = this.options.onComment && this.curPosition();
+	var start = this.pos, end = this.input.indexOf("*/", this.pos += 2);
+	if (end === -1) this.raise(this.pos - 2, "Unterminated comment");
+	this.pos = end + 2;
+	if (this.options.locations) for (var nextBreak = void 0, pos = start; (nextBreak = nextLineBreak(this.input, pos, this.pos)) > -1;) {
+		++this.curLine;
+		pos = this.lineStart = nextBreak;
+	}
+	if (this.options.onComment) this.options.onComment(true, this.input.slice(start + 2, end), start, this.pos, startLoc, this.curPosition());
+};
+pp.skipLineComment = function(startSkip) {
+	var start = this.pos;
+	var startLoc = this.options.onComment && this.curPosition();
+	var ch = this.input.charCodeAt(this.pos += startSkip);
+	while (this.pos < this.input.length && !isNewLine(ch)) ch = this.input.charCodeAt(++this.pos);
+	if (this.options.onComment) this.options.onComment(false, this.input.slice(start + startSkip, this.pos), start, this.pos, startLoc, this.curPosition());
+};
+pp.skipSpace = function() {
+	loop: while (this.pos < this.input.length) {
+		var ch = this.input.charCodeAt(this.pos);
+		switch (ch) {
+			case 32:
+			case 160:
+				++this.pos;
+				break;
+			case 13: if (this.input.charCodeAt(this.pos + 1) === 10) ++this.pos;
+			case 10:
+			case 8232:
+			case 8233:
+				++this.pos;
+				if (this.options.locations) {
+					++this.curLine;
+					this.lineStart = this.pos;
+				}
+				break;
+			case 47:
+				switch (this.input.charCodeAt(this.pos + 1)) {
+					case 42:
+						this.skipBlockComment();
+						break;
+					case 47:
+						this.skipLineComment(2);
+						break;
+					default: break loop;
+				}
+				break;
+			default: if (ch > 8 && ch < 14 || ch >= 5760 && nonASCIIwhitespace.test(String.fromCharCode(ch))) ++this.pos;
+			else break loop;
+		}
+	}
+};
+pp.finishToken = function(type, val) {
+	this.end = this.pos;
+	if (this.options.locations) this.endLoc = this.curPosition();
+	var prevType = this.type;
+	this.type = type;
+	this.value = val;
+	this.updateContext(prevType);
+};
+pp.readToken_dot = function() {
+	var next = this.input.charCodeAt(this.pos + 1);
+	if (next >= 48 && next <= 57) return this.readNumber(true);
+	var next2 = this.input.charCodeAt(this.pos + 2);
+	if (this.options.ecmaVersion >= 6 && next === 46 && next2 === 46) {
+		this.pos += 3;
+		return this.finishToken(types$1.ellipsis);
+	} else {
+		++this.pos;
+		return this.finishToken(types$1.dot);
+	}
+};
+pp.readToken_slash = function() {
+	var next = this.input.charCodeAt(this.pos + 1);
+	if (this.exprAllowed) {
+		++this.pos;
+		return this.readRegexp();
+	}
+	if (next === 61) return this.finishOp(types$1.assign, 2);
+	return this.finishOp(types$1.slash, 1);
+};
+pp.readToken_mult_modulo_exp = function(code) {
+	var next = this.input.charCodeAt(this.pos + 1);
+	var size = 1;
+	var tokentype = code === 42 ? types$1.star : types$1.modulo;
+	if (this.options.ecmaVersion >= 7 && code === 42 && next === 42) {
+		++size;
+		tokentype = types$1.starstar;
+		next = this.input.charCodeAt(this.pos + 2);
+	}
+	if (next === 61) return this.finishOp(types$1.assign, size + 1);
+	return this.finishOp(tokentype, size);
+};
+pp.readToken_pipe_amp = function(code) {
+	var next = this.input.charCodeAt(this.pos + 1);
+	if (next === code) {
+		if (this.options.ecmaVersion >= 12) {
+			if (this.input.charCodeAt(this.pos + 2) === 61) return this.finishOp(types$1.assign, 3);
+		}
+		return this.finishOp(code === 124 ? types$1.logicalOR : types$1.logicalAND, 2);
+	}
+	if (next === 61) return this.finishOp(types$1.assign, 2);
+	return this.finishOp(code === 124 ? types$1.bitwiseOR : types$1.bitwiseAND, 1);
+};
+pp.readToken_caret = function() {
+	if (this.input.charCodeAt(this.pos + 1) === 61) return this.finishOp(types$1.assign, 2);
+	return this.finishOp(types$1.bitwiseXOR, 1);
+};
+pp.readToken_plus_min = function(code) {
+	var next = this.input.charCodeAt(this.pos + 1);
+	if (next === code) {
+		if (next === 45 && !this.inModule && this.input.charCodeAt(this.pos + 2) === 62 && (this.lastTokEnd === 0 || lineBreak.test(this.input.slice(this.lastTokEnd, this.pos)))) {
+			this.skipLineComment(3);
+			this.skipSpace();
+			return this.nextToken();
+		}
+		return this.finishOp(types$1.incDec, 2);
+	}
+	if (next === 61) return this.finishOp(types$1.assign, 2);
+	return this.finishOp(types$1.plusMin, 1);
+};
+pp.readToken_lt_gt = function(code) {
+	var next = this.input.charCodeAt(this.pos + 1);
+	var size = 1;
+	if (next === code) {
+		size = code === 62 && this.input.charCodeAt(this.pos + 2) === 62 ? 3 : 2;
+		if (this.input.charCodeAt(this.pos + size) === 61) return this.finishOp(types$1.assign, size + 1);
+		return this.finishOp(types$1.bitShift, size);
+	}
+	if (next === 33 && code === 60 && !this.inModule && this.input.charCodeAt(this.pos + 2) === 45 && this.input.charCodeAt(this.pos + 3) === 45) {
+		this.skipLineComment(4);
+		this.skipSpace();
+		return this.nextToken();
+	}
+	if (next === 61) size = 2;
+	return this.finishOp(types$1.relational, size);
+};
+pp.readToken_eq_excl = function(code) {
+	var next = this.input.charCodeAt(this.pos + 1);
+	if (next === 61) return this.finishOp(types$1.equality, this.input.charCodeAt(this.pos + 2) === 61 ? 3 : 2);
+	if (code === 61 && next === 62 && this.options.ecmaVersion >= 6) {
+		this.pos += 2;
+		return this.finishToken(types$1.arrow);
+	}
+	return this.finishOp(code === 61 ? types$1.eq : types$1.prefix, 1);
+};
+pp.readToken_question = function() {
+	var ecmaVersion = this.options.ecmaVersion;
+	if (ecmaVersion >= 11) {
+		var next = this.input.charCodeAt(this.pos + 1);
+		if (next === 46) {
+			var next2 = this.input.charCodeAt(this.pos + 2);
+			if (next2 < 48 || next2 > 57) return this.finishOp(types$1.questionDot, 2);
+		}
+		if (next === 63) {
+			if (ecmaVersion >= 12) {
+				if (this.input.charCodeAt(this.pos + 2) === 61) return this.finishOp(types$1.assign, 3);
+			}
+			return this.finishOp(types$1.coalesce, 2);
+		}
+	}
+	return this.finishOp(types$1.question, 1);
+};
+pp.readToken_numberSign = function() {
+	var ecmaVersion = this.options.ecmaVersion;
+	var code = 35;
+	if (ecmaVersion >= 13) {
+		++this.pos;
+		code = this.fullCharCodeAtPos();
+		if (isIdentifierStart(code, true) || code === 92) return this.finishToken(types$1.privateId, this.readWord1());
+	}
+	this.raise(this.pos, "Unexpected character '" + codePointToString(code) + "'");
+};
+pp.getTokenFromCode = function(code) {
+	switch (code) {
+		case 46: return this.readToken_dot();
+		case 40:
+			++this.pos;
+			return this.finishToken(types$1.parenL);
+		case 41:
+			++this.pos;
+			return this.finishToken(types$1.parenR);
+		case 59:
+			++this.pos;
+			return this.finishToken(types$1.semi);
+		case 44:
+			++this.pos;
+			return this.finishToken(types$1.comma);
+		case 91:
+			++this.pos;
+			return this.finishToken(types$1.bracketL);
+		case 93:
+			++this.pos;
+			return this.finishToken(types$1.bracketR);
+		case 123:
+			++this.pos;
+			return this.finishToken(types$1.braceL);
+		case 125:
+			++this.pos;
+			return this.finishToken(types$1.braceR);
+		case 58:
+			++this.pos;
+			return this.finishToken(types$1.colon);
+		case 96:
+			if (this.options.ecmaVersion < 6) break;
+			++this.pos;
+			return this.finishToken(types$1.backQuote);
+		case 48:
+			var next = this.input.charCodeAt(this.pos + 1);
+			if (next === 120 || next === 88) return this.readRadixNumber(16);
+			if (this.options.ecmaVersion >= 6) {
+				if (next === 111 || next === 79) return this.readRadixNumber(8);
+				if (next === 98 || next === 66) return this.readRadixNumber(2);
+			}
+		case 49:
+		case 50:
+		case 51:
+		case 52:
+		case 53:
+		case 54:
+		case 55:
+		case 56:
+		case 57: return this.readNumber(false);
+		case 34:
+		case 39: return this.readString(code);
+		case 47: return this.readToken_slash();
+		case 37:
+		case 42: return this.readToken_mult_modulo_exp(code);
+		case 124:
+		case 38: return this.readToken_pipe_amp(code);
+		case 94: return this.readToken_caret();
+		case 43:
+		case 45: return this.readToken_plus_min(code);
+		case 60:
+		case 62: return this.readToken_lt_gt(code);
+		case 61:
+		case 33: return this.readToken_eq_excl(code);
+		case 63: return this.readToken_question();
+		case 126: return this.finishOp(types$1.prefix, 1);
+		case 35: return this.readToken_numberSign();
+	}
+	this.raise(this.pos, "Unexpected character '" + codePointToString(code) + "'");
+};
+pp.finishOp = function(type, size) {
+	var str = this.input.slice(this.pos, this.pos + size);
+	this.pos += size;
+	return this.finishToken(type, str);
+};
+pp.readRegexp = function() {
+	var escaped, inClass, start = this.pos;
+	for (;;) {
+		if (this.pos >= this.input.length) this.raise(start, "Unterminated regular expression");
+		var ch = this.input.charAt(this.pos);
+		if (lineBreak.test(ch)) this.raise(start, "Unterminated regular expression");
+		if (!escaped) {
+			if (ch === "[") inClass = true;
+			else if (ch === "]" && inClass) inClass = false;
+			else if (ch === "/" && !inClass) break;
+			escaped = ch === "\\";
+		} else escaped = false;
+		++this.pos;
+	}
+	var pattern = this.input.slice(start, this.pos);
+	++this.pos;
+	var flagsStart = this.pos;
+	var flags = this.readWord1();
+	if (this.containsEsc) this.unexpected(flagsStart);
+	var state = this.regexpState || (this.regexpState = new RegExpValidationState(this));
+	state.reset(start, pattern, flags);
+	this.validateRegExpFlags(state);
+	this.validateRegExpPattern(state);
+	var value = null;
+	try {
+		value = new RegExp(pattern, flags);
+	} catch (e) {}
+	return this.finishToken(types$1.regexp, {
+		pattern,
+		flags,
+		value
+	});
+};
+pp.readInt = function(radix, len, maybeLegacyOctalNumericLiteral) {
+	var allowSeparators = this.options.ecmaVersion >= 12 && len === void 0;
+	var isLegacyOctalNumericLiteral = maybeLegacyOctalNumericLiteral && this.input.charCodeAt(this.pos) === 48;
+	var start = this.pos, total = 0, lastCode = 0;
+	for (var i = 0, e = len == null ? Infinity : len; i < e; ++i, ++this.pos) {
+		var code = this.input.charCodeAt(this.pos), val = void 0;
+		if (allowSeparators && code === 95) {
+			if (isLegacyOctalNumericLiteral) this.raiseRecoverable(this.pos, "Numeric separator is not allowed in legacy octal numeric literals");
+			if (lastCode === 95) this.raiseRecoverable(this.pos, "Numeric separator must be exactly one underscore");
+			if (i === 0) this.raiseRecoverable(this.pos, "Numeric separator is not allowed at the first of digits");
+			lastCode = code;
+			continue;
+		}
+		if (code >= 97) val = code - 97 + 10;
+		else if (code >= 65) val = code - 65 + 10;
+		else if (code >= 48 && code <= 57) val = code - 48;
+		else val = Infinity;
+		if (val >= radix) break;
+		lastCode = code;
+		total = total * radix + val;
+	}
+	if (allowSeparators && lastCode === 95) this.raiseRecoverable(this.pos - 1, "Numeric separator is not allowed at the last of digits");
+	if (this.pos === start || len != null && this.pos - start !== len) return null;
+	return total;
+};
+function stringToNumber(str, isLegacyOctalNumericLiteral) {
+	if (isLegacyOctalNumericLiteral) return parseInt(str, 8);
+	return parseFloat(str.replace(/_/g, ""));
+}
+function stringToBigInt(str) {
+	if (typeof BigInt !== "function") return null;
+	return BigInt(str.replace(/_/g, ""));
+}
+pp.readRadixNumber = function(radix) {
+	var start = this.pos;
+	this.pos += 2;
+	var val = this.readInt(radix);
+	if (val == null) this.raise(this.start + 2, "Expected number in radix " + radix);
+	if (this.options.ecmaVersion >= 11 && this.input.charCodeAt(this.pos) === 110) {
+		val = stringToBigInt(this.input.slice(start, this.pos));
+		++this.pos;
+	} else if (isIdentifierStart(this.fullCharCodeAtPos())) this.raise(this.pos, "Identifier directly after number");
+	return this.finishToken(types$1.num, val);
+};
+pp.readNumber = function(startsWithDot) {
+	var start = this.pos;
+	if (!startsWithDot && this.readInt(10, void 0, true) === null) this.raise(start, "Invalid number");
+	var octal = this.pos - start >= 2 && this.input.charCodeAt(start) === 48;
+	if (octal && this.strict) this.raise(start, "Invalid number");
+	var next = this.input.charCodeAt(this.pos);
+	if (!octal && !startsWithDot && this.options.ecmaVersion >= 11 && next === 110) {
+		var val$1 = stringToBigInt(this.input.slice(start, this.pos));
+		++this.pos;
+		if (isIdentifierStart(this.fullCharCodeAtPos())) this.raise(this.pos, "Identifier directly after number");
+		return this.finishToken(types$1.num, val$1);
+	}
+	if (octal && /[89]/.test(this.input.slice(start, this.pos))) octal = false;
+	if (next === 46 && !octal) {
+		++this.pos;
+		this.readInt(10);
+		next = this.input.charCodeAt(this.pos);
+	}
+	if ((next === 69 || next === 101) && !octal) {
+		next = this.input.charCodeAt(++this.pos);
+		if (next === 43 || next === 45) ++this.pos;
+		if (this.readInt(10) === null) this.raise(start, "Invalid number");
+	}
+	if (isIdentifierStart(this.fullCharCodeAtPos())) this.raise(this.pos, "Identifier directly after number");
+	var val = stringToNumber(this.input.slice(start, this.pos), octal);
+	return this.finishToken(types$1.num, val);
+};
+pp.readCodePoint = function() {
+	var ch = this.input.charCodeAt(this.pos), code;
+	if (ch === 123) {
+		if (this.options.ecmaVersion < 6) this.unexpected();
+		var codePos = ++this.pos;
+		code = this.readHexChar(this.input.indexOf("}", this.pos) - this.pos);
+		++this.pos;
+		if (code > 1114111) this.invalidStringToken(codePos, "Code point out of bounds");
+	} else code = this.readHexChar(4);
+	return code;
+};
+pp.readString = function(quote) {
+	var out = "", chunkStart = ++this.pos;
+	for (;;) {
+		if (this.pos >= this.input.length) this.raise(this.start, "Unterminated string constant");
+		var ch = this.input.charCodeAt(this.pos);
+		if (ch === quote) break;
+		if (ch === 92) {
+			out += this.input.slice(chunkStart, this.pos);
+			out += this.readEscapedChar(false);
+			chunkStart = this.pos;
+		} else if (ch === 8232 || ch === 8233) {
+			if (this.options.ecmaVersion < 10) this.raise(this.start, "Unterminated string constant");
+			++this.pos;
+			if (this.options.locations) {
+				this.curLine++;
+				this.lineStart = this.pos;
+			}
+		} else {
+			if (isNewLine(ch)) this.raise(this.start, "Unterminated string constant");
+			++this.pos;
+		}
+	}
+	out += this.input.slice(chunkStart, this.pos++);
+	return this.finishToken(types$1.string, out);
+};
+var INVALID_TEMPLATE_ESCAPE_ERROR = {};
+pp.tryReadTemplateToken = function() {
+	this.inTemplateElement = true;
+	try {
+		this.readTmplToken();
+	} catch (err) {
+		if (err === INVALID_TEMPLATE_ESCAPE_ERROR) this.readInvalidTemplateToken();
+		else throw err;
+	}
+	this.inTemplateElement = false;
+};
+pp.invalidStringToken = function(position, message) {
+	if (this.inTemplateElement && this.options.ecmaVersion >= 9) throw INVALID_TEMPLATE_ESCAPE_ERROR;
+	else this.raise(position, message);
+};
+pp.readTmplToken = function() {
+	var out = "", chunkStart = this.pos;
+	for (;;) {
+		if (this.pos >= this.input.length) this.raise(this.start, "Unterminated template");
+		var ch = this.input.charCodeAt(this.pos);
+		if (ch === 96 || ch === 36 && this.input.charCodeAt(this.pos + 1) === 123) {
+			if (this.pos === this.start && (this.type === types$1.template || this.type === types$1.invalidTemplate)) {
+				if (ch === 36) {
+					this.pos += 2;
+					return this.finishToken(types$1.dollarBraceL);
+				} else {
+					++this.pos;
+					return this.finishToken(types$1.backQuote);
+				}
+			}
+			out += this.input.slice(chunkStart, this.pos);
+			return this.finishToken(types$1.template, out);
+		}
+		if (ch === 92) {
+			out += this.input.slice(chunkStart, this.pos);
+			out += this.readEscapedChar(true);
+			chunkStart = this.pos;
+		} else if (isNewLine(ch)) {
+			out += this.input.slice(chunkStart, this.pos);
+			++this.pos;
+			switch (ch) {
+				case 13: if (this.input.charCodeAt(this.pos) === 10) ++this.pos;
+				case 10:
+					out += "\n";
+					break;
+				default: out += String.fromCharCode(ch);
+			}
+			if (this.options.locations) {
+				++this.curLine;
+				this.lineStart = this.pos;
+			}
+			chunkStart = this.pos;
+		} else ++this.pos;
+	}
+};
+pp.readInvalidTemplateToken = function() {
+	for (; this.pos < this.input.length; this.pos++) switch (this.input[this.pos]) {
+		case "\\":
+			++this.pos;
+			break;
+		case "$": if (this.input[this.pos + 1] !== "{") break;
+		case "`": return this.finishToken(types$1.invalidTemplate, this.input.slice(this.start, this.pos));
+		case "\r": if (this.input[this.pos + 1] === "\n") ++this.pos;
+		case "\n":
+		case "\u2028":
+		case "\u2029":
+			++this.curLine;
+			this.lineStart = this.pos + 1;
+	}
+	this.raise(this.start, "Unterminated template");
+};
+pp.readEscapedChar = function(inTemplate) {
+	var ch = this.input.charCodeAt(++this.pos);
+	++this.pos;
+	switch (ch) {
+		case 110: return "\n";
+		case 114: return "\r";
+		case 120: return String.fromCharCode(this.readHexChar(2));
+		case 117: return codePointToString(this.readCodePoint());
+		case 116: return "	";
+		case 98: return "\b";
+		case 118: return "\v";
+		case 102: return "\f";
+		case 13: if (this.input.charCodeAt(this.pos) === 10) ++this.pos;
+		case 10:
+			if (this.options.locations) {
+				this.lineStart = this.pos;
+				++this.curLine;
+			}
+			return "";
+		case 56:
+		case 57:
+			if (this.strict) this.invalidStringToken(this.pos - 1, "Invalid escape sequence");
+			if (inTemplate) {
+				var codePos = this.pos - 1;
+				this.invalidStringToken(codePos, "Invalid escape sequence in template string");
+			}
+		default:
+			if (ch >= 48 && ch <= 55) {
+				var octalStr = this.input.substr(this.pos - 1, 3).match(/^[0-7]+/)[0];
+				var octal = parseInt(octalStr, 8);
+				if (octal > 255) {
+					octalStr = octalStr.slice(0, -1);
+					octal = parseInt(octalStr, 8);
+				}
+				this.pos += octalStr.length - 1;
+				ch = this.input.charCodeAt(this.pos);
+				if ((octalStr !== "0" || ch === 56 || ch === 57) && (this.strict || inTemplate)) this.invalidStringToken(this.pos - 1 - octalStr.length, inTemplate ? "Octal literal in template string" : "Octal literal in strict mode");
+				return String.fromCharCode(octal);
+			}
+			if (isNewLine(ch)) {
+				if (this.options.locations) {
+					this.lineStart = this.pos;
+					++this.curLine;
+				}
+				return "";
+			}
+			return String.fromCharCode(ch);
+	}
+};
+pp.readHexChar = function(len) {
+	var codePos = this.pos;
+	var n = this.readInt(16, len);
+	if (n === null) this.invalidStringToken(codePos, "Bad character escape sequence");
+	return n;
+};
+pp.readWord1 = function() {
+	this.containsEsc = false;
+	var word = "", first = true, chunkStart = this.pos;
+	var astral = this.options.ecmaVersion >= 6;
+	while (this.pos < this.input.length) {
+		var ch = this.fullCharCodeAtPos();
+		if (isIdentifierChar(ch, astral)) this.pos += ch <= 65535 ? 1 : 2;
+		else if (ch === 92) {
+			this.containsEsc = true;
+			word += this.input.slice(chunkStart, this.pos);
+			var escStart = this.pos;
+			if (this.input.charCodeAt(++this.pos) !== 117) this.invalidStringToken(this.pos, "Expecting Unicode escape sequence \\uXXXX");
+			++this.pos;
+			var esc = this.readCodePoint();
+			if (!(first ? isIdentifierStart : isIdentifierChar)(esc, astral)) this.invalidStringToken(escStart, "Invalid Unicode escape");
+			word += codePointToString(esc);
+			chunkStart = this.pos;
+		} else break;
+		first = false;
+	}
+	return word + this.input.slice(chunkStart, this.pos);
+};
+pp.readWord = function() {
+	var word = this.readWord1();
+	var type = types$1.name;
+	if (this.keywords.test(word)) type = keywords[word];
+	return this.finishToken(type, word);
+};
+Parser$3.acorn = {
+	Parser: Parser$3,
+	version: "8.18.0",
+	defaultOptions: defaultOptions$2,
+	Position,
+	SourceLocation,
+	getLineInfo,
+	Node: Node$4,
+	TokenType,
+	tokTypes: types$1,
+	keywordTypes: keywords,
+	TokContext,
+	tokContexts: types$2,
+	isIdentifierChar,
+	isIdentifierStart,
+	Token: Token$1,
+	isNewLine,
+	lineBreak,
+	lineBreakG,
+	nonASCIIwhitespace
+};
+function parse$4(input, options) {
+	return Parser$3.parse(input, options);
+}
+//#endregion
+//#region ../renderer/dist/motion-lint.js
+const MAX_FILES = 256;
+const GLOBAL_OBJECTS = /* @__PURE__ */ new Set([
+	"window",
+	"globalThis",
+	"self",
+	"top",
+	"parent",
+	"frames"
+]);
+const JS_TYPES = /* @__PURE__ */ new Set([
+	"",
+	"text/javascript",
+	"application/javascript",
+	"module",
+	"text/ecmascript",
+	"application/ecmascript"
+]);
+const DATA_TYPES = /* @__PURE__ */ new Set([
+	"application/json",
+	"application/ld+json",
+	"text/plain",
+	"text/template",
+	"text/html",
+	"text/x-template"
+]);
+const FORBIDDEN_TAGS = /* @__PURE__ */ new Set([
+	"iframe",
+	"frame",
+	"frameset",
+	"object",
+	"embed",
+	"base",
+	"portal",
+	"applet"
+]);
+const URL_ATTRS = /* @__PURE__ */ new Set([
+	"src",
+	"href",
+	"xlink:href",
+	"poster",
+	"data",
+	"action",
+	"formaction",
+	"background",
+	"srcset",
+	"imagesrcset"
+]);
+const NETWORK_FIX = "remove it: a motion page draws only from its own files and window.__vs (put data in props.text or a local .js file next to the page)";
+const RULES = {
+	fetch: {
+		id: "motion_network",
+		message: "uses fetch (network access)",
+		fix: NETWORK_FIX
+	},
+	XMLHttpRequest: {
+		id: "motion_network",
+		message: "uses XMLHttpRequest (network access)",
+		fix: NETWORK_FIX
+	},
+	WebSocket: {
+		id: "motion_network",
+		message: "uses WebSocket (network access)",
+		fix: NETWORK_FIX
+	},
+	EventSource: {
+		id: "motion_network",
+		message: "uses EventSource (network access)",
+		fix: NETWORK_FIX
+	},
+	"navigator.sendBeacon": {
+		id: "motion_network",
+		message: "uses navigator.sendBeacon (network access)",
+		fix: NETWORK_FIX
+	},
+	"import()": {
+		id: "motion_network",
+		message: "uses dynamic import()",
+		fix: "use a static import of a relative file (./x.js), or a <script src> next to the page"
+	},
+	"Date.now": {
+		id: "motion_clock",
+		message: "reads the wall clock (Date.now)",
+		fix: "draw from the seek time t only; the page must be a pure function of time"
+	},
+	"new Date()": {
+		id: "motion_clock",
+		message: "reads the wall clock (new Date() without arguments)",
+		fix: "draw from the seek time t only (a fixed date needs an explicit argument)"
+	},
+	"Date()": {
+		id: "motion_clock",
+		message: "reads the wall clock (Date() called as a function)",
+		fix: "draw from the seek time t only"
+	},
+	"performance.now": {
+		id: "motion_clock",
+		message: "reads the clock (performance.now)",
+		fix: "draw from the seek time t only; the page must be a pure function of time"
+	},
+	"Math.random": {
+		id: "motion_random",
+		message: "uses unseeded randomness (Math.random)",
+		fix: "use vs.rng(seed) from the motion kit: const r = vs.rng(7); r() gives the same sequence every render"
+	},
+	setTimeout: {
+		id: "motion_timer",
+		message: "drives state with setTimeout",
+		fix: "compute every value from t inside window.seek(t) (vs.spring, vs.tween); nothing may advance on its own"
+	},
+	setInterval: {
+		id: "motion_timer",
+		message: "drives state with setInterval",
+		fix: "compute every value from t inside window.seek(t) (vs.spring, vs.tween); nothing may advance on its own"
+	},
+	requestAnimationFrame: {
+		id: "motion_timer",
+		message: "drives state with requestAnimationFrame",
+		fix: "compute every value from t inside window.seek(t); the renderer seeks each frame"
+	},
+	eval: {
+		id: "motion_eval",
+		message: "uses eval",
+		fix: "write the code directly; eval is blocked"
+	},
+	Function: {
+		id: "motion_eval",
+		message: "builds code with Function()",
+		fix: "write the code directly; new Function is blocked"
+	},
+	"window.open": {
+		id: "motion_network",
+		message: "opens a window (window.open)",
+		fix: "remove it"
+	}
+};
+function lineOf(text, offset) {
+	let n = 1;
+	for (let i = 0; i < offset && i < text.length; i++) if (text.charCodeAt(i) === 10) n++;
+	return n;
+}
+/** Replace a range with spaces, keeping newlines (so offsets and line numbers stay valid). */
+function blank(s) {
+	return s.replace(/[^\n]/g, " ");
+}
+function decodeEntities(s) {
+	return s.replace(/&#x([0-9a-f]+);?/gi, (_m, h) => String.fromCodePoint(Number.parseInt(h, 16))).replace(/&#(\d+);?/g, (_m, d) => String.fromCodePoint(Number(d))).replace(/&colon;/gi, ":").replace(/&sol;/gi, "/").replace(/&period;/gi, ".").replace(/&quot;/gi, "\"").replace(/&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&amp;/gi, "&");
+}
+/** Attributes of a start tag (names lower-cased, values entity-decoded). */
+function parseAttrs(src) {
+	const out = /* @__PURE__ */ new Map();
+	for (const m of src.matchAll(/([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g)) {
+		const name = m[1].toLowerCase();
+		if (!out.has(name)) out.set(name, decodeEntities(m[2] ?? m[3] ?? m[4] ?? ""));
+	}
+	return out;
+}
+function push$2(c, f) {
+	const key = `${f.id}\0${f.file ?? ""}\0${f.line ?? ""}\0${f.message}`;
+	if (c.findings.some((x) => `${x.id}\0${x.file ?? ""}\0${x.line ?? ""}\0${x.message}` === key)) return;
+	c.findings.push(f);
+}
+function rule(c, name, file, line) {
+	const r = RULES[name];
+	push$2(c, {
+		id: r.id,
+		severity: "error",
+		message: r.message,
+		fix: r.fix,
+		...file ? { file } : {},
+		...line ? { line } : {}
+	});
+}
+/** Classify a URL written in `from` (page-relative path of the referencing file; "" = the page). */
+function classifyUrl(raw, from) {
+	const u = raw.trim();
+	if (u === "" || u.startsWith("#")) return { kind: "ignore" };
+	if (/^data:/i.test(u)) return { kind: "ignore" };
+	if (u.startsWith("//")) return {
+		kind: "remote",
+		why: "a protocol-relative (remote) URL"
+	};
+	const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(u);
+	if (scheme) return {
+		kind: "remote",
+		why: `a ${scheme[1].toLowerCase()}: URL`
+	};
+	if (u.startsWith("/") || u.startsWith("\\")) return {
+		kind: "remote",
+		why: "an absolute path"
+	};
+	let path = u.replace(/[?#].*$/, "");
+	try {
+		path = decodeURIComponent(path);
+	} catch {}
+	if (path === "") return { kind: "ignore" };
+	const dir = from ? posix.dirname(from) : ".";
+	const ref = posix.normalize(posix.join(dir, path.replace(/\\/g, "/")));
+	if (ref === ".." || ref.startsWith("../") || posix.isAbsolute(ref) || ref.includes("\0")) return {
+		kind: "outside",
+		ref
+	};
+	return {
+		kind: "local",
+		ref
+	};
+}
+function useUrl(c, raw, as, from, line, what) {
+	const u = classifyUrl(raw, from);
+	const file = from || void 0;
+	if (u.kind === "ignore") return;
+	if (u.kind === "remote") {
+		push$2(c, {
+			id: "motion_remote_ref",
+			severity: "error",
+			message: `${what} "${raw.trim().slice(0, 120)}" is ${u.why}; the page may load only its own files`,
+			fix: "copy the file next to the page and reference it with a relative path (e.g. ./logo.png), or inline it as a data: URL",
+			...file ? { file } : {},
+			...line ? { line } : {}
+		});
+		return;
+	}
+	if (u.kind === "outside") {
+		push$2(c, {
+			id: "motion_asset_outside",
+			severity: "error",
+			message: `${what} "${raw.trim()}" points outside the page's folder`,
+			fix: "move the file into the page's folder (or a subfolder) and reference it relatively",
+			...file ? { file } : {},
+			...line ? { line } : {}
+		});
+		return;
+	}
+	const kinds = c.refs.get(u.ref) ?? /* @__PURE__ */ new Set();
+	kinds.add(as);
+	c.refs.set(u.ref, kinds);
+}
+function isNode$2(v) {
+	return typeof v === "object" && v !== null && typeof v.type === "string";
+}
+function walk(node, visit, parent, key) {
+	visit(node, parent, key);
+	for (const k of Object.keys(node)) {
+		if (k === "loc") continue;
+		const v = node[k];
+		if (Array.isArray(v)) {
+			for (const x of v) if (isNode$2(x)) walk(x, visit, node, k);
+		} else if (isNode$2(v)) walk(v, visit, node, k);
+	}
+}
+function propName(m) {
+	const p = m.property;
+	if (!m.computed && p.type === "Identifier") return p.name;
+	if (m.computed && p.type === "Literal" && typeof p.value === "string") return p.value;
+}
+/** Dotted name of an identifier or member chain, with any global-object prefix dropped (`window.Date.now` → `Date.now`). */
+function qualified(n) {
+	if (n.type === "Identifier") return n.name;
+	if (n.type === "ChainExpression") return qualified(n.expression);
+	if (n.type !== "MemberExpression") return void 0;
+	const prop = propName(n);
+	if (prop === void 0) return void 0;
+	const obj = n.object;
+	if (obj.type === "Identifier" && GLOBAL_OBJECTS.has(obj.name)) return prop;
+	if (obj.type === "ThisExpression") return void 0;
+	const base = qualified(obj);
+	return base === void 0 ? void 0 : `${base}.${prop}`;
+}
+/** An identifier that reads a variable (not a property name, label or declared name). */
+function isReference(n, parent, key) {
+	if (!parent) return true;
+	if (key === "property" && parent.type === "MemberExpression" && !parent.computed) return false;
+	if (key === "key" && !parent.computed && (parent.type === "Property" || parent.type === "MethodDefinition" || parent.type === "PropertyDefinition")) return false;
+	if (key === "label") return false;
+	if (key === "id") return false;
+	if (parent.type === "ImportSpecifier" || parent.type === "ExportSpecifier" || parent.type === "ImportDefaultSpecifier" || parent.type === "ImportNamespaceSpecifier") return false;
+	return true;
+}
+function parseAny(code, module) {
+	const tries = module === void 0 ? [true, false] : [module];
+	let last = { error: "unparseable" };
+	for (const m of tries) try {
+		return {
+			ast: parse$4(code, {
+				ecmaVersion: "latest",
+				sourceType: m ? "module" : "script",
+				locations: true,
+				allowReturnOutsideFunction: !m,
+				allowHashBang: true
+			}),
+			module: m
+		};
+	} catch (e) {
+		const err = e;
+		last = {
+			error: err.message ?? String(e),
+			...err.loc ? { line: err.loc.line } : {}
+		};
+	}
+	return last;
+}
+/**
+* Lint one script. `file` is its page-relative path (undefined: inline in the page, starting at
+* `lineBase` + 1); `classic` means a non-module <script>, whose top-level declarations are globals.
+*/
+function lintScript(c, code, o) {
+	const parsed = parseAny(code, o.module);
+	const at = (n, line) => (line ?? n?.loc?.start.line ?? 1) + (o.lineBase ?? 0);
+	if ("error" in parsed) {
+		push$2(c, {
+			id: "motion_parse_error",
+			severity: "error",
+			message: `script could not be parsed (${parsed.error}), so it cannot be checked`,
+			fix: "fix the syntax error (standard modern JavaScript only)",
+			...o.file ? { file: o.file } : {},
+			line: at(void 0, parsed.line)
+		});
+		return;
+	}
+	const from = o.file ?? "";
+	const hit = (name, n) => rule(c, name, o.file, at(n));
+	const top = parsed.ast.body;
+	if (o.classic) for (const s of top) {
+		if (s.type === "FunctionDeclaration" && s.id?.name === "seek") c.seek = true;
+		if (s.type === "VariableDeclaration" && s.kind === "var") {
+			for (const d of s.declarations) if (d.id.type === "Identifier" && d.id.name === "seek") c.seek = true;
+		}
+	}
+	walk(parsed.ast, (n, parent, key) => {
+		switch (n.type) {
+			case "Identifier": {
+				if (!isReference(n, parent, key)) return;
+				const name = n.name;
+				if (name === "fetch" || name === "XMLHttpRequest" || name === "WebSocket" || name === "EventSource" || name === "setTimeout" || name === "setInterval" || name === "requestAnimationFrame" || name === "eval") hit(name, n);
+				return;
+			}
+			case "MemberExpression": {
+				const q = qualified(n);
+				if (q === void 0) return;
+				if (q === "fetch" || q === "XMLHttpRequest" || q === "WebSocket" || q === "EventSource" || q === "setTimeout" || q === "setInterval" || q === "requestAnimationFrame" || q === "eval") hit(q, n);
+				else if (q === "navigator.sendBeacon" || q === "Date.now" || q === "performance.now" || q === "Math.random") hit(q, n);
+				else if (q === "open" && n.object.type === "Identifier") hit("window.open", n);
+				return;
+			}
+			case "NewExpression":
+			case "CallExpression": {
+				const callee = qualified(n.callee);
+				if (callee === "Function") hit("Function", n);
+				if (callee === "Date" && n.type === "NewExpression" && n.arguments.length === 0) hit("new Date()", n);
+				if (callee === "Date" && n.type === "CallExpression") hit("Date()", n);
+				if (n.type === "CallExpression" && n.callee.type === "Identifier" && n.callee.name === "open") hit("window.open", n);
+				if (n.type === "CallExpression" && callee === "Object.assign") {
+					const [target, src] = n.arguments;
+					if (target?.type === "Identifier" && GLOBAL_OBJECTS.has(target.name) && src?.type === "ObjectExpression") {
+						for (const p of src.properties) if (p.type === "Property" && (p.key.name === "seek" || p.key.value === "seek")) c.seek = true;
+					}
+				}
+				return;
+			}
+			case "ImportExpression":
+				hit("import()", n);
+				return;
+			case "ImportDeclaration":
+			case "ExportAllDeclaration":
+			case "ExportNamedDeclaration": {
+				const src = n.source;
+				if (!src || typeof src.value !== "string") return;
+				const spec = src.value;
+				if (spec.startsWith("./") || spec.startsWith("../")) useUrl(c, spec, "module", from, at(n), "import");
+				else push$2(c, {
+					id: "motion_network",
+					severity: "error",
+					message: `imports "${spec.slice(0, 120)}", which is not a relative file`,
+					fix: "import only files next to the page (./x.js); packages and URLs cannot be loaded",
+					...o.file ? { file: o.file } : {},
+					line: at(n)
+				});
+				return;
+			}
+			case "AssignmentExpression": {
+				const left = n.left;
+				if (left.type === "MemberExpression" && left.object.type === "Identifier" && GLOBAL_OBJECTS.has(left.object.name) && propName(left) === "seek") c.seek = true;
+				return;
+			}
+			default: return;
+		}
+	});
+}
+function lintCss(c, css, o) {
+	const from = o.file ?? "";
+	let text = css.replace(/\/\*[\s\S]*?\*\//g, blank);
+	const line = (off) => lineOf(text, off) + (o.lineBase ?? 0);
+	const where = (off) => ({
+		...o.file ? { file: o.file } : {},
+		line: line(off)
+	});
+	for (const m of text.matchAll(/@import\s+(?:url\(\s*)?(?:"([^"]*)"|'([^']*)'|([^\s;)"']+))/gi)) useUrl(c, m[1] ?? m[2] ?? m[3] ?? "", "style", from, line(m.index), "@import");
+	text = text.replace(/@import\s+[^;]*;?/gi, blank);
+	for (const m of text.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s"']*))\s*\)/gi)) useUrl(c, m[1] ?? m[2] ?? m[3] ?? "", "asset", from, line(m.index), "url()");
+	for (const m of text.matchAll(/@(?:-[a-z]+-)?keyframes\b/gi)) push$2(c, {
+		id: "motion_css_animation",
+		severity: "error",
+		message: "defines CSS @keyframes; CSS animations run on the browser clock, not on seek(t)",
+		fix: "animate from window.seek(t): compute the value (vs.spring, vs.tween) and set the style there",
+		...where(m.index)
+	});
+	const propRe = o.decls ? /(?:^|[;\s])(-(?:webkit|moz|ms|o)-)?(transition|animation)(-[a-z-]+)?\s*:/gi : /(?:^|[{;\s])(-(?:webkit|moz|ms|o)-)?(transition|animation)(-[a-z-]+)?\s*:/gi;
+	for (const m of text.matchAll(propRe)) push$2(c, {
+		id: "motion_css_animation",
+		severity: "error",
+		message: `uses the CSS ${`${m[1] ?? ""}${m[2].toLowerCase()}${m[3] ?? ""}`} property; transitions and animations run on the browser clock, not on seek(t)`,
+		fix: "remove it and set the animated value from window.seek(t) instead",
+		...where(m.index)
+	});
+}
+const RAW_BLOCK = /<(script|style)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi;
+function lintHtml(c, html) {
+	let masked = html.replace(/<!--[\s\S]*?-->/g, blank);
+	const blocks = [];
+	masked = masked.replace(RAW_BLOCK, (whole, tag, attrs, body, off) => {
+		const bodyAt = off + whole.indexOf(">") + 1;
+		blocks.push({
+			tag: tag.toLowerCase(),
+			attrs,
+			body,
+			bodyAt
+		});
+		return whole.slice(0, bodyAt - off) + blank(body) + whole.slice(bodyAt - off + body.length);
+	});
+	for (const m of masked.matchAll(/<([a-zA-Z][\w:-]*)((?:\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*\/?>/g)) {
+		const tag = m[1].toLowerCase();
+		const attrs = parseAttrs(m[2] ?? "");
+		const line = lineOf(masked, m.index);
+		if (FORBIDDEN_TAGS.has(tag)) {
+			push$2(c, {
+				id: "motion_forbidden_tag",
+				severity: "error",
+				message: `uses <${tag}>`,
+				fix: `remove the <${tag}>; a motion page draws everything itself`,
+				line
+			});
+			continue;
+		}
+		if (tag === "meta" && /refresh/i.test(attrs.get("http-equiv") ?? "")) push$2(c, {
+			id: "motion_forbidden_tag",
+			severity: "error",
+			message: "uses <meta http-equiv=refresh>",
+			fix: "remove the refresh meta",
+			line
+		});
+		if (tag === "script") {
+			const type = (attrs.get("type") ?? "").trim().toLowerCase();
+			if (!JS_TYPES.has(type) && !DATA_TYPES.has(type)) push$2(c, {
+				id: "motion_forbidden_tag",
+				severity: "error",
+				message: `uses <script type="${type}">`,
+				fix: "use plain <script> or <script type=\"module\"> with local files only",
+				line
+			});
+			const src = attrs.get("src");
+			if (src !== void 0 && JS_TYPES.has(type)) useUrl(c, src, type === "module" ? "module" : "script", "", line, "script src");
+		} else if (tag === "link") {
+			const rel = (attrs.get("rel") ?? "").toLowerCase().split(/\s+/);
+			const href = attrs.get("href");
+			if (href !== void 0) useUrl(c, href, rel.includes("stylesheet") ? "style" : rel.includes("modulepreload") ? "module" : "asset", "", line, `<link rel="${rel.join(" ")}"> href`);
+		}
+		for (const [name, value] of attrs) {
+			if (tag === "link" && name === "href") continue;
+			if (tag === "script" && name === "src") continue;
+			if (URL_ATTRS.has(name)) {
+				const urls = name.endsWith("srcset") ? value.split(",").map((s) => s.trim().split(/\s+/)[0] ?? "") : [value];
+				for (const u of urls) useUrl(c, u, "asset", "", line, `${name}`);
+			} else if (name === "style") lintCss(c, value, {
+				lineBase: line - 1,
+				decls: true
+			});
+			else if (/^on[a-z]+$/.test(name) && value.trim()) lintScript(c, value, {
+				lineBase: line - 1,
+				classic: false,
+				handler: true,
+				module: false
+			});
+		}
+	}
+	for (const b of blocks) {
+		const lineBase = lineOf(html, b.bodyAt) - 1;
+		if (b.tag === "style") {
+			lintCss(c, b.body, { lineBase });
+			continue;
+		}
+		const attrs = parseAttrs(b.attrs);
+		const type = (attrs.get("type") ?? "").trim().toLowerCase();
+		if (!JS_TYPES.has(type) || attrs.has("src") || !b.body.trim()) continue;
+		lintScript(c, b.body, {
+			lineBase,
+			classic: type !== "module",
+			...type === "module" ? { module: true } : {}
+		});
+	}
+}
+function lintFiles(c) {
+	for (let pass = 0; pass < MAX_FILES; pass++) {
+		let progressed = false;
+		for (const [ref, kinds] of [...c.refs]) {
+			if (c.done.has(ref)) continue;
+			const f = c.files.get(ref);
+			if (!f) continue;
+			c.done.add(ref);
+			if ("error" in f) {
+				const missing = /not found|missing|ENOENT/i.test(f.error);
+				push$2(c, {
+					id: missing ? "motion_asset_missing" : "motion_asset_outside",
+					severity: "error",
+					message: `${ref}: ${f.error}`,
+					fix: missing ? `create ${ref} next to the page, or remove the reference` : "keep every file the page uses as a regular file inside the page's folder (no symlinks out of the project)",
+					file: ref
+				});
+				continue;
+			}
+			progressed = true;
+			const text = new TextDecoder().decode(f.bytes);
+			if (kinds.has("style")) lintCss(c, text, { file: ref });
+			if (kinds.has("script") || kinds.has("module")) lintScript(c, text, {
+				file: ref,
+				classic: kinds.has("script") && !kinds.has("module"),
+				...kinds.has("module") ? { module: true } : {}
+			});
+		}
+		if (!progressed) break;
+	}
+}
+/**
+* Lint a motion page. `files` maps page-relative paths of referenced local files to their bytes
+* (or why they are unusable); referenced scripts and stylesheets found there are linted too.
+* References not in `files` are returned in `refs` unchecked (the caller loads them and lints again).
+*/
+function lintMotionPage(html, opts = {}) {
+	const c = {
+		findings: [],
+		files: opts.files ?? /* @__PURE__ */ new Map(),
+		refs: /* @__PURE__ */ new Map(),
+		done: /* @__PURE__ */ new Set(),
+		seek: false
+	};
+	lintHtml(c, html);
+	lintFiles(c);
+	if (!c.seek) push$2(c, {
+		id: "motion_no_seek",
+		severity: "warning",
+		message: "no script assigns window.seek, so every frame will look the same",
+		fix: "define window.seek = function (t) { ... } that draws the whole frame from t (seconds), e.g. with vs.spring(t, {...})"
+	});
+	const order = (f) => f.severity === "error" ? 0 : 1;
+	c.findings.sort((a, b) => order(a) - order(b) || (a.file ?? "").localeCompare(b.file ?? "") || (a.line ?? 0) - (b.line ?? 0));
+	return {
+		findings: c.findings,
+		refs: [...c.refs.keys()].sort()
+	};
+}
+/** One-line summary of a finding (`id file:line: message`). */
+function formatMotionFinding(f) {
+	return `${f.id}${f.file ? ` ${f.file}${f.line ? `:${f.line}` : ""}` : f.line ? ` line ${f.line}` : ""}: ${f.message}`;
+}
+/**
+* Read a motion page (`htmlPath`, project-relative) and every local file it references, confined
+* to the project after resolving symlinks, and lint them all. Never throws for page problems:
+* they come back as findings.
+*/
+async function loadMotionPage(projectDir, htmlPath) {
+	const paths = projectPaths(projectDir);
+	const out = {
+		html_path: htmlPath,
+		files: [],
+		findings: []
+	};
+	let pageAbs;
+	try {
+		pageAbs = await resolveInsideProject(paths, htmlPath);
+	} catch (e) {
+		out.findings.push({
+			id: "motion_page_outside",
+			severity: "error",
+			message: `html "${htmlPath}" is not a path inside the project (${e instanceof Error ? e.message : String(e)})`,
+			fix: "write the page inside the project (e.g. motion/s01.html) and set props.html to that relative path"
+		});
+		return out;
+	}
+	let bytes;
+	try {
+		if (!(await stat(pageAbs)).isFile()) throw new Error("not a file");
+		bytes = await readFile(pageAbs);
+	} catch {
+		out.findings.push({
+			id: "motion_page_missing",
+			severity: "error",
+			message: `html "${htmlPath}" does not exist`,
+			fix: `write the page to ${htmlPath} (see the motion authoring contract), or fix props.html`
+		});
+		return out;
+	}
+	out.html = bytes.toString("utf8");
+	out.sha256 = sha256Hex(bytes);
+	const dir = posix.dirname(htmlPath.replace(/\\/g, "/"));
+	const files = /* @__PURE__ */ new Map();
+	const abs = /* @__PURE__ */ new Map();
+	let result = lintMotionPage(out.html, { files });
+	while (result.refs.some((r) => !files.has(r))) {
+		for (const ref of result.refs) {
+			if (files.has(ref)) continue;
+			if (files.size >= MAX_FILES) {
+				files.set(ref, { error: `too many files (more than ${MAX_FILES})` });
+				continue;
+			}
+			try {
+				const p = await resolveInsideProject(paths, posix.join(dir, ref));
+				let st;
+				try {
+					st = await stat(p);
+				} catch {
+					files.set(ref, { error: "file not found" });
+					continue;
+				}
+				if (!st.isFile()) {
+					files.set(ref, { error: "not a regular file" });
+					continue;
+				}
+				files.set(ref, { bytes: await readFile(p) });
+				abs.set(ref, p);
+			} catch (e) {
+				files.set(ref, { error: e instanceof Error ? e.message : String(e) });
+			}
+		}
+		result = lintMotionPage(out.html, { files });
+	}
+	out.findings.push(...result.findings);
+	for (const ref of result.refs) {
+		const f = files.get(ref);
+		const p = abs.get(ref);
+		if (f && "bytes" in f && p) out.files.push({
+			ref,
+			abs: p,
+			sha256: sha256Hex(f.bytes)
+		});
+	}
+	return out;
+}
+/** What a motion scene's clip depends on besides the spec: the page and file hashes (cache key input). */
+function motionPageDigest(page) {
+	return {
+		html: page.html_path,
+		sha256: page.sha256 ?? null,
+		files: page.files.map((f) => ({
+			ref: f.ref,
+			sha256: f.sha256
+		}))
+	};
+}
+//#endregion
 //#region ../renderer/dist/select.js
 function rendererFamily(r) {
 	if (r.id.startsWith("hyperframes")) return "hyperframes";
@@ -26980,7 +33447,7 @@ function serialQueue() {
 	};
 }
 /** Cache key of a scene clip: scene canonical JSON + tokens + target (+ zones) + renderer id/version. */
-function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage, cues, images) {
+function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zones, footage, cues, images, motion) {
 	return sha256Hex(canonicalJson({
 		v: 1,
 		layout: 10,
@@ -26995,8 +33462,21 @@ function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zon
 		placeholder,
 		...footage ? { footage } : {},
 		...cues?.length ? { cues } : {},
-		...images?.length ? { images } : {}
+		...images?.length ? { images } : {},
+		...motion ? { motion } : {}
 	}));
+}
+/** The cache-key input of a `motion` scene: page and file hashes, kit version and its beat grid. Undefined for other kinds. */
+async function motionKeyInput(scene, projectDir, beats) {
+	const det = scene.deterministic;
+	if (det?.kind !== "motion") return void 0;
+	const page = await loadMotionPage(projectDir, typeof det.props.html === "string" ? det.props.html : "");
+	const beatsUsed = beats && (beats.beats_s.length || beats.downbeats_s.length) ? { beats } : {};
+	return {
+		kit: MOTION_KIT_VERSION,
+		...motionPageDigest(page),
+		...beatsUsed
+	};
 }
 /**
 * Every image reference a scene's picture draws: `asset` ids anywhere in the deterministic props
@@ -27151,11 +33631,13 @@ async function renderScenes(spec, o) {
 		const refs = sceneImageRefs(scene, o.tokens);
 		if (refs.assets.length) irAssets ??= loadIrAssetPaths(o.project_dir);
 		const images = await sceneImages(scene, o.tokens, o.project_dir, refs.assets.length ? await irAssets : void 0);
+		const beats = placeholder || footage ? void 0 : o.beats?.get(orig.id);
+		const motion = placeholder || footage ? void 0 : await motionKeyInput(scene, o.project_dir, beats);
 		const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? {
 			sha256: footage.sha256,
 			duration_sec: footage.media.duration_sec,
 			...footage.media.content_box ? { content_box: footage.media.content_box } : {}
-		} : void 0, cues, images);
+		} : void 0, cues, images, motion);
 		const out = join(dir, `${orig.id}.mp4`);
 		const sidecarPath = join(dir, `${orig.id}.json`);
 		const base = {
@@ -27190,7 +33672,8 @@ async function renderScenes(spec, o) {
 				project_dir: o.project_dir,
 				...o.zones ? { zones: o.zones } : {},
 				...footage ? { footage } : {},
-				...cues?.length ? { cues } : {}
+				...cues?.length ? { cues } : {},
+				...motion?.beats ? { beats: motion.beats } : {}
 			}, { signal: o.signal });
 			const res = await (rendererFamily(r) === "hyperframes" ? chromeGate(draw) : draw());
 			await rename(tmp, out);
@@ -27240,7 +33723,251 @@ async function renderScenes(spec, o) {
 	};
 }
 //#endregion
+//#region ../renderer/dist/motion-compose.js
+/**
+* Composer for `motion` scenes: a page Claude wrote as code, wrapped into a HyperFrames
+* composition (pinned producer 0.8.78). Pure: no filesystem or network access; the same inputs
+* give byte-identical HTML.
+*
+* Authoring contract (the page, e.g. `motion/s01.html`):
+* - `window.seek(t)` is synchronous and pure: it draws the whole frame from `t` (scene-local
+*   seconds) alone, whatever order it is called in. The renderer seeks every frame.
+* - `window.readyForCapture` is a Promise that resolves once fonts and images have decoded.
+*   Without it the composer waits for `document.fonts.ready`.
+* - No CSS transitions or animations, no timers or `requestAnimationFrame` driving state, no
+*   wall clock (`Date.now`, `performance.now`), no unseeded randomness (use `vs.rng(seed)`), no
+*   network. Physics is closed-form, or pre-simulated and indexed by time; springs are
+*   closed-form step responses (`vs.spring`), and a value whose target changes several times is
+*   the sum of one spring per change (`vs.springs`).
+* - Viewer-facing copy comes from `window.__vs.text` (the scene's `props.text`), so grounding,
+*   verify, localize and word cues see it.
+* - Local files (scripts, styles, images, fonts) sit in the page's folder and are referenced
+*   relatively; they are copied next to the composition with the same relative paths.
+* - The page draws on a canvas of the target size. A page designed for another size declares it
+*   with `<meta name="vs-canvas" content="1080x1920">` and is scaled to fit (contain, centred).
+*
+* Injected before any author code, first thing in `<head>`:
+* - a Content-Security-Policy meta: local scripts, styles, images, fonts and media only, and no
+*   `connect-src` (the runtime backstop for the static lint in motion-lint.ts);
+* - `window.__vs = { fps, duration, width, height, target, text, beats, downbeats, cues, tokens, loop }`
+*   (JSON with `<`, `>`, `&`, U+2028/2029 escaped, so no value can close the script tag);
+* - the motion kit (`window.vs`, motion-kit.ts).
+*
+* After the author's markup: the timeline adapter, registered synchronously on
+* `window.__timelines[<composition id>]` (the producer polls for it), whose `seek(t)` calls
+* `window.seek(t)`. Readiness goes through the runtime's `window.__hf.buildReady` registry: the
+* runtime holds render-ready until every promise there settles, so capture starts only after
+* `readyForCapture`. Author scripts in `<body>` are moved after the page's markup (in order), so
+* the producer's composition scoping never sees a script inside the clip.
+*/
+const MOTION_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self'";
+/** Where the composer's own files (bundled fonts) go in the composition dir; never an author path. */
+const MOTION_INTERNAL_DIR = "__vs";
+const HEX$1 = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+/** JSON safe to embed in an inline <script>: nothing in it can end the element or break the parser. */
+function scriptJson(value) {
+	return JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+}
+function ms3(n) {
+	return Math.round(n * 1e3) / 1e3;
+}
+/** The author's page split into head markup, body markup and body scripts (in order). */
+function splitMotionPage(html) {
+	let src = html.replace(/^﻿/, "").replace(/<!doctype[^>]*>/i, "");
+	const headM = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/i.exec(src);
+	let head = headM?.[1] ?? "";
+	if (headM) src = src.slice(0, headM.index) + src.slice(headM.index + headM[0].length);
+	const bodyM = /<body\b[^>]*>([\s\S]*?)(?:<\/body\s*>|$)/i.exec(src);
+	let body = bodyM ? bodyM[1] : src.replace(/<\/?html\b[^>]*>/gi, "");
+	body = body.replace(/<\/html\s*>\s*$/i, "");
+	let canvas;
+	head = head.replace(/<meta\b([^>]*)>/gi, (whole, attrs) => {
+		const a = parseAttrs(attrs);
+		const name = (a.get("name") ?? "").toLowerCase();
+		if (name === "vs-canvas") {
+			const m = /^\s*(\d{2,5})\s*x\s*(\d{2,5})\s*$/i.exec(a.get("content") ?? "");
+			if (m) canvas = {
+				width: Number(m[1]),
+				height: Number(m[2])
+			};
+			return "";
+		}
+		if (a.has("charset") || name === "viewport") return "";
+		return whole;
+	});
+	head = head.replace(/<title\b[^>]*>[\s\S]*?<\/title\s*>/gi, "");
+	const scripts = [];
+	body = body.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, (s) => {
+		scripts.push(s);
+		return "";
+	});
+	return {
+		head: head.trim(),
+		body: body.trim(),
+		scripts,
+		...canvas ? { canvas } : {}
+	};
+}
+function timelineAdapter(compositionId, duration) {
+	const id = JSON.stringify(compositionId);
+	return `(function () {
+  var DURATION = ${ms3(duration)};
+  var t = 0;
+  var playing = false;
+  function apply(seconds) {
+    t = Math.min(Math.max(0, Number(seconds) || 0), DURATION);
+    if (typeof window.seek === "function") window.seek(t);
+  }
+  var ready = Promise.resolve(window.readyForCapture || (document.fonts ? document.fonts.ready : undefined)).then(function () { apply(t); });
+  var tl = {
+    duration: function () { return DURATION; },
+    totalDuration: function () { return DURATION; },
+    seek: function (s) { apply(s); return tl; },
+    totalTime: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    time: function (s) { if (s === undefined) return t; apply(s); return tl; },
+    progress: function (p) { if (p === undefined) return DURATION ? t / DURATION : 0; apply(p * DURATION); return tl; },
+    pause: function () { playing = false; apply(t); return tl; },
+    play: function () { playing = true; return tl; },
+    paused: function (v) { if (v === undefined) return !playing; playing = !v; return tl; },
+    isActive: function () { return false; },
+    timeScale: function (v) { return v === undefined ? 1 : tl; },
+    getChildren: function () { return []; },
+    kill: function () { return tl; }
+  };
+  window.__timelines = window.__timelines || {};
+  window.__timelines[${id}] = tl;
+  window.__hf = window.__hf || {};
+  window.__hf.buildReady = window.__hf.buildReady || {};
+  window.__hf.buildReady[${id}] = ready;
+  try { apply(0); } catch (e) { if (typeof console !== "undefined") console.error(e); }
+})();`;
+}
+/**
+* Wrap a motion page (`pageHtml`, the author's file) into a HyperFrames composition for `req`.
+* Returned assets are the composer's own (bundled fonts under `__vs/`); the caller copies the
+* page's local files (motion-lint.ts `loadMotionPage`) next to it with their relative paths.
+* `text_boxes` is empty: the page lays out its own text, which the composer cannot measure.
+*/
+function composeMotion(req, pageHtml, opts = {}) {
+	const { scene, target, tokens } = req;
+	const det = scene.deterministic;
+	if (!det || det.kind !== "motion") throw new Error(`scene ${scene.id} is not a motion scene`);
+	const W = Math.round(target.width);
+	const H = Math.round(target.height);
+	if (!(W > 0 && H > 0)) throw new Error(`invalid target size ${target.width}x${target.height}`);
+	const dur = scene.duration_sec;
+	const warnings = [];
+	const assets = [];
+	const props = det.props;
+	const page = splitMotionPage(pageHtml);
+	const canvas = page.canvas ?? {
+		width: W,
+		height: H
+	};
+	const scale = Math.min(W / canvas.width, H / canvas.height);
+	const offX = (W - canvas.width * scale) / 2;
+	const offY = (H - canvas.height * scale) / 2;
+	const fit = canvas.width === W && canvas.height === H ? "" : ` left: ${ms3(offX)}px; top: ${ms3(offY)}px; transform: scale(${Math.round(scale * 1e6) / 1e6}); transform-origin: 0 0;`;
+	const colour = (v, key) => {
+		if (v && HEX$1.test(v.trim())) return v.trim();
+		warnings.push(`tokens: ${key} "${v ?? ""}" is not a hex colour; window.__vs.tokens.palette.${key} is null`);
+		return null;
+	};
+	const palette = {
+		background: colour(tokens.color_background, "background"),
+		text: colour(tokens.color_text, "text"),
+		primary: colour(tokens.color_primary, "primary"),
+		secondary: colour(tokens.color_secondary, "secondary")
+	};
+	const cues = opts.cues ?? req.cues ?? [];
+	const vsData = {
+		fps: target.fps,
+		duration: dur,
+		width: canvas.width,
+		height: canvas.height,
+		target: {
+			width: W,
+			height: H,
+			aspect_ratio: target.aspect_ratio
+		},
+		text: Array.isArray(props.text) ? props.text.filter((x) => typeof x === "string") : [],
+		beats: (req.beats?.beats_s ?? []).map(ms3),
+		downbeats: (req.beats?.downbeats_s ?? []).map(ms3),
+		cues: cues.map((c) => ({
+			item: c.item,
+			at: ms3(c.at_s)
+		})),
+		loop: props.loop === true,
+		tokens: {
+			palette,
+			fonts: {
+				heading: tokens.font_heading ?? null,
+				body: tokens.font_body ?? null,
+				mono: tokens.font_mono ?? null
+			},
+			...tokens.weight_heading !== void 0 ? { weight_heading: tokens.weight_heading } : {},
+			...tokens.weight_body !== void 0 ? { weight_body: tokens.weight_body } : {},
+			...tokens.text_case ? { text_case: tokens.text_case } : {},
+			...tokens.motion ? { motion: tokens.motion } : {},
+			...tokens.style ? { style: tokens.style } : {},
+			...tokens.language ? { language: tokens.language } : {}
+		}
+	};
+	const faces = fontFaceCss(tokens, opts.fontsDir === void 0 ? {} : { fontsDir: opts.fontsDir }).replace(/url\("(file:[^"]+)"\)/g, (_m, href) => {
+		const src = fileURLToPath(href);
+		const dest = `${MOTION_INTERNAL_DIR}/fonts/${basename(src).replace(/[^A-Za-z0-9._-]/g, "_")}`;
+		if (!assets.some((a) => a.dest === dest)) assets.push({
+			src,
+			dest
+		});
+		return `url("${dest}")`;
+	});
+	const compositionId = `vs-${scene.id.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+	const d = String(ms3(dur));
+	const bg = palette.background ?? "#000000";
+	return {
+		composition_id: compositionId,
+		html: `<!doctype html>
+<html lang="${escapeHtml(tokens.language ?? "en")}">
+<head>
+<meta http-equiv="Content-Security-Policy" content="${MOTION_CSP}">
+<meta charset="utf-8">
+<meta name="viewport" content="width=${W}, height=${H}">
+<title>${escapeHtml(`${scene.id} motion`)}</title>
+<style>
+html, body { margin: 0; padding: 0; width: ${W}px; height: ${H}px; overflow: hidden; background: ${bg}; }
+#vs-root { position: relative; width: ${W}px; height: ${H}px; overflow: hidden; }
+#vs-scene { position: absolute; left: 0; top: 0; width: ${W}px; height: ${H}px; overflow: hidden; }
+#vs-canvas { position: absolute; left: 0; top: 0; width: ${canvas.width}px; height: ${canvas.height}px; overflow: hidden;${fit} }${faces ? `\n${faces}` : ""}
+</style>
+<script>window.__vs = ${scriptJson(vsData)};<\/script>
+<script>
+${MOTION_KIT_SOURCE}<\/script>
+${page.head}
+</head>
+<body>
+<div id="vs-root" data-composition-id="${compositionId}" data-start="0" data-duration="${d}" data-width="${W}" data-height="${H}" data-fps="${target.fps}">
+<div id="vs-scene" class="clip vs-kind-motion" data-start="0" data-duration="${d}" data-track-index="0">
+<div id="vs-canvas">
+${page.body}
+</div>
+</div>
+</div>
+${page.scripts.join("\n")}
+<script>
+${timelineAdapter(compositionId, dur)}
+<\/script>
+</body>
+</html>
+`,
+		assets,
+		warnings,
+		text_boxes: []
+	};
+}
+//#endregion
 //#region ../renderer/dist/hyperframes-compose.js
+/** Every kind the HyperFrames renderer draws: the built-in kinds plus Claude-authored `motion` pages (motion-compose.ts). */
 const HYPERFRAMES_KINDS = [
 	"typography",
 	"code",
@@ -27256,7 +33983,8 @@ const HYPERFRAMES_KINDS = [
 	"split_screen",
 	"lower_third",
 	"kinetic_text",
-	"map"
+	"map",
+	"motion"
 ];
 const IMAGE_EXT = /^\.(png|jpe?g|webp|gif|avif|svg)$/i;
 const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
@@ -29089,7 +35817,11 @@ function buildComposition(req, opts = {}) {
 	const { scene, target, project_dir } = req;
 	const det = scene.deterministic;
 	if (!det) throw new Error(`scene ${scene.id} has no deterministic content`);
-	const render = det.kind === "motion" ? void 0 : RENDERERS[det.kind];
+	if (det.kind === "motion") {
+		if (opts.motionHtml === void 0) throw new Error(`scene ${scene.id}: a motion scene needs its page source (motionHtml)`);
+		return composeMotion(req, opts.motionHtml, opts.cues ? { cues: opts.cues } : {});
+	}
+	const render = RENDERERS[det.kind];
 	if (!render) throw new Error(`scene ${scene.id}: unsupported deterministic kind "${String(det.kind)}"`);
 	const W = Math.round(target.width);
 	const H = Math.round(target.height);
@@ -29578,12 +36310,30 @@ function createHyperframesRenderer(opts = {}) {
 			].includes(target.fps)) throw new Error(`HyperFrames renderer supports 24, 30 or 60 fps (scene ${scene.id} asked for ${target.fps})`);
 			const avail = await check(process.env);
 			if (!avail.ok || !avail.chromePath) throw new Error(`HyperFrames renderer unavailable: ${avail.reason}`);
+			let motionHtml;
+			const motionAssets = [];
+			const motionWarnings = [];
+			if (kind === "motion") {
+				const html = scene.deterministic.props.html;
+				const page = await loadMotionPage(req.project_dir, typeof html === "string" ? html : "");
+				const errors = page.findings.filter((f) => f.severity === "error");
+				if (errors.length || page.html === void 0) throw new Error(`HyperFrames renderer refuses motion page ${String(html)} of scene ${scene.id} (${errors.length} lint error(s)): ${errors.map(formatMotionFinding).join("; ")}`);
+				motionHtml = page.html;
+				for (const f of page.findings) motionWarnings.push(`motion: ${formatMotionFinding(f)}`);
+				for (const f of page.files) if (f.ref === "index.html" || f.ref.startsWith(`__vs/`)) motionWarnings.push(`motion: ${f.ref} clashes with a composition file; not copied`);
+				else motionAssets.push({
+					src: f.abs,
+					dest: f.ref
+				});
+			}
 			const assetIndex = await loadAssetIndex(req.project_dir);
 			const comp = buildComposition(req, {
 				resolveAsset: (id) => assetIndex.get(id),
-				...req.cues?.length ? { cues: req.cues } : {}
+				...req.cues?.length ? { cues: req.cues } : {},
+				...motionHtml !== void 0 ? { motionHtml } : {}
 			});
-			const warnings = [...comp.warnings];
+			comp.assets.push(...motionAssets);
+			const warnings = [...comp.warnings, ...motionWarnings];
 			const keep = opts.keepTmp || process.env.VS_KEEP_HYPERFRAMES_TMP === "1";
 			const dir = await mkdtemp(join(opts.tmpRoot ?? tmpdir(), `vs-hf-${scene.id}-`));
 			let job;
@@ -31915,8 +38665,10 @@ function projectSpecPaths(projectDir) {
 /**
 * Validate a VideoSpec file: schema first, then semantic rules. If a ContentIR path
 * is given and exists, evidence refs and asset ids are cross-checked against it.
+* `motion` pages are read from `projectDir` (default: the folder above `project/video-spec.json`)
+* and linted; their errors fail validation.
 */
-async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = findPlatformSpecsDir(), stylesDir = findStylesDir()) {
+async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = findPlatformSpecsDir(), stylesDir = findStylesDir(), projectDir = dirname(dirname(specPath))) {
 	const result = {
 		ok: false,
 		spec_path: specPath,
@@ -31984,8 +38736,39 @@ async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = find
 		const style = await checkSpecStyle(parsed.data.style, stylesDir);
 		if (style) result.errors.push(style);
 	}
+	const motion = await checkMotionPages(parsed.data, projectDir);
+	result.errors.push(...motion.errors);
+	result.warnings.push(...motion.warnings);
 	result.ok = result.errors.length === 0;
 	return result;
+}
+/**
+* Every `motion` scene's page, linted (motion-lint.ts): a missing page, a path or symlink leaving
+* the project, and each unsafe or non-deterministic construct. The same findings as lint's
+* `motion_unsafe` rule; errors here block the render.
+*/
+async function checkMotionPages(spec, projectDir) {
+	const errors = [];
+	const warnings = [];
+	for (const [i, s] of spec.scenes.entries()) {
+		const det = s.deterministic;
+		if (det?.kind !== "motion") continue;
+		const html = typeof det.props.html === "string" ? det.props.html : "";
+		const page = await loadMotionPage(projectDir, html);
+		for (const f of page.findings) {
+			const issue = {
+				path: `scenes.${i}.deterministic.props.html`,
+				stage: "motion",
+				message: `${s.id}: ${html}: ${formatMotionFinding(f)}`,
+				fix: f.fix
+			};
+			(f.severity === "error" ? errors : warnings).push(issue);
+		}
+	}
+	return {
+		errors,
+		warnings
+	};
 }
 /** An error when `id` is not a loadable style pack in `dir`, listing the available ids. */
 async function checkSpecStyle(id, dir) {
@@ -33052,6 +39835,24 @@ function checkCues(state, out) {
 		});
 	}
 }
+/**
+* `motion` pages that are unsafe or not a pure function of time (network, clocks, randomness,
+* timers, CSS animation, files outside the page's folder): motion-lint.ts, the same findings
+* spec_validate reports, warnings included. The HyperFrames renderer refuses a page with errors.
+*/
+async function checkMotionUnsafe(root, spec, out) {
+	for (const s of spec.scenes) {
+		if (s.deterministic?.kind !== "motion") continue;
+		const html = typeof s.deterministic.props.html === "string" ? s.deterministic.props.html : "";
+		for (const f of (await loadMotionPage(root, html)).findings) out.push({
+			id: "motion_unsafe",
+			severity: f.severity,
+			scene_id: s.id,
+			message: `${html}: ${formatMotionFinding(f)}`,
+			fix: f.fix
+		});
+	}
+}
 function formatMarkdown$1(r) {
 	const lines = [
 		`# Lint: ${r.status}`,
@@ -33138,6 +39939,7 @@ async function lintProject(projectDir, opts = {}) {
 		}))
 	} : manifest?.cover, findings);
 	checkBanned(spec, brand, findings);
+	await checkMotionUnsafe(paths.root, spec, findings);
 	findings.sort((a, b) => a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1);
 	const errors = findings.filter((f) => f.severity === "error").length;
 	const warnings = findings.length - errors;
@@ -34058,10 +40860,61 @@ async function resolveVoicePolicy(o) {
 //#region src/music.ts
 /**
 * Music beds: `bundled:<id>` resolves to music/<file> in the plugin (catalog.json, CC0 beds made
-* by scripts/generate-music.mjs); anything else is a file inside the project. The licence is
-* carried into the render state, manifest, lock and provenance.
+* by scripts/generate-music.mjs); `synth:<preset>` is a score synthesized locally with ffmpeg
+* (packages/media/src/score.ts) into the render cache; anything else is a file inside the project.
+* The licence is carried into the render state, manifest, lock and provenance.
 */
 const CATALOG = "catalog.json";
+/**
+* `synth:<preset>` → a score in the cache, keyed by the final parameters, its length and
+* {@link SCORE_VERSION}; an existing file is reused (the synthesis is deterministic).
+*/
+async function resolveSynth(bed, env, o) {
+	const name = bed.file.slice(6);
+	let resolved;
+	try {
+		resolved = resolveScorePreset(name, bed.synth ?? {});
+	} catch (e) {
+		throw new Error(`audio.music.file "${bed.file}": ${e instanceof Error ? e.message : String(e)}`);
+	}
+	const { preset, params } = resolved;
+	const cycleSec = (params.progression?.length ?? 4) * 4 * 60 / params.bpm;
+	const want = Math.max(1, o.durationSec ?? 60);
+	const duration_s = Math.ceil(want / cycleSec - 1e-9) * cycleSec;
+	const bars = scoreBars(params.bpm, duration_s);
+	const key = sha256Hex(canonicalJson({
+		v: 1,
+		params,
+		bars
+	}));
+	const dir = o.cacheDir ?? join(resolveDataDir(env).cache, "score");
+	await mkdir(dir, { recursive: true });
+	const path = join(dir, `${key}.wav`);
+	let sha256;
+	if (existsSync(path)) sha256 = await hashFile(path);
+	else try {
+		sha256 = (await synthScore({
+			...params,
+			duration_s
+		}, path, o.signal ? { signal: o.signal } : {})).sha256;
+	} catch (e) {
+		throw new Error(`audio.music.file "${bed.file}": ffmpeg could not synthesize the score (${e instanceof Error ? e.message : String(e)})`);
+	}
+	const grid = scoreGrid(params.bpm, bars);
+	return {
+		ref: bed.file,
+		path,
+		sha256,
+		license: { ...SCORE_LICENSE },
+		title: `${preset.title} (${params.bpm} bpm)`,
+		bed,
+		grid: {
+			bpm: params.bpm,
+			...grid,
+			duration_ms: Math.round(bars * 4 * 6e4 / params.bpm)
+		}
+	};
+}
 /** The plugin's music/ directory (CLAUDE_PLUGIN_ROOT first, then walking up from this module). */
 function findMusicDir(env = process.env, from) {
 	const root = env.CLAUDE_PLUGIN_ROOT;
@@ -34085,7 +40938,9 @@ function loadMusicCatalog(dir) {
 	}
 }
 /** Resolve spec.audio.music to a file, its hash and licence. Throws an actionable error when it cannot. */
-async function resolveMusic(bed, projectDir, env = process.env) {
+async function resolveMusic(bed, projectDir, env = process.env, opts = {}) {
+	if (bed.file.startsWith("synth:")) return resolveSynth(bed, env, opts);
+	if (bed.synth) throw new Error(`audio.music.synth only applies to a synthesized score; set audio.music.file to "synth:<preset>" (e.g. synth:pulse) or remove synth`);
 	if (bed.file.startsWith("bundled:")) {
 		const id = bed.file.slice(8);
 		const dir = findMusicDir(env);
@@ -237654,12 +244509,37 @@ async function transcriptWords(root, asset, clip, sceneMs, warnings) {
 	return out;
 }
 /**
+* Peak offset (ms) of a sound effect, measured once per file content: cached as JSON under
+* `cacheDir` keyed by the file hash and SFX_PEAK_VERSION. A file ffmpeg cannot decode is an error
+* naming the file.
+*/
+async function sfxPeakMs(abs, sha, o = {}) {
+	const cacheFile = o.cacheDir ? join(o.cacheDir, `${sha256Hex(canonicalJson({
+		v: 1,
+		sfx: sha
+	}))}.json`) : void 0;
+	if (cacheFile && await exists(cacheFile)) {
+		const c = await readJson(cacheFile).catch(() => void 0);
+		if (typeof c?.peak_ms === "number" && c.peak_ms >= 0) return c.peak_ms;
+	}
+	let peak;
+	try {
+		peak = await measurePeakOffset(abs, o.signal ? { signal: o.signal } : {});
+	} catch (e) {
+		if (o.signal?.aborted) throw e;
+		throw new Error(`sfx file ${abs} could not be decoded to find its peak (${errMsg(e)}); re-export it as WAV or M4A`);
+	}
+	if (cacheFile) await writeJsonAtomic(cacheFile, { peak_ms: peak }).catch(() => void 0);
+	return peak;
+}
+/**
 * Per-scene audio: a narrated scene keeps its voice slot; a footage scene plays its own sound for
 * the same span (`native`, `mix`), the bed only (`music`) or nothing (`mute`); crossfades come from
-* `audio.crossfade_ms`; sound effects play at scene start + `at_sec`.
+* `audio.crossfade_ms`; sound effects peak at scene start + `at_sec`.
 */
-async function buildSceneAudio(root, scenes, placements, slotMs, footage, nativeTracks, warnings) {
+async function buildSceneAudio(root, scenes, placements, slotMs, footage, nativeTracks, warnings, opts = {}) {
 	const paths = projectPaths(root);
+	const peaks = /* @__PURE__ */ new Map();
 	const plan = {
 		slots: [],
 		sfx: [],
@@ -237733,15 +244613,22 @@ async function buildSceneAudio(root, scenes, placements, slotMs, footage, native
 			if (!await exists(abs)) throw new Error(`${s.id}: sfx file "${fx.file}" not found in the project`);
 			if (fx.at_sec * 1e3 >= dur) warnings.push(`${s.id}: sfx ${fx.file} at ${fx.at_sec}s starts after the scene ends (${(dur / 1e3).toFixed(2)}s)`);
 			const sha = await hashFile(abs);
-			const at = Math.round(start + fx.at_sec * 1e3);
+			let peak = peaks.get(sha);
+			if (peak === void 0) {
+				peak = await sfxPeakMs(abs, sha, opts);
+				peaks.set(sha, peak);
+			}
+			const { at_ms: at, trim_ms: trim } = alignOneShot(start + fx.at_sec * 1e3, peak, start);
 			plan.sfx.push({
 				path: abs,
 				at_ms: at,
+				...trim ? { trim_ms: trim } : {},
 				...fx.volume_db !== void 0 ? { volume_db: fx.volume_db } : {}
 			});
 			keySfx.push({
 				sha,
 				at,
+				trim,
 				db: fx.volume_db ?? 0
 			});
 			const rel = toPosix$1(fx.file.replace(/^\.\//, ""));
@@ -237753,7 +244640,8 @@ async function buildSceneAudio(root, scenes, placements, slotMs, footage, native
 				file: rel,
 				sha256: sha,
 				scenes: [s.id],
-				...fx.license ? { license: fx.license } : {}
+				...fx.license ? { license: fx.license } : {},
+				peak_ms: peak
 			});
 		}
 	}
@@ -237764,39 +244652,103 @@ async function buildSceneAudio(root, scenes, placements, slotMs, footage, native
 	return plan;
 }
 const BEAT_MIN_SCENE_MS = 500;
+/** Beat and bar times kept in the render state (lint and motion scenes read them). */
+const BEAT_TIMES_CAP = 1e3;
+/** Beat analysis of a bed: a synthesized score's exact grid, a cached analysis, or a fresh detection. */
+async function bedBeats(music, o = {}) {
+	if (music.grid) {
+		const g = music.grid;
+		return {
+			analysis: {
+				bpm: g.bpm,
+				beats_ms: g.beats_ms,
+				downbeats_ms: g.downbeats_ms,
+				onsets_ms: [],
+				confidence: 1
+			},
+			fileMs: g.duration_ms,
+			source: "synth"
+		};
+	}
+	const cacheFile = o.cacheDir ? join(o.cacheDir, `${sha256Hex(canonicalJson({
+		v: 2,
+		bed: music.sha256
+	}))}.json`) : void 0;
+	let cached;
+	if (cacheFile && await exists(cacheFile)) cached = await readJson(cacheFile).catch(() => void 0);
+	if (cached?.analysis.analysis_version === 2) return {
+		...cached,
+		source: "detected"
+	};
+	const analysis = await detectBeats(music.path, o.signal ? { signal: o.signal } : {});
+	const fileMs = Math.round((await ffprobe(music.path)).duration_s * 1e3);
+	if (cacheFile) await writeJsonAtomic(cacheFile, {
+		analysis,
+		fileMs
+	}).catch(() => void 0);
+	return {
+		analysis,
+		fileMs,
+		source: "detected"
+	};
+}
+/** Times (ms from the file start) mapped onto the video timeline: shifted by `start_sec`, repeated when the bed loops, inside [0, total]. */
+function bedTimeline(times, fileMs, startMs, loop, totalMs) {
+	const out = [];
+	for (let k = 0; k === 0 || loop && fileMs > 0 && k * fileMs - startMs <= totalMs; k++) for (const b of times) {
+		const t = b + k * fileMs - startMs;
+		if (t >= 0 && t <= totalMs) out.push(t);
+	}
+	return out.sort((a, b) => a - b);
+}
 /**
-* Snap scene cuts to beats of the music bed (on the video timeline: `start_sec` offset, looped
-* when the bed loops). A cut is kept where it was when no beat is within tolerance, or when moving
-* it would cut into a scene's voiceover. Returns timing adjustments for the scenes that changed.
+* Snap scene cuts to beats (or, with `snap: "downbeat"`, bar starts) of the music bed, on the
+* video timeline: `start_sec` offset, looped when the bed loops. A synthesized score gives its
+* exact grid; any other bed is detected (cached by its hash). A cut is kept where it was when no
+* beat is within tolerance, or when moving it would cut into a scene's voiceover. Returns timing
+* adjustments for the scenes that changed.
 */
-async function beatSyncDurations(scenes, adjusted, music, toleranceMs, trackById, signal) {
+async function beatSyncDurations(scenes, adjusted, music, toleranceMs, trackById, signalOrOptions) {
+	const o = signalOrOptions instanceof AbortSignal ? { signal: signalOrOptions } : signalOrOptions ?? {};
 	const durs = scenes.map((s) => Math.round((adjusted.get(s.id) ?? s.duration_sec) * 1e3));
 	const total = durs.reduce((a, b) => a + b, 0);
-	const analysis = await detectBeats(music.path, signal ? { signal } : {});
+	const { analysis, fileMs, source } = await bedBeats(music, o);
 	const summary = {
 		bpm: analysis.bpm,
 		beats: analysis.beats_ms.length,
-		moved_cuts: 0
+		moved_cuts: 0,
+		source,
+		...source === "detected" ? { analysis_version: analysis.analysis_version ?? 1 } : {},
+		...analysis.alternate_bpm ? { alternate_bpm: analysis.alternate_bpm } : {}
 	};
 	if (!analysis.beats_ms.length) return {
 		adjustments: [],
 		summary,
 		warning: `beat_sync: no clear beat found in ${music.ref}; cuts unchanged`
 	};
-	const fileMs = Math.round((await ffprobe(music.path)).duration_s * 1e3);
 	const startMs = Math.round((music.bed.start_sec ?? 0) * 1e3);
 	const loop = music.bed.loop ?? true;
-	const beats = [];
-	for (let k = 0; k === 0 || loop && fileMs > 0 && k * fileMs - startMs <= total; k++) for (const b of analysis.beats_ms) {
-		const t = b + k * fileMs - startMs;
-		if (t >= 0 && t <= total) beats.push(t);
+	const beats = bedTimeline(analysis.beats_ms, fileMs, startMs, loop, total);
+	const downbeats = bedTimeline(analysis.downbeats_ms ?? [], fileMs, startMs, loop, total);
+	summary.beat_times_ms = beats.slice(0, BEAT_TIMES_CAP).map((t) => Math.round(t));
+	if (downbeats.length) summary.downbeat_times_ms = downbeats.slice(0, BEAT_TIMES_CAP).map((t) => Math.round(t));
+	if (analysis.drop_ms !== void 0) {
+		const drop = bedTimeline([analysis.drop_ms], fileMs, startMs, loop, total)[0];
+		if (drop !== void 0) summary.drop_ms = Math.round(drop);
 	}
-	beats.sort((a, b) => a - b);
-	summary.beat_times_ms = beats.slice(0, 1e3).map((t) => Math.round(t));
+	let warning;
+	let grid = beats;
+	summary.snap = "beat";
+	if (o.snap === "downbeat") {
+		if (downbeats.length) {
+			grid = downbeats;
+			summary.snap = "downbeat";
+		} else warning = `beat_sync: snap "downbeat" but no bar starts could be read from ${music.ref} (no accented beat 1); snapped to beats instead`;
+	}
 	const cuts = [];
 	let acc = 0;
 	for (const d of durs.slice(0, -1)) cuts.push(acc += d);
-	const snapped = snapCuts(cuts, beats, toleranceMs, BEAT_MIN_SCENE_MS);
+	const snapped = snapCuts(cuts, grid, toleranceMs, BEAT_MIN_SCENE_MS);
 	const voiceMs = (i) => {
 		const t = trackById.get(scenes[i].id);
 		return t?.audio_path ? t.duration_ms : 0;
@@ -237828,12 +244780,13 @@ async function beatSyncDurations(scenes, adjusted, music, toleranceMs, trackById
 			scene_id: s.id,
 			spec_duration_sec: s.duration_sec,
 			render_duration_sec: Math.round(nd) / 1e3,
-			reason: `beat sync${analysis.bpm ? ` (${analysis.bpm} bpm)` : ""}: ${moved.join(", ")} onto the nearest beat within ${toleranceMs} ms; render plan only (the spec is unchanged)`
+			reason: `beat sync${analysis.bpm ? ` (${analysis.bpm} bpm)` : ""}: ${moved.join(", ")} onto the nearest ${summary.snap === "downbeat" ? "bar start" : "beat"} within ${toleranceMs} ms; render plan only (the spec is unchanged)`
 		});
 	});
 	return {
 		adjustments,
-		summary
+		summary,
+		...warning ? { warning } : {}
 	};
 }
 /**
@@ -238243,9 +245196,15 @@ async function stageVoice(run, spec, brand) {
 }
 /** c0. Footage assets (ContentIR → project files) and the music bed. */
 async function stageSources(run, spec, irPath) {
+	const footage = await resolveFootage(run.root, spec, irPath);
+	const specSec = spec.scenes.reduce((a, s) => a + s.duration_sec, 0);
 	return {
-		footage: await resolveFootage(run.root, spec, irPath),
-		music: spec.audio?.music ? await resolveMusic(spec.audio.music, run.root, run.env) : void 0
+		footage,
+		music: spec.audio?.music ? await resolveMusic(spec.audio.music, run.root, run.env, {
+			durationSec: specSec,
+			cacheDir: join(resolveDataDir(run.env).cache, "score"),
+			...run.signal ? { signal: run.signal } : {}
+		}) : void 0
 	};
 }
 /** c'. Overruns extend scenes to fit the voiceover; c''. beat sync moves cuts onto beats. Render plan only. */
@@ -238264,7 +245223,11 @@ async function stagePlanTiming(run, spec, voice, music, trackById) {
 		if (!music) warnings.push("beat_sync: no audio.music bed to detect beats in; cuts unchanged");
 		else {
 			signal?.throwIfAborted();
-			const r = await beatSyncDurations(spec.scenes, adjusted, music, spec.audio.beat_sync.tolerance_ms ?? 250, trackById, signal);
+			const r = await beatSyncDurations(spec.scenes, adjusted, music, spec.audio.beat_sync.tolerance_ms ?? 250, trackById, {
+				...spec.audio.beat_sync.snap ? { snap: spec.audio.beat_sync.snap } : {},
+				cacheDir: join(resolveDataDir(run.env).cache, "beats"),
+				...signal ? { signal } : {}
+			});
 			beatSync = r.summary;
 			if (r.warning) warnings.push(r.warning);
 			for (const a of r.adjustments) {
@@ -238275,7 +245238,7 @@ async function stagePlanTiming(run, spec, voice, music, trackById) {
 				} else timing_adjustments.push(a);
 				adjusted.set(a.scene_id, a.render_duration_sec);
 			}
-			if (r.adjustments.length) warnings.push(`timing: beat sync moved ${r.summary.moved_cuts} cut(s) onto beats (${r.summary.bpm ?? "?"} bpm)`);
+			if (r.adjustments.length) warnings.push(`timing: beat sync moved ${r.summary.moved_cuts} cut(s) onto ${r.summary.snap === "downbeat" ? "bar starts" : "beats"} (${r.summary.bpm ?? "?"} bpm)`);
 		}
 	}
 	timing_adjustments.sort((a, b) => spec.scenes.findIndex((s) => s.id === a.scene_id) - spec.scenes.findIndex((s) => s.id === b.scene_id));
@@ -238376,6 +245339,29 @@ function resolveWordCues(run, planScenes, nativeTracks, trackById, slotMs) {
 	};
 }
 /**
+* The music beat grid inside each `motion` scene of the render plan, in scene-local seconds (the
+* page reads it as `window.__vs.beats` / `downbeats`). Scene starts are the frame-aligned slots of
+* `frameTimeline`. Empty without a beat grid; other kinds get none (their clips do not use it).
+*/
+function sceneBeatGrids(planScenes, fps, beatSync) {
+	const out = /* @__PURE__ */ new Map();
+	const beats = beatSync?.beat_times_ms ?? [];
+	const downbeats = beatSync?.downbeat_times_ms ?? [];
+	if (!beats.length && !downbeats.length) return out;
+	const { bounds, frameMs } = frameTimeline(planScenes, fps);
+	planScenes.forEach((s, i) => {
+		if (s.deterministic?.kind !== "motion") return;
+		const start = frameMs(bounds[i]);
+		const end = frameMs(bounds[i + 1]);
+		const local = (list) => list.filter((t) => t >= start && t < end).map((t) => Math.round(t - start) / 1e3);
+		out.set(s.id, {
+			beats_s: local(beats),
+			downbeats_s: local(downbeats)
+		});
+	});
+	return out;
+}
+/**
 * d. Scene clips: render every plan scene (cached by sidecar keys); with renderer "auto", scenes
 * that fail are retried with ffmpeg. Throws when a scene still has no clip. Also resolves the
 * target contracts and layout zones the scenes (and later captions, logo and cover) use.
@@ -238417,6 +245403,7 @@ async function stageScenes(run, input) {
 	for (const s of planScenes) sceneStart.set(s.id, now().toISOString());
 	const contracts = await loadTargetContracts(spec);
 	const zones = layoutZones(target, contracts);
+	const sceneBeats = sceneBeatGrids(planScenes, target.fps, input.beatSync);
 	const baseOpts = {
 		project_dir: root,
 		dir: scenesDir,
@@ -238429,7 +245416,8 @@ async function stageScenes(run, input) {
 		...signal ? { signal } : {},
 		footage: footage.byScene,
 		footageRenderer: o.footageRenderer ?? createFootageRenderer({ encodePreset: o.encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") }),
-		...sceneCues.size ? { cues: sceneCues } : {}
+		...sceneCues.size ? { cues: sceneCues } : {},
+		...sceneBeats.size ? { beats: sceneBeats } : {}
 	};
 	const first = await renderScenes({ scenes: planScenes }, {
 		...baseOpts,
@@ -238589,7 +245577,11 @@ async function stageSceneAudio(run, input) {
 		end_ms: Math.round(p.scene_start_ms + p.track.duration_ms)
 	}));
 	const useSceneAudio = mode === "native" || planScenes.some((s) => s.footage || s.sfx?.length);
-	const sceneAudio = useSceneAudio ? await buildSceneAudio(run.root, planScenes, placements, slotMs, footage, nativeTracks, run.warnings) : void 0;
+	const sfxCache = {
+		cacheDir: join(resolveDataDir(run.env).cache, "sfx-peak"),
+		...run.signal ? { signal: run.signal } : {}
+	};
+	const sceneAudio = useSceneAudio ? await buildSceneAudio(run.root, planScenes, placements, slotMs, footage, nativeTracks, run.warnings, sfxCache) : void 0;
 	return {
 		useSceneAudio,
 		sceneAudio,
@@ -238633,7 +245625,7 @@ async function stageAssembly(run, input) {
 	const assSha = captionFiles?.ass ? sha256Hex(await readFile(captionFiles.ass)) : null;
 	const logo = await planLogo(root, brand, tokens, zones, target, planScenes, bounds, frameMs, warnings);
 	const assemblyKey = sha256Hex(canonicalJson({
-		v: 6,
+		v: 7,
 		target,
 		encode: encodePreset ?? null,
 		pad: tokens.color_background,
@@ -238983,7 +245975,8 @@ async function renderProjectLocked(projectDir, o) {
 		target,
 		tp,
 		footage,
-		sceneCues
+		sceneCues,
+		beatSync: timing.beatSync
 	});
 	const { ordered, used, placeholders, reasons, zones, contracts } = scenes;
 	const captions = await stageCaptions(run, {
@@ -239710,6 +246703,8 @@ async function exportFromState(root, state, now, opts = {}) {
 * the ContentIR and source provenance, the brand file, the brief and storyboard, and files under
 * assets/ (except assets/voice/, which the render writes; the voice request hash covers it).
 */
+/** Music refs that are not project files (a bundled bed, a synthesized score): the lock records the ref and hash. */
+const byRef = (ref) => ref.startsWith("bundled:") || ref.startsWith("synth:");
 async function lockFromState(root, state, projectId, outputs) {
 	const paths = projectPaths(root);
 	const brand = state.brand_path && !state.brand_path.startsWith("external/") ? [state.brand_path] : state.brand_path ? [] : ["brand.yaml", "project/brand.yaml"];
@@ -239748,7 +246743,7 @@ async function lockFromState(root, state, projectId, outputs) {
 		...state.content_ir_sha256 ? { content_ir_sha256: state.content_ir_sha256 } : {},
 		engine: {
 			engine: ENGINE_VERSION,
-			assembly: String(6),
+			assembly: String(7),
 			cover: String(3),
 			target_package: String(1),
 			zones: String(2),
@@ -239773,7 +246768,7 @@ async function lockFromState(root, state, projectId, outputs) {
 			cache_key: s.cache_key,
 			clip_sha256: s.clip_sha256
 		})),
-		assets: [...await lockAssets(root, [...new Set(state.music && !state.music.ref.startsWith("bundled:") ? [...inputs, state.music.ref] : inputs)]), ...state.music?.ref.startsWith("bundled:") ? [{
+		assets: [...await lockAssets(root, [...new Set(state.music && !byRef(state.music.ref) ? [...inputs, state.music.ref] : inputs)]), ...state.music && byRef(state.music.ref) ? [{
 			path: state.music.ref,
 			sha256: state.music.sha256
 		}] : []],
@@ -243683,7 +250678,7 @@ const ZodMiniType = /*@__PURE__*/ $constructor("ZodMiniType", (inst, def) => {
 		own(this, "with", value);
 	},
 	parse(data, params) {
-		return parse$5(this, data, params, { callee: this.parse });
+		return parse$6(this, data, params, { callee: this.parse });
 	},
 	parseAsync(data, params) {
 		return parseAsync$1(this, data, params, { callee: this.parseAsync });

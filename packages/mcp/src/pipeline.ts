@@ -128,7 +128,7 @@ async function renderProjectLocked(projectDir: string, o: RenderProjectOptions):
   const { sceneCues, cueLog } = resolveWordCues(run, planScenes, nativeTracks, trackById, timeline.slotMs);
 
   // d. scene clips
-  const scenes = await stageScenes(run, { spec, planScenes, tokens: inputs.tokens, target, tp, footage, sceneCues });
+  const scenes = await stageScenes(run, { spec, planScenes, tokens: inputs.tokens, target, tp, footage, sceneCues, beatSync: timing.beatSync });
   const { ordered, used, placeholders, reasons, zones, contracts } = scenes;
 
   // e. captions; e'. music ducking and per-scene audio
@@ -645,6 +645,9 @@ async function exportFromState(root: string, state: RenderState, now: () => Date
  * the ContentIR and source provenance, the brand file, the brief and storyboard, and files under
  * assets/ (except assets/voice/, which the render writes; the voice request hash covers it).
  */
+/** Music refs that are not project files (a bundled bed, a synthesized score): the lock records the ref and hash. */
+const byRef = (ref: string) => ref.startsWith("bundled:") || ref.startsWith("synth:");
+
 async function lockFromState(root: string, state: RenderState, projectId: string, outputs: RenderManifest["outputs"]) {
   const paths = projectPaths(root);
   const brand = state.brand_path && !state.brand_path.startsWith("external/") ? [state.brand_path] : state.brand_path ? [] : ["brand.yaml", "project/brand.yaml"];
@@ -692,10 +695,10 @@ async function lockFromState(root: string, state: RenderState, projectId: string
     fonts,
     targets: contracts.filter((c) => targetIds.has(c.id)).map((c) => ({ id: c.id, contract_version: c.contract_version, verified: c.verified })),
     scenes: state.scenes.map((s) => ({ scene_id: s.scene_id, renderer: s.renderer, renderer_version: s.renderer_version, cache_key: s.cache_key, clip_sha256: s.clip_sha256 })),
-    // A user music file outside assets/ is an input too; a bundled bed is recorded by its ref.
+    // A user music file outside assets/ is an input too; a bundled bed or synthesized score is recorded by its ref.
     assets: [
-      ...(await lockAssets(root, [...new Set(state.music && !state.music.ref.startsWith("bundled:") ? [...inputs, state.music.ref] : inputs)])),
-      ...(state.music?.ref.startsWith("bundled:") ? [{ path: state.music.ref, sha256: state.music.sha256 }] : []),
+      ...(await lockAssets(root, [...new Set(state.music && !byRef(state.music.ref) ? [...inputs, state.music.ref] : inputs)])),
+      ...(state.music && byRef(state.music.ref) ? [{ path: state.music.ref, sha256: state.music.sha256 }] : []),
     ],
     outputs: outputs.map((o) => ({ path: o.path, sha256: o.sha256, ...(o.target ? { target: o.target } : {}) })),
   });

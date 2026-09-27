@@ -5,8 +5,21 @@
  */
 import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { hashFile, projectPaths, resolveInsideProject } from "@video-studio/core";
-import { type LogoOverlay, type OneShot, type SceneAudioSlot, type SpeechInterval, detectBeats, ffprobe, snapCuts } from "@video-studio/media";
+import { canonicalJson, hashFile, projectPaths, readJson, resolveInsideProject, sha256Hex, writeJsonAtomic } from "@video-studio/core";
+import {
+  BEAT_ANALYSIS_VERSION,
+  type BeatAnalysis,
+  type LogoOverlay,
+  type OneShot,
+  SFX_PEAK_VERSION,
+  type SceneAudioSlot,
+  type SpeechInterval,
+  alignOneShot,
+  detectBeats,
+  ffprobe,
+  measurePeakOffset,
+  snapCuts,
+} from "@video-studio/media";
 import type { RenderTarget, ResolvedFootage, VisualTokens } from "@video-studio/renderer";
 import {
   type Brand,
@@ -154,9 +167,31 @@ export interface SceneAudioPlan {
 }
 
 /**
+ * Peak offset (ms) of a sound effect, measured once per file content: cached as JSON under
+ * `cacheDir` keyed by the file hash and SFX_PEAK_VERSION. A file ffmpeg cannot decode is an error
+ * naming the file.
+ */
+export async function sfxPeakMs(abs: string, sha: string, o: { cacheDir?: string; signal?: AbortSignal } = {}): Promise<number> {
+  const cacheFile = o.cacheDir ? join(o.cacheDir, `${sha256Hex(canonicalJson({ v: SFX_PEAK_VERSION, sfx: sha }))}.json`) : undefined;
+  if (cacheFile && (await exists(cacheFile))) {
+    const c = await readJson<{ peak_ms?: unknown }>(cacheFile).catch(() => undefined);
+    if (typeof c?.peak_ms === "number" && c.peak_ms >= 0) return c.peak_ms;
+  }
+  let peak: number;
+  try {
+    peak = await measurePeakOffset(abs, o.signal ? { signal: o.signal } : {});
+  } catch (e) {
+    if (o.signal?.aborted) throw e;
+    throw new Error(`sfx file ${abs} could not be decoded to find its peak (${errMsg(e)}); re-export it as WAV or M4A`);
+  }
+  if (cacheFile) await writeJsonAtomic(cacheFile, { peak_ms: peak }).catch(() => undefined);
+  return peak;
+}
+
+/**
  * Per-scene audio: a narrated scene keeps its voice slot; a footage scene plays its own sound for
  * the same span (`native`, `mix`), the bed only (`music`) or nothing (`mute`); crossfades come from
- * `audio.crossfade_ms`; sound effects play at scene start + `at_sec`.
+ * `audio.crossfade_ms`; sound effects peak at scene start + `at_sec`.
  */
 export async function buildSceneAudio(
   root: string,
@@ -166,8 +201,10 @@ export async function buildSceneAudio(
   footage: FootageResolution,
   nativeTracks: ReadonlyMap<string, SceneVoiceTrack>,
   warnings: string[],
+  opts: { cacheDir?: string; signal?: AbortSignal } = {},
 ): Promise<SceneAudioPlan> {
   const paths = projectPaths(root);
+  const peaks = new Map<string, number>();
   const plan: SceneAudioPlan = { slots: [], sfx: [], speech: [], mute: [], key: null, sfxState: [] };
   const keySlots: unknown[] = [];
   const keySfx: unknown[] = [];
@@ -218,16 +255,22 @@ export async function buildSceneAudio(
       if (!(await exists(abs))) throw new Error(`${s.id}: sfx file "${fx.file}" not found in the project`);
       if (fx.at_sec * 1000 >= dur) warnings.push(`${s.id}: sfx ${fx.file} at ${fx.at_sec}s starts after the scene ends (${(dur / 1000).toFixed(2)}s)`);
       const sha = await hashFile(abs);
-      const at = Math.round(start + fx.at_sec * 1000);
-      plan.sfx.push({ path: abs, at_ms: at, ...(fx.volume_db !== undefined ? { volume_db: fx.volume_db } : {}) });
-      keySfx.push({ sha, at, db: fx.volume_db ?? 0 });
+      let peak = peaks.get(sha);
+      if (peak === undefined) {
+        peak = await sfxPeakMs(abs, sha, opts);
+        peaks.set(sha, peak);
+      }
+      // The peak, not the file start, lands on at_sec (the head is trimmed at the scene start).
+      const { at_ms: at, trim_ms: trim } = alignOneShot(start + fx.at_sec * 1000, peak, start);
+      plan.sfx.push({ path: abs, at_ms: at, ...(trim ? { trim_ms: trim } : {}), ...(fx.volume_db !== undefined ? { volume_db: fx.volume_db } : {}) });
+      keySfx.push({ sha, at, trim, db: fx.volume_db ?? 0 });
       const rel = toPosix(fx.file.replace(/^\.\//, ""));
       const prev = plan.sfxState.find((x) => x.file === rel);
       if (prev) {
         if (!prev.scenes.includes(s.id)) prev.scenes.push(s.id);
         if (!prev.license && fx.license) prev.license = fx.license;
       } else {
-        plan.sfxState.push({ file: rel, sha256: sha, scenes: [s.id], ...(fx.license ? { license: fx.license } : {}) });
+        plan.sfxState.push({ file: rel, sha256: sha, scenes: [s.id], ...(fx.license ? { license: fx.license } : {}), peak_ms: peak });
       }
     }
   }
@@ -236,11 +279,51 @@ export async function buildSceneAudio(
 }
 
 const BEAT_MIN_SCENE_MS = 500;
+/** Beat and bar times kept in the render state (lint and motion scenes read them). */
+export const BEAT_TIMES_CAP = 1000;
+
+export interface BeatSyncOptions {
+  /** Snap cuts to any beat (default) or to bar starts only. */
+  snap?: "beat" | "downbeat";
+  /** Where detected analyses are cached, keyed by the bed's hash and BEAT_ANALYSIS_VERSION. */
+  cacheDir?: string;
+  signal?: AbortSignal;
+}
+
+/** Beat analysis of a bed: a synthesized score's exact grid, a cached analysis, or a fresh detection. */
+export async function bedBeats(music: ResolvedMusic, o: Pick<BeatSyncOptions, "cacheDir" | "signal"> = {}): Promise<{ analysis: BeatAnalysis; fileMs: number; source: "detected" | "synth" }> {
+  if (music.grid) {
+    const g = music.grid;
+    return { analysis: { bpm: g.bpm, beats_ms: g.beats_ms, downbeats_ms: g.downbeats_ms, onsets_ms: [], confidence: 1 }, fileMs: g.duration_ms, source: "synth" };
+  }
+  const cacheFile = o.cacheDir ? join(o.cacheDir, `${sha256Hex(canonicalJson({ v: BEAT_ANALYSIS_VERSION, bed: music.sha256 }))}.json`) : undefined;
+  let cached: { analysis: BeatAnalysis; fileMs: number } | undefined;
+  if (cacheFile && (await exists(cacheFile))) cached = await readJson<{ analysis: BeatAnalysis; fileMs: number }>(cacheFile).catch(() => undefined);
+  if (cached?.analysis.analysis_version === BEAT_ANALYSIS_VERSION) return { ...cached, source: "detected" };
+  const analysis = await detectBeats(music.path, o.signal ? { signal: o.signal } : {});
+  const fileMs = Math.round((await ffprobe(music.path)).duration_s * 1000);
+  if (cacheFile) await writeJsonAtomic(cacheFile, { analysis, fileMs }).catch(() => undefined);
+  return { analysis, fileMs, source: "detected" };
+}
+
+/** Times (ms from the file start) mapped onto the video timeline: shifted by `start_sec`, repeated when the bed loops, inside [0, total]. */
+export function bedTimeline(times: readonly number[], fileMs: number, startMs: number, loop: boolean, totalMs: number): number[] {
+  const out: number[] = [];
+  for (let k = 0; k === 0 || (loop && fileMs > 0 && k * fileMs - startMs <= totalMs); k++) {
+    for (const b of times) {
+      const t = b + k * fileMs - startMs;
+      if (t >= 0 && t <= totalMs) out.push(t);
+    }
+  }
+  return out.sort((a, b) => a - b);
+}
 
 /**
- * Snap scene cuts to beats of the music bed (on the video timeline: `start_sec` offset, looped
- * when the bed loops). A cut is kept where it was when no beat is within tolerance, or when moving
- * it would cut into a scene's voiceover. Returns timing adjustments for the scenes that changed.
+ * Snap scene cuts to beats (or, with `snap: "downbeat"`, bar starts) of the music bed, on the
+ * video timeline: `start_sec` offset, looped when the bed loops. A synthesized score gives its
+ * exact grid; any other bed is detected (cached by its hash). A cut is kept where it was when no
+ * beat is within tolerance, or when moving it would cut into a scene's voiceover. Returns timing
+ * adjustments for the scenes that changed.
  */
 export async function beatSyncDurations(
   scenes: readonly Scene[],
@@ -248,29 +331,46 @@ export async function beatSyncDurations(
   music: ResolvedMusic,
   toleranceMs: number,
   trackById: ReadonlyMap<string, SceneVoiceTrack>,
-  signal?: AbortSignal,
+  signalOrOptions?: AbortSignal | BeatSyncOptions,
 ): Promise<{ adjustments: TimingAdjustment[]; summary: NonNullable<RenderState["beat_sync"]>; warning?: string }> {
+  const o: BeatSyncOptions = signalOrOptions instanceof AbortSignal ? { signal: signalOrOptions } : (signalOrOptions ?? {});
   const durs = scenes.map((s) => Math.round((adjusted.get(s.id) ?? s.duration_sec) * 1000));
   const total = durs.reduce((a, b) => a + b, 0);
-  const analysis = await detectBeats(music.path, signal ? { signal } : {});
-  const summary: NonNullable<RenderState["beat_sync"]> = { bpm: analysis.bpm, beats: analysis.beats_ms.length, moved_cuts: 0 };
+  const { analysis, fileMs, source } = await bedBeats(music, o);
+  const summary: NonNullable<RenderState["beat_sync"]> = {
+    bpm: analysis.bpm,
+    beats: analysis.beats_ms.length,
+    moved_cuts: 0,
+    source,
+    ...(source === "detected" ? { analysis_version: analysis.analysis_version ?? 1 } : {}),
+    ...(analysis.alternate_bpm ? { alternate_bpm: analysis.alternate_bpm } : {}),
+  };
   if (!analysis.beats_ms.length) return { adjustments: [], summary, warning: `beat_sync: no clear beat found in ${music.ref}; cuts unchanged` };
-  const fileMs = Math.round((await ffprobe(music.path)).duration_s * 1000);
   const startMs = Math.round((music.bed.start_sec ?? 0) * 1000);
   const loop = music.bed.loop ?? true;
-  const beats: number[] = [];
-  for (let k = 0; k === 0 || (loop && fileMs > 0 && k * fileMs - startMs <= total); k++) {
-    for (const b of analysis.beats_ms) {
-      const t = b + k * fileMs - startMs;
-      if (t >= 0 && t <= total) beats.push(t);
+  const beats = bedTimeline(analysis.beats_ms, fileMs, startMs, loop, total);
+  const downbeats = bedTimeline(analysis.downbeats_ms ?? [], fileMs, startMs, loop, total);
+  summary.beat_times_ms = beats.slice(0, BEAT_TIMES_CAP).map((t) => Math.round(t));
+  if (downbeats.length) summary.downbeat_times_ms = downbeats.slice(0, BEAT_TIMES_CAP).map((t) => Math.round(t));
+  if (analysis.drop_ms !== undefined) {
+    const drop = bedTimeline([analysis.drop_ms], fileMs, startMs, loop, total)[0];
+    if (drop !== undefined) summary.drop_ms = Math.round(drop);
+  }
+  let warning: string | undefined;
+  let grid = beats;
+  summary.snap = "beat";
+  if (o.snap === "downbeat") {
+    if (downbeats.length) {
+      grid = downbeats;
+      summary.snap = "downbeat";
+    } else {
+      warning = `beat_sync: snap "downbeat" but no bar starts could be read from ${music.ref} (no accented beat 1); snapped to beats instead`;
     }
   }
-  beats.sort((a, b) => a - b);
-  summary.beat_times_ms = beats.slice(0, 1000).map((t) => Math.round(t));
   const cuts: number[] = [];
   let acc = 0;
   for (const d of durs.slice(0, -1)) cuts.push((acc += d));
-  const snapped = snapCuts(cuts, beats, toleranceMs, BEAT_MIN_SCENE_MS);
+  const snapped = snapCuts(cuts, grid, toleranceMs, BEAT_MIN_SCENE_MS);
   const voiceMs = (i: number) => {
     const t = trackById.get(scenes[i]!.id);
     return t?.audio_path ? t.duration_ms : 0;
@@ -298,10 +398,10 @@ export async function beatSyncDurations(
       scene_id: s.id,
       spec_duration_sec: s.duration_sec,
       render_duration_sec: Math.round(nd) / 1000,
-      reason: `beat sync${analysis.bpm ? ` (${analysis.bpm} bpm)` : ""}: ${moved.join(", ")} onto the nearest beat within ${toleranceMs} ms; render plan only (the spec is unchanged)`,
+      reason: `beat sync${analysis.bpm ? ` (${analysis.bpm} bpm)` : ""}: ${moved.join(", ")} onto the nearest ${summary.snap === "downbeat" ? "bar start" : "beat"} within ${toleranceMs} ms; render plan only (the spec is unchanged)`,
     });
   });
-  return { adjustments, summary };
+  return { adjustments, summary, ...(warning ? { warning } : {}) };
 }
 
 /** Default logo width as a share of the frame width (brand logo_placement.max_fraction overrides). */

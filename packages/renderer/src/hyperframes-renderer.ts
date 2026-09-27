@@ -7,7 +7,9 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ProducerConfig, ProducerLogger, RenderConfigInput, RenderJob } from "@hyperframes/producer";
 import { ffprobe, resolveFfmpeg, type ProbeResult } from "@video-studio/media";
-import { buildComposition, HYPERFRAMES_KINDS } from "./hyperframes-compose.js";
+import { buildComposition, type CompositionAsset, HYPERFRAMES_KINDS } from "./hyperframes-compose.js";
+import { MOTION_INTERNAL_DIR } from "./motion-compose.js";
+import { formatMotionFinding, loadMotionPage } from "./motion-lint.js";
 import type { Availability, SceneRenderer, SceneRenderRequest, SceneRenderResult } from "./types.js";
 
 /** Exact pinned producer version (package.json pins "@hyperframes/producer": "0.8.78"). */
@@ -362,9 +364,32 @@ export function createHyperframesRenderer(opts: HyperframesRendererOptions = {})
       const avail = await check(process.env);
       if (!avail.ok || !avail.chromePath) throw new Error(`HyperFrames renderer unavailable: ${avail.reason}`);
 
+      // A motion page is untrusted code: it renders only when the static lint finds no error
+      // (the composition's CSP is the runtime backstop), and its local files are copied next
+      // to the composition with the same relative paths.
+      let motionHtml: string | undefined;
+      const motionAssets: CompositionAsset[] = [];
+      const motionWarnings: string[] = [];
+      if (kind === "motion") {
+        const html = (scene.deterministic!.props as { html?: unknown }).html;
+        const page = await loadMotionPage(req.project_dir, typeof html === "string" ? html : "");
+        const errors = page.findings.filter((f) => f.severity === "error");
+        if (errors.length || page.html === undefined) {
+          throw new Error(`HyperFrames renderer refuses motion page ${String(html)} of scene ${scene.id} (${errors.length} lint error(s)): ${errors.map(formatMotionFinding).join("; ")}`);
+        }
+        motionHtml = page.html;
+        for (const f of page.findings) motionWarnings.push(`motion: ${formatMotionFinding(f)}`);
+        for (const f of page.files) {
+          if (f.ref === "index.html" || f.ref.startsWith(`${MOTION_INTERNAL_DIR}/`)) motionWarnings.push(`motion: ${f.ref} clashes with a composition file; not copied`);
+          else motionAssets.push({ src: f.abs, dest: f.ref });
+        }
+        // Text boxes: none. The page lays out its own text, which the composer cannot measure.
+      }
+
       const assetIndex = await loadAssetIndex(req.project_dir);
-      const comp = buildComposition(req, { resolveAsset: (id) => assetIndex.get(id), ...(req.cues?.length ? { cues: req.cues } : {}) });
-      const warnings = [...comp.warnings];
+      const comp = buildComposition(req, { resolveAsset: (id) => assetIndex.get(id), ...(req.cues?.length ? { cues: req.cues } : {}), ...(motionHtml !== undefined ? { motionHtml } : {}) });
+      comp.assets.push(...motionAssets);
+      const warnings = [...comp.warnings, ...motionWarnings];
 
       const keep = opts.keepTmp || process.env.VS_KEEP_HYPERFRAMES_TMP === "1";
       const dir = await mkdtemp(join(opts.tmpRoot ?? tmpdir(), `vs-hf-${scene.id}-`));

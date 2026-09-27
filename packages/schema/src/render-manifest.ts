@@ -172,7 +172,7 @@ export const RenderManifest = z
     cover: CoverRender.optional(),
     music: z
       .strictObject({
-        file: FilePath.describe("`bundled:<id>` or the project-relative path from spec.audio.music.file."),
+        file: FilePath.describe("`bundled:<id>`, `synth:<preset>` or the project-relative path from spec.audio.music.file."),
         sha256: Sha256,
         title: z.string().optional(),
         license: AudioLicense.optional(),

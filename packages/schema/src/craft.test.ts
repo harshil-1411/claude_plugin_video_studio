@@ -81,6 +81,9 @@ describe("Phase 6.5 contracts: master, audio and acceptance", () => {
   it("rejects out-of-range acceptance and synth values", () => {
     expect(Acceptance.safeParse({ max_frozen_pct: 120 }).success).toBe(false);
     const s = loadSpec();
+    s.audio = { music: { file: "synth:pulse", synth: { seed: 3 } } };
+    expect(VideoSpec.safeParse(s).success).toBe(true);
+    expect(validateVideoSpecSemantics(s).warnings.some((w) => w.path === "audio.music.license")).toBe(false);
     s.audio = { music: { file: "synth:pulse", synth: { bpm: 300 } } };
     expect(VideoSpec.safeParse(s).success).toBe(false);
     s.audio = { music: { file: "synth:pulse", synth: { bpm: 120, key: "H" } } };

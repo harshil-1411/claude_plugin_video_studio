@@ -44,8 +44,8 @@ export type Env = Record<string, string | undefined>;
 export const ENGINE_VERSION = "0.1.0";
 /** Bump when technical QA's checks change, so cached QA results are re-run. 2: background-aware black frames, intended silence. */
 export const QA_VERSION = 3;
-/** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). 4: the caption plate is its own ASS layer (no dark bars around highlighted words). 5: loudness true peak −1.5 dBTP (headroom for the AAC encode). 6: the brand logo is overlaid in the concat encode (one fewer H.264 generation). */
-export const ASSEMBLY_VERSION = 6;
+/** Bump to invalidate assembled masters/reels. 2: caption engine v2 (plate, emphasis, zones) + bundled fonts. 3: libass gets a flat fonts folder (bundled caption fonts actually load). 4: the caption plate is its own ASS layer (no dark bars around highlighted words). 5: loudness true peak −1.5 dBTP (headroom for the AAC encode). 6: the brand logo is overlaid in the concat encode (one fewer H.264 generation). 7: sound effects land by their peak, not their first sample. */
+export const ASSEMBLY_VERSION = 7;
 /** Scene transition length when neither the scene nor the style sets one (ms). */
 export const DEFAULT_TRANSITION_MS = 400;
 
@@ -241,9 +241,33 @@ export interface RenderState {
   /** Footage assets the scenes showed (project-relative paths). */
   footage?: Array<{ asset: string; path: string; sha256: string; scenes: string[] }>;
   /** Sound effects mixed in, with their rights. */
-  sfx?: Array<{ file: string; sha256: string; scenes: string[]; license?: AudioLicense }>;
-  /** Beats detected in the music bed when beat_sync is on. */
-  beat_sync?: { bpm: number | null; beats: number; moved_cuts: number; /** Beat times on the video timeline (ms, first 1000), for lint's cut_off_beat. */ beat_times_ms?: number[] };
+  sfx?: Array<{
+    file: string;
+    sha256: string;
+    scenes: string[];
+    license?: AudioLicense;
+    /** Where the effect's peak sits in the file (ms); the mix starts it this much before `at_sec` so the peak lands on time. */
+    peak_ms?: number;
+  }>;
+  /** Beats of the music bed when beat_sync is on (detected, or the exact grid of a synthesized score). */
+  beat_sync?: {
+    bpm: number | null;
+    beats: number;
+    moved_cuts: number;
+    /** Beat times on the video timeline (ms, first 1000), for lint's cut_off_beat. */
+    beat_times_ms?: number[];
+    /** Bar starts on the video timeline (ms, first 1000), when the bed has a readable bar. */
+    downbeat_times_ms?: number[];
+    /** What cuts snapped to (spec audio.beat_sync.snap; "beat" when downbeats were asked for but not found). */
+    snap?: "beat" | "downbeat";
+    /** Where the grid came from: beat detection (with its analysis version) or a synthesized score. */
+    source?: "detected" | "synth";
+    analysis_version?: number;
+    /** Half- or double-time reading of the bed. */
+    alternate_bpm?: number;
+    /** The bed's drop on the video timeline (ms), first occurrence. */
+    drop_ms?: number;
+  };
   /** Brand logo drawn over the scenes (brand visual.logo_placement at a corner), for lint and review. */
   logo?: { path: string; box: { x: number; y: number; w: number; h: number }; scenes: string[] };
   /** Word cues as resolved for this render (scene-local ms), for lint's cue checks. */

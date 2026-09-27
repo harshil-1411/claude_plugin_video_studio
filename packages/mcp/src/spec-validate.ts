@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { checkSpecTargets, findPlatformSpecsDir, loadContracts } from "@video-studio/platforms";
-import { findStylesDir, getStyle, styleIds } from "@video-studio/renderer";
+import { findStylesDir, formatMotionFinding, getStyle, loadMotionPage, styleIds } from "@video-studio/renderer";
 import { ContentIR, VideoSpec, closestMatches, parseYamlOrJson, validateVideoSpecSemantics } from "@video-studio/schema";
 
 export interface ValidationIssue {
@@ -10,7 +10,7 @@ export interface ValidationIssue {
   /** Concrete instruction for resolving the issue. */
   fix: string;
   /** Which stage found it. */
-  stage: "syntax" | "schema" | "semantic" | "content-ir" | "platform" | "style";
+  stage: "syntax" | "schema" | "semantic" | "content-ir" | "platform" | "style" | "motion";
 }
 
 export interface SpecValidationResult {
@@ -38,12 +38,15 @@ export function projectSpecPaths(projectDir: string): { spec: string; contentIr:
 /**
  * Validate a VideoSpec file: schema first, then semantic rules. If a ContentIR path
  * is given and exists, evidence refs and asset ids are cross-checked against it.
+ * `motion` pages are read from `projectDir` (default: the folder above `project/video-spec.json`)
+ * and linted; their errors fail validation.
  */
 export async function validateSpecFile(
   specPath: string,
   contentIrPath: string | null,
   platformSpecsDir: string | null = findPlatformSpecsDir(),
   stylesDir: string | null = findStylesDir(),
+  projectDir: string = dirname(dirname(specPath)),
 ): Promise<SpecValidationResult> {
   const result: SpecValidationResult = {
     ok: false,
@@ -116,8 +119,32 @@ export async function validateSpecFile(
     const style = await checkSpecStyle(parsed.data.style, stylesDir);
     if (style) result.errors.push(style);
   }
+  const motion = await checkMotionPages(parsed.data, projectDir);
+  result.errors.push(...motion.errors);
+  result.warnings.push(...motion.warnings);
   result.ok = result.errors.length === 0;
   return result;
+}
+
+/**
+ * Every `motion` scene's page, linted (motion-lint.ts): a missing page, a path or symlink leaving
+ * the project, and each unsafe or non-deterministic construct. The same findings as lint's
+ * `motion_unsafe` rule; errors here block the render.
+ */
+export async function checkMotionPages(spec: VideoSpec, projectDir: string): Promise<{ errors: ValidationIssue[]; warnings: ValidationIssue[] }> {
+  const errors: ValidationIssue[] = [];
+  const warnings: ValidationIssue[] = [];
+  for (const [i, s] of spec.scenes.entries()) {
+    const det = s.deterministic;
+    if (det?.kind !== "motion") continue;
+    const html = typeof det.props.html === "string" ? det.props.html : "";
+    const page = await loadMotionPage(projectDir, html);
+    for (const f of page.findings) {
+      const issue: ValidationIssue = { path: `scenes.${i}.deterministic.props.html`, stage: "motion", message: `${s.id}: ${html}: ${formatMotionFinding(f)}`, fix: f.fix };
+      (f.severity === "error" ? errors : warnings).push(issue);
+    }
+  }
+  return { errors, warnings };
 }
 
 /** An error when `id` is not a loadable style pack in `dir`, listing the available ids. */

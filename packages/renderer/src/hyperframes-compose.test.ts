@@ -25,7 +25,7 @@ const TOKENS: VisualTokens = {
 const PORTRAIT: RenderTarget = { width: 1080, height: 1920, fps: 30, aspect_ratio: "9:16" };
 const LANDSCAPE: RenderTarget = { width: 1920, height: 1080, fps: 30, aspect_ratio: "16:9" };
 /** Kinds built into the composer (`motion` pages are Claude-authored and tested separately). */
-const KINDS = [...HYPERFRAMES_KINDS];
+const KINDS = HYPERFRAMES_KINDS.filter((k) => k !== "motion");
 
 function req(kind: DeterministicKind, props: Record<string, unknown>, over: Partial<SceneRenderRequest> = {}, duration = 3): SceneRenderRequest {
   const scene: Scene = {
@@ -69,6 +69,7 @@ const HOSTILE: Record<DeterministicKind, Record<string, unknown>> = {
   lower_third: { name: XSS, title: XSS, headline: XSS },
   kinetic_text: { text: `${XSS} words`, rhythm: "word", emphasis: XSS },
   map: { title: XSS, points: [{ label: XSS, x: 0.2, y: 0.3 }], route: false },
+  motion: { html: "motion/s01.html", text: [XSS] },
 };
 
 describe("buildComposition: snapshots of DETERMINISTIC_PROPS_EXAMPLES", () => {

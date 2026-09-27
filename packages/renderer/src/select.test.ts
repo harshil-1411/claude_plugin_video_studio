@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import type { DeterministicKind, Scene } from "@video-studio/schema";
 import { createFfmpegRenderer } from "./ffmpeg-renderer.js";
 import { PENDING_REASON, autoSceneConcurrency, parseVmStat, placeholderScene, renderScenes, sceneCacheKey, selectRenderer } from "./select.js";
 import { resolveTokens, targetForAspect } from "./tokens.js";
-import type { SceneRenderer } from "./types.js";
+import type { SceneRenderRequest, SceneRenderer } from "./types.js";
 
 const T = 60_000;
 
@@ -204,5 +204,69 @@ describe("parseVmStat", () => {
     const out = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:      100.\nPages active:    999.\nPages inactive:  200.\nPages speculative: 10.\nPages wired down: 5.\nPages purgeable:  2.\n";
     expect(parseVmStat(out)).toBe(312 * 16384);
     expect(parseVmStat("nonsense")).toBeNull();
+  });
+});
+
+describe("renderScenes: motion pages", () => {
+  const target = targetForAspect("9:16", { shortSide: 180, fps: 12 });
+  const tokens = resolveTokens();
+  /** A renderer that records its requests and writes a dummy clip. */
+  function recorder(): SceneRenderer & { requests: SceneRenderRequest[] } {
+    const r = {
+      id: "hyperframes",
+      version: "1",
+      kinds: ["motion"] as DeterministicKind[],
+      requests: [] as SceneRenderRequest[],
+      available: async () => ({ ok: true }),
+      render: async (req: SceneRenderRequest) => {
+        r.requests.push(req);
+        await writeFile(req.out_path, "mp4");
+        return { scene_id: req.scene.id, out_path: req.out_path, duration_ms: 1000, renderer: "hyperframes", renderer_version: "1", warnings: [] };
+      },
+    };
+    return r;
+  }
+  const motion: Scene = {
+    id: "s01",
+    duration_sec: 1,
+    purpose: "point",
+    voiceover: "",
+    visual_strategy: "motion_graphic",
+    deterministic: { kind: "motion", props: { html: "motion/morph.html", text: ["Docs in."] } },
+    visual_requirements: { continuity_refs: [] },
+    claim_refs: [],
+  };
+
+  it("keys the clip by the page, its files, the kit and the beat grid, and passes the beats on", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vs-rs-motion-"));
+    try {
+      await cp(new URL("./__fixtures__/motion/", import.meta.url), join(root, "motion"), { recursive: true });
+      const r = recorder();
+      const run = (beats?: Map<string, { beats_s: number[]; downbeats_s: number[] }>) =>
+        renderScenes({ scenes: [motion] }, { project_dir: root, renderers: [r], tokens, target, ...(beats ? { beats } : {}) }).then((x) => x.scenes[0]!);
+      const first = await run();
+      expect(first.status).toBe("rendered");
+      expect((await run()).status).toBe("cached");
+      // Editing a stylesheet the page uses re-renders the scene; so does editing the page.
+      await writeFile(join(root, "motion", "morph.css"), "#copy { color: red; }");
+      const css = await run();
+      expect(css.status).toBe("rendered");
+      expect(css.cache_key).not.toBe(first.cache_key);
+      await writeFile(join(root, "motion", "morph.html"), (await readFile(join(root, "motion", "morph.html"), "utf8")).replace("<p id", "<p class=\"x\" id"));
+      expect((await run()).status).toBe("rendered");
+      // A beat grid is part of the key and reaches the request.
+      const beats = new Map([["s01", { beats_s: [0.5], downbeats_s: [0.5] }]]);
+      expect((await run(beats)).status).toBe("rendered");
+      expect(r.requests.at(-1)!.beats).toEqual({ beats_s: [0.5], downbeats_s: [0.5] });
+      expect((await run(beats)).status).toBe("cached");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves the keys of other kinds unchanged", () => {
+    const s = { ...motion, deterministic: { kind: "typography" as const, props: { lines: ["a"] } } };
+    const r = { id: "x", version: "1" };
+    expect(sceneCacheKey(s, tokens, target, r)).toBe(sceneCacheKey(s, tokens, target, r, false, undefined, undefined, undefined, undefined, undefined));
   });
 });

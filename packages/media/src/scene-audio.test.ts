@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { atempoChain, mixMusic, mixSceneAudio } from "./audio.js";
+import { alignOneShot, atempoChain, measurePeakOffset, mixMusic, mixSceneAudio, peakOffsetMs } from "./audio.js";
 import { ffprobe, runFfmpeg } from "./ffmpeg.js";
 
 let tmp: string;
@@ -85,6 +85,38 @@ describe("mixSceneAudio", () => {
     await mixSceneAudio([{ duration_ms: 1000, layers: [] }, { duration_ms: 1000, layers: [] }], out, { sfx: [{ path: click, at_ms: 1500, volume_db: -3 }] });
     expect(await meanDb(out, 0, 1400)).toBeLessThan(-80);
     expect(await meanDb(out, 1490, 80)).toBeGreaterThan(-30);
+  }, 30_000);
+});
+
+describe("sfx peak alignment", () => {
+  it("finds the loudest short window, not a stray sample", () => {
+    const sr = 1000;
+    const x = new Float32Array(500).fill(0.01);
+    x[50] = 1; // one loud sample
+    for (let i = 300; i < 340; i++) x[i] = 0.6; // the hit: 40 ms at 0.6
+    expect(peakOffsetMs(x, sr)).toBe(305); // first loudest 10 ms window, by its centre
+    expect(peakOffsetMs(new Float32Array(100), sr)).toBe(0);
+    expect(peakOffsetMs(new Float32Array(3), sr)).toBe(0);
+  });
+
+  it("starts the effect a peak earlier, or trims its head at the scene start", () => {
+    expect(alignOneShot(2000, 300, 1000)).toEqual({ at_ms: 1700, trim_ms: 0 });
+    // Peak 300 ms in, target 100 ms into the scene: start at the scene and skip 200 ms.
+    expect(alignOneShot(1100, 300, 1000)).toEqual({ at_ms: 1000, trim_ms: 200 });
+    expect(alignOneShot(0, 250, 0)).toEqual({ at_ms: 0, trim_ms: 250 });
+    expect(alignOneShot(500, 0, 0)).toEqual({ at_ms: 500, trim_ms: 0 });
+  });
+
+  it("measures a decoded file's peak with ffmpeg and trims a one-shot's head in the mix", async () => {
+    const hit = join(tmp, "hit.wav");
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", "aevalsrc=if(lt(t\\,0.3)\\,0.05\\,0.9*exp(-20*(t-0.3)))*sin(2*PI*300*t):s=48000:d=0.6", hit]);
+    const peak = await measurePeakOffset(hit);
+    expect(Math.abs(peak - 305)).toBeLessThanOrEqual(5);
+    // Trimmed by the peak, the hit is loud right at at_ms instead of 300 ms later.
+    const out = join(tmp, "e.wav");
+    await mixSceneAudio([{ duration_ms: 1000, layers: [] }], out, { sfx: [{ path: hit, at_ms: 0, trim_ms: peak }] });
+    expect(await meanDb(out, 0, 40)).toBeGreaterThan(-15);
+    expect(await meanDb(out, 400, 500)).toBeLessThan(-40);
   }, 30_000);
 });
 

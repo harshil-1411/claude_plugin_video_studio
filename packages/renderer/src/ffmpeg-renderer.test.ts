@@ -11,6 +11,7 @@ import {
   type AssFont,
   type AssTextFonts,
   FFMPEG_RENDERER_VERSION,
+  MOTION_STAND_IN_WARNING,
   assFontRuns,
   buildFilterGraph,
   cameraEaseExpr,
@@ -70,6 +71,8 @@ const PROPS: Record<DeterministicKind, Record<string, unknown>[]> = {
   lower_third: [DETERMINISTIC_PROPS_EXAMPLES.lower_third],
   kinetic_text: [DETERMINISTIC_PROPS_EXAMPLES.kinetic_text, { text: "Write once, render everywhere, ship today.", rhythm: "phrase", emphasis: "everywhere" }],
   map: [DETERMINISTIC_PROPS_EXAMPLES.map],
+  // The page itself needs Chrome; ffmpeg draws a labelled text stand-in (the file need not exist).
+  motion: [DETERMINISTIC_PROPS_EXAMPLES.motion],
 };
 
 const NEW_KINDS = ["quote", "stat", "timeline", "split_screen", "lower_third", "kinetic_text", "map"] as const satisfies readonly DeterministicKind[];
@@ -281,6 +284,27 @@ describe("renders every kind", () => {
     const { ffprobe: bin } = await getTools();
     const { stdout } = await runProcess(bin, ["-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", out], { captureStdout: true });
     expect(Number(stdout.trim())).toBe(15);
+  }, T);
+});
+
+describe("motion stand-in", () => {
+  it("draws props.text as a labelled card, one cue item per entry, and always reports the fallback", () => {
+    const comp = composeScene(scene("motion", { html: "motion/s01.html", text: ["Docs in.", "Video out."] }), target, tokens);
+    expect(comp.warnings[0]).toBe(MOTION_STAND_IN_WARNING);
+    expect(MOTION_STAND_IN_WARNING).toMatch(/text stand-in.*HyperFrames \(Chrome\)/);
+    const texts = comp.elements.flatMap((e) => (e.type === "text" ? [[e.text, e.item]] : []));
+    expect(texts).toEqual([["Docs in.", 0], ["Video out.", 1], ["motion stand-in", undefined]]);
+    // No copy at all: still a labelled card, still reported.
+    const bare = composeScene(scene("motion", { html: "motion/s01.html" }), target, tokens);
+    expect(bare.warnings[0]).toBe(MOTION_STAND_IN_WARNING);
+    expect(bare.elements.some((e) => e.type === "text" && e.text === "motion stand-in")).toBe(true);
+  });
+
+  it("the rendered clip carries the warning", async () => {
+    const out = join(dir, "out", "motion-standin.mp4");
+    const res = await renderer.render({ scene: scene("motion"), target, tokens, out_path: out, project_dir: dir });
+    expect(res.warnings).toContain(MOTION_STAND_IN_WARNING);
+    expect((await ffprobe(out)).duration_s).toBeCloseTo(1, 3);
   }, T);
 });
 

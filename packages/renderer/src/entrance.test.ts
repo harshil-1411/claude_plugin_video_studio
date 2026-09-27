@@ -134,7 +134,8 @@ describe("scene opening: HyperFrames renderer", () => {
   });
 
   it("every kind opens with something already entering at frame 0", () => {
-    for (const kind of HYPERFRAMES_KINDS) {
+    // `motion` pages draw their own opening (motion-compose.test.ts).
+    for (const kind of HYPERFRAMES_KINDS.filter((k) => k !== "motion")) {
       const html = buildComposition({ scene: scene(kind), target, tokens, out_path: "/o.mp4", project_dir: "/p" }).html;
       expect(html, kind).toMatch(/--t:-0\.\d+s/);
     }

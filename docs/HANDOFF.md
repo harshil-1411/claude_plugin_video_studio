@@ -52,7 +52,32 @@ Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and th
      - Beats: optional v2 fields on `BeatAnalysis`.
      - Semantic checks for shot chaining and loop vs acceptance; tests in `craft.test.ts`; schemas regenerated.
      - **Until W1 lands, no renderer draws `motion`:** a render fails with a reported "does not draw motion" reason. Renderer tests loop over each renderer's own kind list.
-   - **Next: W1.** Lane A builds the `motion` composer adapter, `motion-kit.js`, the CSP and static lint, and the cache key. Lane B builds beats v2, SFX peak alignment and `score.ts`.
+   - **W1 done (2026-09-27).** The lanes shared one tree with disjoint files, because a fresh worktree has no `node_modules` and the sandbox can't `pnpm install` online.
+     - **Lane A: the `motion` kind.**
+       - Files: `renderer/src/motion-compose.ts` (CSP first in `<head>`, escaped `window.__vs`, a synchronous timeline adapter, readiness through `__hf.buildReady`), `motion-kit.ts` (`MOTION_KIT_VERSION` 1.0.0), and `motion-lint.ts` (acorn 8.18.0; network, clock, random, timer and CSS-animation checks; confined to the page's folder, no symlinks out).
+       - The HyperFrames renderer refuses pages with lint errors. The ffmpeg renderer draws a text stand-in and reports a warning.
+       - The cache key covers the page, its files, the kit version and the beat grid.
+       - `spec_validate` stage `motion`; lint rule `motion_unsafe`.
+       - Fixtures: `__fixtures__/motion/morph.*` (good) and `unsafe.html` (rejected).
+     - **Lane B: beats and score.**
+       - Beats v2 (`BEAT_ANALYSIS_VERSION` 2): downbeats, bar energy, drop, `alternate_bpm`, trimmed grid. Synthetic accuracy: tempo exact at 75–174 BPM, downbeats ≤ 12 ms, drop ≤ 10 ms.
+       - `snap: downbeat`.
+       - SFX peak alignment (`peak_ms`, `trim_ms`), with `ASSEMBLY_VERSION` 7.
+       - `media/src/score.ts`: presets pulse, lofi, ambient and drive, bitexact; `synth:<preset>` in `music.ts`, whose exact grid replaces detection.
+       - Caches: `cache/score`, `cache/beats`, `cache/sfx-peak`.
+     - **Lead:**
+       - `MusicBed.synth` is now a partial override;
+       - `synth:` beds skip the missing-licence warning;
+       - the grid is passed to `stageScenes`.
+     - **Sandbox end-to-end run:** silent voice, ffmpeg, `synth:pulse`, a `motion` scene and `snap: downbeat`. Audio is present, the grid comes from the synth, cuts land on downbeats, and CC0 is recorded in the lock, provenance and `post.json`.
+     - **User-run:** `VS_TEST_RENDER=1 npx vitest run packages/renderer/src/hyperframes-renderer.test.ts` (a real Chrome render of a motion page: CSP live, readiness).
+     - **Carried into W2:**
+       - Motion pages only get a beat grid when `beat_sync.enabled` is set; give them the grid whenever there is a music bed.
+       - `peak_ms` is not in `provenance.json`.
+       - QA still calls frozen frames "expected" for motion graphics (item 4 fixes that).
+   - **Next: W2.**
+     - Lane A: `stills`, the determinism and loop-seam checks, and the blur spike (needs Chrome, so parts are user-run).
+     - Lane B: density QA, `compare` against a reference, `banned_effect`, `acceptance_unmet`, loop QA.
 4. **Phase 7**, paid providers, ElevenLabs first (needs the user's API key). Step 0 comes first and is local: shot cards, `provider-specs/`, and `prompt_pack` (no keys, no network). The `policy.yaml`, spend and consent machinery it needs is now in place.
 5. **Phase 9**, publishing (needs platform developer accounts). Default targets are Instagram and YouTube Shorts: the user is in India, where TikTok is banned.
 
