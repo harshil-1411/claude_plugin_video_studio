@@ -305,12 +305,20 @@ export function formatCheckFinding(f: CheckFinding): string {
 // ------------------------------------------------------------------------------ chrome
 
 /**
- * Chrome flags for captures: the pixel-relevant subset of the producer's own launch (0.8.78
- * `buildChromeArgs` in screenshot mode with its default software GPU mode). Chrome's sandbox
- * stays on: the page is untrusted, and the sandbox does not change pixels.
+ * Chrome flags for captures: the producer's own launch (0.8.78 `buildChromeArgs` in screenshot
+ * mode with its default software GPU mode), so a still is drawn by a browser started exactly like
+ * the one that renders the scene. That launch is the one proven reliable with macOS Chrome; an
+ * earlier, sandboxed variant hung intermittently. `--no-sandbox` matches the render path, which
+ * runs the same page unsandboxed: the protections for Claude-written pages are the CSP the
+ * composer injects, motion-lint, and the loopback-only, read-only file server.
  */
 export function captureChromeArgs(width: number, height: number): string[] {
   return [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--enable-webgl",
+    "--ignore-gpu-blocklist",
     "--use-gl=angle",
     "--use-angle=swiftshader",
     "--enable-unsafe-swiftshader",
@@ -323,12 +331,21 @@ export function captureChromeArgs(width: number, height: number): string[] {
     "--disable-background-timer-throttling",
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
+    "--disable-background-media-suspend",
+    "--disable-breakpad",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-default-apps",
     "--disable-extensions",
+    "--disable-hang-monitor",
+    "--disable-ipc-flooding-protection",
+    "--disable-popup-blocking",
     "--disable-sync",
     "--disable-component-update",
-    "--disable-default-apps",
+    "--disable-domain-reliability",
+    "--disable-print-preview",
     "--no-pings",
-    "--disable-features=Translate,BackForwardCache,IntensiveWakeUpThrottling",
+    "--no-zygote",
+    "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process,Translate,BackForwardCache,IntensiveWakeUpThrottling",
   ];
 }
 
@@ -336,6 +353,21 @@ export function captureChromeArgs(width: number, height: number): string[] {
 export interface CaptureBrowser {
   newPage(): Promise<CapturePageHandle>;
   close(): Promise<void>;
+  /** The Chrome process (puppeteer), for a hard kill when a graceful close hangs. */
+  process?(): { kill(signal?: NodeJS.Signals): unknown } | null;
+}
+
+/** Close a browser without hanging: a graceful close, then SIGKILL after `ms`. */
+export async function closeBrowser(browser: CaptureBrowser, ms = 5_000): Promise<void> {
+  try {
+    await captureStep("close Chrome", browser.close(), ms);
+  } catch {
+    try {
+      browser.process?.()?.kill("SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }
 }
 export interface CapturePageHandle {
   setViewport(v: { width: number; height: number; deviceScaleFactor: number }): Promise<void>;
@@ -448,7 +480,16 @@ export function serveDirectory(root: string): Promise<{ url: string; close: () =
       const port = typeof addr === "object" && addr ? addr.port : 0;
       done({
         url: `http://127.0.0.1:${port}`,
-        close: () => new Promise<void>((r) => server.close(() => r())),
+        // Drop Chrome's keep-alive sockets first, so close() can't wait on them.
+        close: () =>
+          new Promise<void>((r) => {
+            server.closeAllConnections();
+            const timer = setTimeout(r, 2_000);
+            server.close(() => {
+              clearTimeout(timer);
+              r();
+            });
+          }),
       });
     });
   });
@@ -546,6 +587,9 @@ export interface CaptureSessionOptions {
   launch?: Launch;
 }
 
+/** Default deadline for one capture step (launch, load, readiness, a seek, a screenshot). */
+export const CAPTURE_TIMEOUT_MS = 30_000;
+
 /** Trace a capture phase to stderr when VS_DEBUG_CAPTURE=1 (diagnosing a Chrome that hangs). */
 export function captureTrace(message: string): void {
   if (process.env.VS_DEBUG_CAPTURE === "1") process.stderr.write(`[capture ${new Date().toISOString().slice(11, 23)}] ${message}\n`);
@@ -580,56 +624,77 @@ export interface CaptureSession {
  * with the renderer's Chrome gate (`chromeGate`) so it never runs beside a HyperFrames render.
  */
 export async function openCaptureSession(o: CaptureSessionOptions & { width: number; height: number }): Promise<CaptureSession> {
-  const timeoutMs = o.timeoutMs ?? 60_000;
+  const timeoutMs = o.timeoutMs ?? CAPTURE_TIMEOUT_MS;
   const launch = o.launch ?? (await loadPuppeteerLaunch(o.producerEntry));
   if (!launch) throw new Error("puppeteer-core (a dependency of the HyperFrames producer) could not be loaded; run doctor for setup");
-  const browser = await captureStep(
-    `launch Chrome (${o.chromePath})`,
-    launch({ executablePath: o.chromePath, headless: true, args: captureChromeArgs(o.width, o.height), defaultViewport: null, timeout: timeoutMs, protocolTimeout: timeoutMs }),
-    timeoutMs + 5_000,
-  );
+  const start = async (): Promise<CaptureBrowser> => {
+    const launching = launch({ executablePath: o.chromePath, headless: true, args: captureChromeArgs(o.width, o.height), defaultViewport: null, timeout: timeoutMs, protocolTimeout: timeoutMs });
+    try {
+      return await captureStep(`launch Chrome (${o.chromePath})`, launching, timeoutMs + 5_000);
+    } catch (e) {
+      // A launch that finishes after its deadline must not leave a Chrome behind.
+      void launching.then((b) => closeBrowser(b), () => {});
+      throw e;
+    }
+  };
+  // One retry: a Chrome that stalls while starting usually starts on the next attempt.
+  const browser = await start().catch((e: unknown) => {
+    captureTrace(`launch failed (${e instanceof Error ? e.message : String(e)}); retrying once`);
+    return start();
+  });
   const pages = new Set<PageCapture>();
+  const openOnce = async (dir: string, compositionId: string, width: number, height: number): Promise<PageCapture> => {
+    const server = await serveDirectory(dir);
+    let page: CapturePageHandle | undefined;
+    try {
+      page = await captureStep("open a page", browser.newPage(), timeoutMs);
+      const errors: string[] = [];
+      page.on("pageerror", (e) => errors.push(e instanceof Error ? e.message : String(e)));
+      page.on("console", (m) => {
+        const msg = m as { type?: () => string; text?: () => string };
+        if (msg.type?.() === "error") errors.push(`console: ${msg.text?.() ?? ""}`);
+      });
+      await captureStep("set the viewport", page.setViewport({ width: Math.round(width), height: Math.round(height), deviceScaleFactor: 1 }), timeoutMs);
+      await captureStep("load the page", page.goto(`${server.url}/index.html`, { waitUntil: "load", timeout: timeoutMs }), timeoutMs + 5_000);
+      const report = (await captureStep("wait for readiness", page.evaluate(readinessScript(compositionId, timeoutMs)), timeoutMs + 5_000)) as ReadinessReport;
+      const problem = readinessProblem(report, compositionId);
+      if (problem) throw new Error(`${problem}${errors.length ? `; page errors: ${errors.slice(0, 3).join(" | ")}` : ""}`);
+      const p = page;
+      const pc: PageCapture = {
+        errors,
+        async capture(t) {
+          await captureStep(`seek to ${t}s`, p.evaluate(seekScript(compositionId, t)), timeoutMs);
+          return new Uint8Array(await captureStep(`screenshot at ${t}s`, p.screenshot({ type: "png" }), timeoutMs));
+        },
+        async close() {
+          pages.delete(pc);
+          await captureStep("close the page", p.close(), 5_000).catch(() => {});
+          await server.close();
+        },
+      };
+      pages.add(pc);
+      return pc;
+    } catch (e) {
+      if (page) await captureStep("close the page", page.close(), 5_000).catch(() => {});
+      await server.close();
+      throw e;
+    }
+  };
   return {
     async open(dir, compositionId, width, height) {
-      const server = await serveDirectory(dir);
-      let page: CapturePageHandle | undefined;
+      // One retry with a fresh page when a step stalls (not for a page that is really broken:
+      // readiness problems and page errors are thrown as they are).
       try {
-        page = await captureStep("open a page", browser.newPage(), timeoutMs);
-        const errors: string[] = [];
-        page.on("pageerror", (e) => errors.push(e instanceof Error ? e.message : String(e)));
-        page.on("console", (m) => {
-          const msg = m as { type?: () => string; text?: () => string };
-          if (msg.type?.() === "error") errors.push(`console: ${msg.text?.() ?? ""}`);
-        });
-        await captureStep("set the viewport", page.setViewport({ width: Math.round(width), height: Math.round(height), deviceScaleFactor: 1 }), timeoutMs);
-        await captureStep("load the page", page.goto(`${server.url}/index.html`, { waitUntil: "load", timeout: timeoutMs }), timeoutMs + 5_000);
-        const report = (await captureStep("wait for readiness", page.evaluate(readinessScript(compositionId, timeoutMs)), timeoutMs + 5_000)) as ReadinessReport;
-        const problem = readinessProblem(report, compositionId);
-        if (problem) throw new Error(`${problem}${errors.length ? `; page errors: ${errors.slice(0, 3).join(" | ")}` : ""}`);
-        const p = page;
-        const pc: PageCapture = {
-          errors,
-          async capture(t) {
-            await captureStep(`seek to ${t}s`, p.evaluate(seekScript(compositionId, t)), timeoutMs);
-            return new Uint8Array(await captureStep(`screenshot at ${t}s`, p.screenshot({ type: "png" }), timeoutMs));
-          },
-          async close() {
-            pages.delete(pc);
-            await p.close().catch(() => {});
-            await server.close();
-          },
-        };
-        pages.add(pc);
-        return pc;
+        return await openOnce(dir, compositionId, width, height);
       } catch (e) {
-        await page?.close().catch(() => {});
-        await server.close();
-        throw e;
+        if (!(e instanceof Error) || !e.message.startsWith("capture step")) throw e;
+        captureTrace(`opening ${compositionId} stalled (${e.message}); retrying once with a new page`);
+        return openOnce(dir, compositionId, width, height);
       }
     },
     async close() {
       for (const p of [...pages]) await p.close();
-      await browser.close().catch(() => {});
+      await closeBrowser(browser);
     },
   };
 }

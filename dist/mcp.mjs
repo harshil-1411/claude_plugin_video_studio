@@ -36900,12 +36900,20 @@ function formatCheckFinding(f) {
 	return `${f.id}: ${f.message}; fix: ${f.fix}`;
 }
 /**
-* Chrome flags for captures: the pixel-relevant subset of the producer's own launch (0.8.78
-* `buildChromeArgs` in screenshot mode with its default software GPU mode). Chrome's sandbox
-* stays on: the page is untrusted, and the sandbox does not change pixels.
+* Chrome flags for captures: the producer's own launch (0.8.78 `buildChromeArgs` in screenshot
+* mode with its default software GPU mode), so a still is drawn by a browser started exactly like
+* the one that renders the scene. That launch is the one proven reliable with macOS Chrome; an
+* earlier, sandboxed variant hung intermittently. `--no-sandbox` matches the render path, which
+* runs the same page unsandboxed: the protections for Claude-written pages are the CSP the
+* composer injects, motion-lint, and the loopback-only, read-only file server.
 */
 function captureChromeArgs(width, height) {
 	return [
+		"--no-sandbox",
+		"--disable-setuid-sandbox",
+		"--disable-dev-shm-usage",
+		"--enable-webgl",
+		"--ignore-gpu-blocklist",
 		"--use-gl=angle",
 		"--use-angle=swiftshader",
 		"--enable-unsafe-swiftshader",
@@ -36918,13 +36926,32 @@ function captureChromeArgs(width, height) {
 		"--disable-background-timer-throttling",
 		"--disable-backgrounding-occluded-windows",
 		"--disable-renderer-backgrounding",
+		"--disable-background-media-suspend",
+		"--disable-breakpad",
+		"--disable-component-extensions-with-background-pages",
+		"--disable-default-apps",
 		"--disable-extensions",
+		"--disable-hang-monitor",
+		"--disable-ipc-flooding-protection",
+		"--disable-popup-blocking",
 		"--disable-sync",
 		"--disable-component-update",
-		"--disable-default-apps",
+		"--disable-domain-reliability",
+		"--disable-print-preview",
 		"--no-pings",
-		"--disable-features=Translate,BackForwardCache,IntensiveWakeUpThrottling"
+		"--no-zygote",
+		"--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process,Translate,BackForwardCache,IntensiveWakeUpThrottling"
 	];
+}
+/** Close a browser without hanging: a graceful close, then SIGKILL after `ms`. */
+async function closeBrowser(browser, ms = 5e3) {
+	try {
+		await captureStep("close Chrome", browser.close(), ms);
+	} catch {
+		try {
+			browser.process?.()?.kill("SIGKILL");
+		} catch {}
+	}
 }
 /**
 * puppeteer-core as the producer resolves it (`producerEntry`: the resolved producer entry file;
@@ -37024,7 +37051,14 @@ function serveDirectory(root) {
 			const addr = server.address();
 			done({
 				url: `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`,
-				close: () => new Promise((r) => server.close(() => r()))
+				close: () => new Promise((r) => {
+					server.closeAllConnections();
+					const timer = setTimeout(r, 2e3);
+					server.close(() => {
+						clearTimeout(timer);
+						r();
+					});
+				})
 			});
 		});
 	});
@@ -37113,65 +37147,86 @@ async function captureStep(label, work, ms) {
 * with the renderer's Chrome gate (`chromeGate`) so it never runs beside a HyperFrames render.
 */
 async function openCaptureSession(o) {
-	const timeoutMs = o.timeoutMs ?? 6e4;
+	const timeoutMs = o.timeoutMs ?? 3e4;
 	const launch = o.launch ?? await loadPuppeteerLaunch(o.producerEntry);
 	if (!launch) throw new Error("puppeteer-core (a dependency of the HyperFrames producer) could not be loaded; run doctor for setup");
-	const browser = await captureStep(`launch Chrome (${o.chromePath})`, launch({
-		executablePath: o.chromePath,
-		headless: true,
-		args: captureChromeArgs(o.width, o.height),
-		defaultViewport: null,
-		timeout: timeoutMs,
-		protocolTimeout: timeoutMs
-	}), timeoutMs + 5e3);
+	const start = async () => {
+		const launching = launch({
+			executablePath: o.chromePath,
+			headless: true,
+			args: captureChromeArgs(o.width, o.height),
+			defaultViewport: null,
+			timeout: timeoutMs,
+			protocolTimeout: timeoutMs
+		});
+		try {
+			return await captureStep(`launch Chrome (${o.chromePath})`, launching, timeoutMs + 5e3);
+		} catch (e) {
+			launching.then((b) => closeBrowser(b), () => {});
+			throw e;
+		}
+	};
+	const browser = await start().catch((e) => {
+		captureTrace(`launch failed (${e instanceof Error ? e.message : String(e)}); retrying once`);
+		return start();
+	});
 	const pages = /* @__PURE__ */ new Set();
+	const openOnce = async (dir, compositionId, width, height) => {
+		const server = await serveDirectory(dir);
+		let page;
+		try {
+			page = await captureStep("open a page", browser.newPage(), timeoutMs);
+			const errors = [];
+			page.on("pageerror", (e) => errors.push(e instanceof Error ? e.message : String(e)));
+			page.on("console", (m) => {
+				const msg = m;
+				if (msg.type?.() === "error") errors.push(`console: ${msg.text?.() ?? ""}`);
+			});
+			await captureStep("set the viewport", page.setViewport({
+				width: Math.round(width),
+				height: Math.round(height),
+				deviceScaleFactor: 1
+			}), timeoutMs);
+			await captureStep("load the page", page.goto(`${server.url}/index.html`, {
+				waitUntil: "load",
+				timeout: timeoutMs
+			}), timeoutMs + 5e3);
+			const problem = readinessProblem(await captureStep("wait for readiness", page.evaluate(readinessScript(compositionId, timeoutMs)), timeoutMs + 5e3), compositionId);
+			if (problem) throw new Error(`${problem}${errors.length ? `; page errors: ${errors.slice(0, 3).join(" | ")}` : ""}`);
+			const p = page;
+			const pc = {
+				errors,
+				async capture(t) {
+					await captureStep(`seek to ${t}s`, p.evaluate(seekScript(compositionId, t)), timeoutMs);
+					return new Uint8Array(await captureStep(`screenshot at ${t}s`, p.screenshot({ type: "png" }), timeoutMs));
+				},
+				async close() {
+					pages.delete(pc);
+					await captureStep("close the page", p.close(), 5e3).catch(() => {});
+					await server.close();
+				}
+			};
+			pages.add(pc);
+			return pc;
+		} catch (e) {
+			if (page) await captureStep("close the page", page.close(), 5e3).catch(() => {});
+			await server.close();
+			throw e;
+		}
+	};
 	return {
 		async open(dir, compositionId, width, height) {
-			const server = await serveDirectory(dir);
-			let page;
 			try {
-				page = await captureStep("open a page", browser.newPage(), timeoutMs);
-				const errors = [];
-				page.on("pageerror", (e) => errors.push(e instanceof Error ? e.message : String(e)));
-				page.on("console", (m) => {
-					const msg = m;
-					if (msg.type?.() === "error") errors.push(`console: ${msg.text?.() ?? ""}`);
-				});
-				await captureStep("set the viewport", page.setViewport({
-					width: Math.round(width),
-					height: Math.round(height),
-					deviceScaleFactor: 1
-				}), timeoutMs);
-				await captureStep("load the page", page.goto(`${server.url}/index.html`, {
-					waitUntil: "load",
-					timeout: timeoutMs
-				}), timeoutMs + 5e3);
-				const problem = readinessProblem(await captureStep("wait for readiness", page.evaluate(readinessScript(compositionId, timeoutMs)), timeoutMs + 5e3), compositionId);
-				if (problem) throw new Error(`${problem}${errors.length ? `; page errors: ${errors.slice(0, 3).join(" | ")}` : ""}`);
-				const p = page;
-				const pc = {
-					errors,
-					async capture(t) {
-						await captureStep(`seek to ${t}s`, p.evaluate(seekScript(compositionId, t)), timeoutMs);
-						return new Uint8Array(await captureStep(`screenshot at ${t}s`, p.screenshot({ type: "png" }), timeoutMs));
-					},
-					async close() {
-						pages.delete(pc);
-						await p.close().catch(() => {});
-						await server.close();
-					}
-				};
-				pages.add(pc);
-				return pc;
+				return await openOnce(dir, compositionId, width, height);
 			} catch (e) {
-				await page?.close().catch(() => {});
-				await server.close();
-				throw e;
+				if (!(e instanceof Error) || !e.message.startsWith("capture step")) throw e;
+				captureTrace(`opening ${compositionId} stalled (${e.message}); retrying once with a new page`);
+				return openOnce(dir, compositionId, width, height);
 			}
 		},
 		async close() {
 			for (const p of [...pages]) await p.close();
-			await browser.close().catch(() => {});
+			await closeBrowser(browser);
 		}
 	};
 }

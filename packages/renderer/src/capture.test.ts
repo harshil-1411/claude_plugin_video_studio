@@ -264,11 +264,35 @@ describe("capture page plumbing", () => {
     await expect(captureStep("x", Promise.resolve(7), 50)).resolves.toBe(7);
   });
 
-  it("launches with the producer's pixel-relevant flags at the target size", () => {
+  it("launches Chrome the way the producer does, at the target size", () => {
     const args = captureChromeArgs(180, 320);
-    expect(args).toEqual(expect.arrayContaining(["--use-angle=swiftshader", "--font-render-hinting=none", "--force-color-profile=srgb", "--window-size=180,320", "--hide-scrollbars"]));
-    expect(args).not.toContain("--no-sandbox");
+    expect(args).toEqual(
+      expect.arrayContaining(["--use-angle=swiftshader", "--font-render-hinting=none", "--force-color-profile=srgb", "--window-size=180,320", "--hide-scrollbars", "--disable-hang-monitor", "--no-zygote", "--no-sandbox"]),
+    );
   });
+
+  it("retries a Chrome launch that stalls, and kills a browser that won't close", async () => {
+    const { openCaptureSession } = await import("./capture.js");
+    let launches = 0;
+    let killed = "";
+    const browser = {
+      newPage: () => new Promise<never>(() => {}),
+      close: () => new Promise<void>(() => {}),
+      process: () => ({ kill: (sig?: string) => void (killed = sig ?? "") }),
+    };
+    const launch = () => {
+      launches += 1;
+      return launches === 1 ? new Promise<never>(() => {}) : Promise.resolve(browser);
+    };
+    const session = await openCaptureSession({ chromePath: "/x", width: 10, height: 10, timeoutMs: 50, launch: launch as never });
+    expect(launches).toBe(2);
+    await expect(session.open("/nonexistent", "vs-x", 10, 10)).rejects.toThrow('capture step "open a page"');
+    const t0 = Date.now();
+    const { closeBrowser } = await import("./capture.js");
+    await closeBrowser(browser as never, 50);
+    expect(killed).toBe("SIGKILL");
+    expect(Date.now() - t0).toBeLessThan(1000);
+  }, 10_000);
 
   it("hashes bytes", () => {
     expect(sha256(Buffer.from("abc"))).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
@@ -280,6 +304,10 @@ describe("capture page plumbing", () => {
 //   VS_TEST_RENDER=1 npx vitest run packages/renderer/src/capture.test.ts
 // ---------------------------------------------------------------------------------------------
 describe.skipIf(process.env.VS_TEST_RENDER !== "1")("real Chrome captures (VS_TEST_RENDER=1)", () => {
+  // Trace every capture step to stderr, so a stall names itself.
+  beforeAll(() => {
+    process.env.VS_DEBUG_CAPTURE = "1";
+  });
   const MOTION = new URL("./__fixtures__/motion/", import.meta.url);
   const TOKENS = {
     font_heading: "Helvetica, Arial, sans-serif",
