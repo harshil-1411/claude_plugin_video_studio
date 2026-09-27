@@ -259,6 +259,10 @@ describe("renderScenes: motion pages", () => {
       expect((await run(beats)).status).toBe("rendered");
       expect(r.requests.at(-1)!.beats).toEqual({ beats_s: [0.5], downbeats_s: [0.5] });
       expect((await run(beats)).status).toBe("cached");
+      // Motion blur is part of the key and reaches the request.
+      const blurred = await renderScenes({ scenes: [motion] }, { project_dir: root, renderers: [r], tokens, target, beats, motionBlur: { subframes: 4 } }).then((x) => x.scenes[0]!);
+      expect(blurred.status).toBe("rendered");
+      expect(r.requests.at(-1)!.motion_blur).toEqual({ subframes: 4 });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

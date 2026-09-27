@@ -616,6 +616,8 @@ export async function stageScenes(
     ...(sceneCues.size ? { cues: sceneCues } : {}),
     ...(sceneBeats.size ? { beats: sceneBeats } : {}),
     ...(input.seriesKeys?.size ? { series: input.seriesKeys } : {}),
+    // Blur only the final render: previews stay sharp and fast (cost grows by the sub-frame count).
+    ...(quality === "final" && spec.master?.motion_blur ? { motionBlur: spec.master.motion_blur } : {}),
   };
   const first = await renderScenes({ scenes: planScenes }, { ...baseOpts, preference, concurrency, onScene });
   const entries = new Map(first.scenes.map((e) => [e.scene_id, e]));

@@ -14822,7 +14822,8 @@ const MasterCanvas = strictObject({
 	width: int().min(2).max(7680),
 	height: int().min(2).max(7680),
 	fps: Fps,
-	loop: boolean().optional().describe("The video loops seamlessly: QA checks that the last frame flows into the first and the music seam.")
+	loop: boolean().optional().describe("The video loops seamlessly: QA checks that the last frame flows into the first and the music seam."),
+	motion_blur: strictObject({ subframes: int().min(3).max(6).describe("Sub-frames averaged per output frame; render cost grows by this factor.") }).optional().describe("Motion blur for `motion` scenes in final renders only (previews stay sharp and fast). Add it after a plain render passes review.")
 }).describe("Production master canvas every target is compiled from. Defaults to 1080 px on the short side at 30 fps.");
 const Cover = strictObject({
 	headline: NonEmptyString.describe("Cover/thumbnail text; separate from on-screen text, captions and post captions."),
@@ -34092,7 +34093,7 @@ function sceneCacheKey(scene, tokens, target, renderer, placeholder = false, zon
 	}));
 }
 /** The cache-key input of a `motion` scene: page and file hashes, kit version and its beat grid. Undefined for other kinds. */
-async function motionKeyInput(scene, projectDir, beats) {
+async function motionKeyInput(scene, projectDir, beats, motionBlur) {
 	const det = scene.deterministic;
 	if (det?.kind !== "motion") return void 0;
 	const page = await loadMotionPage(projectDir, typeof det.props.html === "string" ? det.props.html : "");
@@ -34100,7 +34101,8 @@ async function motionKeyInput(scene, projectDir, beats) {
 	return {
 		kit: MOTION_KIT_VERSION,
 		...motionPageDigest(page),
-		...beatsUsed
+		...beatsUsed,
+		...motionBlur ? { motion_blur: motionBlur } : {}
 	};
 }
 /**
@@ -34256,7 +34258,7 @@ async function renderScenes(spec, o) {
 		if (refs.assets.length) irAssets ??= loadIrAssetPaths(o.project_dir);
 		const images = await sceneImages(scene, o.tokens, o.project_dir, refs.assets.length ? await irAssets : void 0);
 		const beats = placeholder || footage ? void 0 : o.beats?.get(orig.id);
-		const motion = placeholder || footage ? void 0 : await motionKeyInput(scene, o.project_dir, beats);
+		const motion = placeholder || footage ? void 0 : await motionKeyInput(scene, o.project_dir, beats, o.motionBlur);
 		const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? {
 			sha256: footage.sha256,
 			duration_sec: footage.media.duration_sec,
@@ -34297,7 +34299,8 @@ async function renderScenes(spec, o) {
 				...o.zones ? { zones: o.zones } : {},
 				...footage ? { footage } : {},
 				...cues?.length ? { cues } : {},
-				...motion?.beats ? { beats: motion.beats } : {}
+				...motion?.beats ? { beats: motion.beats } : {},
+				...motion?.motion_blur ? { motion_blur: motion.motion_blur } : {}
 			}, { signal: o.signal });
 			const res = await (rendererFamily(r) === "hyperframes" ? chromeGate(draw) : draw());
 			await rename(tmp, out);
@@ -37230,6 +37233,18 @@ async function openCaptureSession(o) {
 		}
 	};
 }
+function clampSubframes(n) {
+	return Math.min(6, Math.max(3, Math.round(Number.isFinite(n) ? n : 3)));
+}
+/** Options for the producer's native sub-frame blur: a fixed count (never adaptive, so the cost is known), centred window. */
+function motionBlurOptions(subframes, shutterAngle = 180) {
+	return {
+		samplesPerFrame: clampSubframes(subframes),
+		shutterAngle,
+		shutterPhase: -shutterAngle / 2,
+		blend: "srgb"
+	};
+}
 //#endregion
 //#region ../renderer/dist/hyperframes-renderer.js
 /** Exact pinned producer version (package.json pins "@hyperframes/producer": "0.8.78"). */
@@ -37706,7 +37721,8 @@ function createHyperframesRenderer(opts = {}) {
 					hdrMode: "force-sdr",
 					strictness: "best-effort",
 					producerConfig,
-					logger: quietLogger(warnings)
+					logger: quietLogger(warnings),
+					...kind === "motion" && req.motion_blur ? { motionBlur: motionBlurOptions(req.motion_blur.subframes) } : {}
 				});
 				await mkdir(dirname(req.out_path), { recursive: true });
 				await producer.executeRenderJob(job, dir, req.out_path, void 0, signal);
@@ -247207,7 +247223,8 @@ async function stageScenes(run, input) {
 		footageRenderer: o.footageRenderer ?? createFootageRenderer({ encodePreset: o.encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") }),
 		...sceneCues.size ? { cues: sceneCues } : {},
 		...sceneBeats.size ? { beats: sceneBeats } : {},
-		...input.seriesKeys?.size ? { series: input.seriesKeys } : {}
+		...input.seriesKeys?.size ? { series: input.seriesKeys } : {},
+		...quality === "final" && spec.master?.motion_blur ? { motionBlur: spec.master.motion_blur } : {}
 	};
 	const first = await renderScenes({ scenes: planScenes }, {
 		...baseOpts,

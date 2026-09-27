@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "id": "render-button-loop",
+  "title": "One shape, six states: a render button loop",
+  "brief_id": "brief-render-button-loop",
+  "goal": "explain",
+  "audience": "Developers and designers who want reference-grade motion from code, not from a timeline editor",
+  "platform": "generic",
+  "aspect_ratio": "1:1",
+  "master": { "width": 1080, "height": 1080, "fps": 30, "loop": true },
+  "target_duration_sec": 6,
+  "language": "en-US",
+  "grounding": "strict",
+  "voice": { "mode": "none" },
+  "captions": { "preset": "minimal", "burn_in": false },
+  "style": "minimal",
+  "audio": {
+    "music": { "file": "synth:pulse" },
+    "beat_sync": { "enabled": true, "snap": "downbeat" }
+  },
+  "acceptance": { "loop": true, "min_changes_per_sec": 0.8, "max_frozen_pct": 10, "hold_ms": 400 },
+  "scenes": [
+    {
+      "id": "s01",
+      "duration_sec": 6,
+      "purpose": "hook",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "motion",
+        "props": {
+          "html": "motion/s01.html",
+          "text": ["Render", "reel.mp4", "Ready to post", "Share", "Link copied", "video-studio"],
+          "effects": [],
+          "loop": true
+        }
+      },
+      "visual_requirements": { "continuity_refs": [] },
+      "claim_refs": [
+        "markdown:input/render-button-loop.md#L5",
+        "markdown:input/render-button-loop.md#L7",
+        "markdown:input/render-button-loop.md#L9",
+        "markdown:input/render-button-loop.md#L11",
+        "markdown:input/render-button-loop.md#L13"
+      ],
+      "transition": "cut"
+    }
+  ]
+}

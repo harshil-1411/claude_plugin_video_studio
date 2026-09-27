@@ -76,6 +76,11 @@ export interface SceneRenderRequest {
    * one. `motion` pages read it as `window.__vs.beats` / `downbeats`; other kinds ignore it.
    */
   beats?: SceneBeats;
+  /**
+   * Motion blur for a `motion` scene (final renders only): sub-frames the producer averages per
+   * output frame. Absent: a plain render. Other kinds ignore it.
+   */
+  motion_blur?: { subframes: number };
 }
 
 /** Beat and downbeat times inside one scene, in scene-local seconds. */

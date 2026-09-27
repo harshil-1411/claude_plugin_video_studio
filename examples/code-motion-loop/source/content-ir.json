@@ -1,0 +1,128 @@
+{
+  "schema_version": "1.0",
+  "id": "ir-b95b8c2757f4",
+  "created_at": "2026-09-27T12:56:27.056Z",
+  "sources": [
+    {
+      "id": "src-1",
+      "kind": "markdown",
+      "uri": "input/render-button-loop.md",
+      "sha256": "765bfa33bad2e4b81ba183b3e38e384ffe1fc9d532af9a3d67288487bf7cab51",
+      "title": "One shape, six states: a render button loop"
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec-1",
+      "source_id": "src-1",
+      "heading": "One shape, six states: a render button loop",
+      "text": "This example is a six-second square loop drawn by one motion page. One shape never cuts: it morphs from state to state while a cursor drives it.\n\nThe cursor clicks the Render button, and the button grows to fill the frame with a progress ring.\n\nWhen the ring fills, the frame shrinks into a card for reel.mp4, marked Ready to post.\n\nThe cursor clicks Share on the card, and the card shrinks into a toast that says Link copied.\n\nThe cursor clicks the toast, and it grows into an end card with the product name, video-studio.\n\nThe end card shrinks back into the Render button, so the last frame is the first frame and the loop has no seam.\n\nEvery change lands on a beat of a synthesized score at 120 BPM: six seconds is three bars, with a bar every two seconds."
+    }
+  ],
+  "evidence": [
+    {
+      "ref": "markdown:input/render-button-loop.md#L3",
+      "source_id": "src-1",
+      "text": "This example is a six-second square loop drawn by one motion page. One shape never cuts: it morphs from state to state while a cursor drives it.",
+      "locator": {
+        "line_start": 3,
+        "line_end": 3,
+        "selector": "#one-shape-six-states-a-render-button-loop",
+        "char_start": 47,
+        "char_end": 191
+      }
+    },
+    {
+      "ref": "markdown:input/render-button-loop.md#L5",
+      "source_id": "src-1",
+      "text": "The cursor clicks the Render button, and the button grows to fill the frame with a progress ring.",
+      "locator": {
+        "line_start": 5,
+        "line_end": 5,
+        "selector": "#one-shape-six-states-a-render-button-loop",
+        "char_start": 193,
+        "char_end": 290
+      }
+    },
+    {
+      "ref": "markdown:input/render-button-loop.md#L7",
+      "source_id": "src-1",
+      "text": "When the ring fills, the frame shrinks into a card for reel.mp4, marked Ready to post.",
+      "locator": {
+        "line_start": 7,
+        "line_end": 7,
+        "selector": "#one-shape-six-states-a-render-button-loop",
+        "char_start": 292,
+        "char_end": 378
+      }
+    },
+    {
+      "ref": "markdown:input/render-button-loop.md#L9",
+      "source_id": "src-1",
+      "text": "The cursor clicks Share on the card, and the card shrinks into a toast that says Link copied.",
+      "locator": {
+        "line_start": 9,
+        "line_end": 9,
+        "selector": "#one-shape-six-states-a-render-button-loop",
+        "char_start": 380,
+        "char_end": 473
+      }
+    },
+    {
+      "ref": "markdown:input/render-button-loop.md#L11",
+      "source_id": "src-1",
+      "text": "The cursor clicks the toast, and it grows into an end card with the product name, video-studio.",
+      "locator": {
+        "line_start": 11,
+        "line_end": 11,
+        "selector": "#one-shape-six-states-a-render-button-loop",
+        "char_start": 475,
+        "char_end": 570
+      }
+    },
+    {
+      "ref": "markdown:input/render-button-loop.md#L13",
+      "source_id": "src-1",
+      "text": "The end card shrinks back into the Render button, so the last frame is the first frame and the loop has no seam.",
+      "locator": {
+        "line_start": 13,
+        "line_end": 13,
+        "selector": "#one-shape-six-states-a-render-button-loop",
+        "char_start": 572,
+        "char_end": 684
+      }
+    },
+    {
+      "ref": "markdown:input/render-button-loop.md#L15",
+      "source_id": "src-1",
+      "text": "Every change lands on a beat of a synthesized score at 120 BPM: six seconds is three bars, with a bar every two seconds.",
+      "locator": {
+        "line_start": 15,
+        "line_end": 15,
+        "selector": "#one-shape-six-states-a-render-button-loop",
+        "char_start": 686,
+        "char_end": 806
+      }
+    }
+  ],
+  "entities": [],
+  "claims": [
+    {
+      "id": "claim-1",
+      "text": "Every change lands on a beat of a synthesized score at 120 BPM: six seconds is three bars, with a bar every two seconds.",
+      "kind": "quantitative",
+      "evidence_refs": [
+        "markdown:input/render-button-loop.md#L15"
+      ]
+    }
+  ],
+  "assets": [],
+  "classification": {
+    "contains_secrets": false,
+    "contains_pii": false,
+    "contains_likeness": false,
+    "data_class": "internal",
+    "notes": []
+  },
+  "warnings": []
+}

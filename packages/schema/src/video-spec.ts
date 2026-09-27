@@ -310,6 +310,10 @@ export const MasterCanvas = z
     height: z.int().min(2).max(7680),
     fps: Fps,
     loop: z.boolean().optional().describe("The video loops seamlessly: QA checks that the last frame flows into the first and the music seam."),
+    motion_blur: z
+      .strictObject({ subframes: z.int().min(3).max(6).describe("Sub-frames averaged per output frame; render cost grows by this factor.") })
+      .optional()
+      .describe("Motion blur for `motion` scenes in final renders only (previews stay sharp and fast). Add it after a plain render passes review."),
   })
   .describe("Production master canvas every target is compiled from. Defaults to 1080 px on the short side at 30 fps.");
 

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Render button loop</title>
+<!-- Laid out at 1080x1080; the composer scales it to the render size. -->
+<meta name="vs-canvas" content="1080x1080">
+<link rel="stylesheet" href="s01.css">
+</head>
+<body>
+<div id="bg"></div>
+
+<!-- The one shape. It never cuts: its size, radius and position morph between states. -->
+<div id="shape"></div>
+
+<!-- Everything drawn on the shape, clipped to it every frame, laid out in its resting state. -->
+<div id="content">
+  <div class="mask" id="pill-mask"><div class="line" id="pill-label"></div></div>
+
+  <svg id="ring" viewBox="0 0 360 360" aria-hidden="true">
+    <circle id="ring-track" cx="180" cy="180" r="150"></circle>
+    <circle id="ring-arc" cx="180" cy="180" r="150" transform="rotate(-90 180 180)"></circle>
+  </svg>
+
+  <div id="tile">
+    <svg viewBox="0 0 280 280" aria-hidden="true"><path id="play" d="M118 96 L118 184 L190 140 Z"></path></svg>
+  </div>
+  <div class="mask" id="title-mask"><div class="line" id="title"></div></div>
+  <div class="mask" id="sub-mask"><div class="line" id="sub"></div></div>
+  <div id="share"><span id="share-label"></span></div>
+
+  <div id="toast-row">
+    <svg id="toast-icon" viewBox="0 0 60 60" aria-hidden="true">
+      <circle id="toast-disc" cx="30" cy="30" r="30"></circle>
+      <path id="toast-check" d="M18 31 L26.5 39 L42 22"></path>
+    </svg>
+    <div class="mask" id="toast-mask"><div class="line" id="toast-text"></div></div>
+  </div>
+
+  <div class="mask" id="end-mask"><div class="line" id="end-title"></div></div>
+</div>
+
+<svg id="cursor" viewBox="0 0 40 52" aria-hidden="true">
+  <path d="M3 3 L3 40 L12.5 31 L19 46 L26 43 L19.5 28.5 L32.5 28.5 Z"></path>
+</svg>
+
+<script src="s01.js"></script>
+</body>
+</html>

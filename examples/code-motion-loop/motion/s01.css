@@ -1,0 +1,45 @@
+/*
+ * The resting layout of every state, on a 1080x1080 canvas. Nothing here animates:
+ * s01.js sets every moving value from window.seek(t). Colours and fonts come from
+ * window.__vs.tokens (set in s01.js), so the page follows the brand.
+ */
+#bg, #content { position: absolute; left: 0; top: 0; width: 1080px; height: 1080px; }
+#shape { position: absolute; }
+#content { overflow: hidden; }
+
+.mask { position: absolute; overflow: hidden; }
+.line { white-space: nowrap; }
+
+/* State 1: the pill button (400x128 at the centre). */
+#pill-mask { left: 340px; top: 476px; width: 400px; height: 128px; }
+#pill-label { font-size: 52px; font-weight: 700; line-height: 128px; letter-spacing: -0.02em; text-align: center; }
+
+/* State 2: the frame fill with its progress ring. */
+#ring { position: absolute; left: 360px; top: 360px; width: 360px; height: 360px; overflow: visible; }
+#ring-track, #ring-arc { fill: none; stroke-width: 18px; }
+#ring-arc { stroke-linecap: round; }
+
+/* State 3: the card (820x392, x 130-950, y 344-736), padding 56. */
+#tile { position: absolute; left: 186px; top: 400px; width: 280px; height: 280px; border-radius: 28px; }
+#tile svg { width: 280px; height: 280px; display: block; }
+#title-mask { left: 514px; top: 400px; width: 380px; height: 80px; }
+#title { font-size: 64px; font-weight: 700; line-height: 80px; letter-spacing: -0.03em; }
+#sub-mask { left: 514px; top: 484px; width: 380px; height: 48px; }
+#sub { font-size: 36px; font-weight: 400; line-height: 48px; letter-spacing: -0.01em; opacity: 0.78; }
+#share { position: absolute; left: 514px; top: 600px; width: 200px; height: 80px; border-radius: 40px; text-align: center; }
+#share-label { font-size: 34px; font-weight: 700; line-height: 80px; letter-spacing: -0.01em; }
+
+/* State 4: the toast (560x128, x 260-820, y 786-914). */
+#toast-row { position: absolute; left: 260px; top: 786px; width: 560px; height: 128px; display: flex; align-items: center; justify-content: center; gap: 22px; }
+#toast-icon { width: 60px; height: 60px; flex: none; }
+#toast-check { fill: none; stroke-width: 6px; stroke-linecap: round; stroke-linejoin: round; }
+#toast-mask { position: relative; height: 60px; }
+#toast-text { font-size: 44px; font-weight: 700; line-height: 60px; letter-spacing: -0.02em; }
+
+/* State 5: the end card, the product name full width. */
+#end-mask { left: 40px; top: 460px; width: 1000px; height: 160px; }
+#end-title { font-size: 136px; font-weight: 700; line-height: 160px; letter-spacing: -0.04em; text-align: center; }
+
+/* The cursor; its tip is at (3, 3) in its own box. */
+#cursor { position: absolute; left: 0; top: 0; width: 40px; height: 52px; overflow: visible; transform-origin: 3px 3px; }
+#cursor path { stroke-width: 2.5px; stroke-linejoin: round; }

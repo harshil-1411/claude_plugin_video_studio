@@ -72,7 +72,7 @@ Top level:
 | `schema_version` | yes | `"1.0"` |
 | `id`, `title`, `content_ir_id`, `brief_id` | no | `brief_id` = the brief's `id` |
 | `goal`, `audience`, `platform`, `aspect_ratio`, `target_duration_sec`, `language` | yes | copy from the brief |
-| `master` | no | `{width, height, fps, loop?}`; `loop: true` = the video loops seamlessly (QA checks the seam; set it whenever `acceptance.loop` is); production canvas, ratio must equal `aspect_ratio`, even sides, fps `24`/`30`/`60`. Default 1080 px short side @ 30 (`1080×1920` for 9:16); keep what `spec_scaffold` returns |
+| `master` | no | `{width, height, fps, loop?, motion_blur?}`; `loop: true` = the video loops seamlessly (QA checks the seam; set it whenever `acceptance.loop` is); `motion_blur: {subframes: 3–6}` blurs `motion` scenes in final renders only (cost × subframes; add it after a plain render passes review); production canvas, ratio must equal `aspect_ratio`, even sides, fps `24`/`30`/`60`. Default 1080 px short side @ 30 (`1080×1920` for 9:16); keep what `spec_scaffold` returns |
 | `targets` | no | copy from the brief or `spec_scaffold`; unknown ids are errors |
 | `brand_profile` | no | e.g. `acme@3` |
 | `policy_profile` | no | string |

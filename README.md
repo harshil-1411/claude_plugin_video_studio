@@ -130,15 +130,15 @@ flowchart LR
 | | |
 |---|---|
 | **Inputs** | Markdown, text, PDF, DOCX, PPTX, web pages, local repos, video and audio files (local transcription in English or ~99 languages with detection, optional speaker turns for English conversations), folders of clips, video URLs (YouTube, Vimeo, Loom through your own optional `yt-dlp`, using their subtitles when present; direct .mp4/.mp3 links need nothing extra) |
-| **Templates (18)** | explain · educational · listicle · faceless-listicle · product-launch · devtool-launch · product-demo · product-ui · case-study · before-after · carousel-story · animated-explainer · text-over-music · talking-head · aesthetic-broll · silent-vlog · oddly-satisfying · ambient-slice-of-life |
-| **Scene kinds (15)** | typography · code · chart · stat · diagram · timeline · comparison · split_screen · quote · kinetic_text · lower_third · map · screenshot · cta · end_card, plus real footage with text overlays |
+| **Templates (24)** | explain · educational · listicle · faceless-listicle · product-launch · devtool-launch · product-demo · product-ui · case-study · before-after · carousel-story · animated-explainer · text-over-music · talking-head · aesthetic-broll · silent-vlog · oddly-satisfying · ambient-slice-of-life · ui-morph-loop · kinetic-type · ambient-loop · slides-narrated · topic-explainer-9 · product-hero; templates can ask for the inputs they need first (reference video, photo, real UI states) |
+| **Scene kinds (16)** | typography · code · chart · stat · diagram · timeline · comparison · split_screen · quote · kinetic_text · lower_third · map · screenshot · cta · end_card, plus **`motion`**: a page Claude writes as code (`seek(t)`, springs, the brand tokens and the music's beat grid), checked for safety and determinism before it renders, with optional motion blur; plus real footage with text overlays |
 | **Voice** | macOS `say` (automatically picks an installed Premium/Enhanced voice; with local whisper installed its word timings are aligned to the audio, so captions and cues land exactly) or espeak-ng, ElevenLabs (optional key), no voice (text over music), or the speech already in your footage; pace set with `voice.rate_wpm` (default 160) |
-| **Audio** | 4 bundled CC0 music beds (ducked under speech), beat-synced cuts, native clip sound, crossfades, sound effects, −14 LUFS with true-peak headroom |
+| **Audio** | 4 bundled CC0 music beds (ducked under speech), locally synthesized scores (`synth:pulse`, `lofi`, `ambient`, `drive`: CC0, exact beat grid), cuts snapped to beats or downbeats, native clip sound, crossfades, sound effects placed on their peak, −14 LUFS with true-peak headroom |
 | **Footage** | Crop, contain or blurred-pad fits, trim and speed, text overlays, automatic removal of baked-in letterbox bars, and `redact` regions to blur inboxes, names or dashboards in screen recordings; subject tracking that keeps a moving speaker in frame when a landscape video becomes vertical (`footage_focus`, macOS Vision); `footage_look` shot sheets so Claude sees the footage before choosing clips; cutaways from a talking head to a graphic while the speaker keeps talking; quality warnings (dark or bright picture, clipped or unclear audio); rotated phone video and HDR handled |
 | **Captions** | 3–7 word phrases on plates, placed clear of each platform's UI, held long enough to read, broken at speaker changes, with keyword emphasis and sound-event cues like `[music]`; turn them off per scene where kinetic text already shows the words |
 | **Looks** | Style packs (minimal, editorial, technical, energetic) and brand kits (colours, fonts, weights, motion, a corner logo, forbidden treatments, banned phrases, pronunciation overrides such as `LLM` → "L L M" that keep captions as written); scene transitions (crossfade, fade to black, slide, zoom, whip) that keep narration in sync; per-scene camera moves (push in, pull out, punch, reveal, drift, hold); word cues that land each list item, step or number on the word that says it |
 | **Languages** | `localize` translation sheets; bundled Noto fonts for Japanese, Devanagari and Arabic; CJK line breaking; right-to-left text |
-| **Checks** | 30+ lint rules (platform UI zones, contrast, reading speed, caption timing, cues, story arc, cutaway rhythm, brand rules, footage quality), technical QA (loudness, black or frozen frames), `review` contact sheets with problem scenes bordered, an automatic review → fix → re-render loop, and `compare` before/after pages |
+| **Checks** | 30+ lint rules (platform UI zones, contrast, reading speed, caption timing, cues, story arc, cutaway rhythm, brand rules, banned effects, acceptance numbers, loop seams, footage quality), technical QA (loudness, black or frozen frames, motion density), `stills` sheets before a render, `review` contact sheets with problem scenes bordered, an automatic review → fix → re-render loop, and `compare` before/after pages or against a reference video with metrics |
 | **Trust** | `verify` claim coverage, `video.lock`, golden-frame `test`, `diff`, provenance, optional C2PA content credentials (`export sign`); secrets found in sources are redacted |
 | **Control** | `policy.yaml` (allowed providers, spend limits, approval threshold), consent recorded in `project/consent.json`, `render_cancel`, one render per project at a time |
 
@@ -149,6 +149,7 @@ flowchart LR
 | [`examples/readme-hero`](examples/readme-hero) | The narrated hero reel above, grounded in a README snapshot |
 | [`examples/text-to-motion-graphic`](examples/text-to-motion-graphic) | A 30 s explainer from Markdown notes (also the golden-frame test) |
 | [`examples/reel-grammar`](examples/reel-grammar) | Every Phase 5 scene kind, the `energetic` style and a music bed, with no voiceover |
+| [`examples/code-motion-loop`](examples/code-motion-loop) | A 6 s seamless UI-morph loop written as a `motion` page on a synthesized score, cut to downbeats (needs HyperFrames) |
 | [`examples/demo-app`](examples/demo-app) | A tiny web app to try `/video-studio:demo` screen recording on |
 
 ## Commands
@@ -159,6 +160,8 @@ flowchart LR
 | `/video-studio:plan` · `validate` | Brief, grounded spec and storyboard, built on a story arc (hook, open loop, escalation, payoff, CTA); explains every validation issue |
 | `/video-studio:render` · `qa` · `export` | Local render (preview, then final; cancel anytime), technical QA, per-platform packages (`sign` for C2PA) |
 | `/video-studio:lint` · `verify` | Platform contract checks with a fix loop (UI zones, caption readability and sync, cuts on the beat, story arc); claim coverage against the sources |
+| `/video-studio:stills` | Frames of each scene at chosen times, beats or downbeats, before the full render |
+| `/video-studio:prompt-pack` | Prompts for Seedance, Veo, Kling, Wan, Runway and Hailuo compiled from shot cards (offline: nothing generated or spent) |
 | `/video-studio:review` · `compare` | Contact sheets, frame strips and crops of a render (lint findings bordered), so Claude looks at the video before handing it over; a before/after page that plays two versions in sync (side by side, stacked or wipe) |
 | `/video-studio:test` · `diff` | Golden-frame regression tests; spec, lock and frame diffs between renders |
 | `/video-studio:variants` · `adapt` | Hook × cover A/B sets with an experiment manifest; new aspect, length or platform |
@@ -170,7 +173,7 @@ flowchart LR
 
 ## What it does not do (yet)
 
-- **No generative video or avatars yet.** Runway, HeyGen and fal.ai adapters are planned (Phase 7, needs keys). Until then those scenes render as titled placeholder cards. Sora is intentionally not supported.
+- **No generative video or avatars yet.** Adapters are planned (Phase 7, needs keys; the key fields already exist in Configure and do nothing until then). Until then those scenes render as titled placeholder cards, and `prompt_pack` writes ready-to-paste prompts for each generator. Sora is intentionally not supported.
 - **No posting or analytics.** It produces packages and post copy; you upload them. Platform "trending sounds" are added in each app, and `post.json` reminds you of that.
 - **HyperFrames is optional.** The built-in ffmpeg renderer covers every scene kind. The richer HyperFrames renderer needs its own install and Google Chrome.
 - **Whisper models are downloaded only with your consent** (about 148 MB; 488 MB for the speaker-turn model). You can supply SRT/VTT captions instead.
@@ -208,9 +211,10 @@ After changing anything under `packages/`, rerun `pnpm bundle` and commit `dist/
 | `packages/renderer` | ffmpeg, footage and HyperFrames renderers; tokens, styles, scripts |
 | `packages/platforms` | platform contracts and layout zones |
 | `packages/voice` | TTS backends |
+| `packages/prompts` | provider specs and prompt compilers for shot cards |
 | `packages/mcp` | the MCP server (`dist/mcp.mjs`) and every tool |
 
-Data lives next to the code: `skills/`, `templates/`, `styles/`, `music/`, `fonts/` and `platform-specs/`.
+Data lives next to the code: `skills/`, `templates/`, `styles/`, `music/`, `fonts/`, `platform-specs/` and `provider-specs/`.
 
 </details>
 

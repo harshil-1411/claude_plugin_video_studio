@@ -229,3 +229,11 @@ Five big changes in 4 s.
    `longest_static`, `frozen_frames`) and lint `acceptance_unmet` against
    `spec.acceptance`, and `compare` with the user's reference when there
    is one.
+
+### Motion blur (final renders)
+
+Fast moves look smoother with a little blur. After a plain render passes review, set
+`master.motion_blur: {subframes: 4}` (3–6). Only `motion` scenes in `final` renders are blurred;
+previews stay sharp, and render time grows by the sub-frame count (10 s at 30 fps with 4
+sub-frames = 1,200 captures). The page needs no changes: blur works because `seek(t)` is a pure
+function of time, so the renderer can draw in-between moments.

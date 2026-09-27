@@ -10,6 +10,7 @@ import { ffprobe, resolveFfmpeg, type ProbeResult } from "@video-studio/media";
 import { canonicalJson, sha256Hex } from "@video-studio/core";
 import { type CaptureSession, type CaptureSessionOptions, type DeterminismResult, DETERMINISM_CHECK_VERSION, determinismFindings, formatCheckFinding, openCaptureSession, runDeterminismCheck } from "./capture.js";
 import { buildComposition, type CompositionAsset, HYPERFRAMES_KINDS } from "./hyperframes-compose.js";
+import { motionBlurOptions } from "./motion-blur.js";
 import { MOTION_INTERNAL_DIR } from "./motion-compose.js";
 import { formatMotionFinding, loadMotionPage } from "./motion-lint.js";
 import type { Availability, SceneRenderer, SceneRenderRequest, SceneRenderResult, TextBox } from "./types.js";
@@ -553,6 +554,8 @@ export function createHyperframesRenderer(opts: HyperframesRendererOptions = {})
           strictness: "best-effort",
           producerConfig,
           logger: quietLogger(warnings),
+          // Native sub-frame blur, fixed sample count (never adaptive, so the cost is known).
+          ...(kind === "motion" && req.motion_blur ? { motionBlur: motionBlurOptions(req.motion_blur.subframes) } : {}),
         });
         await mkdir(dirname(req.out_path), { recursive: true });
         await producer.executeRenderJob(job, dir, req.out_path, undefined, signal);

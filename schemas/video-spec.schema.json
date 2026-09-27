@@ -334,6 +334,22 @@
           "description": "The video loops seamlessly: QA checks that the last frame flows into the first and the music seam.",
           "type": "boolean"
         },
+        "motion_blur": {
+          "description": "Motion blur for `motion` scenes in final renders only (previews stay sharp and fast). Add it after a plain render passes review.",
+          "additionalProperties": false,
+          "properties": {
+            "subframes": {
+              "description": "Sub-frames averaged per output frame; render cost grows by this factor.",
+              "maximum": 6,
+              "minimum": 3,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "subframes"
+          ],
+          "type": "object"
+        },
         "width": {
           "maximum": 7680,
           "minimum": 2,

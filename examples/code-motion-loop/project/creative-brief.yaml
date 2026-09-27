@@ -1,0 +1,60 @@
+# Worked example: the Phase 6.5 code-motion loop, planned with the ui-morph-loop template
+# from input/render-button-loop.md only. See ../README.md.
+schema_version: "1.0"
+id: brief-render-button-loop
+goal: explain
+audience: Developers and designers who want reference-grade motion from code, not from a timeline editor
+platform: generic
+aspect_ratio: "1:1"
+target_duration_sec: 6
+language: en-US
+tone:
+  - crisp
+  - confident
+  - quiet
+desired_action: Open the page and copy its structure for your own motion scene
+key_messages:
+  - One shape never cuts; it morphs from the Render button to a progress ring, a card, a toast and an end card.
+  - A cursor drives every change, and every change lands on a beat of the synthesized score.
+  - The last frame is the first frame, so the loop has no seam.
+hook_candidates:
+  - text: One shape. Six states. No cuts.
+    mechanism: demo
+    scores: { relevance: 9, clarity: 9, curiosity: 7, evidence_strength: 9, visual_potential: 10 }
+  - text: Click Render and watch the button become the whole video.
+    mechanism: pattern_interrupt
+    scores: { relevance: 8, clarity: 8, curiosity: 8, evidence_strength: 8, visual_potential: 9 }
+  - text: What if the whole video were one button?
+    mechanism: question
+    scores: { relevance: 7, clarity: 7, curiosity: 9, evidence_strength: 7, visual_potential: 8 }
+chosen_hook: One shape. Six states. No cuts.
+template: ui-morph-loop
+acceptance:
+  loop: true
+  min_changes_per_sec: 0.8
+  max_frozen_pct: 10
+  hold_ms: 400
+inputs:
+  product: video-studio
+  ui_states: input/render-button-loop.md
+  formats: "1:1"
+  music: synthesize a score
+assumptions:
+  - field: platform
+    value: generic
+    reason: A reference loop for the repository, not a post; compile it for a platform later with targets (e.g. instagram).
+  - field: aspect_ratio
+    value: "1:1"
+    reason: A square loop reads in feeds and on profile grids; the template's 9:16 default is overridden on purpose.
+  - field: target_duration_sec
+    value: "6"
+    reason: Three bars of synth:pulse at 120 BPM; the template's minimum length, kept short so the example renders fast.
+  - field: ui_states
+    value: 5 states (the pill returns as the sixth)
+    reason: The source names five UI states; the template's 8-12 states are for a full product reel, not a 6 s reference loop.
+  - field: acceptance.min_changes_per_sec
+    value: "0.8"
+    reason: Five changes in six seconds (one per beat pair) plus a deliberate hold across the seam.
+  - field: style
+    value: minimal
+    reason: No brand was supplied; the minimal pack's palette and bundled Inter keep the one-accent look.

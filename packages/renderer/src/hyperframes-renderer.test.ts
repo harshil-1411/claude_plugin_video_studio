@@ -228,6 +228,18 @@ describe("render() with an injected producer", () => {
     expect(await readdir(tmpRoot)).toEqual([]);
   });
 
+  it("passes motion blur to the producer for motion scenes only", async () => {
+    const { r, seen, project } = await setup({});
+    await cp(MOTION_FIXTURES, join(project, "motion"), { recursive: true });
+    const motion = { ...scene(1), deterministic: { kind: "motion" as const, props: { html: "motion/morph.html", text: ["Docs in."] } } };
+    await r.render(request(project, { scene: motion, motion_blur: { subframes: 4 } }));
+    expect((seen.config as { motionBlur?: unknown }).motionBlur).toEqual({ samplesPerFrame: 4, shutterAngle: 180, shutterPhase: -90, blend: "srgb" });
+    await r.render(request(project, { scene: motion }));
+    expect((seen.config as { motionBlur?: unknown }).motionBlur).toBeUndefined();
+    await r.render(request(project, { motion_blur: { subframes: 4 } }));
+    expect((seen.config as { motionBlur?: unknown }).motionBlur).toBeUndefined();
+  });
+
   it("checks a motion page's determinism in the composed page before rendering, once per page", async () => {
     const { r, seen, project, capture } = await setup({});
     await cp(MOTION_FIXTURES, join(project, "motion"), { recursive: true });

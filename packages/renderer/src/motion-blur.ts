@@ -1,6 +1,6 @@
 /**
- * Motion blur (Phase 6.5 item 8), building block only: NOT wired into the render path (the spec
- * has no motion-blur field yet).
+ * Motion blur (Phase 6.5 item 8): `master.motion_blur.subframes` → the producer's native blur,
+ * for `motion` scenes in final renders (pipeline-stages passes it; hyperframes-renderer maps it).
  *
  * Spike finding: the pinned producer 0.8.78 captures sub-frames itself. `RenderConfigInput`
  * takes `motionBlur?: { samplesPerFrame?, shutterAngle?, shutterPhase?, blend? }` (engine

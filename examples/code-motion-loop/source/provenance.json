@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "ir_id": "ir-b95b8c2757f4",
+  "ir_schema_version": "1.0",
+  "created_at": "2026-09-27T12:56:27.056Z",
+  "sources": [
+    {
+      "source_id": "src-1",
+      "uri": "input/render-button-loop.md",
+      "kind": "markdown",
+      "sha256": "765bfa33bad2e4b81ba183b3e38e384ffe1fc9d532af9a3d67288487bf7cab51",
+      "title": "One shape, six states: a render button loop",
+      "extractor_version": "1",
+      "fetched_at": "2026-09-27T12:56:27.056Z",
+      "cache_hit": false,
+      "cache_key": "99428c0c281989a578036d8d3fb52703ae388cfb3e9f8636c8b4042c1ec80ec1"
+    }
+  ],
+  "failures": []
+}
