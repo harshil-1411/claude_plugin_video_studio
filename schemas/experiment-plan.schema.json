@@ -418,6 +418,14 @@
                 ],
                 "type": "string"
               },
+              "series_refs": {
+                "description": "Series bible entries (characters, locations, motifs) this scene shows; their changes re-render it.",
+                "items": {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "sfx": {
                 "items": {
                   "description": "A one-shot sound effect.",

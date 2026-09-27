@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:provider-spec",
+  "title": "ProviderSpec",
+  "description": "provider-specs/<family>.yaml: a video-generation model family's limits and prompt syntax, as dated, sourced data.",
+  "additionalProperties": false,
+  "properties": {
+    "access": {
+      "items": {
+        "description": "One way to reach the models; the credential is a placeholder until Phase 7 wires it.",
+        "additionalProperties": false,
+        "properties": {
+          "docs_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "env": {
+            "description": "Env var holding the credential; must be in the credential registry.",
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "type": "string"
+          },
+          "via": {
+            "enum": [
+              "direct",
+              "fal",
+              "replicate"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "via",
+          "env",
+          "docs_url"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "aspect_ratios": {
+      "items": {
+        "pattern": "^\\d+:\\d+$",
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "audio": {
+      "additionalProperties": false,
+      "properties": {
+        "native": {
+          "description": "Generates sound with the video.",
+          "type": "boolean"
+        },
+        "syntax": {
+          "description": "How dialogue, SFX and music are written in the prompt.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "native"
+      ],
+      "type": "object"
+    },
+    "camera_syntax": {
+      "description": "Bracketed camera commands or other special camera phrasing.",
+      "type": "string"
+    },
+    "duration": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_sec": {
+          "description": "Only these lengths, when the provider has fixed steps.",
+          "items": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "max_sec": {
+          "exclusiveMinimum": 0,
+          "maximum": 600,
+          "type": "number"
+        },
+        "min_sec": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "min_sec",
+        "max_sec"
+      ],
+      "type": "object"
+    },
+    "id": {
+      "description": "Must equal the file name: provider-specs/<id>.yaml.",
+      "enum": [
+        "seedance",
+        "veo",
+        "kling",
+        "wan",
+        "runway",
+        "hailuo"
+      ],
+      "type": "string"
+    },
+    "models": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Model id as the provider documents it (re-check before use; preview ids change).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "modes": {
+            "items": {
+              "enum": [
+                "text_to_video",
+                "image_to_video",
+                "reference_to_video",
+                "first_last_frame",
+                "extend"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "notes": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "modes"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "multi_shot": {
+      "additionalProperties": false,
+      "properties": {
+        "max_shots": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "syntax": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "max_shots",
+        "syntax"
+      ],
+      "type": "object"
+    },
+    "name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "negatives": {
+      "description": "positive_only: phrase exclusions as positive statements (\"the camera remains still\").",
+      "enum": [
+        "supported",
+        "unsupported",
+        "positive_only"
+      ],
+      "type": "string"
+    },
+    "notes": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "prompt_formula": {
+      "description": "The order the provider's guide recommends, e.g. subject + action + scene + camera + style.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "prompt_max_chars": {
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991,
+      "type": "integer"
+    },
+    "references": {
+      "additionalProperties": false,
+      "properties": {
+        "max_audio": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_images": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_videos": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "syntax": {
+          "description": "How a prompt names a reference, e.g. @Image{n} or @Element{n}.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "syntax"
+      ],
+      "type": "object"
+    },
+    "resolutions": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    },
+    "source_urls": {
+      "items": {
+        "format": "uri",
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "verified": {
+      "description": "false until re-checked against the live docs when Phase 7 starts.",
+      "type": "boolean"
+    },
+    "verified_on": {
+      "description": "When the facts were read from the sources.",
+      "format": "date",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "models",
+    "duration",
+    "aspect_ratios",
+    "audio",
+    "negatives",
+    "prompt_formula",
+    "access",
+    "source_urls",
+    "verified_on",
+    "verified"
+  ],
+  "type": "object"
+}

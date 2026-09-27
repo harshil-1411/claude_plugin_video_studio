@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { REPO_ROOT } from "./emit.js";
 import {
   Acceptance,
+  ProviderSpec,
+  Series,
   CreativeBrief,
   DeterministicProps,
   DETERMINISTIC_PROPS_EXAMPLES,
@@ -153,5 +155,54 @@ describe("Phase 6.5 contracts: style, template and brief", () => {
     const raw = JSON.parse(read("explain-vector-db.creative-brief.json")) as Record<string, unknown>;
     const brief = { ...raw, acceptance: { min_changes_per_sec: 1, max_frozen_pct: 5 }, inputs: { reference: "ref/ref.mp4", music: "synthesize one" } };
     expect(CreativeBrief.safeParse(brief).success).toBe(true);
+  });
+});
+
+describe("W4 contracts: provider specs and the series bible", () => {
+  const provider = {
+    schema_version: "1.0",
+    id: "veo",
+    name: "Veo",
+    models: [{ id: "veo-x", modes: ["text_to_video", "image_to_video"] }],
+    duration: { min_sec: 4, max_sec: 8, allowed_sec: [4, 6, 8] },
+    aspect_ratios: ["16:9", "9:16"],
+    audio: { native: true },
+    negatives: "supported",
+    prompt_formula: "cinematography + subject + action + context + style",
+    access: [{ via: "fal", env: "FAL_KEY", docs_url: "https://fal.ai/models" }],
+    source_urls: ["https://ai.google.dev/gemini-api/docs/video"],
+    verified_on: "2026-09-27",
+    verified: false,
+  };
+
+  it("parses a provider spec and rejects bad ranges, http sources and unknown families", () => {
+    expect(ProviderSpec.safeParse(provider).success).toBe(true);
+    expect(ProviderSpec.safeParse({ ...provider, duration: { min_sec: 9, max_sec: 8 } }).success).toBe(false);
+    expect(ProviderSpec.safeParse({ ...provider, source_urls: ["http://example.com"] }).success).toBe(false);
+    expect(ProviderSpec.safeParse({ ...provider, id: "sora" }).success).toBe(false);
+  });
+
+  it("parses a series bible with unique ids across entries", () => {
+    const series = {
+      schema_version: "1.0",
+      id: "intro-series",
+      name: "Intro series",
+      characters: [{ id: "host", name: "Host", description: "Round glasses, navy hoodie", references: ["refs/host.png"] }],
+      motifs: [{ id: "toggle", description: "A toggle switch flips on every downbeat" }],
+    };
+    expect(Series.safeParse(series).success).toBe(true);
+    expect(Series.safeParse({ ...series, motifs: [{ id: "host", description: "x" }] }).success).toBe(false);
+    expect(Series.safeParse({ ...series, characters: [{ ...series.characters[0], references: ["../x.png"] }] }).success).toBe(false);
+  });
+
+  it("a spec points at its series; series_refs without one warn", () => {
+    const s = loadSpec();
+    s.scenes[0]!.series_refs = ["host"];
+    expect(validateVideoSpecSemantics(s).warnings.some((w) => w.path === "scenes.0.series_refs")).toBe(true);
+    s.series = "../series.yaml";
+    expect(VideoSpec.safeParse(s).success).toBe(true);
+    expect(validateVideoSpecSemantics(s).warnings.some((w) => w.path === "scenes.0.series_refs")).toBe(false);
+    s.series = "https://example.com/series.yaml";
+    expect(VideoSpec.safeParse(s).success).toBe(false);
   });
 });

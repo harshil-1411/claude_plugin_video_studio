@@ -4,6 +4,7 @@ import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveDataDir } from "@video-studio/core";
+import { CREDENTIALS, hasCredential } from "@video-studio/schema";
 import { hasEnvValue as hasValue, locateFfTool, parseBuildconf, which } from "@video-studio/media";
 import { bestNaturalVoice, parseSayVoices } from "@video-studio/voice";
 import { checkHyperframes } from "./hyperframes.js";
@@ -58,13 +59,8 @@ export interface DoctorDeps {
 
 export const MIN_NODE = [22, 13] as const;
 
-export const PROVIDER_KEYS = [
-  "RUNWAYML_API_SECRET",
-  "ELEVENLABS_API_KEY",
-  "HEYGEN_API_KEY",
-  "FAL_KEY",
-  "KLINGAI_API_KEY",
-] as const;
+/** Every credential env var (the registry in @video-studio/schema `CREDENTIALS`). */
+export const PROVIDER_KEYS: readonly string[] = CREDENTIALS.map((c) => c.env);
 
 export function defaultDoctorDeps(): DoctorDeps {
   return {
@@ -336,14 +332,18 @@ export async function checkWhisper(deps: DoctorDeps): Promise<Check> {
 }
 
 export function checkProviderKeys(env: Env): { check: Check; keys: Record<string, boolean> } {
-  const keys = Object.fromEntries(PROVIDER_KEYS.map((k) => [k, hasValue(env[k])])) as Record<string, boolean>;
-  const present = PROVIDER_KEYS.filter((k) => keys[k]);
-  const missing = PROVIDER_KEYS.filter((k) => !keys[k]);
+  const keys = Object.fromEntries(CREDENTIALS.map((c) => [c.env, hasCredential(env, c.env)])) as Record<string, boolean>;
+  const list = (xs: readonly string[]) => (xs.length ? xs.join(", ") : "none");
+  const active = CREDENTIALS.filter((c) => c.active);
+  const planned = CREDENTIALS.filter((c) => !c.active);
+  const plannedSet = planned.filter((c) => keys[c.env]);
   const detail =
-    `present: ${present.length ? present.join(", ") : "none"}; missing: ${missing.length ? missing.join(", ") : "none"}` +
-    " (optional; local/mock paths need no keys)";
+    `in use: ${list(active.filter((c) => keys[c.env]).map((c) => c.env))} set, ${list(active.filter((c) => !keys[c.env]).map((c) => c.env))} not set` +
+    `; placeholders for planned integrations (no effect yet): ${plannedSet.length} of ${planned.length} set` +
+    (plannedSet.length ? ` (${plannedSet.map((c) => `${c.env}, Phase ${c.phase}`).join("; ")})` : "") +
+    " (all optional; local paths need no keys)";
   const check: Check = { id: "provider_keys", status: "ok", detail };
-  if (missing.length) {
+  if (active.some((c) => !keys[c.env])) {
     check.fix = "Set keys via `/plugin` → video-studio → Configure (stored in the OS keychain), or export the env vars for the dev CLI.";
   }
   return { check, keys };

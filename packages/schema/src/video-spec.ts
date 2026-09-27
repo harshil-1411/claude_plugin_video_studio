@@ -17,6 +17,7 @@ import {
 } from "./common.js";
 import { Acceptance, EffectId, ProjectRelativePath, SynthParams } from "./craft.js";
 import { ShotCard } from "./shot-card.js";
+import { SeriesRef } from "./series.js";
 import type { ContentIR } from "./content-ir.js";
 
 export const ScenePurpose = z.enum([
@@ -222,6 +223,7 @@ export const Scene = z.strictObject({
   audio: SceneAudio.optional(),
   sfx: z.array(SoundEffect).max(8).optional(),
   motion: SceneMotion.optional(),
+  series_refs: z.array(Id).optional().describe("Series bible entries (characters, locations, motifs) this scene shows; their changes re-render it."),
   shot: ShotCard.optional().describe("Provider-neutral shot card for generated_video / avatar scenes; prompt packs and provider adapters compile it."),
   burn_captions: z
     .boolean()
@@ -353,6 +355,7 @@ export const VideoSpec = z
     captions: CaptionSettings,
     style: Id.optional().describe("Style pack id: styles/<id>.yaml (look and motion). Brand colours and fonts override it."),
     audio: AudioSettings.optional(),
+    series: SeriesRef.optional().describe("Path to the series bible (series.yaml) this episode belongs to, e.g. ../series.yaml."),
     acceptance: Acceptance.optional().describe("Measurable checks QA and lint hold the render to (copied from the brief)."),
     cover: Cover.optional(),
     publish: z.record(PlatformTargetId, PublishSettings).optional().describe("Post copy keyed by target id."),
@@ -1095,6 +1098,16 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
     });
   }
 
+  if (!spec.series) {
+    const i = spec.scenes.findIndex((s) => s.series_refs?.length);
+    if (i >= 0) {
+      warnings.push({
+        path: `scenes.${i}.series_refs`,
+        message: `scene ${spec.scenes[i]!.id} names series entries, but the spec has no series bible`,
+        fix: "set series to the path of the series.yaml (e.g. ../series.yaml), or remove series_refs",
+      });
+    }
+  }
   if (spec.acceptance?.loop && !spec.master?.loop) {
     warnings.push({
       path: "master.loop",

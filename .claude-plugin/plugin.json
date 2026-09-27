@@ -3,19 +3,23 @@
   "displayName": "Video Studio",
   "version": "0.2.0",
   "description": "Provider-neutral knowledge-to-video compiler: turns text, URLs, documents and repos into reproducible videos with captions, thumbnails and provenance.",
-  "author": { "name": "Suparn Bector" },
+  "author": {
+    "name": "Suparn Bector"
+  },
   "homepage": "https://github.com/harshil-1411/claude_plugin_video_studio",
   "repository": "https://github.com/harshil-1411/claude_plugin_video_studio",
   "license": "Apache-2.0",
-  "keywords": ["video", "knowledge-to-video", "ffmpeg", "captions", "mcp", "runway", "elevenlabs", "heygen"],
+  "keywords": [
+    "video",
+    "knowledge-to-video",
+    "ffmpeg",
+    "captions",
+    "mcp",
+    "runway",
+    "elevenlabs",
+    "heygen"
+  ],
   "userConfig": {
-    "runway_key": {
-      "type": "string",
-      "title": "Runway API key",
-      "description": "Not used yet (planned provider phase): Runway API secret for generative video. Setting it has no effect today (RUNWAYML_API_SECRET).",
-      "sensitive": true,
-      "required": false
-    },
     "elevenlabs_key": {
       "type": "string",
       "title": "ElevenLabs API key",
@@ -23,24 +27,101 @@
       "sensitive": true,
       "required": false
     },
+    "runway_key": {
+      "type": "string",
+      "title": "Runway API key",
+      "description": "Not used yet (Phase 7, providers): Runway Gen-4 / Gen-4.5 generative video. Safe to set now; it has no effect until that integration ships (RUNWAYML_API_SECRET).",
+      "sensitive": true,
+      "required": false
+    },
     "heygen_key": {
       "type": "string",
       "title": "HeyGen API key",
-      "description": "Not used yet (planned provider phase): HeyGen v3 key for presenter videos. Setting it has no effect today (HEYGEN_API_KEY).",
+      "description": "Not used yet (Phase 7, providers): HeyGen v3 presenter videos. Safe to set now; it has no effect until that integration ships (HEYGEN_API_KEY).",
       "sensitive": true,
       "required": false
     },
     "fal_key": {
       "type": "string",
       "title": "fal.ai API key",
-      "description": "Not used yet (planned provider phase): fal.ai key for Kling, Veo and Hailuo models. Setting it has no effect today (FAL_KEY).",
+      "description": "Not used yet (Phase 7, providers): Kling, Veo, Hailuo, Seedance and Wan through fal.ai. Safe to set now; it has no effect until that integration ships (FAL_KEY).",
       "sensitive": true,
       "required": false
     },
     "kling_key": {
       "type": "string",
       "title": "Kling API key",
-      "description": "Not used yet (planned provider phase): direct Kling API key. Setting it has no effect today (KLINGAI_API_KEY).",
+      "description": "Not used yet (Phase 7, providers): direct Kling API. Safe to set now; it has no effect until that integration ships (KLINGAI_API_KEY).",
+      "sensitive": true,
+      "required": false
+    },
+    "google_key": {
+      "type": "string",
+      "title": "Google Gemini API key",
+      "description": "Not used yet (Phase 7, providers): direct Veo through the Gemini API. Safe to set now; it has no effect until that integration ships (GEMINI_API_KEY).",
+      "sensitive": true,
+      "required": false
+    },
+    "ark_key": {
+      "type": "string",
+      "title": "BytePlus ModelArk API key",
+      "description": "Not used yet (Phase 7, providers): direct Seedance API. Safe to set now; it has no effect until that integration ships (ARK_API_KEY).",
+      "sensitive": true,
+      "required": false
+    },
+    "dashscope_key": {
+      "type": "string",
+      "title": "Alibaba DashScope API key",
+      "description": "Not used yet (Phase 7, providers): direct Wan API. Safe to set now; it has no effect until that integration ships (DASHSCOPE_API_KEY).",
+      "sensitive": true,
+      "required": false
+    },
+    "minimax_key": {
+      "type": "string",
+      "title": "MiniMax API key",
+      "description": "Not used yet (Phase 7, providers): direct Hailuo API. Safe to set now; it has no effect until that integration ships (MINIMAX_API_KEY).",
+      "sensitive": true,
+      "required": false
+    },
+    "youtube_client_id": {
+      "type": "string",
+      "title": "YouTube OAuth client ID",
+      "description": "Not used yet (Phase 9, publishing): uploading to YouTube and YouTube Shorts. Safe to set now; it has no effect until that integration ships (YOUTUBE_CLIENT_ID).",
+      "sensitive": false,
+      "required": false
+    },
+    "youtube_client_secret": {
+      "type": "string",
+      "title": "YouTube OAuth client secret",
+      "description": "Not used yet (Phase 9, publishing): uploading to YouTube and YouTube Shorts. Safe to set now; it has no effect until that integration ships (YOUTUBE_CLIENT_SECRET).",
+      "sensitive": true,
+      "required": false
+    },
+    "meta_access_token": {
+      "type": "string",
+      "title": "Meta (Instagram) access token",
+      "description": "Not used yet (Phase 9, publishing): publishing Instagram Reels. Safe to set now; it has no effect until that integration ships (META_ACCESS_TOKEN).",
+      "sensitive": true,
+      "required": false
+    },
+    "linkedin_access_token": {
+      "type": "string",
+      "title": "LinkedIn access token",
+      "description": "Not used yet (Phase 9, publishing): posting videos to LinkedIn. Safe to set now; it has no effect until that integration ships (LINKEDIN_ACCESS_TOKEN).",
+      "sensitive": true,
+      "required": false
+    },
+    "tiktok_client_key": {
+      "type": "string",
+      "title": "TikTok client key",
+      "description": "Not used yet (Phase 9, publishing): TikTok Direct Post (not available in India). Safe to set now; it has no effect until that integration ships (TIKTOK_CLIENT_KEY).",
+      "sensitive": false,
+      "required": false
+    },
+    "tiktok_client_secret": {
+      "type": "string",
+      "title": "TikTok client secret",
+      "description": "Not used yet (Phase 9, publishing): TikTok Direct Post (not available in India). Safe to set now; it has no effect until that integration ships (TIKTOK_CLIENT_SECRET).",
       "sensitive": true,
       "required": false
     }

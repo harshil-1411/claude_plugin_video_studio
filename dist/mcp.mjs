@@ -13777,6 +13777,192 @@ const SynthParams = strictObject({
 */
 const ProjectRelativePath = string().min(1).refine((p) => !/^([a-zA-Z]:)?[\\/]/.test(p), "must be relative to the project folder").refine((p) => !p.split(/[\\/]/).includes(".."), "must not contain `..`").refine((p) => !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p), "must be a project file, not a URL");
 //#endregion
+//#region ../schema/dist/credentials.js
+/**
+* Every credential the plugin knows about, as data: the `userConfig` key a user fills in
+* (`/plugin` → video-studio → Configure, stored in the OS keychain when sensitive), the env var
+* `.mcp.json` passes it to the engine as, and what it is for. Most are placeholders for provider
+* (Phase 7) and publishing (Phase 9) integrations that are not built yet: setting them is safe
+* and has no effect until then. `.claude-plugin/plugin.json` and `.mcp.json` must list exactly
+* these (a test checks it). Env var names for unbuilt integrations are re-verified against each
+* provider's docs when that integration is built.
+*/
+const CREDENTIALS = [
+	{
+		user_config: "elevenlabs_key",
+		env: "ELEVENLABS_API_KEY",
+		title: "ElevenLabs API key",
+		service: "ElevenLabs",
+		use: "voice",
+		active: true,
+		sensitive: true,
+		purpose: "voiceover and word timings"
+	},
+	{
+		user_config: "runway_key",
+		env: "RUNWAYML_API_SECRET",
+		title: "Runway API key",
+		service: "Runway",
+		use: "generation",
+		active: false,
+		phase: 7,
+		sensitive: true,
+		purpose: "Runway Gen-4 / Gen-4.5 generative video"
+	},
+	{
+		user_config: "heygen_key",
+		env: "HEYGEN_API_KEY",
+		title: "HeyGen API key",
+		service: "HeyGen",
+		use: "generation",
+		active: false,
+		phase: 7,
+		sensitive: true,
+		purpose: "HeyGen v3 presenter videos"
+	},
+	{
+		user_config: "fal_key",
+		env: "FAL_KEY",
+		title: "fal.ai API key",
+		service: "fal.ai",
+		use: "generation",
+		active: false,
+		phase: 7,
+		sensitive: true,
+		purpose: "Kling, Veo, Hailuo, Seedance and Wan through fal.ai"
+	},
+	{
+		user_config: "kling_key",
+		env: "KLINGAI_API_KEY",
+		title: "Kling API key",
+		service: "Kling",
+		use: "generation",
+		active: false,
+		phase: 7,
+		sensitive: true,
+		purpose: "direct Kling API"
+	},
+	{
+		user_config: "google_key",
+		env: "GEMINI_API_KEY",
+		title: "Google Gemini API key",
+		service: "Google (Veo)",
+		use: "generation",
+		active: false,
+		phase: 7,
+		sensitive: true,
+		purpose: "direct Veo through the Gemini API"
+	},
+	{
+		user_config: "ark_key",
+		env: "ARK_API_KEY",
+		title: "BytePlus ModelArk API key",
+		service: "BytePlus ModelArk (Seedance)",
+		use: "generation",
+		active: false,
+		phase: 7,
+		sensitive: true,
+		purpose: "direct Seedance API"
+	},
+	{
+		user_config: "dashscope_key",
+		env: "DASHSCOPE_API_KEY",
+		title: "Alibaba DashScope API key",
+		service: "Alibaba Model Studio (Wan)",
+		use: "generation",
+		active: false,
+		phase: 7,
+		sensitive: true,
+		purpose: "direct Wan API"
+	},
+	{
+		user_config: "minimax_key",
+		env: "MINIMAX_API_KEY",
+		title: "MiniMax API key",
+		service: "MiniMax (Hailuo)",
+		use: "generation",
+		active: false,
+		phase: 7,
+		sensitive: true,
+		purpose: "direct Hailuo API"
+	},
+	{
+		user_config: "youtube_client_id",
+		env: "YOUTUBE_CLIENT_ID",
+		title: "YouTube OAuth client ID",
+		service: "YouTube Data API",
+		use: "publishing",
+		active: false,
+		phase: 9,
+		sensitive: false,
+		purpose: "uploading to YouTube and YouTube Shorts"
+	},
+	{
+		user_config: "youtube_client_secret",
+		env: "YOUTUBE_CLIENT_SECRET",
+		title: "YouTube OAuth client secret",
+		service: "YouTube Data API",
+		use: "publishing",
+		active: false,
+		phase: 9,
+		sensitive: true,
+		purpose: "uploading to YouTube and YouTube Shorts"
+	},
+	{
+		user_config: "meta_access_token",
+		env: "META_ACCESS_TOKEN",
+		title: "Meta (Instagram) access token",
+		service: "Instagram Graph API",
+		use: "publishing",
+		active: false,
+		phase: 9,
+		sensitive: true,
+		purpose: "publishing Instagram Reels"
+	},
+	{
+		user_config: "linkedin_access_token",
+		env: "LINKEDIN_ACCESS_TOKEN",
+		title: "LinkedIn access token",
+		service: "LinkedIn API",
+		use: "publishing",
+		active: false,
+		phase: 9,
+		sensitive: true,
+		purpose: "posting videos to LinkedIn"
+	},
+	{
+		user_config: "tiktok_client_key",
+		env: "TIKTOK_CLIENT_KEY",
+		title: "TikTok client key",
+		service: "TikTok Content Posting API",
+		use: "publishing",
+		active: false,
+		phase: 9,
+		sensitive: false,
+		purpose: "TikTok Direct Post (not available in India)"
+	},
+	{
+		user_config: "tiktok_client_secret",
+		env: "TIKTOK_CLIENT_SECRET",
+		title: "TikTok client secret",
+		service: "TikTok Content Posting API",
+		use: "publishing",
+		active: false,
+		phase: 9,
+		sensitive: true,
+		purpose: "TikTok Direct Post (not available in India)"
+	}
+];
+/** An unset `${user_config.X}` can reach the env as the literal placeholder text: that is not a value. */
+function isUnexpandedPlaceholder(v) {
+	return /^\$\{[^}]*\}$/.test(v.trim());
+}
+/** Whether a credential env var holds a real value (not empty, not an unexpanded placeholder). */
+function hasCredential(env, envVar) {
+	const v = env[envVar]?.trim();
+	return Boolean(v) && !isUnexpandedPlaceholder(v);
+}
+//#endregion
 //#region ../schema/dist/shot-card.js
 /**
 * A provider-neutral shot card for generated footage (Phase 7). Prompt compilers turn it into
@@ -13817,6 +14003,165 @@ const ShotCard = strictObject({
 	first_frame_from: Id.optional().describe("Scene id whose approved last frame is this shot's first frame."),
 	exclusions: array(NonEmptyString).optional().describe("Things the model must not do (compiled only where the provider accepts negatives).")
 }).describe("Provider-neutral shot card for a generated_video or avatar scene.");
+//#endregion
+//#region ../schema/dist/provider-spec.js
+/**
+* provider-specs/<family>.yaml: what a video-generation model family accepts, as data (limits,
+* reference syntax, audio channels, negative prompts), with the source it was read from and
+* when. Prompt compilers read it; no limit lives in code or skill prose. Specs are hypotheses
+* until re-verified: `verified: false` until someone re-checks the live docs, and the compiler
+* says so in every prompt pack.
+*/
+const ProviderFamily = _enum([
+	"seedance",
+	"veo",
+	"kling",
+	"wan",
+	"runway",
+	"hailuo"
+]);
+const GenerationMode = _enum([
+	"text_to_video",
+	"image_to_video",
+	"reference_to_video",
+	"first_last_frame",
+	"extend"
+]);
+const Ratio = string().regex(/^\d+:\d+$/, "expected an aspect ratio like 16:9");
+const Url = url$1({ protocol: /^https$/ });
+const IsoDate$1 = date();
+const ProviderModel = strictObject({
+	id: NonEmptyString.describe("Model id as the provider documents it (re-check before use; preview ids change)."),
+	label: string().optional(),
+	modes: array(GenerationMode).min(1),
+	notes: array(NonEmptyString).optional()
+});
+const ProviderAccess = strictObject({
+	via: _enum([
+		"direct",
+		"fal",
+		"replicate"
+	]),
+	env: string().regex(/^[A-Z][A-Z0-9_]*$/).describe("Env var holding the credential; must be in the credential registry."),
+	docs_url: Url
+}).describe("One way to reach the models; the credential is a placeholder until Phase 7 wires it.");
+strictObject({
+	schema_version: SchemaVersion,
+	id: ProviderFamily.describe("Must equal the file name: provider-specs/<id>.yaml."),
+	name: NonEmptyString,
+	models: array(ProviderModel).min(1),
+	duration: strictObject({
+		min_sec: number().positive(),
+		max_sec: number().positive().max(600),
+		allowed_sec: array(number().positive()).optional().describe("Only these lengths, when the provider has fixed steps.")
+	}).refine((d) => d.min_sec <= d.max_sec, "min_sec must be <= max_sec"),
+	aspect_ratios: array(Ratio).min(1),
+	resolutions: array(NonEmptyString).optional(),
+	references: strictObject({
+		max_images: int().min(0).optional(),
+		max_videos: int().min(0).optional(),
+		max_audio: int().min(0).optional(),
+		syntax: NonEmptyString.describe("How a prompt names a reference, e.g. @Image{n} or @Element{n}.")
+	}).optional(),
+	audio: strictObject({
+		native: boolean().describe("Generates sound with the video."),
+		syntax: string().optional().describe("How dialogue, SFX and music are written in the prompt.")
+	}),
+	negatives: _enum([
+		"supported",
+		"unsupported",
+		"positive_only"
+	]).describe("positive_only: phrase exclusions as positive statements (\"the camera remains still\")."),
+	multi_shot: strictObject({
+		max_shots: int().min(1),
+		syntax: NonEmptyString
+	}).optional(),
+	camera_syntax: string().optional().describe("Bracketed camera commands or other special camera phrasing."),
+	prompt_max_chars: int().positive().optional(),
+	prompt_formula: NonEmptyString.describe("The order the provider's guide recommends, e.g. subject + action + scene + camera + style."),
+	access: array(ProviderAccess).min(1),
+	source_urls: array(Url).min(1),
+	verified_on: IsoDate$1.describe("When the facts were read from the sources."),
+	verified: boolean().describe("false until re-checked against the live docs when Phase 7 starts."),
+	notes: array(NonEmptyString).optional()
+}).meta({
+	id: "ProviderSpec",
+	title: "ProviderSpec",
+	description: "provider-specs/<family>.yaml: a video-generation model family's limits and prompt syntax, as dated, sourced data."
+});
+//#endregion
+//#region ../schema/dist/series.js
+/**
+* series.yaml: a series bible shared by the episodes (projects) of one series: recurring
+* characters, locations and motifs, and the look they share. It sits next to the project folders
+* and a spec points at it with `series`. File paths inside it are relative to the series file.
+* Scenes name the entries they use in `series_refs`, so changing one character re-renders only
+* the scenes that show it.
+*/
+const Refs = array(ProjectRelativePath).describe("Reference images or clips, relative to the series file.");
+const SeriesCharacter = strictObject({
+	id: Id,
+	name: NonEmptyString,
+	description: NonEmptyString.describe("Look, silhouette, personality: what must stay the same in every episode."),
+	wardrobe: string().optional(),
+	voice_id: string().optional().describe("TTS voice used for this character's lines."),
+	references: Refs.optional()
+});
+const SeriesLocation = strictObject({
+	id: Id,
+	description: NonEmptyString,
+	references: Refs.optional()
+});
+const SeriesMotif = strictObject({
+	id: Id,
+	description: NonEmptyString.describe("A recurring visual or sound, e.g. a toggle switch that flips in every episode."),
+	asset: ProjectRelativePath.optional()
+});
+strictObject({
+	schema_version: SchemaVersion,
+	id: Id,
+	name: NonEmptyString,
+	style: Id.optional().describe("Style pack every episode uses unless its spec overrides it."),
+	brand_profile: string().optional(),
+	palette: strictObject({
+		background: HexColor.optional(),
+		text: HexColor.optional(),
+		primary: HexColor.optional(),
+		secondary: HexColor.optional()
+	}).optional(),
+	characters: array(SeriesCharacter).optional(),
+	locations: array(SeriesLocation).optional(),
+	motifs: array(SeriesMotif).optional(),
+	rules: array(NonEmptyString).optional().describe("Standards every episode follows, e.g. the intro always opens on the motif.")
+}).superRefine((s, ctx) => {
+	const seen = /* @__PURE__ */ new Map();
+	for (const key of [
+		"characters",
+		"locations",
+		"motifs"
+	]) (s[key] ?? []).forEach((e, i) => {
+		const prev = seen.get(e.id);
+		if (prev) ctx.addIssue({
+			code: "custom",
+			path: [
+				key,
+				i,
+				"id"
+			],
+			message: `id "${e.id}" is already used in ${prev}; ids are unique across the series`
+		});
+		else seen.set(e.id, key);
+	});
+}).meta({
+	id: "Series",
+	title: "Series",
+	description: "series.yaml: the bible shared by a series' episodes (characters, locations, motifs, look)."
+});
+/**
+* Path from a project folder to its series file: relative, may climb out of the project (the
+* file sits next to the episodes), no absolute paths or URLs, and a YAML or JSON file.
+*/
+const SeriesRef = string().min(1).refine((p) => !/^([a-zA-Z]:)?[\\/]/.test(p), "must be relative to the project folder").refine((p) => !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p), "must be a file, not a URL").refine((p) => /\.(ya?ml|json)$/i.test(p), "must be a .yaml, .yml or .json file");
 //#endregion
 //#region ../schema/dist/content-ir.js
 const Source = strictObject({
@@ -14431,6 +14776,7 @@ const Scene = strictObject({
 	audio: SceneAudio.optional(),
 	sfx: array(SoundEffect).max(8).optional(),
 	motion: SceneMotion.optional(),
+	series_refs: array(Id).optional().describe("Series bible entries (characters, locations, motifs) this scene shows; their changes re-render it."),
 	shot: ShotCard.optional().describe("Provider-neutral shot card for generated_video / avatar scenes; prompt packs and provider adapters compile it."),
 	burn_captions: boolean().optional().describe("false: no burned-in captions over this scene (e.g. kinetic_text already shows the spoken words). The .srt/.vtt captions keep every word. Default: captions.burn_in."),
 	cues: array(SceneCue).max(12).optional().describe("Word cues: each reveal item of the deterministic graphic appears as its word is spoken. Items without a cue keep the default stagger, never ahead of an earlier cue.")
@@ -14509,6 +14855,7 @@ const VideoSpec = strictObject({
 	captions: CaptionSettings,
 	style: Id.optional().describe("Style pack id: styles/<id>.yaml (look and motion). Brand colours and fonts override it."),
 	audio: AudioSettings.optional(),
+	series: SeriesRef.optional().describe("Path to the series bible (series.yaml) this episode belongs to, e.g. ../series.yaml."),
 	acceptance: Acceptance.optional().describe("Measurable checks QA and lint hold the render to (copied from the brief)."),
 	cover: Cover.optional(),
 	publish: record(PlatformTargetId, PublishSettings).optional().describe("Post copy keyed by target id."),
@@ -15258,6 +15605,14 @@ function validateVideoSpecSemantics(spec, ir) {
 		message: `goal is "${spec.goal}" but the last scene is "${last.purpose}"`,
 		fix: "end with a \"cta\" or \"end_card\" scene that states the desired action"
 	});
+	if (!spec.series) {
+		const i = spec.scenes.findIndex((s) => s.series_refs?.length);
+		if (i >= 0) warnings.push({
+			path: `scenes.${i}.series_refs`,
+			message: `scene ${spec.scenes[i].id} names series entries, but the spec has no series bible`,
+			fix: "set series to the path of the series.yaml (e.g. ../series.yaml), or remove series_refs"
+		});
+	}
 	if (spec.acceptance?.loop && !spec.master?.loop) warnings.push({
 		path: "master.loop",
 		message: "acceptance.loop is set but master.loop is not, so QA won't check the loop seam",
@@ -261829,13 +262184,7 @@ const EMPTY_COMPLETION_RESULT = { completion: {
 //#endregion
 //#region src/doctor.ts
 const MIN_NODE = [22, 13];
-const PROVIDER_KEYS = [
-	"RUNWAYML_API_SECRET",
-	"ELEVENLABS_API_KEY",
-	"HEYGEN_API_KEY",
-	"FAL_KEY",
-	"KLINGAI_API_KEY"
-];
+CREDENTIALS.map((c) => c.env);
 function defaultDoctorDeps() {
 	return {
 		env: process.env,
@@ -262169,15 +262518,17 @@ async function checkWhisper(deps) {
 	};
 }
 function checkProviderKeys(env) {
-	const keys = Object.fromEntries(PROVIDER_KEYS.map((k) => [k, hasEnvValue(env[k])]));
-	const present = PROVIDER_KEYS.filter((k) => keys[k]);
-	const missing = PROVIDER_KEYS.filter((k) => !keys[k]);
+	const keys = Object.fromEntries(CREDENTIALS.map((c) => [c.env, hasCredential(env, c.env)]));
+	const list = (xs) => xs.length ? xs.join(", ") : "none";
+	const active = CREDENTIALS.filter((c) => c.active);
+	const planned = CREDENTIALS.filter((c) => !c.active);
+	const plannedSet = planned.filter((c) => keys[c.env]);
 	const check = {
 		id: "provider_keys",
 		status: "ok",
-		detail: `present: ${present.length ? present.join(", ") : "none"}; missing: ${missing.length ? missing.join(", ") : "none"} (optional; local/mock paths need no keys)`
+		detail: `in use: ${list(active.filter((c) => keys[c.env]).map((c) => c.env))} set, ${list(active.filter((c) => !keys[c.env]).map((c) => c.env))} not set; placeholders for planned integrations (no effect yet): ${plannedSet.length} of ${planned.length} set` + (plannedSet.length ? ` (${plannedSet.map((c) => `${c.env}, Phase ${c.phase}`).join("; ")})` : "") + " (all optional; local paths need no keys)"
 	};
-	if (missing.length) check.fix = "Set keys via `/plugin` → video-studio → Configure (stored in the OS keychain), or export the env vars for the dev CLI.";
+	if (active.some((c) => !keys[c.env])) check.fix = "Set keys via `/plugin` → video-studio → Configure (stored in the OS keychain), or export the env vars for the dev CLI.";
 	return {
 		check,
 		keys

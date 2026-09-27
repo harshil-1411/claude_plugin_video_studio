@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:series",
+  "title": "Series",
+  "description": "series.yaml: the bible shared by a series' episodes (characters, locations, motifs, look).",
+  "additionalProperties": false,
+  "properties": {
+    "brand_profile": {
+      "type": "string"
+    },
+    "characters": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "Look, silhouette, personality: what must stay the same in every episode.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "references": {
+            "description": "Reference images or clips, relative to the series file.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "voice_id": {
+            "description": "TTS voice used for this character's lines.",
+            "type": "string"
+          },
+          "wardrobe": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    },
+    "locations": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          },
+          "references": {
+            "description": "Reference images or clips, relative to the series file.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "description"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "motifs": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "asset": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "description": {
+            "description": "A recurring visual or sound, e.g. a toggle switch that flips in every episode.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "description"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "palette": {
+      "additionalProperties": false,
+      "properties": {
+        "background": {
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "primary": {
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "secondary": {
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "text": {
+          "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "rules": {
+      "description": "Standards every episode follows, e.g. the intro always opens on the motif.",
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    },
+    "style": {
+      "description": "Style pack every episode uses unless its spec overrides it.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "name"
+  ],
+  "type": "object"
+}

@@ -135,13 +135,17 @@ describe("doctor", () => {
         },
       }),
     );
-    expect(r.provider_keys).toEqual({
+    expect(r.provider_keys).toMatchObject({
       RUNWAYML_API_SECRET: true,
       ELEVENLABS_API_KEY: false,
       HEYGEN_API_KEY: false,
       FAL_KEY: true,
       KLINGAI_API_KEY: false,
+      GEMINI_API_KEY: false,
+      YOUTUBE_CLIENT_SECRET: false,
     });
+    expect(Object.keys(r.provider_keys)).toHaveLength(15);
+    expect(byId(r, "provider_keys").detail).toContain("2 of 14 set");
     const everything = JSON.stringify(r) + formatDoctorReport(r);
     expect(everything).not.toContain(secret);
     expect(everything).not.toContain("SUPER-SECRET");
