@@ -12,7 +12,7 @@
 
 **Turn a README, a paper, a web page or a folder of clips into a finished, captioned short video, one package per platform, without leaving Claude Code.**
 
-[Features](#features) · [See what it makes](#see-what-it-makes) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Commands](#commands) · [Limits](#what-it-does-not-do-yet)
+[Features](#features) · [See what it makes](#see-what-it-makes) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Commands](#commands) · [Limits](#what-it-does-not-do-yet) · [What's new](CHANGELOG.md)
 
 </div>
 
@@ -115,9 +115,34 @@ dist/
 <summary>Optional extras: natural voices, HyperFrames, video URLs, local transcription</summary>
 
 - **Voice:** macOS picks your best installed voice (add a Premium voice in System Settings → Accessibility → Spoken Content). An ElevenLabs key (`/plugin` → video-studio → Configure, stored in the OS credential store) is used only when your `policy.yaml` allows it or you ask for it.
-- **HyperFrames renderer:** richer motion graphics; needs Google Chrome and a one-time install (the render skill gives the command).
+- **HyperFrames renderer (needed for `motion` scenes):** install Google Chrome, then run `/video-studio:doctor`: it prints the one-time install command (the pinned `@hyperframes/producer`, installed into the plugin's data folder) and confirms Chrome starts. Nothing is installed until you run it. Without HyperFrames, every scene kind still renders with ffmpeg, but a `motion` scene appears as a labelled text stand-in and the render says so.
 - **Video URLs:** `brew install yt-dlp` to ingest YouTube, Vimeo or Loom videos (subtitles become the transcript).
 - **Transcription:** whisper.cpp (`brew install whisper-cpp`); models are downloaded only after you approve.
+
+</details>
+
+<details>
+<summary>API keys (all optional)</summary>
+
+Nothing needs a key. `/plugin` → video-studio → Configure shows these fields; secrets are kept in the OS credential store and only reach the engine, never a shell:
+
+| Kind | Keys |
+|---|---|
+| In use today | ElevenLabs (voiceover), used only when your `policy.yaml` allows it or you ask for it |
+| Placeholders for Phase 7 (AI video) | Runway, HeyGen, fal.ai, Kling, Google Gemini (Veo), BytePlus ModelArk (Seedance), Alibaba DashScope (Wan), MiniMax (Hailuo) |
+| Placeholders for Phase 9 (publishing) | YouTube client ID and secret, Meta (Instagram) token, LinkedIn token, TikTok client key and secret |
+
+Placeholders can be filled in any time; they have no effect until their integration ships. `/video-studio:doctor` shows which keys are set, never their values.
+
+</details>
+
+<details>
+<summary>Recipe: match a reel you like</summary>
+
+1. Give Claude the reference video with your source: `/video-studio:create my-notes.md as a 20-second 9:16 reel that feels like reference.mp4`. The plan skill asks for a reference, a photo and your brand first, and turns "make it feel like this" into acceptance numbers (big changes per second, frozen %, holds).
+2. `/video-studio:analyze reference.mp4 write_style ref-look` measures the reference's motion timing (entrance length, easing, stagger, holds) and saves it as a style pack in your project. Only timing is kept, never its words, frames or audio.
+3. After the preview render, `/video-studio:stills` shows each scene on the beats before the final render, and `/video-studio:compare` scores your render against the reference (frozen %, changes per second, cut rate, loudness).
+4. QA fails a render that misses the acceptance numbers, so a slideshow-paced reel cannot pass silently.
 
 </details>
 
@@ -151,7 +176,7 @@ flowchart LR
   - `RenderManifest`: exactly what happened.
 
   Their JSON Schemas are in [`schemas/`](schemas/).
-- **Platform facts are data**, not code: [`platform-specs/*.yaml`](platform-specs/) record each app's limits and UI masks, with a source URL and the date they were verified.
+- **Facts are data**, not code: [`platform-specs/*.yaml`](platform-specs/) record each app's limits and UI masks, and [`provider-specs/*.yaml`](provider-specs/) each AI video model family's limits and prompt syntax, with source URLs and the date they were checked.
 
 ## What you can make
 
@@ -186,7 +211,7 @@ flowchart LR
 |---|---|
 | `/video-studio:create` | The whole flow, from a source or an idea to packages, with an approval step |
 | `/video-studio:plan` · `validate` | Brief, grounded spec and storyboard, built on a story arc (hook, open loop, escalation, payoff, CTA); explains every validation issue |
-| `/video-studio:render` · `qa` · `export` | Local render (preview, then final; cancel anytime), technical QA (including flashing and A/V sync), per-platform packages (`sign` for C2PA; a Resolve/Final Cut timeline, new in this release) |
+| `/video-studio:render` · `qa` · `export` | Local render (preview, then final; cancel anytime), technical QA (including flashing and A/V sync), per-platform packages (`sign` for C2PA; `timeline` for a DaVinci Resolve or Final Cut project) |
 | `/video-studio:lint` · `verify` | Platform contract checks with a fix loop (UI zones, caption readability and sync, cuts on the beat, story arc); claim coverage against the sources |
 | `/video-studio:stills` | Frames of each scene at chosen times, beats or downbeats, before the full render |
 | `/video-studio:prompt-pack` | Prompts for Seedance, Veo, Kling, Wan, Runway and Hailuo compiled from shot cards (offline: nothing generated or spent) |
@@ -203,7 +228,9 @@ flowchart LR
 
 - **No generative video or avatars yet.** Adapters are planned (Phase 7, needs keys; the key fields already exist in Configure and do nothing until then). Until then those scenes render as titled placeholder cards, and `prompt_pack` writes ready-to-paste prompts for each generator. Sora is intentionally not supported.
 - **No posting or analytics.** It produces packages and post copy; you upload them. Platform "trending sounds" are added in each app, and `post.json` reminds you of that.
-- **HyperFrames is optional.** The built-in ffmpeg renderer covers every scene kind. The richer HyperFrames renderer needs its own install and Google Chrome.
+- **HyperFrames is optional, except for `motion` scenes.** The built-in ffmpeg renderer covers every other scene kind. `motion` pages (Claude-written code) need HyperFrames and Google Chrome; without them they render as a reported text stand-in.
+- **Some checks are approximations.** Flash detection measures average brightness (it follows WCAG 2.3.1 but does not measure red flashes); the title-length band is a rule of thumb, reported as a warning only; motion density counts sudden changes, not smooth motion.
+- **The editor timeline is a starting point.** It places every scene on its exact frame and keeps the audio and captions, but transitions become markers rather than rebuilt dissolves.
 - **Whisper models are downloaded only with your consent** (about 148 MB; 488 MB for the speaker-turn model). You can supply SRT/VTT captions instead.
 - **Speaker turns are English-only** and label two alternating speakers (S1/S2); rename them if there are more.
 - **Subject tracking is automatic on macOS only.** Elsewhere Claude marks the subject from shot sheets.
@@ -242,7 +269,16 @@ After changing anything under `packages/`, rerun `pnpm bundle` and commit `dist/
 | `packages/prompts` | provider specs and prompt compilers for shot cards |
 | `packages/mcp` | the MCP server (`dist/mcp.mjs`) and every tool |
 
-Data lives next to the code: `skills/`, `templates/`, `styles/` (a project can add its own in `<project>/styles/`), `music/`, `fonts/`, `platform-specs/` and `provider-specs/`.
+Data lives next to the code: `skills/`, `templates/`, `styles/` (a project can add its own in `<project>/styles/`), `music/`, `fonts/`, `platform-specs/`, `provider-specs/` and `research-specs/`.
+
+Tests that need real Chrome or a whisper model are skipped by default:
+
+```sh
+VS_TEST_RENDER=1 npx vitest run packages/renderer packages/mcp/src/stills.test.ts   # real HyperFrames/Chrome renders
+VS_TEST_RENDER=1 VS_UPDATE_GOLDEN=1 npx vitest run tests/golden-frames              # record the motion example's goldens
+VS_TEST_WHISPER_MODEL=<path to a ggml model> npx vitest run packages/mcp/src/tighten.test.ts
+VS_DEBUG_CAPTURE=1 …                                                               # trace every Chrome capture step
+```
 
 </details>
 
