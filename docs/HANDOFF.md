@@ -1,24 +1,49 @@
-# Handoff: video-studio (2026-09-27)
+# Handoff: video-studio (2026-09-27, v0.4.0)
 
-**Version 0.2.0** (tags `v0.1.0` = 3e4143d, `v0.2.0`). **Git:** branch `main`, pushed to https://github.com/harshil-1411/claude_plugin_video_studio (the only branch). There is no CI by the user's choice; the user's **pre-push hook is active** (`pnpm hooks`), so every `git push` runs `node scripts/check.mjs --push`, all 8 steps, about 4 min. Latest commits:
-- `d6604e7` Checklist: 0.2.0 items verified on the user's Mac
-- `a93ab1f` README: cover 0.2.0 features
-- `4679362` Release 0.2.0: audit P0-P2 fixed, footage features, CHANGELOG
-- `75ad6c4` Footage quality, rotation/HDR, automatic review loop, faster renders
+**Version 0.4.0** (tags `v0.1.0`, `v0.2.0`, `v0.3.0`, `v0.4.0`). **Git:** branch `main` only, pushed to https://github.com/harshil-1411/claude_plugin_video_studio. The working tree is clean. There is no CI by the user's choice; the user's **pre-push hook** runs `node scripts/check.mjs --push` on every push (8 steps, about 5 min; tags run it too).
 
-**The user's own projects stay local** and are ignored by git: `msb-docs-ebmr-explainer/`, `video-studio-*/`, `vs-interview/`. Never commit or modify them unless asked.
+Read this with `.claude/CLAUDE.md` (architecture rules and commands) and `docs/PLAN.md` (roadmap). Everything below "History" is how each phase was built.
 
-Read this together with `.claude/CLAUDE.md` (architecture rules and commands) and `docs/PLAN.md` (the roadmap). The sections below the status table are the history of how each phase was built.
+## Start here (read first)
 
-## Session 2026-09-27: the user's self-intro reel (read first)
+**State.** Phases 0–6, 6.5 (directed motion), 6.6 (craft and hygiene) and the local part of 8 are done. Phase 7 (paid AI video providers) and Phase 9 (publishing) are not started; both need the user's keys or accounts.
 
-- **Plugin output was rejected.** The plugin's own render of the user's self-intro (`video-studio-suparn-intro/`, 14 fixed scene cards, system voice) was judged "too simple, just audio and text". Measured against the user's reference reel (`video-studio-suparn-intro/1790412993830_…Motion-Graphics.mp4`): ours had **42.6 s of 63 s frozen and 3 big visual changes**; the reference has 0.5 s of 15 s frozen and about 1 change per second. See open issue 11.
-- **Current work:** a hand-written HyperFrames composition at `video-studio-suparn-reel/` (git-ignored). Read `video-studio-suparn-reel/HANDOFF.md`. The user started its render at about 10:47; next, review the finished `out/suparn-bector-reel.mp4` frame by frame against the brief's 18-point checklist.
-- **Ecamm short lip sync** (`vs-interview/shorts/short-4`): measured, the render keeps the source's audio/picture relationship to within 1 frame, and the clip matches the original recording at 32:23 with 0 ms shift. Any lip-sync offset therefore comes from the recording (a remote-call guest feed). **Pending:** the user compares against the untouched cut `/tmp/claude-504/original-32m25s-untouched.mp4`. See open issue 13.
-- **Headless Chrome in the Claude sandbox is not fixable by permissions.** Chrome hits a macOS system call the sandbox forbids (`mac_util.mm: Operation not permitted`), after the folder and socket issues are cleared. The only route is `sandbox.excludedCommands` in `~/.claude-msbector/settings.json`, which Claude may not edit itself. **Action for the user:** in that file, `excludedCommands` currently sits *inside* `sandbox.filesystem`, so it has no effect. Move it directly under `sandbox`, and delete the `filesystem.allowWrite` Chrome and `/var/folders` entries and the `network` block (they were added while testing and don't help). Then restart Claude Code.
-- `sbector-self-introduction-video/` (the user's CV, marksheets, certificates, portrait) is now in `.gitignore`. Never ingest the marksheets or degrees; the user forbids grades or marks in any video.
+**What changed today (2026-09-27), in one breath:**
+- **v0.3.0 (Phase 6.5):**
+  - `motion` scenes: Claude-written `seek(t)` HTML with CSP, static lint and a determinism check;
+  - `stills`, beats v2, synth scores, motion-density QA, `compare` against a reference;
+  - templates now ask for inputs first; the series bible; prompt packs (Phase 7 step 0);
+  - motion blur, plus the `code-motion-loop` example with real-render goldens.
+- **v0.4.0 (Phase 6.6, ideas from a tubeai-skills (MIT) review, re-expressed, nothing copied):**
+  - flash and A/V sync QA; insert-sync and title lint;
+  - motion timing from a reference into a project style pack (`analyze write_style`);
+  - glossary, measured pacing and checked `tighten` joins;
+  - FCPXML/OTIO editor timeline export (the user's import worked).
+- **API keys:** every generator and publishing key exists as an optional placeholder (registry: `packages/schema/src/credentials.ts`; tested against `plugin.json` and `.mcp.json`). None does anything until Phase 7 or 9. The user has no keys yet.
+- **README:** a Features section, a Requirements section (OS, software, hardware), an API keys table, and a "match a reel you like" recipe.
 
-## Start here: next steps (the user chooses)
+**The user's self-intro reel is done.** It lives in `video-studio-suparn-intro-v2/` (git-ignored).
+- The user approved it: 20 s, 1080×1920 @ 30, six `motion` pages on `synth:pulse`, no voice.
+- QA passes every check at 0.90 big changes/s. The acceptance target was set to the reference's measured 0.8.
+- **Loose end:** `suparn-intro-v2.mp4` in that folder is the *preview* (540×960). The final is `dist/reel.mp4`. The user was given the command to swap them; don't overwrite their file unasked.
+
+**Pending, all optional (the user decides):**
+1. `! pnpm install` once. `packages/prompts` was linked by hand, so `pnpm` scripts try to reinstall until then; use `node scripts/check.mjs` meanwhile.
+2. A real `tighten` run with a whisper model installed. The join re-check has only run against simulated output.
+3. Re-render `examples/code-motion-loop` with HyperFrames under QA_VERSION 5.
+4. A frame strip of a `motion` scene for the README gallery. Use the loop example; the intro only with the user's OK.
+
+**Next phase, the user's choice:**
+- **Real reels:** the eBMR and launch videos. Real runs have always found bugs.
+- **Phase 9:** publishing and analytics with the user's own OAuth.
+- **Phase 7:** AI video providers, once there are keys. Re-verify `provider-specs/*.yaml` first; they are all `verified: false`.
+
+**Rules that matter:**
+- **Never name the research source in the repo.** Its folder at the repo root is untracked and excluded locally through `.git/info/exclude`. Before every commit, search the staged diff for the source's name (ask the user or see Claude's memory for it) and expect 0 hits. Cite it only as "motion-design research (2026-09-27)". The tubeai repo is named only in `PLAN.md` and here.
+- **The user's projects stay local and untouched:** `msb-docs-ebmr-explainer/`, `video-studio-*/`, `vs-interview/`, `sbector-self-introduction-video/`. Never ingest the user's marksheets, degrees or CV.
+- **Agents:** the user allowed up to 3 at once on 2026-09-27 (2 lanes plus 1 separate project agent). Lanes share one tree with disjoint files, because worktrees lack `node_modules`. The lead owns schemas, bundles, commits and pushes.
+
+## History: 2026-09-27, 0.2.0 → 0.4.0 (Phase 6.5 and 6.6 in detail)
 
 Version **0.2.0** (tag `v0.2.0`): the audit fix loop is complete (P0–P2 and the user's top-8 features; see below and `CHANGELOG.md`).
 
@@ -545,21 +570,26 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
 1. **TikTok contract not re-verified.** Re-check `platform-specs/tiktok.yaml` against developers.tiktok.com and bump `contract_version`/`verified`.
 2. ~~Deprecated caption helpers~~: already removed.
 3. ~~Brand v2 fields not used yet~~: all used now (`logo_placement` overlay, `forbidden` lint, `motion`/`weights` in tokens).
-4. **HyperFrames 404.** HyperFrames logs a non-blocking 404 for one resource, probably a favicon or font lookup. Re-check now that fonts are embedded.
+4. ~~HyperFrames 404~~: it was the browser's favicon request; our capture server answers `/favicon.ico` with 204 (the producer's own server still logs it as non-blocking).
 5. ~~QA noise in silent mode~~: silent-voice renders report silence and loudness as not measured (`QA_VERSION` 3).
 6. ~~No render lock~~: `renders/.render.lock` (see `render-lock.ts`).
 7. ~~Scenes open empty~~: the first reveal is half in at frame 0 (`entrance.ts`).
 8. **Spec vs. actual timing.** The render plan lengthens scenes to fit the voiceover and records `timing_adjustments`; the spec is left unchanged by design.
 9. **Lockfile:** refreshed by the user on 2026-09-25 (`0958554`); 2 harmless orphan `@secretlint/node` entries remain.
 10. **Warnings.** Node prints an `ExperimentalWarning` for `node:sqlite`. It is harmless.
-11. **The motion-graphic ceiling (from the 2026-09-27 self-intro).** The 15 deterministic kinds each draw one component on a flat background, then hold still. Missing: layered backgrounds (particles, grid, drifting glow), a persistent presenter/photo slot (face-cam morph), recurring motifs, tickers, beat-timed kinetic type and in-scene continuous motion. `video-studio-suparn-reel/build.py` is a working prototype of all of these in plain HyperFrames CSS. It's a candidate for a `composition`/`layers` spec extension or a "showcase" style.
-12. **QA and review mislabel dead video.** `frozen_frames` is reported as "expected for static motion-graphic scenes" even at 67% of the runtime, and the create skill tells Claude to accept it. Make it a warning above about 15% frozen and an error above about 35%, and have `review` compare the frozen share and changes per second against a reference when the user gives one.
+11. ~~The motion-graphic ceiling~~ → solved by `motion` scenes (v0.3.0); the user approved the intro v2 built with them. Original note: The 15 deterministic kinds each draw one component on a flat background, then hold still. Missing: layered backgrounds (particles, grid, drifting glow), a persistent presenter/photo slot (face-cam morph), recurring motifs, tickers, beat-timed kinetic type and in-scene continuous motion. `video-studio-suparn-reel/build.py` is a working prototype of all of these in plain HyperFrames CSS. It's a candidate for a `composition`/`layers` spec extension or a "showcase" style.
+12. ~~QA and review mislabel dead video~~ → fixed in v0.3.0: `frozen_frames` fails above 15% (or `acceptance.max_frozen_pct`), `motion_density`, `compare` against a reference. Original note: `frozen_frames` is reported as "expected for static motion-graphic scenes" even at 67% of the runtime, and the create skill tells Claude to accept it. Make it a warning above about 15% frozen and an error above about 35%, and have `review` compare the frozen share and changes per second against a reference when the user gives one.
 13. **No audio/video offset control.** Footage scenes can't shift audio against picture (for remote-call recordings with baked-in delay). Add `footage.av_offset_ms`, and optionally a `sync_check` that correlates mouth motion with speech. A pure-motion correlation test on `vs-interview` was inconclusive (r ≈ 0.2).
 14. **Write/Edit classifier gaps.** In auto mode the Write and Edit tools were refused several times ("classifier gave no verdict"); writing files through Bash heredocs worked.
+15. **Glossary captions untested end to end.** The call site in `pipeline-stages.ts` is covered by the type check only; add a render test with a brand glossary.
+16. **Provider specs are per family, not per model.** Seedance 2.5 allows 4–30 s, and Runway's text-to-video 16:9-only rule is hardcoded. Add optional per-model limits when Phase 7 starts.
+17. **`spec_scaffold` doesn't check the `style` id** (`spec_validate` does, including project styles).
+18. **Timeline export leaves an older `dist/timeline/` in place** when exporting without `timeline`. This is deliberate: an editor project may still reference that media.
+19. **Motion density counts sudden changes only.** Smooth motion and crossfades don't count, so compare against a reference rather than trusting the number alone.
 
 ## How work is run
 
-- **Coordinator + at most 2 `general-purpose` agents.** Each agent gets exact file ownership (no two edit the same file), "no `pnpm install`", targeted tests only, and a short final report. The coordinator writes and commits any shared interface (schema, types, stubs) before agents start. Agents never commit.
+- **Coordinator + at most 2 lane agents** (plus, with the user's OK, one agent on a separate user project). Each agent gets exact file ownership (no two edit the same file), "no `pnpm install`", targeted tests only, and a short final report. The coordinator writes and commits any shared interface (schema, types, stubs) before agents start. Agents never commit.
 - **After agents finish:** `npx tsc -b`, the full `npx vitest run`, rebuild the bundle (`cd packages/mcp && ../../node_modules/.bin/tsdown`), `node scripts/smoke-mcp.mjs`, `claude plugin validate --strict .claude-plugin/plugin.json` and `claude plugin validate --strict .`, then commit.
 - **Visual checks:** render a copy of a project in the scratchpad (`node scripts/render-project.mjs <dir> --voice silent --renderer ffmpeg --quality preview`), extract frames (`ffmpeg -ss T -i dist/reel.mp4 -frames:v 1 x.png`) and look at them. This is how the cover-headline overlap was found in step 2.
 - **Regenerate schemas** after any zod change: `npx tsc -b && node packages/schema/dist/emit.js` (a test fails if they are stale).
@@ -567,12 +597,15 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
 ## Commands the user runs outside the sandbox
 
 ```
-pnpm install && git add pnpm-lock.yaml                                                                  # refresh the lockfile (issue 9)
-node scripts/render-project.mjs examples/text-to-motion-graphic --voice system --renderer hyperframes   # real voice + HyperFrames
+pnpm install                                                                                             # once: links packages/prompts properly
+node scripts/render-project.mjs <project> --voice silent|system --renderer hyperframes --quality preview|final
+VS_TEST_RENDER=1 npx vitest run packages/renderer packages/mcp/src/stills.test.ts                        # real Chrome captures and renders
+VS_TEST_RENDER=1 VS_UPDATE_GOLDEN=1 npx vitest run tests/golden-frames                                   # record motion-example goldens
+VS_TEST_WHISPER_MODEL=<ggml model> npx vitest run packages/mcp/src/tighten.test.ts                       # whisper join re-check
+VS_DEBUG_CAPTURE=1 …                                                                                     # trace every Chrome capture step
 VS_TEST_SAY=1 npx vitest run packages/voice/src/system.test.ts
-VS_TEST_RENDER=1 npx vitest run packages/renderer/src/hyperframes
 node scripts/diagnose-chrome.mjs
-claude --plugin-dir .    # then /video-studio:doctor, /video-studio:create ..., /video-studio:lint
+claude --plugin-dir .    # then /video-studio:doctor, /video-studio:create ..., /video-studio:stills, /video-studio:compare
 ```
 
 ## Document map
@@ -584,3 +617,6 @@ claude --plugin-dir .    # then /video-studio:doctor, /video-studio:create ..., 
 - `reports/Video studio implementation specs.md`: verified API and plugin facts. Where they conflict, it overrides v1.
 - `platform-specs/README.md`: contract rules. `fonts/README.md`: font sources and hashes.
 - `packages/renderer/README.md`: the two renderers and their gated tests.
+- `provider-specs/*.yaml`: AI video model families (sourced, `verified: false`). `research-specs/titles.yaml`: the title-length heuristic.
+- `skills/plan/references/code-motion.md`: how Claude writes a `motion` page (contract, kit, craft rules).
+- `CHANGELOG.md`: 0.2.0, 0.3.0 and 0.4.0 in detail.
