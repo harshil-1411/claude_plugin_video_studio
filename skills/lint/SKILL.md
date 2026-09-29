@@ -1,6 +1,6 @@
 ---
 name: lint
-description: Lint a video-studio project against its platform targets (TikTok, Instagram, YouTube Shorts, LinkedIn, Facebook Page API) - duration/fps/size envelopes, text cut off, text or captions under the app UI, contrast, caption reading speed and timing (captions too brief or out of sync with the voice, flicker), cuts off the beat, data inserts out of step with the voice, flashing, on-screen text too brief to read, story arc, title length, post caption and hashtag limits, cover, brand banned phrases, banned motion effects, acceptance numbers and the loop seam - and fix what it finds by editing the spec and re-rendering. Use when the user runs /video-studio:lint, asks whether a video is ready for a platform, or after a render before publishing.
+description: Lint a video-studio project against its platform targets (TikTok, Instagram, YouTube Shorts, LinkedIn, Facebook Page API) - duration/fps/size envelopes, text cut off, text or captions under the app UI, contrast, caption reading speed and timing (captions too brief or out of sync with the voice, flicker), cuts off the beat, data inserts out of step with the voice, flashing, on-screen text too brief to read, story arc, title length, stock phrases, post caption and hashtag limits, cover, brand banned phrases (also in the generated post copy), banned motion effects, busy crossfades, sound effects (licence, harsh repeats, under the voice), acceptance numbers and the loop seam - and fix what it finds by editing the spec and re-rendering. Use when the user runs /video-studio:lint, asks whether a video is ready for a platform, or after a render before publishing.
 allowed-tools: mcp__plugin_video-studio_engine__lint mcp__plugin_video-studio_engine__spec_validate mcp__plugin_video-studio_engine__render_submit mcp__plugin_video-studio_engine__job_status Read Edit
 ---
 
@@ -34,6 +34,30 @@ Run this loop when lint returns errors, or warnings the user wants cleared:
    - `envelope_*`: adjust durations, `master` or `targets` as the fix says; ask
      the user before dropping a target.
    - `brand_banned_phrase`: rewrite the named field without the phrase.
+     When it is in the generated post copy (a target with no `publish`
+     override), write `publish.<target>.post_caption` without it, or edit
+     the brief's hook, key messages or desired action the draft comes from.
+   - `cliche` (warning): a stock phrase from `research-specs/cliches.yaml`
+     ("game-changer", "excited to share", …) in the voiceover, on-screen or
+     graphic text, cover headline, publish copy or the generated post copy.
+     Say it in the product's own words or make a concrete claim (a number,
+     what it does); keep it grounded. A brand's own banned phrases stay
+     errors; this list is a default.
+   - `busy_crossfade` (warning): a crossfade (the scene's own, or the style's
+     default) between two text-dense scenes (6+ on-screen words each) or two
+     `motion` pages; mid-blend neither reads. Set that scene's `transition`
+     to `fade_black` or `cut`, or stagger: old content out, then new in.
+   - Sound effects (see the plan skill's `references/sound-design.md`):
+     - `sfx_license_missing`: a project audio file in `sfx` has no
+       `license`. Add `license {id, source}` (e.g. `user-owned`), or use a
+       bundled sound (`bundled:<id>`, CC0).
+     - `sfx_harsh_repeat`: a bright or high-`hf_risk` bundled sound plays
+       more than 3 times, or two effects start under 250 ms apart (a run of
+       bundled key presses is exempt). Drop or swap repeats for a warm one;
+       move one of the close pair.
+     - `sfx_over_voice` (needs a render with voice timings): an effect's
+       peak lands inside a spoken word. Move `at_sec` into the pause the fix
+       names, or lower `volume_db`.
    - Timing findings need a render (they read `renders/<quality>/render-state.json`,
      `captions/captions.json` and the voice tracks):
      - `caption_too_brief`: a caption is on screen for less than its

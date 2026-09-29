@@ -35,6 +35,7 @@ import {
 } from "@video-studio/schema";
 import type { layoutZones } from "@video-studio/platforms";
 import type { ResolvedMusic } from "./music.js";
+import { isBundledSfx, resolveBundledSfx } from "./sfx.js";
 import { type RenderState, errMsg, exists, toPosix } from "./pipeline-core.js";
 
 // ------------------------------------------------------------------------------------ footage, scene audio, beat sync
@@ -125,8 +126,19 @@ function footageSpanSec(clip: FootageClip, media: MediaInfo, sceneMs: number): n
 }
 
 /**
+ * Where a clip's own sound comes from and when it plays, given `av_offset_ms` (source time):
+ * a negative offset advances the sound (read `-offset` later in the source), a positive one delays
+ * it (silence first). `readSec` is the source second heard at the scene start (before the delay).
+ */
+export function footageAudioShift(clip: FootageClip): { readSec: number; delaySec: number } {
+  const shift = (clip.av_offset_ms ?? 0) / 1000;
+  return { readSec: clip.in_sec + Math.max(0, -shift), delaySec: Math.max(0, shift) };
+}
+
+/**
  * Words of an asset transcript inside a footage clip's span, on the scene's timeline: shifted by
- * `in_sec`, divided by `speed`, and cut at the scene end (a looped or held tail has no captions).
+ * `in_sec` (and by `av_offset_ms`, like the clip's sound), divided by `speed`, and cut at the
+ * scene end (a looped or held tail has no captions).
  */
 export async function transcriptWords(root: string, asset: FootageAsset | undefined, clip: FootageClip, sceneMs: number, warnings: string[]): Promise<WordTiming[]> {
   if (!asset?.transcript) return [];
@@ -139,16 +151,18 @@ export async function transcriptWords(root: string, asset: FootageAsset | undefi
   }
   const list: unknown[] = Array.isArray(raw) ? raw : Array.isArray((raw as { words?: unknown })?.words) ? (raw as { words: unknown[] }).words : [];
   const speed = clip.speed ?? 1;
-  const inMs = clip.in_sec * 1000;
+  const { readSec, delaySec } = footageAudioShift(clip);
+  const inMs = readSec * 1000;
   const endMs = inMs + footageSpanSec(clip, asset.media, sceneMs) * 1000;
+  const delayMs = delaySec * 1000;
   const out: WordTiming[] = [];
   for (const w of list) {
     const { word, start_ms, end_ms, speaker } = (w ?? {}) as Partial<WordTiming>;
     if (typeof word !== "string" || !word.trim() || typeof start_ms !== "number" || typeof end_ms !== "number") continue;
     if (start_ms < inMs || start_ms >= endMs) continue;
-    const a = Math.round((start_ms - inMs) / speed);
+    const a = Math.round((start_ms - inMs + delayMs) / speed);
     if (a >= sceneMs) continue;
-    const b = Math.round(Math.min((Math.min(end_ms, endMs) - inMs) / speed, sceneMs));
+    const b = Math.round(Math.min((Math.min(end_ms, endMs) - inMs + delayMs) / speed, sceneMs));
     out.push({ word: word.trim(), start_ms: a, end_ms: Math.max(a, b), ...(typeof speaker === "string" && speaker ? { speaker } : {}) });
   }
   return out;
@@ -190,8 +204,10 @@ export async function sfxPeakMs(abs: string, sha: string, o: { cacheDir?: string
 
 /**
  * Per-scene audio: a narrated scene keeps its voice slot; a footage scene plays its own sound for
- * the same span (`native`, `mix`), the bed only (`music`) or nothing (`mute`); crossfades come from
- * `audio.crossfade_ms`; sound effects peak at scene start + `at_sec`.
+ * the same span (`native`, `mix`), shifted by `footage.av_offset_ms`, the bed only (`music`) or
+ * nothing (`mute`); crossfades come from `audio.crossfade_ms`; sound effects peak at scene start +
+ * `at_sec`. A `bundled:<id>` effect resolves to the plugin's sfx/ catalogue, plays at the
+ * catalogue's `default_db` unless `volume_db` is set, and carries the catalogue licence.
  */
 export async function buildSceneAudio(
   root: string,
@@ -201,7 +217,7 @@ export async function buildSceneAudio(
   footage: FootageResolution,
   nativeTracks: ReadonlyMap<string, SceneVoiceTrack>,
   warnings: string[],
-  opts: { cacheDir?: string; signal?: AbortSignal } = {},
+  opts: { cacheDir?: string; signal?: AbortSignal; /** sfx/ catalogue directory (tests); default: the plugin's. */ sfxDir?: string | null; env?: Record<string, string | undefined> } = {},
 ): Promise<SceneAudioPlan> {
   const paths = projectPaths(root);
   const peaks = new Map<string, number>();
@@ -227,9 +243,11 @@ export async function buildSceneAudio(
       if ((amode === "native" || amode === "mix") && f && !("error" in f) && asset && asset.kind === "video" && f.media.has_audio) {
         const clip = s.footage;
         const span = footageSpanSec(clip, f.media, dur);
+        const { readSec, delaySec } = footageAudioShift(clip);
         const layer = {
           path: f.path,
-          offset_sec: clip.in_sec,
+          offset_sec: readSec,
+          ...(delaySec > 0 ? { delay_ms: Math.round(delaySec * 1000) } : {}),
           // Without out_sec the sound runs on past the span (for a crossfade tail) unless it loops.
           ...(clip.out_sec !== undefined || clip.loop ? { span_sec: span } : {}),
           ...(clip.speed && clip.speed !== 1 ? { tempo: clip.speed } : {}),
@@ -247,12 +265,28 @@ export async function buildSceneAudio(
     keySlots.push({ ms: dur, xf, layers: keyLayers });
     for (const fx of s.sfx ?? []) {
       let abs: string;
-      try {
-        abs = await resolveInsideProject(paths, fx.file);
-      } catch (e) {
-        throw new Error(`${s.id}: sfx file "${fx.file}" is not a project-relative path (${errMsg(e)})`);
+      let volumeDb = fx.volume_db;
+      let license = fx.license;
+      if (isBundledSfx(fx.file)) {
+        let b: ReturnType<typeof resolveBundledSfx>;
+        try {
+          const env = opts.env ?? process.env;
+          b = opts.sfxDir === undefined ? resolveBundledSfx(fx.file, env) : resolveBundledSfx(fx.file, env, opts.sfxDir);
+        } catch (e) {
+          throw new Error(`${s.id}: ${errMsg(e)}`);
+        }
+        abs = b.path;
+        volumeDb ??= b.sound.default_db;
+        // A bundled sound is CC0 by construction; a licence in the spec cannot change that.
+        license = { ...b.license };
+      } else {
+        try {
+          abs = await resolveInsideProject(paths, fx.file);
+        } catch (e) {
+          throw new Error(`${s.id}: sfx file "${fx.file}" is not a project-relative path (${errMsg(e)})`);
+        }
+        if (!(await exists(abs))) throw new Error(`${s.id}: sfx file "${fx.file}" not found in the project`);
       }
-      if (!(await exists(abs))) throw new Error(`${s.id}: sfx file "${fx.file}" not found in the project`);
       if (fx.at_sec * 1000 >= dur) warnings.push(`${s.id}: sfx ${fx.file} at ${fx.at_sec}s starts after the scene ends (${(dur / 1000).toFixed(2)}s)`);
       const sha = await hashFile(abs);
       let peak = peaks.get(sha);
@@ -262,15 +296,15 @@ export async function buildSceneAudio(
       }
       // The peak, not the file start, lands on at_sec (the head is trimmed at the scene start).
       const { at_ms: at, trim_ms: trim } = alignOneShot(start + fx.at_sec * 1000, peak, start);
-      plan.sfx.push({ path: abs, at_ms: at, ...(trim ? { trim_ms: trim } : {}), ...(fx.volume_db !== undefined ? { volume_db: fx.volume_db } : {}) });
-      keySfx.push({ sha, at, trim, db: fx.volume_db ?? 0 });
-      const rel = toPosix(fx.file.replace(/^\.\//, ""));
+      plan.sfx.push({ path: abs, at_ms: at, ...(trim ? { trim_ms: trim } : {}), ...(volumeDb !== undefined ? { volume_db: volumeDb } : {}) });
+      keySfx.push({ sha, at, trim, db: volumeDb ?? 0 });
+      const rel = isBundledSfx(fx.file) ? fx.file : toPosix(fx.file.replace(/^\.\//, ""));
       const prev = plan.sfxState.find((x) => x.file === rel);
       if (prev) {
         if (!prev.scenes.includes(s.id)) prev.scenes.push(s.id);
-        if (!prev.license && fx.license) prev.license = fx.license;
+        if (!prev.license && license) prev.license = license;
       } else {
-        plan.sfxState.push({ file: rel, sha256: sha, scenes: [s.id], ...(fx.license ? { license: fx.license } : {}), peak_ms: peak });
+        plan.sfxState.push({ file: rel, sha256: sha, scenes: [s.id], ...(license ? { license } : {}), peak_ms: peak });
       }
     }
   }

@@ -45,6 +45,11 @@ export interface QaExpectations {
   acceptance?: QaAcceptance;
   /** The video must loop seamlessly (spec master.loop): adds the `loop_seam` check. */
   loop?: boolean;
+  /**
+   * Leading frames left out of the single-frame spike, flash and scene-change stats (a cover baked
+   * into frame 0 cuts back to the reel on frame 1, which is neither a flash nor a scene change).
+   */
+  skip_leading_frames?: number;
 }
 
 /** The acceptance numbers technical QA checks (schema `Acceptance`). */
@@ -263,13 +268,13 @@ export function parseDetections(stderr: string, totalS: number): Pick<QaMetrics,
   };
 }
 
-/** Big changes from `scdet` log lines (score ≥ BIG_CHANGE_SCORE), merged within CHANGE_MERGE_S. */
-export function parseSceneChanges(stderr: string, minScore = BIG_CHANGE_SCORE): SceneChange[] {
+/** Big changes from `scdet` log lines (score ≥ BIG_CHANGE_SCORE, at or after `fromS`), merged within CHANGE_MERGE_S. */
+export function parseSceneChanges(stderr: string, minScore = BIG_CHANGE_SCORE, fromS = 0): SceneChange[] {
   const out: SceneChange[] = [];
   for (const m of stderr.matchAll(/lavfi\.scd\.score:\s*([\d.]+),\s*lavfi\.scd\.time:\s*(-?[\d.]+)/g)) {
     const score = Number(m[1]);
     const t = r3(Number(m[2]));
-    if (!Number.isFinite(score) || !Number.isFinite(t) || score < minScore) continue;
+    if (!Number.isFinite(score) || !Number.isFinite(t) || score < minScore || t < fromS) continue;
     const prev = out[out.length - 1];
     if (prev && t - prev.t < CHANGE_MERGE_S) {
       prev.score = Math.max(prev.score, score);
@@ -351,11 +356,13 @@ export function relativeLuminance(y8: number): number {
  * {@link FLASH_DARK_MAX}. A flash is a pair of opposing transitions (WCAG 2.3.1), so the rate is
  * floor(transitions in the window / 2), timed at each leg's end.
  */
-export function flashStats(samples: readonly LumaSample[]): FlashStats {
+export function flashStats(samples: readonly LumaSample[], skipLeading = 0): FlashStats {
   const n = samples.length;
   const spikeTimes: number[] = [];
   let spikes = 0;
-  for (let i = 1; i < n - 1; i++) {
+  // Skipped frames are never a spike, and transitions start at the last skipped frame (its neighbour).
+  const first = Math.max(0, Math.min(n, Math.floor(skipLeading)) - 1);
+  for (let i = Math.max(1, first + 1); i < n - 1; i++) {
     const a = samples[i]!.y - samples[i - 1]!.y;
     const b = samples[i]!.y - samples[i + 1]!.y;
     if (Math.abs(a) >= FLASH_SPIKE_Y && Math.abs(b) >= FLASH_SPIKE_Y && Math.sign(a) === Math.sign(b)) {
@@ -369,11 +376,11 @@ export function flashStats(samples: readonly LumaSample[]): FlashStats {
     if (Math.min(lum[from]!, lum[to]!) < FLASH_DARK_MAX) legs.push(samples[to]!.t);
   };
   let dir = 0;
-  let lo = 0;
-  let hi = 0;
-  let pivot = 0;
-  let ext = 0;
-  for (let i = 1; i < n; i++) {
+  let lo = first;
+  let hi = first;
+  let pivot = first;
+  let ext = first;
+  for (let i = first + 1; i < n; i++) {
     const v = lum[i]!;
     if (dir === 0) {
       if (v > lum[hi]!) hi = i;
@@ -507,7 +514,11 @@ export interface VideoAnalysis extends LoudnessStats {
  * (signalstats) on the video, silencedetect and ebur128 on the audio. Shared by technical QA and
  * `compare` (a reference video).
  */
-export async function analyzeVideo(videoPath: string, o: { background?: string; probe?: ProbeResult } = {}, opts: RunOptions = {}): Promise<VideoAnalysis> {
+export async function analyzeVideo(
+  videoPath: string,
+  o: { background?: string; probe?: ProbeResult; /** Leading frames left out of the scene-change, spike and flash stats. */ skipLeadingFrames?: number } = {},
+  opts: RunOptions = {},
+): Promise<VideoAnalysis> {
   const probe = o.probe ?? (await ffprobe(videoPath, opts));
   const args = ["-i", videoPath];
   const black = blackThreshold(o.background);
@@ -516,8 +527,12 @@ export async function analyzeVideo(videoPath: string, o: { background?: string; 
   args.push("-f", "null", "-");
   const { stderr } = await runFfmpeg(args, { ...opts, keepStderr: true });
   const det = parseDetections(stderr, probe.duration_s);
-  const motion = motionStats(probe.has_video ? parseSceneChanges(stderr) : [], probe.duration_s, det.freeze);
-  const flash = flashStats(probe.has_video ? parseLuma(stderr, probe.bit_depth ?? 8) : []);
+  const skip = o.skipLeadingFrames ?? 0;
+  // scdet times a change at the frame it lands on: frames 0..skip-1 end half a frame before frame `skip`.
+  const skipBefore = skip > 0 && probe.fps ? (skip - 0.5) / probe.fps : 0;
+  const changes = probe.has_video ? parseSceneChanges(stderr, BIG_CHANGE_SCORE, skipBefore) : [];
+  const motion = motionStats(changes, probe.duration_s, det.freeze);
+  const flash = flashStats(probe.has_video ? parseLuma(stderr, probe.bit_depth ?? 8) : [], skip);
   return { probe, ...det, motion, flash, black_threshold: black };
 }
 
@@ -620,7 +635,11 @@ export async function technicalQa(videoPath: string, expect: QaExpectations, opt
   }
 
   // One decode pass for every detector.
-  const det = await analyzeVideo(videoPath, { probe, ...(expect.background ? { background: expect.background } : {}) }, opts);
+  const det = await analyzeVideo(
+    videoPath,
+    { probe, ...(expect.background ? { background: expect.background } : {}), ...(expect.skip_leading_frames ? { skipLeadingFrames: expect.skip_leading_frames } : {}) },
+    opts,
+  );
   const black = det.black_threshold;
   const acc = expect.acceptance ?? {};
   let loopSeam: LoopSeam | undefined;

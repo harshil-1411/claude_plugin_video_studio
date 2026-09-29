@@ -7,6 +7,7 @@ import { CreativeBrief, RenderManifest, type SceneRender, VideoSpec, parseYamlOr
 import { ZONES_VERSION, findPlatformSpecsDir, loadContracts } from "@video-studio/platforms";
 import { type C2paDeps, type SourceFacts, classifySource, signVideos } from "./c2pa.js";
 import { COVER_VERSION } from "./cover.js";
+import { POSTER_SKIP_FRAMES, POSTER_VERSION } from "./poster.js";
 import { LOCK_FILE, buildLock, listFiles, lockAssets, lockFonts, serializeLock, withSeriesAssets } from "./lock.js";
 import { acquireRenderLock } from "./render-lock.js";
 import { type LintResult, lintProject } from "./lint.js";
@@ -46,6 +47,7 @@ import {
   stageCaptions,
   stageCover,
   stageInputs,
+  stagePoster,
   stageNativeTracks,
   stagePlanTiming,
   stageRenderState,
@@ -141,12 +143,17 @@ async function renderProjectLocked(projectDir: string, o: RenderProjectOptions):
   const captions = await stageCaptions(run, { spec, inputs, target, planScenes, timeline, vs, nativeTracks, footage, music, zones });
   const audio = await stageSceneAudio(run, { mode: vs.mode, hasAudio, planScenes, placements: captions.placements, slotMs: timeline.slotMs, footage, nativeTracks });
 
-  // f. assembly (skipped when the inputs are unchanged); g. cover or thumbnail
+  // f. assembly (skipped when the inputs are unchanged); g. cover or thumbnail; g'. the cover baked into frame 0
   const asm = await stageAssembly(run, { inputs, tp, planScenes, timeline, ordered, zones, hasAudio, music, captions, audio });
-  const cover = await stageCover(run, { spec, inputs, planScenes, placements: captions.placements, slotMs: timeline.slotMs, zones, contracts, asm });
+  const cover = await stageCover(run, { spec, inputs, planScenes, placements: captions.placements, slotMs: timeline.slotMs, zones, contracts, asm, fps: target.fps });
+  const poster = await stagePoster(run, { spec, tp, asm, cover });
 
   const state = await stageRenderState(run, { inputs, target, vs, timingSource, timing, footage, music, cueLog, scenes, captions, audio, asm, cover });
   state.policy = vs.policy;
+  if (poster.posterKey) {
+    state.poster_baked = true;
+    state.poster_key = poster.posterKey;
+  }
   if (vs.paid_voice) state.paid_voice = vs.paid_voice;
   setQaExpectations(state, spec);
 
@@ -239,6 +246,8 @@ async function runQaOn(root: string, state: RenderState, reelSha?: string): Prom
     ...(state.background ? { background: state.background } : {}),
     ...(state.acceptance ? { acceptance: state.acceptance } : {}),
     ...(state.loop ? { loop: true } : {}),
+    // The baked poster is frame 0: its cut back to the reel is not a flash or a scene change.
+    ...(state.poster_baked ? { skip_leading_frames: POSTER_SKIP_FRAMES } : {}),
   });
   // Relative path in the report so the project folder stays portable.
   report.video = state.reel;
@@ -432,6 +441,7 @@ async function exportFromState(
       },
       ...(out.cover ? { cover: out.cover } : {}),
       ...(state.cover ? { coverAtMs: state.cover.at_ms } : {}),
+      ...(state.poster_baked ? { posterBaked: true } : {}),
       ...(out.captions_srt ? { captionsSrt: out.captions_srt } : {}),
       ...(out.captions_vtt ? { captionsVtt: out.captions_vtt } : {}),
       generatedCopy: (c) => {
@@ -645,6 +655,8 @@ async function exportFromState(
             path: rel(root, out.cover),
             ...(out.cover_square_preview ? { square_preview: rel(root, out.cover_square_preview) } : {}),
             at_ms: state.cover.at_ms,
+            ...(spec.cover && spec.cover.focal_time_sec == null ? { auto: true } : {}),
+            ...(state.poster_baked ? { poster_baked: true } : {}),
             ...(state.cover.headline_box ? { headline_box: state.cover.headline_box } : {}),
             crops: state.cover.crops.map(({ id, targets, x, y, w, h }) => ({ id, targets, rect: { x, y, w, h } })),
           },
@@ -684,7 +696,7 @@ async function exportFromState(
  * the ContentIR and source provenance, the brand file, the brief and storyboard, and files under
  * assets/ (except assets/voice/, which the render writes; the voice request hash covers it).
  */
-/** Music refs that are not project files (a bundled bed, a synthesized score): the lock records the ref and hash. */
+/** Refs that are not project files (a bundled bed or sound, a synthesized score): the lock records the ref and hash. */
 const byRef = (ref: string) => ref.startsWith("bundled:") || ref.startsWith("synth:");
 
 async function lockFromState(root: string, state: RenderState, projectId: string, outputs: RenderManifest["outputs"]) {
@@ -698,7 +710,7 @@ async function lockFromState(root: string, state: RenderState, projectId: string
     ...(await listFiles(root, "assets", ["assets/voice"])),
     // Footage and sound effects may live outside assets/ (e.g. source/); they are inputs too.
     ...(state.footage ?? []).map((f) => f.path),
-    ...(state.sfx ?? []).map((x) => x.file),
+    ...(state.sfx ?? []).filter((x) => !byRef(x.file)).map((x) => x.file),
   ];
   // Fonts: recorded at render time; older render states are resolved now.
   let fonts = state.fonts;
@@ -725,6 +737,7 @@ async function lockFromState(root: string, state: RenderState, projectId: string
       engine: ENGINE_VERSION,
       assembly: String(ASSEMBLY_VERSION),
       cover: String(COVER_VERSION),
+      ...(state.poster_baked ? { poster: String(POSTER_VERSION) } : {}),
       target_package: String(TARGET_PACKAGE_VERSION),
       zones: String(ZONES_VERSION),
       layout: String(LAYOUT_VERSION),
@@ -739,6 +752,8 @@ async function lockFromState(root: string, state: RenderState, projectId: string
       [
         ...(await lockAssets(root, [...new Set(state.music && !byRef(state.music.ref) ? [...inputs, state.music.ref] : inputs)])),
         ...(state.music && byRef(state.music.ref) ? [{ path: state.music.ref, sha256: state.music.sha256 }] : []),
+        // Bundled sound effects are recorded by ref too.
+        ...(state.sfx ?? []).filter((x) => byRef(x.file)).map((x) => ({ path: x.file, sha256: x.sha256 })),
       ],
       state.series,
     ),

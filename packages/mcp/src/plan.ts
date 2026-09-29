@@ -547,7 +547,9 @@ export function renderStoryboardMarkdown(spec: VideoSpec, ir: ContentIR | null):
   lines.push("|---|---|---|---|---|---|---|");
   spec.scenes.forEach((s, i) => {
     const p = pacing[i]!;
-    const visual = s.deterministic ? `${s.visual_strategy} / ${s.deterministic.kind}` : s.visual_strategy;
+    const offset = s.footage?.av_offset_ms ? ` (sound ${s.footage.av_offset_ms > 0 ? "+" : ""}${s.footage.av_offset_ms} ms)` : "";
+    const sfx = s.sfx?.length ? ` · sfx ${s.sfx.map((x) => `${x.file.replace(/^bundled:/, "")}@${x.at_sec}s`).join(", ")}` : "";
+    const visual = `${s.deterministic ? `${s.visual_strategy} / ${s.deterministic.kind}` : s.visual_strategy}${offset}${sfx}`;
     // A motion page draws its copy from props.text; show it so the storyboard reads like the reel.
     const motionText = s.deterministic?.kind === "motion" && Array.isArray(s.deterministic.props.text) ? (s.deterministic.props.text as unknown[]).filter((t): t is string => typeof t === "string").join(" / ") : "";
     const onScreen = [s.on_screen_text ?? "", motionText].filter((t) => t.trim()).join(" · ");

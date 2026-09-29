@@ -2,11 +2,12 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hashFile } from "@video-studio/core";
-import { runFfmpeg } from "@video-studio/media";
+import { measurePeakOffset, mixSceneAudio, runFfmpeg } from "@video-studio/media";
 import type { Scene, SceneVoiceTrack } from "@video-studio/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ResolvedMusic } from "./music.js";
-import { beatSyncDurations, bedTimeline, buildSceneAudio, sfxPeakMs } from "./pipeline-media.js";
+import { type FootageResolution, beatSyncDurations, bedTimeline, buildSceneAudio, sfxPeakMs, transcriptWords } from "./pipeline-media.js";
+import { findSfxDir, loadSfxCatalog } from "./sfx.js";
 
 let tmp: string;
 beforeAll(async () => {
@@ -115,4 +116,93 @@ describe("sfx peak alignment in the scene audio plan", () => {
     expect(plan.sfx[1]!.trim_ms).toBeUndefined();
     expect(plan.sfxState).toEqual([{ file: "assets/sfx/hit.wav", sha256: sha, scenes: ["s01", "s02"], peak_ms: peak }]);
   }, 30_000);
+});
+
+describe("bundled sound effects in the scene audio plan", () => {
+  const noFootage: FootageResolution = { byScene: new Map(), assets: new Map(), used: [] };
+  const plan = (sfx: unknown[], sfxDir?: string | null) =>
+    buildSceneAudio(
+      join(tmp, "bundled-proj"),
+      [{ ...scene("s01", 1), sfx } as Scene],
+      [{ scene_start_ms: 0, track: track("s01") }],
+      [1000],
+      noFootage,
+      new Map(),
+      [],
+      { cacheDir: join(tmp, "cache"), ...(sfxDir !== undefined ? { sfxDir } : {}) },
+    );
+
+  it("resolves bundled:<id> to the plugin catalogue with its default level and CC0 licence", async () => {
+    const dir = findSfxDir({});
+    const catalog = loadSfxCatalog(dir)!;
+    const pop = catalog.sounds.find((x) => x.id === "pop")!;
+    const p = await plan([{ file: "bundled:pop", at_sec: 0.5 }, { file: "bundled:pop", at_sec: 0.8, volume_db: -6, license: { id: "user-owned" } }]);
+    expect(p.sfx[0]).toMatchObject({ path: join(dir!, "pop.wav"), volume_db: pop.default_db });
+    // An explicit volume wins; a licence in the spec cannot relabel a bundled sound.
+    expect(p.sfx[1]!.volume_db).toBe(-6);
+    expect(p.sfxState).toEqual([{ file: "bundled:pop", sha256: pop.sha256, scenes: ["s01"], license: catalog.license, peak_ms: expect.any(Number) }]);
+    expect(p.sfxState[0]!.license).toEqual({ id: "CC0-1.0", source: expect.stringMatching(/synthesized by video-studio/) });
+    // The key follows the effective level.
+    const q = await plan([{ file: "bundled:pop", at_sec: 0.5, volume_db: -3 }]);
+    expect(JSON.stringify(q.key)).not.toBe(JSON.stringify((await plan([{ file: "bundled:pop", at_sec: 0.5 }])).key));
+  });
+
+  it("names the available ids for an unknown one, and says when there is no catalogue", async () => {
+    await expect(plan([{ file: "bundled:airhorn", at_sec: 0 }])).rejects.toThrow(/s01: sfx file "bundled:airhorn" is not a bundled sound; use one of bundled:whoosh-soft, .*bundled:pop/);
+    await expect(plan([{ file: "bundled:pop", at_sec: 0 }], null)).rejects.toThrow(/no sfx\/ catalogue found/);
+  });
+});
+
+describe("footage av_offset_ms", () => {
+  /** 2 s at 15 fps: a white flash frame and a click at 1.0 s, nothing else. */
+  let clip: string;
+  let footage: FootageResolution;
+  const FRAME_MS = 1000 / 15;
+  beforeAll(async () => {
+    clip = join(tmp, "flash-click.mp4");
+    await runFfmpeg([
+      "-y",
+      "-f", "lavfi", "-i", "color=c=black:s=160x90:r=15:d=2,drawbox=c=white:t=fill:enable='eq(n\\,15)'",
+      "-f", "lavfi", "-i", "aevalsrc=if(between(t\\,1\\,1.01)\\,0.9*sin(2*PI*2000*t)\\,0):s=48000:d=2",
+      "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-shortest", clip.replace(/\.mp4$/, ".mov"),
+    ]);
+    clip = clip.replace(/\.mp4$/, ".mov");
+    const media = { duration_sec: 2, width: 160, height: 90, fps: 15, has_video: true, has_audio: true };
+    footage = {
+      byScene: new Map([["s01", { path: clip, sha256: "a".repeat(64), media }]]),
+      assets: new Map([["v1", { id: "v1", kind: "video", rel: "flash-click.mov", abs: clip, sha256: "a".repeat(64), media }]]),
+      used: [],
+    };
+  });
+
+  async function clickAt(av_offset_ms?: number): Promise<{ ms: number; key: string }> {
+    const s = { ...scene("s01", 2), footage: { asset: "v1", in_sec: 0, ...(av_offset_ms !== undefined ? { av_offset_ms } : {}) } } as unknown as Scene;
+    const p = await buildSceneAudio(tmp, [s], [{ scene_start_ms: 0, track: track("s01") }], [2000], footage, new Map(), []);
+    const out = join(tmp, `mix-${av_offset_ms ?? 0}.wav`);
+    await mixSceneAudio(p.slots, out);
+    return { ms: await measurePeakOffset(out), key: JSON.stringify(p.key) };
+  }
+
+  it("moves the clip's sound against its picture and keeps the scene length", async () => {
+    const base = await clickAt();
+    expect(Math.abs(base.ms - 1005)).toBeLessThanOrEqual(FRAME_MS);
+    const late = await clickAt(200);
+    expect(Math.abs(late.ms - base.ms - 200)).toBeLessThanOrEqual(FRAME_MS);
+    const early = await clickAt(-200);
+    expect(Math.abs(base.ms - early.ms - 200)).toBeLessThanOrEqual(FRAME_MS);
+    // Edits re-render: the offset is part of the mix key.
+    expect(new Set([base.key, late.key, early.key]).size).toBe(3);
+  }, 60_000);
+
+  it("shifts the transcript words with the sound", async () => {
+    const root = join(tmp, "tw");
+    await mkdir(root, { recursive: true });
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(root, "t.json"), JSON.stringify([{ word: "hi", start_ms: 1000, end_ms: 1200 }, { word: "early", start_ms: 100, end_ms: 150 }]));
+    const asset = { ...footage.assets.get("v1")!, transcript: "t.json" };
+    const words = (off: number) => transcriptWords(root, asset, { asset: "v1", in_sec: 0, av_offset_ms: off }, 2000, []);
+    expect((await words(200)).map((w) => [w.word, w.start_ms])).toEqual([["hi", 1200], ["early", 300]]);
+    // Advanced 200 ms: the first 200 ms of the source's sound are never heard.
+    expect((await words(-200)).map((w) => [w.word, w.start_ms])).toEqual([["hi", 800]]);
+  });
 });

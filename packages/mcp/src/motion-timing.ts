@@ -140,6 +140,47 @@ export function splitOverlaps(curve: readonly number[]): Array<[number, number]>
   return parts;
 }
 
+/** Energies (clamped at 0), the frame interval and the change/still thresholds above the clip's noise floor. */
+function energyThresholds(samples: readonly LumaSample[]): { e: number[]; dt: number; hi: number; lo: number } {
+  const e = samples.map((s) => Math.max(0, s.y));
+  // Frame interval from the whole span (pts_time is rounded to 1 ms per sample).
+  const span = samples.length > 1 ? samples[samples.length - 1]!.t - samples[0]!.t : 0;
+  const dt = span > 0 ? span / (samples.length - 1) : 1 / 30;
+  const floor = median(e);
+  const mad = median(e.map((v) => Math.abs(v - floor)));
+  return { e, dt, hi: floor + Math.max(MOTION_HIGH, 6 * mad), lo: floor + Math.max(MOTION_LOW, 3 * mad) };
+}
+
+/** A still stretch of the picture (ms on the video's clock): every frame from start to end matches its neighbour. */
+export interface HoldSpan {
+  start_ms: number;
+  end_ms: number;
+}
+
+/**
+ * Where the holds are: still stretches (every interval ≤ the low threshold) of at least
+ * HOLD_MIN_S, as spans on the video clock. Interval i joins frame i−1 to frame i, so a run of
+ * still intervals i..j is the picture from frame i−1 to frame j. Same thresholds as
+ * motionTimingFrom's hold count.
+ */
+export function holdSpans(samples: readonly LumaSample[]): HoldSpan[] {
+  if (samples.length < 3) return [];
+  const { e, dt, lo } = energyThresholds(samples);
+  const out: HoldSpan[] = [];
+  let from = -1;
+  for (let i = 0; i <= e.length; i++) {
+    if (i < e.length && e[i]! <= lo) {
+      if (from < 0) from = i;
+      continue;
+    }
+    if (from >= 0 && (i - from) * dt >= HOLD_MIN_S - 1e-6) {
+      out.push({ start_ms: Math.round(Math.max(0, samples[from]!.t - dt) * 1000), end_ms: Math.round(samples[i - 1]!.t * 1000) });
+    }
+    from = -1;
+  }
+  return out;
+}
+
 /** Motion timing from per-interval difference energies (`samples[i].y` = |frame i − frame i−1|). */
 export function motionTimingFrom(samples: readonly LumaSample[]): MotionMeasurement {
   const empty: MotionMeasurement = {
@@ -148,14 +189,7 @@ export function motionTimingFrom(samples: readonly LumaSample[]): MotionMeasurem
     continuous: 0,
   };
   if (samples.length < 3) return empty;
-  const e = samples.map((s) => Math.max(0, s.y));
-  // Frame interval from the whole span (pts_time is rounded to 1 ms per sample).
-  const span = samples[samples.length - 1]!.t - samples[0]!.t;
-  const dt = span > 0 ? span / (samples.length - 1) : 1 / 30;
-  const floor = median(e);
-  const mad = median(e.map((v) => Math.abs(v - floor)));
-  const hi = floor + Math.max(MOTION_HIGH, 6 * mad);
-  const lo = floor + Math.max(MOTION_LOW, 3 * mad);
+  const { e, dt, hi, lo } = energyThresholds(samples);
 
   // Active runs: above `lo`, ended by SETTLE_FRAMES still frames.
   const runs: Array<[number, number]> = [];

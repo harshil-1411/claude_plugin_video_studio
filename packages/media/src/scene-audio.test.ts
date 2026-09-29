@@ -66,6 +66,15 @@ describe("mixSceneAudio", () => {
     expect((await meanDb(ref, 550, 400)) - loud).toBeGreaterThan(10);
   }, 30_000);
 
+  it("delays a layer in source time (before tempo) and keeps the slot length", async () => {
+    const out = join(tmp, "d.wav");
+    // The tone starts at 1 s in the source; delayed 400 ms at 2x it starts at 0.7 s here.
+    const r = await mixSceneAudio([{ duration_ms: 1500, layers: [{ path: tone, tempo: 2, delay_ms: 400 }] }], out);
+    expect(r.duration_ms).toBe(1500);
+    expect(await meanDb(out, 0, 650)).toBeLessThan(-80);
+    expect(await meanDb(out, 750, 600)).toBeGreaterThan(-20);
+  }, 30_000);
+
   it("crossfades: the outgoing slot keeps playing under the incoming one", async () => {
     const out = join(tmp, "c.wav");
     await mixSceneAudio(

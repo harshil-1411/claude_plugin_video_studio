@@ -241,6 +241,10 @@ export interface RenderState {
     crops: Array<{ id: string; targets: string[]; x: number; y: number; w: number; h: number }>;
   };
   assembly_key: string;
+  /** spec.cover.bake_first_frame: frame 0 of the reel (and every target video) is the cover; the assembled reel is kept as reel-unbaked.mp4. */
+  poster_baked?: true;
+  /** Hash of the assembly, the cover and the poster version the baked reel was made from. */
+  poster_key?: string;
   qa?: {
     version?: number;
     status: "pass" | "warn" | "fail";

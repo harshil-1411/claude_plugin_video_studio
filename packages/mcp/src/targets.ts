@@ -97,6 +97,8 @@ export interface PostJson {
   limits: { post_caption_max_chars?: number; hashtags_max?: number; mentions_max?: number };
   /** What is in the audio, and the reminder that in-app trending sounds are chosen when posting. */
   sound: { music?: string; license?: string; attribution?: string; note: string };
+  /** Frame 0 of video.mp4 is the cover (spec cover.bake_first_frame), for apps that thumbnail the first frame. */
+  poster_baked?: true;
 }
 
 /** Platforms' trending sounds live in their apps; a file upload cannot carry one. */
@@ -145,6 +147,8 @@ export interface PackageTargetsInput {
   cover?: string;
   /** Video time the cover frame was taken from. */
   coverAtMs?: number;
+  /** The reel's frame 0 is the baked cover (the target videos inherit it). */
+  posterBaked?: boolean;
   captionsSrt?: string;
   captionsVtt?: string;
   /** Draft post copy for a target without `publish.<target>`. */
@@ -219,7 +223,10 @@ export async function packageTargets(i: PackageTargetsInput, allTargetIds: reado
     const hashtags = publish ? (publish.hashtags ?? []) : draft!.hashtags;
     const coverTimestamp =
       c.cover.mode === "frame" || c.cover.mode === "file_or_frame"
-        ? Math.round(i.spec.cover?.focal_time_sec != null ? i.spec.cover.focal_time_sec * 1000 : (i.coverAtMs ?? 0))
+        ? // A baked poster is frame 0: pointing the platform there shows the composed cover.
+          i.posterBaked
+          ? 0
+          : Math.round(i.spec.cover?.focal_time_sec != null ? i.spec.cover.focal_time_sec * 1000 : (i.coverAtMs ?? 0))
         : undefined;
     const post: PostJson = {
       target: c.id,
@@ -244,6 +251,7 @@ export async function packageTargets(i: PackageTargetsInput, allTargetIds: reado
         ...(i.music?.license?.attribution ? { attribution: i.music.license.attribution } : {}),
         note: TRENDING_SOUND_NOTE,
       },
+      ...(i.posterBaked ? { poster_baked: true as const } : {}),
       limits: {
         ...(c.captions.post_caption_max_chars !== undefined ? { post_caption_max_chars: c.captions.post_caption_max_chars } : {}),
         ...(c.captions.hashtags_max !== undefined ? { hashtags_max: c.captions.hashtags_max } : {}),

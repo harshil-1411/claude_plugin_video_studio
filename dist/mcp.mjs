@@ -9428,6 +9428,7 @@ async function mixSceneAudio(slots, out, opts = {}) {
 				fmt,
 				...span !== void 0 ? [`atrim=end_sample=${span}`, "asetpts=N/SR/TB"] : [],
 				...l.loop && span !== void 0 ? [`aloop=loop=-1:size=${span}`] : [],
+				...l.delay_ms && l.delay_ms > 0 ? [`adelay=delays=${toS(l.delay_ms)}S:all=1`] : [],
 				...atempoChain(l.tempo ?? 1),
 				...l.gain_db ? [`volume=${l.gain_db}dB`] : [],
 				fmt,
@@ -10934,13 +10935,13 @@ function parseDetections(stderr, totalS) {
 		...parseEbur128Summary(stderr)
 	};
 }
-/** Big changes from `scdet` log lines (score ≥ BIG_CHANGE_SCORE), merged within CHANGE_MERGE_S. */
-function parseSceneChanges(stderr, minScore = 5) {
+/** Big changes from `scdet` log lines (score ≥ BIG_CHANGE_SCORE, at or after `fromS`), merged within CHANGE_MERGE_S. */
+function parseSceneChanges(stderr, minScore = 5, fromS = 0) {
 	const out = [];
 	for (const m of stderr.matchAll(/lavfi\.scd\.score:\s*([\d.]+),\s*lavfi\.scd\.time:\s*(-?[\d.]+)/g)) {
 		const score = Number(m[1]);
 		const t = r3$4(Number(m[2]));
-		if (!Number.isFinite(score) || !Number.isFinite(t) || score < minScore) continue;
+		if (!Number.isFinite(score) || !Number.isFinite(t) || score < minScore || t < fromS) continue;
 		const prev = out[out.length - 1];
 		if (prev && t - prev.t < .1) {
 			prev.score = Math.max(prev.score, score);
@@ -11031,11 +11032,12 @@ function relativeLuminance$1(y8) {
 * {@link FLASH_DARK_MAX}. A flash is a pair of opposing transitions (WCAG 2.3.1), so the rate is
 * floor(transitions in the window / 2), timed at each leg's end.
 */
-function flashStats(samples) {
+function flashStats(samples, skipLeading = 0) {
 	const n = samples.length;
 	const spikeTimes = [];
 	let spikes = 0;
-	for (let i = 1; i < n - 1; i++) {
+	const first = Math.max(0, Math.min(n, Math.floor(skipLeading)) - 1);
+	for (let i = Math.max(1, first + 1); i < n - 1; i++) {
 		const a = samples[i].y - samples[i - 1].y;
 		const b = samples[i].y - samples[i + 1].y;
 		if (Math.abs(a) >= 40 && Math.abs(b) >= 40 && Math.sign(a) === Math.sign(b)) {
@@ -11049,11 +11051,11 @@ function flashStats(samples) {
 		if (Math.min(lum[from], lum[to]) < .8) legs.push(samples[to].t);
 	};
 	let dir = 0;
-	let lo = 0;
-	let hi = 0;
-	let pivot = 0;
-	let ext = 0;
-	for (let i = 1; i < n; i++) {
+	let lo = first;
+	let hi = first;
+	let pivot = first;
+	let ext = first;
+	for (let i = first + 1; i < n; i++) {
 		const v = lum[i];
 		if (dir === 0) {
 			if (v > lum[hi]) hi = i;
@@ -11195,8 +11197,10 @@ async function analyzeVideo$1(videoPath, o = {}, opts = {}) {
 		keepStderr: true
 	});
 	const det = parseDetections(stderr, probe.duration_s);
-	const motion = motionStats(probe.has_video ? parseSceneChanges(stderr) : [], probe.duration_s, det.freeze);
-	const flash = flashStats(probe.has_video ? parseLuma(stderr, probe.bit_depth ?? 8) : []);
+	const skip = o.skipLeadingFrames ?? 0;
+	const skipBefore = skip > 0 && probe.fps ? (skip - .5) / probe.fps : 0;
+	const motion = motionStats(probe.has_video ? parseSceneChanges(stderr, 5, skipBefore) : [], probe.duration_s, det.freeze);
+	const flash = flashStats(probe.has_video ? parseLuma(stderr, probe.bit_depth ?? 8) : [], skip);
 	return {
 		probe,
 		...det,
@@ -11380,7 +11384,8 @@ async function technicalQa(videoPath, expect, opts = {}) {
 	}
 	const det = await analyzeVideo$1(videoPath, {
 		probe,
-		...expect.background ? { background: expect.background } : {}
+		...expect.background ? { background: expect.background } : {},
+		...expect.skip_leading_frames ? { skipLeadingFrames: expect.skip_leading_frames } : {}
 	}, opts);
 	const black = det.black_threshold;
 	const acc = expect.acceptance ?? {};
@@ -15200,7 +15205,11 @@ const ToneRules = strictObject({
 	title: "ToneRules",
 	description: "research-specs/tones.yaml: tone presets (pacing, transitions, sound density, bed level) as data."
 });
-strictObject({
+/**
+* research-specs/cliches.yaml: stock phrases that make copy generic. Lint reports them as
+* `cliche` warnings in every text channel; a brand's own banned_phrases stay errors.
+*/
+const ClicheRules = strictObject({
 	schema_version: SchemaVersion,
 	id: literal$1("cliches"),
 	phrases: array(NonEmptyString).min(1).describe("Matched case-insensitively on word boundaries."),
@@ -15744,6 +15753,8 @@ const CoverRender = strictObject({
 	path: FilePath,
 	square_preview: FilePath.optional(),
 	at_ms: int().nonnegative().describe("Video time of the frame the cover was composed from."),
+	auto: boolean().optional().describe("The time was picked by the engine (the longest settled hold), not set in the spec."),
+	poster_baked: boolean().optional().describe("The cover replaces frame 0 of the reel and every target video (cover.bake_first_frame)."),
 	headline_box: TextBox.optional(),
 	crops: array(strictObject({
 		id: Id,
@@ -39942,8 +39953,41 @@ async function signVideos(i) {
 		}
 	};
 }
-//#endregion
-//#region src/cover.ts
+/** Scene purposes preferred after the hook: where the payoff, result or call to action sits. */
+const COVER_PAYOFF_PURPOSES = /* @__PURE__ */ new Set([
+	"payoff",
+	"reveal",
+	"cta"
+]);
+/**
+* Automatic cover time (spec.cover without `focal_time_sec`): the midpoint of the longest settled
+* hold (a still stretch: text fully in, nothing moving). Each scene's first COVER_SKIP_MS (or its
+* incoming transition, if longer; at most half the scene) and its last frame are left out, so a
+* crossfade or an entrance is never picked. Holds in the hook scene win, then the payoff/cta
+* scenes, then any scene; a hold must keep COVER_MIN_HOLD_MS after trimming. Ties go to the
+* earlier hold. Null when no hold qualifies (the caller falls back to the hook midpoint).
+*/
+function autoCoverTime(holds, scenes, frameMs) {
+	const cands = [];
+	for (const sc of scenes) {
+		const skip = Math.min(Math.max(500, sc.transition_ms ?? 0), sc.duration_ms / 2);
+		const from = sc.start_ms + skip;
+		const to = sc.start_ms + sc.duration_ms - frameMs;
+		const tier = sc.purpose === "hook" ? 0 : COVER_PAYOFF_PURPOSES.has(sc.purpose) ? 1 : 2;
+		for (const h of holds) {
+			const start = Math.max(from, h.start_ms);
+			const end = Math.min(to, h.end_ms);
+			if (end - start >= 300) cands.push({
+				tier,
+				start,
+				end
+			});
+		}
+	}
+	if (!cands.length) return null;
+	const best = cands.reduce((a, c) => c.tier < a.tier || c.tier === a.tier && c.end - c.start > a.end - a.start ? c : a);
+	return Math.round((best.start + best.end) / 2);
+}
 /** The largest `aspect` rect inside a W×H frame, anchored centre/top/bottom. */
 function cropRect(width, height, aspect, anchor = "center") {
 	const [aw, ah] = aspect.split(":").map(Number);
@@ -40222,6 +40266,50 @@ async function renderCover(o) {
 		region,
 		crops,
 		warnings
+	};
+}
+//#endregion
+//#region src/poster.ts
+/** ffmpeg arguments that overlay `image` on frame 0 of `reel` (W×H) and write `out`. */
+function posterArgs(reel, image, out, width, height, encode) {
+	return [
+		"-y",
+		"-i",
+		reel,
+		"-i",
+		image,
+		"-filter_complex",
+		`[1:v]scale=${width}:${height},setsar=1,format=yuv420p[p];[0:v][p]overlay=0:0:enable='eq(n,0)'[v]`,
+		"-map",
+		"[v]",
+		"-map",
+		"0:a?",
+		...h264Args(encode),
+		"-c:a",
+		"copy",
+		...FASTSTART,
+		out
+	];
+}
+/** Bake the cover into frame 0 of the reel. */
+async function bakePoster(o) {
+	if (o.out === o.reel) throw new Error("poster: the output must not overwrite the input reel");
+	const run = {
+		...o.signal ? { signal: o.signal } : {},
+		...o.tools ? { tools: o.tools } : {}
+	};
+	const probe = await ffprobe(o.reel, run);
+	if (!probe.width || !probe.height) throw new Error(`poster: ${o.reel} has no video stream`);
+	const tmp = `${o.out}.tmp-${process.pid}.mp4`;
+	try {
+		await runFfmpeg(posterArgs(o.reel, o.image, tmp, probe.width, probe.height, o.encode), run);
+		await rename(tmp, o.out);
+	} finally {
+		await rm(tmp, { force: true });
+	}
+	return {
+		width: probe.width,
+		height: probe.height
 	};
 }
 //#endregion
@@ -40967,6 +41055,105 @@ function seriesGlossary(loaded) {
 	return loaded?.series.glossary ?? [];
 }
 //#endregion
+//#region src/sfx.ts
+/**
+* Bundled sound effects: `bundled:<id>` in a scene's `sfx[].file` resolves to sfx/<file> in the
+* plugin (catalog.json, CC0 one-shots made and measured by scripts/generate-sfx.mjs). The catalog's
+* licence is carried into the render state, manifest and provenance like a project file's.
+*/
+const CATALOG$1 = "catalog.json";
+const BUNDLED_PREFIX = "bundled:";
+const SfxCatalogSound = object$2({
+	id: string().min(1),
+	title: string().min(1),
+	family: _enum([
+		"whoosh",
+		"riser",
+		"hit",
+		"ui",
+		"type",
+		"chime",
+		"glitch"
+	]),
+	file: string().min(1),
+	duration_ms: int().positive(),
+	peak_ms: int().nonnegative(),
+	character: _enum([
+		"warm",
+		"balanced",
+		"bright"
+	]),
+	hf_risk: _enum([
+		"low",
+		"med",
+		"high"
+	]),
+	uses: array(string().min(1)),
+	default_db: number().min(-60).max(6),
+	sha256: string().regex(/^[0-9a-f]{64}$/),
+	/** The generator's measurements behind the labels (energy shares, loudest 50 ms). */
+	measured: object$2({
+		low_share: number(),
+		high_share: number(),
+		hf_share: number(),
+		short_rms_dbfs: number()
+	}).optional()
+});
+const SfxCatalog = object$2({
+	version: int().positive(),
+	generator: string().optional(),
+	ffmpeg: string().optional(),
+	license: AudioLicense,
+	sounds: array(SfxCatalogSound)
+});
+/** The plugin's sfx/ directory (CLAUDE_PLUGIN_ROOT first, then walking up from this module). */
+function findSfxDir(env = process.env, from) {
+	const root = env.CLAUDE_PLUGIN_ROOT;
+	if (root && existsSync(join(root, "sfx", CATALOG$1))) return join(root, "sfx");
+	let dir = from ?? dirname(fileURLToPath(import.meta.url));
+	for (let i = 0; i < 6; i++) {
+		const candidate = join(dir, "sfx");
+		if (existsSync(join(candidate, CATALOG$1))) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+/** The catalogue in `dir`, or null when there is none or it does not match {@link SfxCatalog}. */
+function loadSfxCatalog(dir) {
+	if (!dir) return null;
+	try {
+		const parsed = SfxCatalog.safeParse(JSON.parse(readFileSync(join(dir, CATALOG$1), "utf8")));
+		return parsed.success ? parsed.data : null;
+	} catch {
+		return null;
+	}
+}
+const isBundledSfx = (file) => file.startsWith(BUNDLED_PREFIX);
+/**
+* `bundled:<id>` → the catalogue entry, its absolute path and the catalogue licence. Throws an
+* actionable error for an unknown id (listing the available ones) or a missing file.
+*/
+function resolveBundledSfx(ref, env = process.env, dir = findSfxDir(env)) {
+	const id = ref.slice(8);
+	const catalog = loadSfxCatalog(dir);
+	if (!dir || !catalog) throw new Error(`sfx file "${ref}": no sfx/ catalogue found in the plugin; reinstall the plugin or run scripts/generate-sfx.mjs`);
+	const sound = catalog.sounds.find((s) => s.id === id);
+	if (!sound) throw new Error(`sfx file "${ref}" is not a bundled sound; use one of ${bundledSfxIds(catalog).join(", ")}`);
+	const path = join(dir, sound.file);
+	if (!existsSync(path)) throw new Error(`bundled sound ${sound.file} is missing from ${dir}; reinstall the plugin or run scripts/generate-sfx.mjs`);
+	return {
+		path,
+		sound,
+		license: catalog.license
+	};
+}
+/** `bundled:<id>` for every sound in the catalogue. */
+function bundledSfxIds(catalog) {
+	return (catalog?.sounds ?? []).map((s) => `${BUNDLED_PREFIX}${s.id}`);
+}
+//#endregion
 //#region src/spec-validate.ts
 async function readIfExists$2(path) {
 	try {
@@ -40989,7 +41176,7 @@ function projectSpecPaths(projectDir) {
 * `motion` pages are read from `projectDir` (default: the folder above `project/video-spec.json`)
 * and linted; their errors fail validation.
 */
-async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = findPlatformSpecsDir(), stylesDir = findStylesDir(), projectDir = dirname(dirname(specPath))) {
+async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = findPlatformSpecsDir(), stylesDir = findStylesDir(), projectDir = dirname(dirname(specPath)), sfxDir = findSfxDir()) {
 	const result = {
 		ok: false,
 		spec_path: specPath,
@@ -41060,11 +41247,39 @@ async function validateSpecFile(specPath, contentIrPath, platformSpecsDir = find
 	const series = await checkSeries(parsed.data, projectDir, stylesDir);
 	result.errors.push(...series.errors);
 	result.warnings.push(...series.warnings);
+	result.errors.push(...checkBundledSfx(parsed.data, sfxDir));
 	const motion = await checkMotionPages(parsed.data, projectDir);
 	result.errors.push(...motion.errors);
 	result.warnings.push(...motion.warnings);
 	result.ok = result.errors.length === 0;
 	return result;
+}
+/**
+* Every `bundled:<id>` sound effect names a sound in the plugin's sfx/ catalogue (the fix lists the
+* closest ids), so a typo fails before the render instead of in the audio mix.
+*/
+function checkBundledSfx(spec, sfxDir = findSfxDir()) {
+	const refs = spec.scenes.flatMap((s, i) => (s.sfx ?? []).map((fx, j) => ({
+		s,
+		i,
+		j,
+		file: fx.file
+	}))).filter((r) => isBundledSfx(r.file));
+	if (!refs.length) return [];
+	const catalog = loadSfxCatalog(sfxDir);
+	const ids = bundledSfxIds(catalog);
+	const errors = [];
+	for (const r of refs) {
+		if (ids.includes(r.file)) continue;
+		const near = closestMatches(r.file.slice(8), ids.map((x) => x.slice(8)));
+		errors.push({
+			path: `scenes.${r.i}.sfx.${r.j}.file`,
+			stage: "sfx",
+			message: catalog ? `scene ${r.s.id}: "${r.file}" is not a bundled sound; available: ${ids.join(", ")}` : `scene ${r.s.id}: "${r.file}" needs the plugin's sfx/ catalogue, which was not found`,
+			fix: catalog ? near.length ? `use ${near.map((n) => `"${BUNDLED_PREFIX}${n}"`).join(" or ")}, or a project-relative audio file` : "use one of the available ids, or a project-relative audio file" : "reinstall the plugin (sfx/catalog.json is missing), or use a project-relative audio file"
+		});
+	}
+	return errors;
 }
 /**
 * Every `motion` scene's page, linted (motion-lint.ts): a missing page, a path or symlink leaving
@@ -41459,6 +41674,10 @@ function loadTitleRules(dir) {
 /** `<dir>/tones.yaml` (tone presets); undefined when missing. */
 function loadToneRules(dir) {
 	return loadSpec(dir, "tones.yaml", ToneRules);
+}
+/** `<dir>/cliches.yaml` (stock phrases lint warns about); undefined when missing. */
+function loadClicheRules(dir) {
+	return loadSpec(dir, "cliches.yaml", ClicheRules);
 }
 //#endregion
 //#region src/lint.ts
@@ -41905,7 +42124,12 @@ function checkCover(spec, contracts, rendered, out) {
 		fix: "keep cover.headline to about 4 words so it survives the centre crop, or check the cover preview"
 	});
 }
-function checkBanned(spec, brand, out) {
+/**
+* brand_banned_phrase: brand `voice.banned_phrases` in the spec's text and, when targets have no
+* `publish` override, in the generated social-copy draft (skipped for a phrase the spec already
+* shows: fixing the spec fixes the draft).
+*/
+function checkBanned(spec, brand, out, draft) {
 	const banned = brand?.voice?.banned_phrases ?? [];
 	if (banned.length === 0) return;
 	const fields = [];
@@ -41936,8 +42160,10 @@ function checkBanned(spec, brand, out) {
 	});
 	for (const phrase of banned) {
 		const needle = phrase.toLowerCase();
+		let inSpec = false;
 		for (const f of fields) {
 			if (!f.text.toLowerCase().includes(needle)) continue;
+			inSpec = true;
 			out.push({
 				id: "brand_banned_phrase",
 				severity: "error",
@@ -41946,6 +42172,13 @@ function checkBanned(spec, brand, out) {
 				fix: `rewrite ${f.where} without "${phrase}" (brand.yaml voice.banned_phrases)`
 			});
 		}
+		if (!inSpec && draft && draft.text.toLowerCase().includes(needle)) out.push({
+			id: "brand_banned_phrase",
+			severity: "error",
+			...draft.targets.length === 1 ? { target: draft.targets[0] } : {},
+			message: `banned brand phrase "${phrase}" appears in ${draft.where}`,
+			fix: `${draft.fix} without "${phrase}" (brand.yaml voice.banned_phrases)`
+		});
 	}
 }
 /** Text the renderers fitted into boxes that the brand's corner logo covers. */
@@ -42848,11 +43081,14 @@ function checkLoopSeam(spec, state, out) {
 * The active style's avoid list: the spec's style, else its series bible's (none when neither
 * names one or the pack can't be read).
 */
-async function styleAvoid(spec, stylesDir, projectDir) {
+/** The spec's style pack (or its series bible's), when it loads. */
+async function lintStyle(spec, stylesDir, projectDir) {
 	const series = !spec.style && spec.series ? await loadSeries(projectDir, spec.series).catch(() => void 0) : void 0;
 	const id = spec.style ?? series?.series.style;
 	if (!id) return void 0;
-	const style = await getStyle(stylesDir, id, projectDir).catch(() => void 0);
+	return getStyle(stylesDir, id, projectDir).catch(() => void 0);
+}
+function styleAvoid(style) {
 	return style ? {
 		id: style.id,
 		...style.motion.avoid ? { avoid: style.motion.avoid } : {}
@@ -42922,7 +43158,8 @@ async function lintProject(projectDir, opts = {}) {
 	checkOnScreenBrief(spec, state, findings);
 	const brand = await loadBrand(paths.root);
 	await checkTiming(paths.root, spec, state, brand, findings);
-	checkInserts(spec, state, state?.voice?.tracks_path ? await readOptionalJson$1(join(paths.root, state.voice.tracks_path)) : void 0, findings);
+	const tracks = state?.voice?.tracks_path ? await readOptionalJson$1(join(paths.root, state.voice.tracks_path)) : void 0;
+	checkInserts(spec, state, tracks, findings);
 	checkStory(spec, findings);
 	checkCutaways(spec, findings);
 	const irMedia = await readOptionalJson$1(join(paths.root, "source", "content-ir.json"));
@@ -42930,13 +43167,25 @@ async function lintProject(projectDir, opts = {}) {
 	checkFootageQuality(spec, irMedia, findings);
 	checkLogo(state, boxes, findings);
 	checkForbidden(spec, brand, findings);
-	checkBannedEffect(spec, await styleAvoid(spec, opts.stylesDir === void 0 ? findStylesDir() : opts.stylesDir, paths.root), brand, findings);
+	const style = await lintStyle(spec, opts.stylesDir === void 0 ? findStylesDir() : opts.stylesDir, paths.root);
+	checkBannedEffect(spec, styleAvoid(style), brand, findings);
+	let defaultTransition;
+	try {
+		defaultTransition = resolveTokens$1(brand, {}, style).motion?.transition;
+	} catch {
+		defaultTransition = style?.motion.transition;
+	}
+	checkBusyCrossfade(spec, defaultTransition, findings);
 	checkAcceptance(spec, state, findings);
 	checkLoopSeam(spec, state, findings);
 	checkFlashing(state, findings);
 	checkPostCopy(spec, contracts, findings);
-	const titleRules = await loadTitleRules(opts.researchSpecsDir === void 0 ? findResearchSpecsDir() : opts.researchSpecsDir);
-	if (titleRules) checkTitleLength(spec, await loadBrief$1(paths.root), titleRules, findings);
+	const researchDir = opts.researchSpecsDir === void 0 ? findResearchSpecsDir() : opts.researchSpecsDir;
+	const brief = await loadBrief$1(paths.root);
+	const titleRules = await loadTitleRules(researchDir);
+	if (titleRules) checkTitleLength(spec, brief, titleRules, findings);
+	const draft = generatedCopy(spec, brief);
+	checkCliche(spec, await loadClicheRules(researchDir), draft, findings);
 	checkCover(spec, contracts, state?.cover ? {
 		...state.cover.headline_box ? { headline_box: state.cover.headline_box } : {},
 		crops: (state.cover.crops ?? []).map(({ id, targets, x, y, w, h }) => ({
@@ -42950,8 +43199,12 @@ async function lintProject(projectDir, opts = {}) {
 			}
 		}))
 	} : manifest?.cover, findings);
-	checkBanned(spec, brand, findings);
+	checkBanned(spec, brand, findings, draft);
 	await checkMotionUnsafe(paths.root, spec, findings);
+	const sfxCatalog = loadSfxCatalog(opts.sfxDir === void 0 ? findSfxDir() : opts.sfxDir);
+	checkSfxLicense(spec, findings);
+	checkSfxHarshRepeat(spec, sfxCatalog, sceneSpans(state), findings);
+	checkSfxOverVoice(spec, state, tracks, sfxCatalog, findings);
 	findings.sort((a, b) => a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1);
 	const errors = findings.filter((f) => f.severity === "error").length;
 	const warnings = findings.length - errors;
@@ -43006,6 +43259,233 @@ function checkFlashing(state, out) {
 			severity: "warning",
 			message: `${f.spikes} single-frame luma spike(s) at ${times}${f.spikes > f.spike_times_s.length ? ", …" : ""}`,
 			fix: "check those frames (qa/report.md lists them): a lone white or black frame is usually a render glitch or a hard flash; replace it or ease it with a short fade"
+		});
+	}
+}
+const CLICHE_FIX = "say it in the product's own words or make a concrete claim";
+/** The generated social-copy draft (title, description lines, hashtags) when some target has no `publish` override. */
+function generatedCopy(spec, brief) {
+	const targets = resolveTargets(spec).filter((t) => !spec.publish?.[t]);
+	if (!targets.length) return void 0;
+	const p = socialCopyParts(spec, brief);
+	return {
+		where: `the generated post copy for ${targets.join(", ")} (no publish override)`,
+		text: [
+			p.title,
+			...p.lines,
+			...p.hashtags
+		].join("\n"),
+		targets,
+		fix: `write publish.${targets[0]}.post_caption${targets.length > 1 ? " (and the other targets')" : ""}, or edit the brief's chosen_hook, key_messages or desired_action the draft is built from,`
+	};
+}
+const normQuotes = (s) => s.replace(/[\u2018\u2019\u02bc]/g, "'").toLowerCase();
+/** Whole-word, case-insensitive phrase match (curly and straight apostrophes alike). */
+function phraseIn(text, phrase) {
+	const esc = normQuotes(phrase).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return new RegExp(`(?<![\\p{L}\\p{N}])${esc}(?![\\p{L}\\p{N}])`, "u").test(normQuotes(text));
+}
+/**
+* cliche (warning): stock phrases from research-specs/cliches.yaml in the voiceover, on-screen
+* text, graphic text, cover headline, publish copy and the generated social-copy draft (the draft
+* only for phrases the spec does not already show). One finding per field.
+*/
+function checkCliche(spec, rules, draft, out) {
+	if (!rules?.phrases.length) return;
+	const fields = [];
+	for (const s of spec.scenes) {
+		fields.push({
+			where: `scene ${s.id} voiceover`,
+			scene_id: s.id,
+			text: s.voiceover
+		});
+		if (s.on_screen_text) fields.push({
+			where: `scene ${s.id} on_screen_text`,
+			scene_id: s.id,
+			text: s.on_screen_text
+		});
+		if (s.deterministic) fields.push({
+			where: `scene ${s.id} graphic text (deterministic.props)`,
+			scene_id: s.id,
+			text: propsText(s.deterministic.props)
+		});
+	}
+	if (spec.cover) fields.push({
+		where: "cover.headline",
+		text: spec.cover.headline
+	});
+	for (const [id, p] of Object.entries(spec.publish ?? {})) fields.push({
+		where: `publish.${id}`,
+		target: id,
+		text: [p.title ?? "", p.post_caption].join("\n")
+	});
+	const seen = /* @__PURE__ */ new Set();
+	const quote = (list) => list.map((x) => `"${x}"`).join(", ");
+	for (const f of fields) {
+		const hits = rules.phrases.filter((ph) => phraseIn(f.text, ph));
+		if (!hits.length) continue;
+		for (const h of hits) seen.add(h);
+		out.push({
+			id: "cliche",
+			severity: "warning",
+			...f.scene_id ? { scene_id: f.scene_id } : {},
+			...f.target ? { target: f.target } : {},
+			message: `stock phrase${hits.length > 1 ? "s" : ""} ${quote(hits)} in ${f.where} (research-specs/cliches.yaml)`,
+			fix: `rewrite ${f.where} without ${quote(hits)}: ${CLICHE_FIX}`
+		});
+	}
+	if (!draft) return;
+	const hits = rules.phrases.filter((ph) => !seen.has(ph) && phraseIn(draft.text, ph));
+	if (!hits.length) return;
+	out.push({
+		id: "cliche",
+		severity: "warning",
+		...draft.targets.length === 1 ? { target: draft.targets[0] } : {},
+		message: `stock phrase${hits.length > 1 ? "s" : ""} ${quote(hits)} in ${draft.where} (research-specs/cliches.yaml)`,
+		fix: `${draft.fix} without ${quote(hits)}: ${CLICHE_FIX}`
+	});
+}
+/**
+* busy_crossfade (warning): a crossfade (the scene's own, or the style's default transition) between
+* two adjacent scenes that are both text-dense (≥ BUSY_TEXT_WORDS on-screen words each) or both
+* `motion` pages: halfway through, both layers are half visible and neither reads.
+*/
+function checkBusyCrossfade(spec, defaultTransition, out) {
+	const words = (s) => wordCount([s.on_screen_text ?? "", s.deterministic ? propsText(s.deterministic.props) : ""].join(" "));
+	const isMotion = (s) => s.deterministic?.kind === "motion";
+	spec.scenes.forEach((b, i) => {
+		if (i === 0) return;
+		if ((b.transition ?? defaultTransition) !== "crossfade") return;
+		const a = spec.scenes[i - 1];
+		const [wa, wb] = [words(a), words(b)];
+		const motion = isMotion(a) && isMotion(b);
+		if (!motion && !(wa >= 6 && wb >= 6)) return;
+		out.push({
+			id: "busy_crossfade",
+			severity: "warning",
+			scene_id: b.id,
+			message: `the crossfade${b.transition ? "" : " (the style's default transition)"} from ${a.id} into ${b.id} blends two ${motion ? "motion pages" : `text-dense scenes (${wa} and ${wb} on-screen words)`}; mid-transition both are half visible and neither reads`,
+			fix: `set scene ${b.id} transition to "fade_black" or "cut", or stagger: old content out, then new in`
+		});
+	});
+}
+/** Every effect on the video timeline: rendered scene spans when known, else the spec durations. */
+function sfxPlacements(spec, catalog, spans) {
+	const out = [];
+	let t = 0;
+	for (const s of spec.scenes) {
+		const start = spans?.find((x) => x.id === s.id)?.start ?? t;
+		t += s.duration_sec * 1e3;
+		for (const fx of s.sfx ?? []) {
+			const sound = isBundledSfx(fx.file) ? catalog?.sounds.find((x) => `bundled:${x.id}` === fx.file) : void 0;
+			const peak = Math.round(start + fx.at_sec * 1e3);
+			out.push({
+				scene_id: s.id,
+				file: fx.file,
+				peak_ms: peak,
+				start_ms: Math.max(start, peak - (sound?.peak_ms ?? 0)),
+				...sound ? { sound } : {}
+			});
+		}
+	}
+	return out.sort((a, b) => a.start_ms - b.start_ms);
+}
+/** sfx_license_missing (warning): a project-file effect without `license` on any of its uses (bundled sounds carry the catalogue's CC0). */
+function checkSfxLicense(spec, out) {
+	const files = /* @__PURE__ */ new Map();
+	for (const s of spec.scenes) for (const fx of s.sfx ?? []) {
+		if (isBundledSfx(fx.file)) continue;
+		const f = files.get(fx.file) ?? {
+			scenes: [],
+			licensed: false
+		};
+		if (!f.scenes.includes(s.id)) f.scenes.push(s.id);
+		f.licensed ||= !!fx.license;
+		files.set(fx.file, f);
+	}
+	for (const [file, f] of files) {
+		if (f.licensed) continue;
+		out.push({
+			id: "sfx_license_missing",
+			severity: "warning",
+			scene_id: f.scenes[0],
+			message: `sound effect ${file} (${f.scenes.join(", ")}) has no licence, so the manifest and provenance cannot say you may use it`,
+			fix: `add license {id, source} to the sfx entry for ${file} (e.g. {id: "user-owned"} for your own recording, or the SPDX id of its licence), or use a bundled sound (bundled:<id>, CC0)`
+		});
+	}
+}
+/**
+* sfx_harsh_repeat (warning): one bright or high-hf_risk bundled sound used more than
+* SFX_BRIGHT_MAX_USES times, or two effects starting under SFX_MIN_GAP_MS apart (a run of bundled
+* key presses is typing and is exempt).
+*/
+function checkSfxHarshRepeat(spec, catalog, spans, out) {
+	const all = sfxPlacements(spec, catalog, spans);
+	if (!all.length) return;
+	const uses = /* @__PURE__ */ new Map();
+	for (const p of all) if (p.sound && (p.sound.character === "bright" || p.sound.hf_risk === "high")) uses.set(p.file, [...uses.get(p.file) ?? [], p]);
+	for (const [file, list] of uses) {
+		if (list.length <= 3) continue;
+		const snd = list[0].sound;
+		out.push({
+			id: "sfx_harsh_repeat",
+			severity: "warning",
+			scene_id: list[3].scene_id,
+			message: `${file} (${snd.character}, hf_risk ${snd.hf_risk}) plays ${list.length} times (in ${[...new Set(list.map((p) => p.scene_id))].join(", ")}); a bright sound repeated gets harsh fast`,
+			fix: `keep ${file} to at most 3 uses: drop the ones on minor moments or swap them for a warm or balanced sound (bundled:pop, bundled:hit-soft)`
+		});
+	}
+	for (let i = 1; i < all.length; i++) {
+		const [a, b] = [all[i - 1], all[i]];
+		const gap = b.start_ms - a.start_ms;
+		if (gap >= 250) continue;
+		if (a.sound?.family === "type" && b.sound?.family === "type") continue;
+		out.push({
+			id: "sfx_harsh_repeat",
+			severity: "warning",
+			scene_id: b.scene_id,
+			message: `sound effects ${a.file} (${a.scene_id}) and ${b.file} (${b.scene_id}) start ${Math.round(gap)} ms apart at ${sec(b.start_ms)}; closer than 250 ms they smear into one sound`,
+			fix: `move one of them at least 250 ms away (its at_sec), or drop one`
+		});
+	}
+}
+/**
+* sfx_over_voice (warning): an effect's peak lands inside a spoken word and masks it. Uses the
+* voice word timings of the render; skipped without them (no render, `timing_source: none`).
+*/
+function checkSfxOverVoice(spec, state, tracks, catalog, out) {
+	if (!state?.voice?.timing_source || state.voice.timing_source === "none" || !tracks?.length) return;
+	const spans = sceneSpans(state);
+	if (!spans) return;
+	const spoken = spokenWords(tracks, spans);
+	const words = /* @__PURE__ */ new Map();
+	for (const t of tracks) {
+		const span = spans.find((x) => x.id === t.scene_id);
+		const w = spoken.get(t.scene_id);
+		if (!span || !w) continue;
+		const text = t.words.filter((x) => x.word.trim()).map((x) => x.word.trim());
+		words.set(t.scene_id, w.map((x, k) => ({
+			...x,
+			word: text[k] ?? ""
+		})));
+	}
+	const hits = /* @__PURE__ */ new Map();
+	for (const p of sfxPlacements(spec, catalog, spans)) {
+		const w = (words.get(p.scene_id) ?? []).find((x) => x.start < p.peak_ms && p.peak_ms < x.end);
+		if (w) hits.set(p.scene_id, [...hits.get(p.scene_id) ?? [], {
+			p,
+			w
+		}]);
+	}
+	for (const [scene, list] of hits) {
+		const start = spans.find((x) => x.id === scene).start;
+		const moves = list.map(({ p, w }) => `${p.file} to at_sec ${round2((w.end - start) / 1e3)} (after "${w.word}")`);
+		out.push({
+			id: "sfx_over_voice",
+			severity: "warning",
+			scene_id: scene,
+			message: `${list.length} sound effect(s) in ${scene} peak inside a spoken word; ${list[0].p.file} lands at ${sec(list[0].p.peak_ms)} during "${list[0].w.word}" (${sec(list[0].w.start)}–${sec(list[0].w.end)})`,
+			fix: `move ${moves.join("; ")}, into the pause, or lower its volume_db; a sound under a word masks it`
 		});
 	}
 }
@@ -43132,7 +43612,7 @@ async function packageTargets(i, allTargetIds) {
 		const draft = publish ? void 0 : i.generatedCopy(c);
 		const caption = publish?.post_caption ?? draft.post_caption;
 		const hashtags = publish ? publish.hashtags ?? [] : draft.hashtags;
-		const coverTimestamp = c.cover.mode === "frame" || c.cover.mode === "file_or_frame" ? Math.round(i.spec.cover?.focal_time_sec != null ? i.spec.cover.focal_time_sec * 1e3 : i.coverAtMs ?? 0) : void 0;
+		const coverTimestamp = c.cover.mode === "frame" || c.cover.mode === "file_or_frame" ? i.posterBaked ? 0 : Math.round(i.spec.cover?.focal_time_sec != null ? i.spec.cover.focal_time_sec * 1e3 : i.coverAtMs ?? 0) : void 0;
 		const post = {
 			target: c.id,
 			platform: c.name,
@@ -43164,6 +43644,7 @@ async function packageTargets(i, allTargetIds) {
 				...i.music?.license?.attribution ? { attribution: i.music.license.attribution } : {},
 				note: TRENDING_SOUND_NOTE
 			},
+			...i.posterBaked ? { poster_baked: true } : {},
 			limits: {
 				...c.captions.post_caption_max_chars !== void 0 ? { post_caption_max_chars: c.captions.post_caption_max_chars } : {},
 				...c.captions.hashtags_max !== void 0 ? { hashtags_max: c.captions.hashtags_max } : {},
@@ -44066,6 +44547,348 @@ async function resolveVoicePolicy(o) {
 		gate,
 		decisions
 	};
+}
+/** Energy (8-bit code values) a change must reach, above the noise floor. */
+const MOTION_HIGH = .5;
+/** Energy under which a frame counts as still, above the noise floor. */
+const MOTION_LOW = .25;
+/** A still stretch at least this long is a hold. */
+const HOLD_MIN_S = .3;
+const median = (xs) => quantile(xs, .5);
+function quantile(xs, q) {
+	const s = [...xs].sort((a, b) => a - b);
+	if (!s.length) return 0;
+	const pos = (s.length - 1) * q;
+	const lo = Math.floor(pos);
+	const hi = Math.ceil(pos);
+	return s[lo] + (s[hi] - s[lo]) * (pos - lo);
+}
+/**
+* The easing class of one change from its energy curve (one value per frame interval):
+* - one active interval: `snap` (a cut, or an element that appears in one frame);
+* - a second rise after the main hump has decayed below half its peak: `spring` (overshoot and rebound);
+* - flat (at least 6 intervals, each third's mean within ±20 % of the whole mean): `linear`;
+* - the peak (middle of its plateau) in the first third: `ease_out`; otherwise `ease_in_out`
+*   (an ease-in, peak in the last third, has no class of its own and reads as ease_in_out).
+*/
+function classifyEasing(curve) {
+	const n = curve.length;
+	if (n <= 1) return "snap";
+	const peak = Math.max(...curve);
+	const k = curve.indexOf(peak);
+	if (n >= 3) {
+		let min = peak;
+		let decayed = false;
+		for (let j = k + 1; j < n; j++) {
+			const v = curve[j];
+			if (v < peak * .5) decayed = true;
+			if (decayed && v >= min * 1.3 && v - min >= peak * .03 && v >= .25) return "spring";
+			min = Math.min(min, v);
+		}
+	}
+	if (n >= 6) {
+		const mean = (xs) => xs.reduce((a, v) => a + v, 0) / xs.length;
+		const all = mean(curve);
+		const third = Math.round(n / 3);
+		const parts = [
+			curve.slice(0, third),
+			curve.slice(third, n - third),
+			curve.slice(n - third)
+		];
+		if (all > 0 && parts.every((part) => Math.abs(mean(part) - all) <= .2 * all)) return "linear";
+	}
+	let last = k;
+	while (last + 1 < n && curve[last + 1] >= peak * .97) last++;
+	return (k + last) / 2 / (n - 1) < 1 / 3 ? "ease_out" : "ease_in_out";
+}
+/**
+* Split a change at a deep valley between two humps of similar height (staggered entrances that
+* overlap). A small second hump is a rebound (spring) and stays in the same change.
+*/
+function splitOverlaps(curve) {
+	const parts = [];
+	let start = 0;
+	let hump = curve[0] ?? 0;
+	let valley = Infinity;
+	let valleyAt = -1;
+	for (let j = 1; j < curve.length; j++) {
+		const v = curve[j];
+		if (valleyAt >= 0 && v > curve[j - 1]) {
+			let p = j;
+			while (p + 1 < curve.length && curve[p + 1] >= curve[p]) p++;
+			const next = curve[p];
+			if (next >= .6 * hump && valley <= .5 * Math.min(hump, next)) {
+				parts.push([start, valleyAt]);
+				start = valleyAt + 1;
+				hump = next;
+			} else hump = Math.max(hump, next);
+			valley = Infinity;
+			valleyAt = -1;
+			j = p;
+			continue;
+		}
+		if (v < curve[j - 1]) {
+			if (v < valley) {
+				valley = v;
+				valleyAt = j;
+			}
+		} else if (valleyAt < 0) hump = Math.max(hump, v);
+	}
+	parts.push([start, curve.length - 1]);
+	return parts;
+}
+/** Energies (clamped at 0), the frame interval and the change/still thresholds above the clip's noise floor. */
+function energyThresholds(samples) {
+	const e = samples.map((s) => Math.max(0, s.y));
+	const span = samples.length > 1 ? samples[samples.length - 1].t - samples[0].t : 0;
+	const dt = span > 0 ? span / (samples.length - 1) : 1 / 30;
+	const floor = median(e);
+	const mad = median(e.map((v) => Math.abs(v - floor)));
+	return {
+		e,
+		dt,
+		hi: floor + Math.max(MOTION_HIGH, 6 * mad),
+		lo: floor + Math.max(MOTION_LOW, 3 * mad)
+	};
+}
+/**
+* Where the holds are: still stretches (every interval ≤ the low threshold) of at least
+* HOLD_MIN_S, as spans on the video clock. Interval i joins frame i−1 to frame i, so a run of
+* still intervals i..j is the picture from frame i−1 to frame j. Same thresholds as
+* motionTimingFrom's hold count.
+*/
+function holdSpans(samples) {
+	if (samples.length < 3) return [];
+	const { e, dt, lo } = energyThresholds(samples);
+	const out = [];
+	let from = -1;
+	for (let i = 0; i <= e.length; i++) {
+		if (i < e.length && e[i] <= lo) {
+			if (from < 0) from = i;
+			continue;
+		}
+		if (from >= 0 && (i - from) * dt >= .299999) out.push({
+			start_ms: Math.round(Math.max(0, samples[from].t - dt) * 1e3),
+			end_ms: Math.round(samples[i - 1].t * 1e3)
+		});
+		from = -1;
+	}
+	return out;
+}
+/** Motion timing from per-interval difference energies (`samples[i].y` = |frame i − frame i−1|). */
+function motionTimingFrom(samples) {
+	const empty = {
+		timing: {
+			changes_analyzed: 0,
+			enter_ms_median: null,
+			enter_ms_p75: null,
+			easing: null,
+			easing_share: null,
+			stagger_ms_median: null,
+			holds: {
+				count: 0,
+				median_ms: null,
+				longest_ms: null
+			}
+		},
+		changes: [],
+		continuous: 0
+	};
+	if (samples.length < 3) return empty;
+	const { e, dt, hi, lo } = energyThresholds(samples);
+	const runs = [];
+	let i = 0;
+	while (i < e.length) {
+		if (e[i] <= lo) {
+			i++;
+			continue;
+		}
+		const s = i;
+		let last = i;
+		let still = 0;
+		for (i = i + 1; i < e.length; i++) if (e[i] > lo) {
+			last = i;
+			still = 0;
+		} else if (++still >= 2) break;
+		runs.push([s, last]);
+		i = last + 1;
+	}
+	const changes = [];
+	let continuous = 0;
+	let prev;
+	for (const [s, t] of runs) {
+		const run = e.slice(s, t + 1);
+		for (const [a, b] of splitOverlaps(run)) {
+			const curve = run.slice(a, b + 1);
+			const peak = Math.max(...curve);
+			const last = changes[changes.length - 1];
+			if (last && prev && (s + a - prev.to) * dt <= .25 && peak < .2 * last.peak) {
+				prev.to = s + b;
+				last.duration_ms = Math.round((prev.to - prev.from + 1) * dt * 1e3);
+				continue;
+			}
+			if (peak < hi) continue;
+			if (curve.length * dt > 2) {
+				continuous++;
+				continue;
+			}
+			const at = s + a;
+			prev = {
+				from: at,
+				to: s + b
+			};
+			changes.push({
+				start_sec: Math.round(Math.max(0, samples[at].t - dt) * 1e3) / 1e3,
+				duration_ms: Math.round(curve.length * dt * 1e3),
+				easing: classifyEasing(curve),
+				peak: Math.round(peak * 100) / 100
+			});
+		}
+	}
+	const holds = [];
+	let still = 0;
+	for (const v of [...e, Infinity]) if (v <= lo) still++;
+	else {
+		if (still * dt >= .299999) holds.push(Math.round(still * dt * 1e3));
+		still = 0;
+	}
+	const n = changes.length;
+	const counts = /* @__PURE__ */ new Map();
+	for (const c of changes) counts.set(c.easing, (counts.get(c.easing) ?? 0) + 1);
+	const winner = [
+		"ease_out",
+		"ease_in_out",
+		"spring",
+		"linear",
+		"snap"
+	].reduce((best, cls) => (counts.get(cls) ?? 0) > (best ? counts.get(best) ?? 0 : 0) ? cls : best, null);
+	const animated = changes.filter((c) => c.easing !== "snap").map((c) => c.duration_ms);
+	const durations = animated.length >= 2 ? animated : changes.map((c) => c.duration_ms);
+	const gaps = [];
+	for (let j = 1; j < n; j++) {
+		const g = changes[j].start_sec - changes[j - 1].start_sec;
+		if (g < .8) gaps.push(g * 1e3);
+	}
+	return {
+		timing: {
+			changes_analyzed: n,
+			enter_ms_median: n >= 2 ? Math.round(median(durations)) : null,
+			enter_ms_p75: n >= 2 ? Math.round(quantile(durations, .75)) : null,
+			easing: n >= 2 ? winner : null,
+			easing_share: n >= 2 && winner ? Math.round((counts.get(winner) ?? 0) / n * 1e3) / 1e3 : null,
+			stagger_ms_median: gaps.length ? Math.round(median(gaps)) : null,
+			holds: {
+				count: holds.length,
+				median_ms: holds.length ? Math.round(median(holds)) : null,
+				longest_ms: holds.length ? Math.max(...holds) : null
+			}
+		},
+		changes,
+		continuous
+	};
+}
+/** Per-interval difference energy of a video's first picture track, in one decode pass. */
+async function differenceEnergy(path) {
+	return parseLuma((await runFfmpeg([
+		"-i",
+		path,
+		"-map",
+		"0:v:0",
+		"-an",
+		"-sn",
+		"-vf",
+		`scale=160:-2,format=gray,tblend=all_mode=difference,signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG`,
+		"-f",
+		"null",
+		"-"
+	], {
+		keepStderr: true,
+		timeoutMs: 36e5
+	})).stderr);
+}
+async function measureMotionTiming(path) {
+	return motionTimingFrom(await differenceEnergy(path));
+}
+function formatMotionTiming(m) {
+	const ms = (x) => x === null ? "n/a" : `${Math.round(x)} ms`;
+	return [
+		"## Motion timing",
+		"",
+		`- Changes analyzed: ${m.changes_analyzed}`,
+		`- Entrance: median ${ms(m.enter_ms_median)}, p75 ${ms(m.enter_ms_p75)}`,
+		`- Easing: ${m.easing ? `**${m.easing}**${m.easing_share !== null ? ` (${Math.round(m.easing_share * 100)}% of changes)` : ""}` : "n/a"}`,
+		`- Stagger: ${ms(m.stagger_ms_median)}`,
+		`- Holds (still ≥ ${HOLD_MIN_S * 1e3} ms): ${m.holds.count}${m.holds.count ? ` (median ${ms(m.holds.median_ms)}, longest ${ms(m.holds.longest_ms)})` : ""}`
+	];
+}
+const STYLE_ID = /^[a-z0-9][a-z0-9-]*$/;
+const r10 = (x) => Math.round(x / 10) * 10;
+const clamp$1 = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+/**
+* A style pack from measured motion timing: easing and durations from the measurement, the scene
+* transition from the cut rate (≥ 3 cuts per 10 s or a snap-dominated reference: cut; else crossfade).
+*/
+function styleFromMotion(id, g) {
+	const m = g.motion_timing;
+	const easing = m?.easing ?? "ease_out";
+	const enter = clamp$1(r10(m?.enter_ms_median ?? 400), 0, 2e3);
+	const personality = easing === "spring" ? "playful" : easing === "snap" || enter < 300 ? "energetic" : easing === "linear" ? "precise" : enter >= 500 ? "calm" : easing === "ease_in_out" ? "precise" : "friendly";
+	const cut = easing === "snap" || g.cuts_per_10s >= 3;
+	const name = id.split("-").filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+	return Style$2.parse({
+		id,
+		name,
+		version: 1,
+		description: "measured from a reference; structure only",
+		motion: {
+			personality,
+			easing,
+			enter_ms: enter,
+			exit_ms: clamp$1(r10(enter * .7), 0, 2e3),
+			stagger_ms: clamp$1(r10(m?.stagger_ms_median ?? enter * .4), 0, 1e3),
+			transition: cut ? "cut" : "crossfade",
+			transition_ms: cut ? 0 : clamp$1(r10(enter * .8), 200, 800),
+			avoid: []
+		}
+	});
+}
+/** The pack as YAML (JSON-quoted scalars; YAML is a superset of JSON). */
+function styleYaml(s) {
+	const q = (v) => JSON.stringify(v);
+	const lines = [
+		"# Measured by analyze from a reference video: motion timing only, nothing from the reference is kept.",
+		`id: ${q(s.id)}`,
+		`name: ${q(s.name)}`,
+		`version: ${s.version}`,
+		`description: ${q(s.description)}`,
+		"motion:"
+	];
+	for (const [k, v] of Object.entries(s.motion)) lines.push(`  ${k}: ${Array.isArray(v) ? `[${v.map(q).join(", ")}]` : q(v)}`);
+	return `${lines.join("\n")}\n`;
+}
+/**
+* Where write_style would write `<id>`, or an error: an id that is not a file-name id, an existing
+* file, and an id that would shadow a bundled pack are refused unless `overwrite`.
+*/
+async function styleTarget(projectDir, id, o = {}) {
+	if (!STYLE_ID.test(id)) throw new Error(`write_style id "${id}" must be lowercase letters, digits and dashes (it names styles/<id>.yaml)`);
+	const path = join(projectStylesDir(projectDir), `${id}.yaml`);
+	const warnings = [];
+	if ((await styleIds(o.stylesDir === void 0 ? findStylesDir() : o.stylesDir).catch(() => [])).includes(id)) {
+		if (!o.overwrite) throw new Error(`"${id}" is a bundled style; pick another id, or pass overwrite: true to shadow it in this project`);
+		warnings.push(`styles/${id}.yaml shadows the bundled "${id}" pack in this project`);
+	}
+	if (existsSync(path) && !o.overwrite) throw new Error(`styles/${id}.yaml already exists; pass overwrite: true to replace it`);
+	return {
+		path,
+		warnings
+	};
+}
+/** Write `<project>/styles/<id>.yaml` (refusals as in styleTarget). */
+async function writeProjectStyle(projectDir, style, o = {}) {
+	const t = await styleTarget(projectDir, style.id, o);
+	await writeFileAtomic(t.path, styleYaml(style));
+	return t;
 }
 //#endregion
 //#region src/music.ts
@@ -247769,8 +248592,21 @@ function footageSpanSec(clip, media, sceneMs) {
 	return Math.max(0, Math.min(clip.out_sec ?? clip.in_sec + sceneMs / 1e3 * speed, dur) - clip.in_sec);
 }
 /**
+* Where a clip's own sound comes from and when it plays, given `av_offset_ms` (source time):
+* a negative offset advances the sound (read `-offset` later in the source), a positive one delays
+* it (silence first). `readSec` is the source second heard at the scene start (before the delay).
+*/
+function footageAudioShift(clip) {
+	const shift = (clip.av_offset_ms ?? 0) / 1e3;
+	return {
+		readSec: clip.in_sec + Math.max(0, -shift),
+		delaySec: Math.max(0, shift)
+	};
+}
+/**
 * Words of an asset transcript inside a footage clip's span, on the scene's timeline: shifted by
-* `in_sec`, divided by `speed`, and cut at the scene end (a looped or held tail has no captions).
+* `in_sec` (and by `av_offset_ms`, like the clip's sound), divided by `speed`, and cut at the
+* scene end (a looped or held tail has no captions).
 */
 async function transcriptWords(root, asset, clip, sceneMs, warnings) {
 	if (!asset?.transcript) return [];
@@ -247783,16 +248619,18 @@ async function transcriptWords(root, asset, clip, sceneMs, warnings) {
 	}
 	const list = Array.isArray(raw) ? raw : Array.isArray(raw?.words) ? raw.words : [];
 	const speed = clip.speed ?? 1;
-	const inMs = clip.in_sec * 1e3;
+	const { readSec, delaySec } = footageAudioShift(clip);
+	const inMs = readSec * 1e3;
 	const endMs = inMs + footageSpanSec(clip, asset.media, sceneMs) * 1e3;
+	const delayMs = delaySec * 1e3;
 	const out = [];
 	for (const w of list) {
 		const { word, start_ms, end_ms, speaker } = w ?? {};
 		if (typeof word !== "string" || !word.trim() || typeof start_ms !== "number" || typeof end_ms !== "number") continue;
 		if (start_ms < inMs || start_ms >= endMs) continue;
-		const a = Math.round((start_ms - inMs) / speed);
+		const a = Math.round((start_ms - inMs + delayMs) / speed);
 		if (a >= sceneMs) continue;
-		const b = Math.round(Math.min((Math.min(end_ms, endMs) - inMs) / speed, sceneMs));
+		const b = Math.round(Math.min((Math.min(end_ms, endMs) - inMs + delayMs) / speed, sceneMs));
 		out.push({
 			word: word.trim(),
 			start_ms: a,
@@ -247828,8 +248666,10 @@ async function sfxPeakMs(abs, sha, o = {}) {
 }
 /**
 * Per-scene audio: a narrated scene keeps its voice slot; a footage scene plays its own sound for
-* the same span (`native`, `mix`), the bed only (`music`) or nothing (`mute`); crossfades come from
-* `audio.crossfade_ms`; sound effects peak at scene start + `at_sec`.
+* the same span (`native`, `mix`), shifted by `footage.av_offset_ms`, the bed only (`music`) or
+* nothing (`mute`); crossfades come from `audio.crossfade_ms`; sound effects peak at scene start +
+* `at_sec`. A `bundled:<id>` effect resolves to the plugin's sfx/ catalogue, plays at the
+* catalogue's `default_db` unless `volume_db` is set, and carries the catalogue licence.
 */
 async function buildSceneAudio(root, scenes, placements, slotMs, footage, nativeTracks, warnings, opts = {}) {
 	const paths = projectPaths(root);
@@ -247866,9 +248706,11 @@ async function buildSceneAudio(root, scenes, placements, slotMs, footage, native
 			if ((amode === "native" || amode === "mix") && f && !("error" in f) && asset && asset.kind === "video" && f.media.has_audio) {
 				const clip = s.footage;
 				const span = footageSpanSec(clip, f.media, dur);
+				const { readSec, delaySec } = footageAudioShift(clip);
 				const layer = {
 					path: f.path,
-					offset_sec: clip.in_sec,
+					offset_sec: readSec,
+					...delaySec > 0 ? { delay_ms: Math.round(delaySec * 1e3) } : {},
 					...clip.out_sec !== void 0 || clip.loop ? { span_sec: span } : {},
 					...clip.speed && clip.speed !== 1 ? { tempo: clip.speed } : {},
 					...s.audio?.native_db ? { gain_db: s.audio.native_db } : {},
@@ -247899,12 +248741,27 @@ async function buildSceneAudio(root, scenes, placements, slotMs, footage, native
 		});
 		for (const fx of s.sfx ?? []) {
 			let abs;
-			try {
-				abs = await resolveInsideProject(paths, fx.file);
-			} catch (e) {
-				throw new Error(`${s.id}: sfx file "${fx.file}" is not a project-relative path (${errMsg(e)})`);
+			let volumeDb = fx.volume_db;
+			let license = fx.license;
+			if (isBundledSfx(fx.file)) {
+				let b;
+				try {
+					const env = opts.env ?? process.env;
+					b = opts.sfxDir === void 0 ? resolveBundledSfx(fx.file, env) : resolveBundledSfx(fx.file, env, opts.sfxDir);
+				} catch (e) {
+					throw new Error(`${s.id}: ${errMsg(e)}`);
+				}
+				abs = b.path;
+				volumeDb ??= b.sound.default_db;
+				license = { ...b.license };
+			} else {
+				try {
+					abs = await resolveInsideProject(paths, fx.file);
+				} catch (e) {
+					throw new Error(`${s.id}: sfx file "${fx.file}" is not a project-relative path (${errMsg(e)})`);
+				}
+				if (!await exists(abs)) throw new Error(`${s.id}: sfx file "${fx.file}" not found in the project`);
 			}
-			if (!await exists(abs)) throw new Error(`${s.id}: sfx file "${fx.file}" not found in the project`);
 			if (fx.at_sec * 1e3 >= dur) warnings.push(`${s.id}: sfx ${fx.file} at ${fx.at_sec}s starts after the scene ends (${(dur / 1e3).toFixed(2)}s)`);
 			const sha = await hashFile(abs);
 			let peak = peaks.get(sha);
@@ -247917,24 +248774,24 @@ async function buildSceneAudio(root, scenes, placements, slotMs, footage, native
 				path: abs,
 				at_ms: at,
 				...trim ? { trim_ms: trim } : {},
-				...fx.volume_db !== void 0 ? { volume_db: fx.volume_db } : {}
+				...volumeDb !== void 0 ? { volume_db: volumeDb } : {}
 			});
 			keySfx.push({
 				sha,
 				at,
 				trim,
-				db: fx.volume_db ?? 0
+				db: volumeDb ?? 0
 			});
-			const rel = toPosix$1(fx.file.replace(/^\.\//, ""));
+			const rel = isBundledSfx(fx.file) ? fx.file : toPosix$1(fx.file.replace(/^\.\//, ""));
 			const prev = plan.sfxState.find((x) => x.file === rel);
 			if (prev) {
 				if (!prev.scenes.includes(s.id)) prev.scenes.push(s.id);
-				if (!prev.license && fx.license) prev.license = fx.license;
+				if (!prev.license && license) prev.license = license;
 			} else plan.sfxState.push({
 				file: rel,
 				sha256: sha,
 				scenes: [s.id],
-				...fx.license ? { license: fx.license } : {},
+				...license ? { license } : {},
 				peak_ms: peak
 			});
 		}
@@ -248272,7 +249129,8 @@ function soundEventCues(i, warnings = []) {
 *   e.  stageCaptions        word timeline, sound-event cues, caption set
 *   e'. stageSceneAudio      per-scene audio and the music bed's speech/mute spans
 *   f.  stageAssembly        logo overlay, assembly key, clean master + reel
-*   g.  stageCover           cover or thumbnail
+*   g.  stageCover           cover or thumbnail (automatic cover time from the master's holds)
+*   g'. stagePoster          cover.bake_first_frame: the cover on frame 0 of the reel
 *       stageRenderState     tool versions, fonts, the persisted RenderState
 *
 * QA and export (f'., g'.) stay in pipeline.ts next to runQa/exportProject.
@@ -248998,7 +249856,7 @@ async function stageAssembly(run, input) {
 	const thumbnail = join(rdir, "thumbnail.png");
 	const statePath = join(rdir, "render-state.json");
 	const prev = await readJson(statePath).catch(() => void 0);
-	const reuse = prev?.assembly_key === assemblyKey && await exists(master) && await exists(reel);
+	const reuse = prev?.assembly_key === assemblyKey && await exists(master) && await exists(reel) && (!prev.poster_baked || await exists(join(rdir, "reel-unbaked.mp4")));
 	if (!reuse) {
 		signal?.throwIfAborted();
 		progress({
@@ -249070,7 +249928,9 @@ async function stageAssembly(run, input) {
 }
 /**
 * g. Cover (spec.cover: headline frame at the focal time) or thumbnail at the hook scene's
-* midpoint, from the clean master; reused with the assembly when its key is unchanged.
+* midpoint, from the clean master; reused with the assembly when its key is unchanged. A cover
+* without `focal_time_sec` is taken at the automatic time (autoCoverTime over the master's holds),
+* which is resolved only when the cover is (re)composed and recorded in `cover.at_ms`.
 */
 async function stageCover(run, input) {
 	const { root, env, quality, signal, progress, warnings } = run;
@@ -249081,11 +249941,25 @@ async function stageCover(run, input) {
 	const hookIdx = Math.max(0, planScenes.findIndex((s) => s.purpose === "hook"));
 	const hookStart = placements[hookIdx].scene_start_ms;
 	const hookMid = Math.round(hookStart + slotMs[hookIdx] / 2);
-	const coverAt = spec.cover?.focal_time_sec != null ? Math.round(spec.cover.focal_time_sec * 1e3) : hookMid;
+	const focalMs = spec.cover?.focal_time_sec != null ? Math.round(spec.cover.focal_time_sec * 1e3) : void 0;
+	const coverScenes = planScenes.map((s, i) => {
+		const tr = input.asm.segments[i]?.transition_in;
+		const trMs = tr ? Math.round(transitionSeconds(tr.ms, slotMs[i], input.fps) * 1e3) : 0;
+		return {
+			start_ms: Math.round(placements[i].scene_start_ms),
+			duration_ms: slotMs[i],
+			purpose: s.purpose,
+			...trMs ? { transition_ms: trMs } : {}
+		};
+	});
+	const auto = spec.cover && focalMs === void 0;
 	const thumbnailKey = sha256Hex(canonicalJson({
 		v: 3,
 		assembly: assemblyKey,
-		at: coverAt,
+		at: auto ? {
+			auto: 1,
+			scenes: coverScenes
+		} : focalMs ?? hookMid,
 		cover: spec.cover ?? null,
 		...spec.cover ? {
 			zones,
@@ -249102,6 +249976,13 @@ async function stageCover(run, input) {
 			stage: "thumbnail",
 			message: "composing cover"
 		});
+		let coverAt = focalMs ?? hookMid;
+		if (auto) {
+			const frameMs = 1e3 / input.fps;
+			const picked = autoCoverTime(holdSpans(await differenceEnergy(master)), coverScenes, frameMs);
+			if (picked === null) warnings.push(`cover: no settled hold found for the automatic cover time; used the hook scene's midpoint (${(hookMid / 1e3).toFixed(2)}s). Set cover.focal_time_sec to choose.`);
+			coverAt = picked ?? hookMid;
+		}
 		const c = await renderCover({
 			master,
 			outDir: rdir,
@@ -249148,6 +250029,48 @@ async function stageCover(run, input) {
 		thumbnailKey,
 		coverState
 	};
+}
+/** The assembled reel before its poster was baked, kept beside reel.mp4 so the poster can be re-baked or dropped without re-assembling. */
+const UNBAKED_REEL = "reel-unbaked.mp4";
+/**
+* g'. Poster (spec.cover.bake_first_frame): the composed cover replaces frame 0 of renders/<q>/reel.mp4,
+* before QA and before the target packages copy the reel. The assembled reel moves to
+* reel-unbaked.mp4 and is the bake's input, so a changed cover re-bakes from it and dropping the
+* flag restores it. Whenever reel-unbaked.mp4 exists it is the assembled reel of the current
+* assembly (a fresh assembly removes a stale one), so an interrupted run never bakes twice.
+* Cached by the assembly, the cover (thumbnail key) and POSTER_VERSION. The clean master is never touched.
+*/
+async function stagePoster(run, input) {
+	const { root, quality, signal, progress } = run;
+	const { assemblyKey, reuse, prev, reel, thumbnail } = input.asm;
+	const unbaked = join(renderDir(root, quality), UNBAKED_REEL);
+	if (!reuse) await rm(unbaked, { force: true });
+	const haveUnbaked = await exists(unbaked);
+	if (!input.spec.cover?.bake_first_frame || !input.cover.coverState) {
+		if (haveUnbaked) await rename(unbaked, reel);
+		return {};
+	}
+	const posterKey = sha256Hex(canonicalJson({
+		v: 1,
+		assembly: assemblyKey,
+		cover: input.cover.thumbnailKey
+	}));
+	if (reuse && haveUnbaked && prev?.poster_key === posterKey && await exists(reel)) return { posterKey };
+	signal?.throwIfAborted();
+	progress({
+		stage: "thumbnail",
+		message: "baking the cover into frame 0"
+	});
+	if (!haveUnbaked) await rename(reel, unbaked);
+	const { encodePreset } = input.tp;
+	await bakePoster({
+		reel: unbaked,
+		image: thumbnail,
+		out: reel,
+		...encodePreset ? { encode: { preset: encodePreset } } : {},
+		...signal ? { signal } : {}
+	});
+	return { posterKey };
 }
 /** Tool versions, locked fonts and the RenderState persisted at renders/<quality>/render-state.json (before QA fills `qa`). */
 async function stageRenderState(run, input) {
@@ -249349,6 +250272,23 @@ async function renderProjectLocked(projectDir, o) {
 		captions,
 		audio
 	});
+	const cover = await stageCover(run, {
+		spec,
+		inputs,
+		planScenes,
+		placements: captions.placements,
+		slotMs: timeline.slotMs,
+		zones,
+		contracts,
+		asm,
+		fps: target.fps
+	});
+	const poster = await stagePoster(run, {
+		spec,
+		tp,
+		asm,
+		cover
+	});
 	const state = await stageRenderState(run, {
 		inputs,
 		target,
@@ -249362,18 +250302,13 @@ async function renderProjectLocked(projectDir, o) {
 		captions,
 		audio,
 		asm,
-		cover: await stageCover(run, {
-			spec,
-			inputs,
-			planScenes,
-			placements: captions.placements,
-			slotMs: timeline.slotMs,
-			zones,
-			contracts,
-			asm
-		})
+		cover
 	});
 	state.policy = vs.policy;
+	if (poster.posterKey) {
+		state.poster_baked = true;
+		state.poster_key = poster.posterKey;
+	}
 	if (vs.paid_voice) state.paid_voice = vs.paid_voice;
 	setQaExpectations(state, spec);
 	const qa = await stageQa(run, state, asm.reel, asm.statePath);
@@ -249478,7 +250413,8 @@ async function runQaOn(root, state, reelSha) {
 		} : {},
 		...state.background ? { background: state.background } : {},
 		...state.acceptance ? { acceptance: state.acceptance } : {},
-		...state.loop ? { loop: true } : {}
+		...state.loop ? { loop: true } : {},
+		...state.poster_baked ? { skip_leading_frames: 2 } : {}
 	});
 	report.video = state.reel;
 	const files = await writeQaReport(root, report);
@@ -249678,6 +250614,7 @@ async function exportFromState(root, state, now, opts = {}) {
 		},
 		...out.cover ? { cover: out.cover } : {},
 		...state.cover ? { coverAtMs: state.cover.at_ms } : {},
+		...state.poster_baked ? { posterBaked: true } : {},
 		...out.captions_srt ? { captionsSrt: out.captions_srt } : {},
 		...out.captions_vtt ? { captionsVtt: out.captions_vtt } : {},
 		generatedCopy: (c) => {
@@ -250025,6 +250962,8 @@ async function exportFromState(root, state, now, opts = {}) {
 			path: rel$2(root, out.cover),
 			...out.cover_square_preview ? { square_preview: rel$2(root, out.cover_square_preview) } : {},
 			at_ms: state.cover.at_ms,
+			...spec.cover && spec.cover.focal_time_sec == null ? { auto: true } : {},
+			...state.poster_baked ? { poster_baked: true } : {},
 			...state.cover.headline_box ? { headline_box: state.cover.headline_box } : {},
 			crops: state.cover.crops.map(({ id, targets, x, y, w, h }) => ({
 				id,
@@ -250081,7 +251020,7 @@ async function exportFromState(root, state, now, opts = {}) {
 * the ContentIR and source provenance, the brand file, the brief and storyboard, and files under
 * assets/ (except assets/voice/, which the render writes; the voice request hash covers it).
 */
-/** Music refs that are not project files (a bundled bed, a synthesized score): the lock records the ref and hash. */
+/** Refs that are not project files (a bundled bed or sound, a synthesized score): the lock records the ref and hash. */
 const byRef = (ref) => ref.startsWith("bundled:") || ref.startsWith("synth:");
 async function lockFromState(root, state, projectId, outputs) {
 	const paths = projectPaths(root);
@@ -250098,7 +251037,7 @@ async function lockFromState(root, state, projectId, outputs) {
 		].map((n) => `project/${n}`),
 		...await listFiles(root, "assets", ["assets/voice"]),
 		...(state.footage ?? []).map((f) => f.path),
-		...(state.sfx ?? []).map((x) => x.file)
+		...(state.sfx ?? []).filter((x) => !byRef(x.file)).map((x) => x.file)
 	];
 	let fonts = state.fonts;
 	if (!fonts) {
@@ -250123,6 +251062,7 @@ async function lockFromState(root, state, projectId, outputs) {
 			engine: ENGINE_VERSION,
 			assembly: String(7),
 			cover: String(3),
+			...state.poster_baked ? { poster: String(1) } : {},
 			target_package: String(1),
 			zones: String(2),
 			layout: String(10)
@@ -250146,10 +251086,17 @@ async function lockFromState(root, state, projectId, outputs) {
 			cache_key: s.cache_key,
 			clip_sha256: s.clip_sha256
 		})),
-		assets: withSeriesAssets([...await lockAssets(root, [...new Set(state.music && !byRef(state.music.ref) ? [...inputs, state.music.ref] : inputs)]), ...state.music && byRef(state.music.ref) ? [{
-			path: state.music.ref,
-			sha256: state.music.sha256
-		}] : []], state.series),
+		assets: withSeriesAssets([
+			...await lockAssets(root, [...new Set(state.music && !byRef(state.music.ref) ? [...inputs, state.music.ref] : inputs)]),
+			...state.music && byRef(state.music.ref) ? [{
+				path: state.music.ref,
+				sha256: state.music.sha256
+			}] : [],
+			...(state.sfx ?? []).filter((x) => byRef(x.file)).map((x) => ({
+				path: x.file,
+				sha256: x.sha256
+			}))
+		], state.series),
 		outputs: outputs.map((o) => ({
 			path: o.path,
 			sha256: o.sha256,
@@ -264887,7 +265834,7 @@ async function measureSpeechPacing(path, signal) {
 }
 const PACING_MAX_PAUSE_RANGE = [250, 1500];
 const PACING_KEEP_PAUSE_RANGE = [120, 600];
-const clamp$1 = (x, [lo, hi]) => Math.min(hi, Math.max(lo, Math.round(x)));
+const clamp = (x, [lo, hi]) => Math.min(hi, Math.max(lo, Math.round(x)));
 /**
 * tighten limits from measured pacing: pauses up to the speaker's own p95 stay, longer ones are
 * shortened to their median. max_pause_ms = clamp(p95, 250, 1500), keep_pause_ms =
@@ -264896,321 +265843,11 @@ const clamp$1 = (x, [lo, hi]) => Math.min(hi, Math.max(lo, Math.round(x)));
 */
 function pacingLimits(p) {
 	if (p.pause_p95_ms === null || p.pause_median_ms === null || p.pauses_analyzed === 0) throw new Error("the pacing reference has no pauses inside speech to learn from; pass max_pause_ms/keep_pause_ms instead");
-	const max_pause_ms = clamp$1(p.pause_p95_ms, PACING_MAX_PAUSE_RANGE);
+	const max_pause_ms = clamp(p.pause_p95_ms, PACING_MAX_PAUSE_RANGE);
 	return {
 		max_pause_ms,
-		keep_pause_ms: Math.min(clamp$1(p.pause_median_ms, PACING_KEEP_PAUSE_RANGE), max_pause_ms)
+		keep_pause_ms: Math.min(clamp(p.pause_median_ms, PACING_KEEP_PAUSE_RANGE), max_pause_ms)
 	};
-}
-/** Energy (8-bit code values) a change must reach, above the noise floor. */
-const MOTION_HIGH = .5;
-/** Energy under which a frame counts as still, above the noise floor. */
-const MOTION_LOW = .25;
-/** A still stretch at least this long is a hold. */
-const HOLD_MIN_S = .3;
-const median = (xs) => quantile(xs, .5);
-function quantile(xs, q) {
-	const s = [...xs].sort((a, b) => a - b);
-	if (!s.length) return 0;
-	const pos = (s.length - 1) * q;
-	const lo = Math.floor(pos);
-	const hi = Math.ceil(pos);
-	return s[lo] + (s[hi] - s[lo]) * (pos - lo);
-}
-/**
-* The easing class of one change from its energy curve (one value per frame interval):
-* - one active interval: `snap` (a cut, or an element that appears in one frame);
-* - a second rise after the main hump has decayed below half its peak: `spring` (overshoot and rebound);
-* - flat (at least 6 intervals, each third's mean within ±20 % of the whole mean): `linear`;
-* - the peak (middle of its plateau) in the first third: `ease_out`; otherwise `ease_in_out`
-*   (an ease-in, peak in the last third, has no class of its own and reads as ease_in_out).
-*/
-function classifyEasing(curve) {
-	const n = curve.length;
-	if (n <= 1) return "snap";
-	const peak = Math.max(...curve);
-	const k = curve.indexOf(peak);
-	if (n >= 3) {
-		let min = peak;
-		let decayed = false;
-		for (let j = k + 1; j < n; j++) {
-			const v = curve[j];
-			if (v < peak * .5) decayed = true;
-			if (decayed && v >= min * 1.3 && v - min >= peak * .03 && v >= .25) return "spring";
-			min = Math.min(min, v);
-		}
-	}
-	if (n >= 6) {
-		const mean = (xs) => xs.reduce((a, v) => a + v, 0) / xs.length;
-		const all = mean(curve);
-		const third = Math.round(n / 3);
-		const parts = [
-			curve.slice(0, third),
-			curve.slice(third, n - third),
-			curve.slice(n - third)
-		];
-		if (all > 0 && parts.every((part) => Math.abs(mean(part) - all) <= .2 * all)) return "linear";
-	}
-	let last = k;
-	while (last + 1 < n && curve[last + 1] >= peak * .97) last++;
-	return (k + last) / 2 / (n - 1) < 1 / 3 ? "ease_out" : "ease_in_out";
-}
-/**
-* Split a change at a deep valley between two humps of similar height (staggered entrances that
-* overlap). A small second hump is a rebound (spring) and stays in the same change.
-*/
-function splitOverlaps(curve) {
-	const parts = [];
-	let start = 0;
-	let hump = curve[0] ?? 0;
-	let valley = Infinity;
-	let valleyAt = -1;
-	for (let j = 1; j < curve.length; j++) {
-		const v = curve[j];
-		if (valleyAt >= 0 && v > curve[j - 1]) {
-			let p = j;
-			while (p + 1 < curve.length && curve[p + 1] >= curve[p]) p++;
-			const next = curve[p];
-			if (next >= .6 * hump && valley <= .5 * Math.min(hump, next)) {
-				parts.push([start, valleyAt]);
-				start = valleyAt + 1;
-				hump = next;
-			} else hump = Math.max(hump, next);
-			valley = Infinity;
-			valleyAt = -1;
-			j = p;
-			continue;
-		}
-		if (v < curve[j - 1]) {
-			if (v < valley) {
-				valley = v;
-				valleyAt = j;
-			}
-		} else if (valleyAt < 0) hump = Math.max(hump, v);
-	}
-	parts.push([start, curve.length - 1]);
-	return parts;
-}
-/** Motion timing from per-interval difference energies (`samples[i].y` = |frame i − frame i−1|). */
-function motionTimingFrom(samples) {
-	const empty = {
-		timing: {
-			changes_analyzed: 0,
-			enter_ms_median: null,
-			enter_ms_p75: null,
-			easing: null,
-			easing_share: null,
-			stagger_ms_median: null,
-			holds: {
-				count: 0,
-				median_ms: null,
-				longest_ms: null
-			}
-		},
-		changes: [],
-		continuous: 0
-	};
-	if (samples.length < 3) return empty;
-	const e = samples.map((s) => Math.max(0, s.y));
-	const span = samples[samples.length - 1].t - samples[0].t;
-	const dt = span > 0 ? span / (samples.length - 1) : 1 / 30;
-	const floor = median(e);
-	const mad = median(e.map((v) => Math.abs(v - floor)));
-	const hi = floor + Math.max(MOTION_HIGH, 6 * mad);
-	const lo = floor + Math.max(MOTION_LOW, 3 * mad);
-	const runs = [];
-	let i = 0;
-	while (i < e.length) {
-		if (e[i] <= lo) {
-			i++;
-			continue;
-		}
-		const s = i;
-		let last = i;
-		let still = 0;
-		for (i = i + 1; i < e.length; i++) if (e[i] > lo) {
-			last = i;
-			still = 0;
-		} else if (++still >= 2) break;
-		runs.push([s, last]);
-		i = last + 1;
-	}
-	const changes = [];
-	let continuous = 0;
-	let prev;
-	for (const [s, t] of runs) {
-		const run = e.slice(s, t + 1);
-		for (const [a, b] of splitOverlaps(run)) {
-			const curve = run.slice(a, b + 1);
-			const peak = Math.max(...curve);
-			const last = changes[changes.length - 1];
-			if (last && prev && (s + a - prev.to) * dt <= .25 && peak < .2 * last.peak) {
-				prev.to = s + b;
-				last.duration_ms = Math.round((prev.to - prev.from + 1) * dt * 1e3);
-				continue;
-			}
-			if (peak < hi) continue;
-			if (curve.length * dt > 2) {
-				continuous++;
-				continue;
-			}
-			const at = s + a;
-			prev = {
-				from: at,
-				to: s + b
-			};
-			changes.push({
-				start_sec: Math.round(Math.max(0, samples[at].t - dt) * 1e3) / 1e3,
-				duration_ms: Math.round(curve.length * dt * 1e3),
-				easing: classifyEasing(curve),
-				peak: Math.round(peak * 100) / 100
-			});
-		}
-	}
-	const holds = [];
-	let still = 0;
-	for (const v of [...e, Infinity]) if (v <= lo) still++;
-	else {
-		if (still * dt >= .299999) holds.push(Math.round(still * dt * 1e3));
-		still = 0;
-	}
-	const n = changes.length;
-	const counts = /* @__PURE__ */ new Map();
-	for (const c of changes) counts.set(c.easing, (counts.get(c.easing) ?? 0) + 1);
-	const winner = [
-		"ease_out",
-		"ease_in_out",
-		"spring",
-		"linear",
-		"snap"
-	].reduce((best, cls) => (counts.get(cls) ?? 0) > (best ? counts.get(best) ?? 0 : 0) ? cls : best, null);
-	const animated = changes.filter((c) => c.easing !== "snap").map((c) => c.duration_ms);
-	const durations = animated.length >= 2 ? animated : changes.map((c) => c.duration_ms);
-	const gaps = [];
-	for (let j = 1; j < n; j++) {
-		const g = changes[j].start_sec - changes[j - 1].start_sec;
-		if (g < .8) gaps.push(g * 1e3);
-	}
-	return {
-		timing: {
-			changes_analyzed: n,
-			enter_ms_median: n >= 2 ? Math.round(median(durations)) : null,
-			enter_ms_p75: n >= 2 ? Math.round(quantile(durations, .75)) : null,
-			easing: n >= 2 ? winner : null,
-			easing_share: n >= 2 && winner ? Math.round((counts.get(winner) ?? 0) / n * 1e3) / 1e3 : null,
-			stagger_ms_median: gaps.length ? Math.round(median(gaps)) : null,
-			holds: {
-				count: holds.length,
-				median_ms: holds.length ? Math.round(median(holds)) : null,
-				longest_ms: holds.length ? Math.max(...holds) : null
-			}
-		},
-		changes,
-		continuous
-	};
-}
-/** Per-interval difference energy of a video's first picture track, in one decode pass. */
-async function differenceEnergy(path) {
-	return parseLuma((await runFfmpeg([
-		"-i",
-		path,
-		"-map",
-		"0:v:0",
-		"-an",
-		"-sn",
-		"-vf",
-		`scale=160:-2,format=gray,tblend=all_mode=difference,signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG`,
-		"-f",
-		"null",
-		"-"
-	], {
-		keepStderr: true,
-		timeoutMs: 36e5
-	})).stderr);
-}
-async function measureMotionTiming(path) {
-	return motionTimingFrom(await differenceEnergy(path));
-}
-function formatMotionTiming(m) {
-	const ms = (x) => x === null ? "n/a" : `${Math.round(x)} ms`;
-	return [
-		"## Motion timing",
-		"",
-		`- Changes analyzed: ${m.changes_analyzed}`,
-		`- Entrance: median ${ms(m.enter_ms_median)}, p75 ${ms(m.enter_ms_p75)}`,
-		`- Easing: ${m.easing ? `**${m.easing}**${m.easing_share !== null ? ` (${Math.round(m.easing_share * 100)}% of changes)` : ""}` : "n/a"}`,
-		`- Stagger: ${ms(m.stagger_ms_median)}`,
-		`- Holds (still ≥ ${HOLD_MIN_S * 1e3} ms): ${m.holds.count}${m.holds.count ? ` (median ${ms(m.holds.median_ms)}, longest ${ms(m.holds.longest_ms)})` : ""}`
-	];
-}
-const STYLE_ID = /^[a-z0-9][a-z0-9-]*$/;
-const r10 = (x) => Math.round(x / 10) * 10;
-const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
-/**
-* A style pack from measured motion timing: easing and durations from the measurement, the scene
-* transition from the cut rate (≥ 3 cuts per 10 s or a snap-dominated reference: cut; else crossfade).
-*/
-function styleFromMotion(id, g) {
-	const m = g.motion_timing;
-	const easing = m?.easing ?? "ease_out";
-	const enter = clamp(r10(m?.enter_ms_median ?? 400), 0, 2e3);
-	const personality = easing === "spring" ? "playful" : easing === "snap" || enter < 300 ? "energetic" : easing === "linear" ? "precise" : enter >= 500 ? "calm" : easing === "ease_in_out" ? "precise" : "friendly";
-	const cut = easing === "snap" || g.cuts_per_10s >= 3;
-	const name = id.split("-").filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
-	return Style$2.parse({
-		id,
-		name,
-		version: 1,
-		description: "measured from a reference; structure only",
-		motion: {
-			personality,
-			easing,
-			enter_ms: enter,
-			exit_ms: clamp(r10(enter * .7), 0, 2e3),
-			stagger_ms: clamp(r10(m?.stagger_ms_median ?? enter * .4), 0, 1e3),
-			transition: cut ? "cut" : "crossfade",
-			transition_ms: cut ? 0 : clamp(r10(enter * .8), 200, 800),
-			avoid: []
-		}
-	});
-}
-/** The pack as YAML (JSON-quoted scalars; YAML is a superset of JSON). */
-function styleYaml(s) {
-	const q = (v) => JSON.stringify(v);
-	const lines = [
-		"# Measured by analyze from a reference video: motion timing only, nothing from the reference is kept.",
-		`id: ${q(s.id)}`,
-		`name: ${q(s.name)}`,
-		`version: ${s.version}`,
-		`description: ${q(s.description)}`,
-		"motion:"
-	];
-	for (const [k, v] of Object.entries(s.motion)) lines.push(`  ${k}: ${Array.isArray(v) ? `[${v.map(q).join(", ")}]` : q(v)}`);
-	return `${lines.join("\n")}\n`;
-}
-/**
-* Where write_style would write `<id>`, or an error: an id that is not a file-name id, an existing
-* file, and an id that would shadow a bundled pack are refused unless `overwrite`.
-*/
-async function styleTarget(projectDir, id, o = {}) {
-	if (!STYLE_ID.test(id)) throw new Error(`write_style id "${id}" must be lowercase letters, digits and dashes (it names styles/<id>.yaml)`);
-	const path = join(projectStylesDir(projectDir), `${id}.yaml`);
-	const warnings = [];
-	if ((await styleIds(o.stylesDir === void 0 ? findStylesDir() : o.stylesDir).catch(() => [])).includes(id)) {
-		if (!o.overwrite) throw new Error(`"${id}" is a bundled style; pick another id, or pass overwrite: true to shadow it in this project`);
-		warnings.push(`styles/${id}.yaml shadows the bundled "${id}" pack in this project`);
-	}
-	if (existsSync(path) && !o.overwrite) throw new Error(`styles/${id}.yaml already exists; pass overwrite: true to replace it`);
-	return {
-		path,
-		warnings
-	};
-}
-/** Write `<project>/styles/<id>.yaml` (refusals as in styleTarget). */
-async function writeProjectStyle(projectDir, style, o = {}) {
-	const t = await styleTarget(projectDir, style.id, o);
-	await writeFileAtomic(t.path, styleYaml(style));
-	return t;
 }
 //#endregion
 //#region src/shorts.ts
@@ -270775,7 +271412,9 @@ function renderStoryboardMarkdown(spec, ir) {
 	lines.push("|---|---|---|---|---|---|---|");
 	spec.scenes.forEach((s, i) => {
 		const p = pacing[i];
-		const visual = s.deterministic ? `${s.visual_strategy} / ${s.deterministic.kind}` : s.visual_strategy;
+		const offset = s.footage?.av_offset_ms ? ` (sound ${s.footage.av_offset_ms > 0 ? "+" : ""}${s.footage.av_offset_ms} ms)` : "";
+		const sfx = s.sfx?.length ? ` · sfx ${s.sfx.map((x) => `${x.file.replace(/^bundled:/, "")}@${x.at_sec}s`).join(", ")}` : "";
+		const visual = `${s.deterministic ? `${s.visual_strategy} / ${s.deterministic.kind}` : s.visual_strategy}${offset}${sfx}`;
 		const motionText = s.deterministic?.kind === "motion" && Array.isArray(s.deterministic.props.text) ? s.deterministic.props.text.filter((t) => typeof t === "string").join(" / ") : "";
 		const onScreen = [s.on_screen_text ?? "", motionText].filter((t) => t.trim()).join(" · ");
 		lines.push(`| ${s.id} | ${p.start_sec.toFixed(1)}–${p.end_sec.toFixed(1)}s | ${s.purpose} | ${cell(s.voiceover)} | ${cell(onScreen)} | ${visual} | ${claimCell(s.claim_refs)} |`);

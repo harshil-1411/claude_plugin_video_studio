@@ -24,6 +24,8 @@ Load references only when you reach the step that needs them:
 - `references/code-motion.md`: writing a `motion` page (contract, kit,
   lint, craft rules, banned effects, the stills loop). Load it only when
   the spec gets a `motion` scene.
+- `references/sound-design.md`: sound effects (the bundled `bundled:<id>`
+  library, when a sound lands, density per tone, levels).
 - `references/series.md`: a series bible (`series.yaml`) for episodic content, a recurring host or motif, or one look across videos.
 
 ## Safety rules (always)
@@ -238,7 +240,11 @@ points; `inputs` and `acceptance` from steps 2-3). Call `brief_validate
    - **Scene sound** (`audio {mode, native_db?, crossfade_ms?}`): `native`
      (the clip's own sound), `mix` (clip sound under the music bed),
      `music` (bed only), `mute`. `sfx: [{file, at_sec, volume_db?, license?}]`
-     adds one-shot sound effects from project files the user supplied.
+     adds one-shot sound effects: `bundled:<id>` from the plugin's CC0
+     library (read `references/sound-design.md`), or project files the user
+     supplied (record their `license`). For a recording whose sound lags or
+     leads the picture (a remote-call guest feed), set
+     `footage.av_offset_ms` (positive delays the sound).
    - With `voice.mode: "native"` (talking head): every `voiceover` stays
      `""`; pick spans on sentence boundaries from the asset transcript;
      captions come from it automatically.

@@ -52,6 +52,8 @@ are strict: unknown keys are errors.
 | `target_duration_sec` | yes | > 0, ≤ 600 |
 | `language` | yes | BCP-47 |
 | `tone` | yes | list of strings |
+| `tone_preset` | no | nearest preset from `research-specs/tones.yaml`: `polished`, `playful` (default), `deadpan`, `cinematic`, `energetic`, `app-store`, `parody`. Sets pacing, transitions, sound density and bed level; free-text direction stays in `tone` |
+| `product_flow` | for product templates | 2–4 `{step, evidence_ref?}`: the product in use (entry → key action → result); the centrepiece scenes show these steps |
 | `desired_action` | yes | what the viewer does after watching |
 | `key_messages` | no | 2-4 grounded points |
 | `hook_candidates` | yes, ≥ 1 (write ≥ 3) | `{text, mechanism, scores}` |
@@ -60,7 +62,7 @@ are strict: unknown keys are errors.
 | `chosen_hook` | yes | exact text of one candidate |
 | `template` | no | template id from `template_list`, e.g. `devtool-launch`, `text-over-music` |
 | `inputs` | no | answers to the template's `inputs[]`, `{input id: string}` (text, choice, asset id or project file); a required input with no answer and no default is a `brief_validate` error |
-| `acceptance` | no | measurable checks, copied to the spec: `min_changes_per_sec` (0–10), `max_frozen_pct` (0–100, default 15), `max_static_sec`, `hold_ms` (a deliberate hold, e.g. 400), `loop`. Vague asks ("go all out") become these numbers; note it in `assumptions` |
+| `acceptance` | no | measurable checks, copied to the spec: `min_changes_per_sec` (0–10), `max_frozen_pct` (0–100, default 15), `max_static_sec`, `hold_ms` (a deliberate hold, e.g. 400), `min_moving_pct` (share of the runtime where the picture moves at all; smooth motion counts), `loop`. Vague asks ("go all out") become these numbers; note it in `assumptions` |
 | `assumptions` | yes (may be `[]`) | `{field, value, reason}`; `value` is a string |
 
 ## VideoSpec (`project/video-spec.json`)
@@ -82,7 +84,7 @@ Top level:
 | `acceptance` | no | as in the brief; `spec_scaffold` copies it (the brief's values win over the template's `pacing.min_changes_per_sec`/`max_frozen_pct`). QA and lint (`acceptance_unmet`) hold the render to it |
 | `audio` | no | `{music?: {file, volume_db?, duck_db?, fade_in_ms?, fade_out_ms?, loop?, start_sec?, license?, synth?}, beat_sync?: {enabled, tolerance_ms?, snap?}}`. `beat_sync` snaps cuts to beats of the bed at render time (default ±250 ms), reported as timing adjustments; `snap: "downbeat"` only to bar starts. `file`: `bundled:ambient` / `bundled:lofi` / `bundled:upbeat` / `bundled:minimal` (CC0, bundled), `synth:pulse` (120 BPM) / `synth:lofi` (80) / `synth:ambient` (60) / `synth:drive` (128) (synthesized locally, CC0, exact beat grid; `synth {bpm?, key?, progression?, drop_bar?, seed?}` overrides the preset) or a path relative to the project; a user file needs `license {id, source?, attribution?}` (e.g. `CC0-1.0`, `CC-BY-4.0`, `user-owned`) and only a track the user has the rights to |
 | `captions` | yes | `{preset, burn_in, position?}`; preset from brand `video.caption_preset` or the template, else `minimal`; `burn_in: true` for short-form narrated videos, `false` with `voice.mode: none` (no speech to caption) |
-| `cover` | no (write it) | `{headline, focal_time_sec}`: thumbnail text ≤ 6 words, different from the hook voiceover; `focal_time_sec` inside the hook scene |
+| `cover` | no (write it) | `{headline, focal_time_sec?, bake_first_frame?}`: thumbnail text ≤ 6 words, different from the hook voiceover; `focal_time_sec` inside the hook scene, or omit it and the engine picks the longest settled hold (hook first, then payoff). `bake_first_frame: true` puts the cover on frame 0 of every video, so Slack, X and Discord previews show it (not with `master.loop`) |
 | `publish` | no (write it) | map target id → `{title?, post_caption, hashtags?, ai_disclosure?}`; one entry per target; `title` is the video title for platforms that have one (YouTube; lint `title_length` suggests 24–58 characters, a heuristic); hashtags look like `#devtools`; the post caption is not the voiceover |
 | `scenes` | yes, ≥ 1 | see below |
 
@@ -100,9 +102,9 @@ Scene:
 | `visual_requirements` | yes | object; `continuity_refs` required (may be `[]`); optional `subject`, `camera`, `style`, `modality` (`video`/`image`/`none`), `realism` (`low`/`medium`/`high`), `character_reference` & `audio_generation` (`required`/`optional`/`none`), `max_cost_usd` (≥ 0), `data_policy` (`external-ok`/`local-only`), `preference` (list of `continuity`/`quality`/`speed`/`cost`) |
 | `claim_refs` | yes (may be `[]`) | ContentIR `evidence[].ref` or `claims[].id`, copied exactly |
 | `transition` | no | `cut`, `crossfade`, `fade_black`, `slide`, `zoom`, `whip` |
-| `footage` | if `user_asset` / `screen_capture` | `{asset, in_sec, out_sec?, fit?, focus?, speed?, loop?}`: `asset` is a ContentIR video (or image) asset id; `out_sec` defaults to `in_sec` + duration × speed; `fit` `cover` (default) / `contain` / `blur_pad`; `focus {x, y}` 0–1 crop centre; `speed` 0.25–4; `loop` repeats a short clip (default: hold the last frame); `redact: [{x, y, w, h, from_sec?, to_sec?, mode?: blur|box, label?}]` hides private regions (inboxes, names, dashboards, bystanders) in **source-frame** fractions and asset seconds, before the crop. A `deterministic` block of kind `lower_third`, `kinetic_text`, `typography`, `quote` or `stat` is drawn over it |
+| `footage` | if `user_asset` / `screen_capture` | `{asset, in_sec, out_sec?, fit?, focus?, speed?, loop?}`: `asset` is a ContentIR video (or image) asset id; `out_sec` defaults to `in_sec` + duration × speed; `fit` `cover` (default) / `contain` / `blur_pad`; `focus {x, y}` 0–1 crop centre; `speed` 0.25–4; `loop` repeats a short clip (default: hold the last frame); `redact: [{x, y, w, h, from_sec?, to_sec?, mode?: blur|box, label?}]` hides private regions (inboxes, names, dashboards, bystanders) in **source-frame** fractions and asset seconds, before the crop; `av_offset_ms` (−2000–2000) shifts the clip's sound against its picture (positive delays it) for recordings with baked-in delay. A `deterministic` block of kind `lower_third`, `kinetic_text`, `typography`, `quote` or `stat` is drawn over it |
 | `audio` | no (footage scenes) | `{mode, native_db?, crossfade_ms?}`; `mode`: `native` (clip sound, default for footage), `mix` (clip sound under the bed), `music` (bed only), `mute`; `native_db` −60…12; `crossfade_ms` ≤ 3000 into this scene |
-| `sfx` | no | up to 8 `{file, at_sec, volume_db?, license?}`: project-relative one-shots played `at_sec` into the scene; record `license` |
+| `sfx` | no | up to 8 `{file, at_sec, volume_db?, license?}`: one-shots played `at_sec` into the scene (the sound's peak lands there). `file` is `bundled:<id>` (the plugin's synthesized CC0 library, `sfx/catalog.json`; `volume_db` defaults to the sound's `default_db`) or a project-relative file with its `license` |
 
 ## Ref formats (as the extractors write them)
 

@@ -83,6 +83,11 @@ export interface AudioLayer {
   gain_db?: number;
   /** Loop the span to fill the slot (needs `span_sec`). */
   loop?: boolean;
+  /**
+   * Silence before the layer, in ms of source time (applied before `tempo`): a clip's sound played
+   * late against its picture. The slot length is kept (the tail is cut).
+   */
+  delay_ms?: number;
 }
 
 export interface SceneAudioSlot {
@@ -223,6 +228,7 @@ export async function mixSceneAudio(
         fmt,
         ...(span !== undefined ? [`atrim=end_sample=${span}`, "asetpts=N/SR/TB"] : []),
         ...(l.loop && span !== undefined ? [`aloop=loop=-1:size=${span}`] : []),
+        ...(l.delay_ms && l.delay_ms > 0 ? [`adelay=delays=${toS(l.delay_ms)}S:all=1`] : []),
         ...atempoChain(l.tempo ?? 1),
         ...(l.gain_db ? [`volume=${l.gain_db}dB`] : []),
         // atempo may change the format; normalise again before padding.

@@ -4,6 +4,7 @@ import { checkSpecTargets, findPlatformSpecsDir, loadContracts } from "@video-st
 import { findStylesDir, formatMotionFinding, getStyle, loadMotionPage, styleIds } from "@video-studio/renderer";
 import { ContentIR, VideoSpec, closestMatches, parseYamlOrJson, validateVideoSpecSemantics, voiceMode } from "@video-studio/schema";
 import { SeriesLoadError, entryFiles, loadSeries, resolveSeriesFile, seriesEntries } from "./series.js";
+import { BUNDLED_PREFIX, bundledSfxIds, findSfxDir, isBundledSfx, loadSfxCatalog } from "./sfx.js";
 
 export interface ValidationIssue {
   path: string;
@@ -11,7 +12,7 @@ export interface ValidationIssue {
   /** Concrete instruction for resolving the issue. */
   fix: string;
   /** Which stage found it. */
-  stage: "syntax" | "schema" | "semantic" | "content-ir" | "platform" | "style" | "motion" | "series";
+  stage: "syntax" | "schema" | "semantic" | "content-ir" | "platform" | "style" | "motion" | "series" | "sfx";
 }
 
 export interface SpecValidationResult {
@@ -48,6 +49,7 @@ export async function validateSpecFile(
   platformSpecsDir: string | null = findPlatformSpecsDir(),
   stylesDir: string | null = findStylesDir(),
   projectDir: string = dirname(dirname(specPath)),
+  sfxDir: string | null = findSfxDir(),
 ): Promise<SpecValidationResult> {
   const result: SpecValidationResult = {
     ok: false,
@@ -123,11 +125,39 @@ export async function validateSpecFile(
   const series = await checkSeries(parsed.data, projectDir, stylesDir);
   result.errors.push(...series.errors);
   result.warnings.push(...series.warnings);
+  result.errors.push(...checkBundledSfx(parsed.data, sfxDir));
   const motion = await checkMotionPages(parsed.data, projectDir);
   result.errors.push(...motion.errors);
   result.warnings.push(...motion.warnings);
   result.ok = result.errors.length === 0;
   return result;
+}
+
+/**
+ * Every `bundled:<id>` sound effect names a sound in the plugin's sfx/ catalogue (the fix lists the
+ * closest ids), so a typo fails before the render instead of in the audio mix.
+ */
+export function checkBundledSfx(spec: VideoSpec, sfxDir: string | null = findSfxDir()): ValidationIssue[] {
+  const refs = spec.scenes.flatMap((s, i) => (s.sfx ?? []).map((fx, j) => ({ s, i, j, file: fx.file }))).filter((r) => isBundledSfx(r.file));
+  if (!refs.length) return [];
+  const catalog = loadSfxCatalog(sfxDir);
+  const ids = bundledSfxIds(catalog);
+  const errors: ValidationIssue[] = [];
+  for (const r of refs) {
+    if (ids.includes(r.file)) continue;
+    const near = closestMatches(r.file.slice(BUNDLED_PREFIX.length), ids.map((x) => x.slice(BUNDLED_PREFIX.length)));
+    errors.push({
+      path: `scenes.${r.i}.sfx.${r.j}.file`,
+      stage: "sfx",
+      message: catalog ? `scene ${r.s.id}: "${r.file}" is not a bundled sound; available: ${ids.join(", ")}` : `scene ${r.s.id}: "${r.file}" needs the plugin's sfx/ catalogue, which was not found`,
+      fix: catalog
+        ? near.length
+          ? `use ${near.map((n) => `"${BUNDLED_PREFIX}${n}"`).join(" or ")}, or a project-relative audio file`
+          : "use one of the available ids, or a project-relative audio file"
+        : "reinstall the plugin (sfx/catalog.json is missing), or use a project-relative audio file",
+    });
+  }
+  return errors;
 }
 
 /**

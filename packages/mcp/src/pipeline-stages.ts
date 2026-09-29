@@ -13,7 +13,8 @@
  *   e.  stageCaptions        word timeline, sound-event cues, caption set
  *   e'. stageSceneAudio      per-scene audio and the music bed's speech/mute spans
  *   f.  stageAssembly        logo overlay, assembly key, clean master + reel
- *   g.  stageCover           cover or thumbnail
+ *   g.  stageCover           cover or thumbnail (automatic cover time from the master's holds)
+ *   g'. stagePoster          cover.bake_first_frame: the cover on frame 0 of the reel
  *       stageRenderState     tool versions, fonts, the persisted RenderState
  *
  * QA and export (f'., g'.) stay in pipeline.ts next to runQa/exportProject.
@@ -22,7 +23,7 @@
  * (renderProjectLocked) passes them on explicitly. The only shared mutable state is
  * `run.warnings`, which stages append to in pipeline order.
  */
-import { copyFile, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalJson, hashFile, projectPaths, readJson, resolveDataDir, sha256Hex, writeJsonAtomic } from "@video-studio/core";
 import {
@@ -35,6 +36,7 @@ import {
   ffmpegFeatures,
   makeThumbnail,
   toTranscript,
+  transitionSeconds,
   writeCaptionSet,
 } from "@video-studio/media";
 import {
@@ -76,7 +78,9 @@ import {
 import { layoutZones } from "@video-studio/platforms";
 import { type BackendChoice, type BackendSet, type SynthesizeSpecResult, defaultBackends, selectBackend, synthesizeSpec } from "@video-studio/voice";
 import { type PolicySummary, recordSpend, resolveVoicePolicy, summarizePolicy } from "./policy.js";
-import { COVER_VERSION, renderCover } from "./cover.js";
+import { COVER_AUTO_VERSION, COVER_VERSION, type CoverScene, autoCoverTime, renderCover } from "./cover.js";
+import { differenceEnergy, holdSpans } from "./motion-timing.js";
+import { POSTER_VERSION, bakePoster } from "./poster.js";
 import { type ResolvedMusic, resolveMusic } from "./music.js";
 import { lockFonts } from "./lock.js";
 import { projectGlossary } from "./glossary.js";
@@ -909,7 +913,9 @@ export async function stageAssembly(
   const thumbnail = join(rdir, "thumbnail.png");
   const statePath = join(rdir, "render-state.json");
   const prev = await readJson<RenderState>(statePath).catch(() => undefined);
-  const reuse = prev?.assembly_key === assemblyKey && (await exists(master)) && (await exists(reel));
+  // A baked reel (stagePoster) is only reusable with its unbaked original beside it.
+  const reuse =
+    prev?.assembly_key === assemblyKey && (await exists(master)) && (await exists(reel)) && (!prev.poster_baked || (await exists(join(rdir, UNBAKED_REEL))));
   if (!reuse) {
     signal?.throwIfAborted();
     progress({ stage: "assemble", message: `assembling ${segments.length} clip(s) at ${target.width}x${target.height} ${target.fps} fps` });
@@ -959,7 +965,9 @@ export async function stageAssembly(
 
 /**
  * g. Cover (spec.cover: headline frame at the focal time) or thumbnail at the hook scene's
- * midpoint, from the clean master; reused with the assembly when its key is unchanged.
+ * midpoint, from the clean master; reused with the assembly when its key is unchanged. A cover
+ * without `focal_time_sec` is taken at the automatic time (autoCoverTime over the master's holds),
+ * which is resolved only when the cover is (re)composed and recorded in `cover.at_ms`.
  */
 export async function stageCover(
   run: RenderRun,
@@ -972,6 +980,7 @@ export async function stageCover(
     zones: ReturnType<typeof layoutZones>;
     contracts: PlatformContract[];
     asm: AssemblyStage;
+    fps: number;
   },
 ): Promise<{ thumbnailKey: string; coverState: RenderState["cover"] }> {
   const { root, env, quality, signal, progress, warnings } = run;
@@ -982,12 +991,19 @@ export async function stageCover(
   const hookIdx = Math.max(0, planScenes.findIndex((s) => s.purpose === "hook"));
   const hookStart = placements[hookIdx]!.scene_start_ms;
   const hookMid = Math.round(hookStart + slotMs[hookIdx]! / 2);
-  const coverAt = spec.cover?.focal_time_sec != null ? Math.round(spec.cover.focal_time_sec * 1000) : hookMid;
+  const focalMs = spec.cover?.focal_time_sec != null ? Math.round(spec.cover.focal_time_sec * 1000) : undefined;
+  // Automatic cover time: scene windows on the reel's clock (the master's frames are keyed by the assembly).
+  const coverScenes: CoverScene[] = planScenes.map((s, i) => {
+    const tr = input.asm.segments[i]?.transition_in;
+    const trMs = tr ? Math.round(transitionSeconds(tr.ms, slotMs[i]!, input.fps) * 1000) : 0;
+    return { start_ms: Math.round(placements[i]!.scene_start_ms), duration_ms: slotMs[i]!, purpose: s.purpose, ...(trMs ? { transition_ms: trMs } : {}) };
+  });
+  const auto = spec.cover && focalMs === undefined;
   const thumbnailKey = sha256Hex(
     canonicalJson({
       v: COVER_VERSION,
       assembly: assemblyKey,
-      at: coverAt,
+      at: auto ? { auto: COVER_AUTO_VERSION, scenes: coverScenes } : (focalMs ?? hookMid),
       cover: spec.cover ?? null,
       ...(spec.cover ? { zones, tokens, fonts: fonts.present, contracts: contracts.map((c) => `${c.id}@${c.contract_version}`) } : {}),
     }),
@@ -998,6 +1014,13 @@ export async function stageCover(
     coverState = prev.cover;
   } else if (spec.cover) {
     progress({ stage: "thumbnail", message: "composing cover" });
+    let coverAt = focalMs ?? hookMid;
+    if (auto) {
+      const frameMs = 1000 / input.fps;
+      const picked = autoCoverTime(holdSpans(await differenceEnergy(master)), coverScenes, frameMs);
+      if (picked === null) warnings.push(`cover: no settled hold found for the automatic cover time; used the hook scene's midpoint (${(hookMid / 1000).toFixed(2)}s). Set cover.focal_time_sec to choose.`);
+      coverAt = picked ?? hookMid;
+    }
     const c = await renderCover({ master, outDir: rdir, atMs: coverAt, headline: spec.cover.headline, zones, tokens, contracts, env: env as NodeJS.ProcessEnv, ...(signal ? { signal } : {}) });
     warnings.push(...c.warnings);
     coverState = {
@@ -1018,6 +1041,42 @@ export async function stageCover(
     for (const name of ["cover.jpg", "cover-square-preview.jpg"]) await rm(join(rdir, name), { force: true });
   }
   return { thumbnailKey, coverState };
+}
+
+// ------------------------------------------------------------------------------------ g'. poster
+
+/** The assembled reel before its poster was baked, kept beside reel.mp4 so the poster can be re-baked or dropped without re-assembling. */
+export const UNBAKED_REEL = "reel-unbaked.mp4";
+
+/**
+ * g'. Poster (spec.cover.bake_first_frame): the composed cover replaces frame 0 of renders/<q>/reel.mp4,
+ * before QA and before the target packages copy the reel. The assembled reel moves to
+ * reel-unbaked.mp4 and is the bake's input, so a changed cover re-bakes from it and dropping the
+ * flag restores it. Whenever reel-unbaked.mp4 exists it is the assembled reel of the current
+ * assembly (a fresh assembly removes a stale one), so an interrupted run never bakes twice.
+ * Cached by the assembly, the cover (thumbnail key) and POSTER_VERSION. The clean master is never touched.
+ */
+export async function stagePoster(
+  run: RenderRun,
+  input: { spec: VideoSpec; tp: TargetPlan; asm: AssemblyStage; cover: { thumbnailKey: string; coverState: RenderState["cover"] } },
+): Promise<{ posterKey?: string }> {
+  const { root, quality, signal, progress } = run;
+  const { assemblyKey, reuse, prev, reel, thumbnail } = input.asm;
+  const unbaked = join(renderDir(root, quality), UNBAKED_REEL);
+  if (!reuse) await rm(unbaked, { force: true });
+  const haveUnbaked = await exists(unbaked);
+  if (!input.spec.cover?.bake_first_frame || !input.cover.coverState) {
+    if (haveUnbaked) await rename(unbaked, reel);
+    return {};
+  }
+  const posterKey = sha256Hex(canonicalJson({ v: POSTER_VERSION, assembly: assemblyKey, cover: input.cover.thumbnailKey }));
+  if (reuse && haveUnbaked && prev?.poster_key === posterKey && (await exists(reel))) return { posterKey };
+  signal?.throwIfAborted();
+  progress({ stage: "thumbnail", message: "baking the cover into frame 0" });
+  if (!haveUnbaked) await rename(reel, unbaked);
+  const { encodePreset } = input.tp;
+  await bakePoster({ reel: unbaked, image: thumbnail, out: reel, ...(encodePreset ? { encode: { preset: encodePreset } } : {}), ...(signal ? { signal } : {}) });
+  return { posterKey };
 }
 
 // ------------------------------------------------------------------------------------ render state

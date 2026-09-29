@@ -1,0 +1,409 @@
+{
+  "version": 1,
+  "generator": "scripts/generate-sfx.mjs",
+  "ffmpeg": "8.1.2",
+  "license": {
+    "id": "CC0-1.0",
+    "source": "synthesized by video-studio with ffmpeg aevalsrc (scripts/generate-sfx.mjs); no samples or third-party recordings"
+  },
+  "labels": {
+    "character": "warm: energy below 400 Hz >= 50%; bright: energy above 2 kHz >= 30%; else balanced",
+    "hf_risk": "energy above 4 kHz: low < 3% <= med < 12% <= high",
+    "default_db": "gain that brings the loudest 50 ms to -28 dBFS (about 10 dB under narration), -2 dB for med and -4 dB for high hf_risk, within -30..-10"
+  },
+  "sounds": [
+    {
+      "id": "whoosh-soft",
+      "title": "Soft whoosh",
+      "family": "whoosh",
+      "file": "whoosh-soft.wav",
+      "duration_ms": 900,
+      "peak_ms": 463,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "transition",
+        "reveal"
+      ],
+      "default_db": -17,
+      "sha256": "dec0dad4375e8330060d590f02a69bc9e23c2b2c61bfa4a9e6129146bc69d0d0",
+      "measured": {
+        "low_share": 0.062,
+        "high_share": 0.049,
+        "hf_share": 0.001,
+        "short_rms_dbfs": -10.9
+      }
+    },
+    {
+      "id": "whoosh-fast",
+      "title": "Fast whoosh",
+      "family": "whoosh",
+      "file": "whoosh-fast.wav",
+      "duration_ms": 500,
+      "peak_ms": 219,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "transition"
+      ],
+      "default_db": -16,
+      "sha256": "f181088c7aa3d3b2f991c2b67a90955bfc0ea51e39c9a3a4f284abc2a03c84a6",
+      "measured": {
+        "low_share": 0.003,
+        "high_share": 0.204,
+        "hf_share": 0.024,
+        "short_rms_dbfs": -11.8
+      }
+    },
+    {
+      "id": "swipe",
+      "title": "Swipe",
+      "family": "whoosh",
+      "file": "swipe.wav",
+      "duration_ms": 400,
+      "peak_ms": 117,
+      "character": "bright",
+      "hf_risk": "med",
+      "uses": [
+        "transition",
+        "click"
+      ],
+      "default_db": -19,
+      "sha256": "a40a2bf77461cfacd3f476931e29981f872c5617a9ade38cc2cc15d54f6472c5",
+      "measured": {
+        "low_share": 0,
+        "high_share": 0.431,
+        "hf_share": 0.113,
+        "short_rms_dbfs": -11.4
+      }
+    },
+    {
+      "id": "riser-1s",
+      "title": "Riser, 1 s",
+      "family": "riser",
+      "file": "riser-1s.wav",
+      "duration_ms": 1200,
+      "peak_ms": 982,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "reveal",
+        "transition"
+      ],
+      "default_db": -18,
+      "sha256": "ae1e135b25c38c87b7895961b39ddbeddf53ee7cd5c0f15f5c8d33529f1d035e",
+      "measured": {
+        "low_share": 0.007,
+        "high_share": 0.059,
+        "hf_share": 0.006,
+        "short_rms_dbfs": -9.9
+      }
+    },
+    {
+      "id": "riser-2s",
+      "title": "Riser, 2 s",
+      "family": "riser",
+      "file": "riser-2s.wav",
+      "duration_ms": 2200,
+      "peak_ms": 1971,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "reveal",
+        "transition"
+      ],
+      "default_db": -18,
+      "sha256": "9c6d92f9c073a9afbdaa5dafe5238dd56d45b7d2ded1f05583f9e4913bdc06c5",
+      "measured": {
+        "low_share": 0.038,
+        "high_share": 0.045,
+        "hf_share": 0.004,
+        "short_rms_dbfs": -10.1
+      }
+    },
+    {
+      "id": "hit-soft",
+      "title": "Soft hit",
+      "family": "hit",
+      "file": "hit-soft.wav",
+      "duration_ms": 900,
+      "peak_ms": 9,
+      "character": "warm",
+      "hf_risk": "low",
+      "uses": [
+        "accent",
+        "reveal",
+        "count"
+      ],
+      "default_db": -20,
+      "sha256": "3a53e14345fcbe5995caf247e203b0add16fd7438f75742ee3cc00d065ceeb26",
+      "measured": {
+        "low_share": 0.967,
+        "high_share": 0,
+        "hf_share": 0,
+        "short_rms_dbfs": -7.6
+      }
+    },
+    {
+      "id": "hit-deep",
+      "title": "Deep hit",
+      "family": "hit",
+      "file": "hit-deep.wav",
+      "duration_ms": 1800,
+      "peak_ms": 23,
+      "character": "warm",
+      "hf_risk": "low",
+      "uses": [
+        "accent",
+        "reveal",
+        "outro"
+      ],
+      "default_db": -22,
+      "sha256": "17dec657412e9ac770b6629300d7f34ac458ddca89f54d8e42b5861c9e337b31",
+      "measured": {
+        "low_share": 0.998,
+        "high_share": 0,
+        "hf_share": 0,
+        "short_rms_dbfs": -6.2
+      }
+    },
+    {
+      "id": "pop",
+      "title": "Pop",
+      "family": "ui",
+      "file": "pop.wav",
+      "duration_ms": 250,
+      "peak_ms": 7,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "click",
+        "reveal",
+        "count"
+      ],
+      "default_db": -20,
+      "sha256": "f795bd62c96f84366a88f652002108cb79e480f781c84a9fda4b9c4c3a4d6775",
+      "measured": {
+        "low_share": 0.033,
+        "high_share": 0.001,
+        "hf_share": 0,
+        "short_rms_dbfs": -8.1
+      }
+    },
+    {
+      "id": "click",
+      "title": "Click",
+      "family": "ui",
+      "file": "click.wav",
+      "duration_ms": 80,
+      "peak_ms": 5,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "click"
+      ],
+      "default_db": -10,
+      "sha256": "2573308fa6888308a5f0c53154b09b8349690c6889518bfcd5ebe5d9844009e4",
+      "measured": {
+        "low_share": 0,
+        "high_share": 0.259,
+        "hf_share": 0.027,
+        "short_rms_dbfs": -19.3
+      }
+    },
+    {
+      "id": "tick",
+      "title": "Tick",
+      "family": "ui",
+      "file": "tick.wav",
+      "duration_ms": 100,
+      "peak_ms": 5,
+      "character": "bright",
+      "hf_risk": "high",
+      "uses": [
+        "count",
+        "click"
+      ],
+      "default_db": -16,
+      "sha256": "9d88641058e350661fd9fd865836ed10b1ce242be83a5600623a3e782e3e5fe3",
+      "measured": {
+        "low_share": 0,
+        "high_share": 0.771,
+        "hf_share": 0.123,
+        "short_rms_dbfs": -16
+      }
+    },
+    {
+      "id": "key-1",
+      "title": "Key press 1",
+      "family": "type",
+      "file": "key-1.wav",
+      "duration_ms": 140,
+      "peak_ms": 5,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "type"
+      ],
+      "default_db": -11,
+      "sha256": "2313750a79163106b30b5efcf53e76920c72ad77058d553a31bf952490f36bc1",
+      "measured": {
+        "low_share": 0.27,
+        "high_share": 0.081,
+        "hf_share": 0.008,
+        "short_rms_dbfs": -17.3
+      }
+    },
+    {
+      "id": "key-2",
+      "title": "Key press 2",
+      "family": "type",
+      "file": "key-2.wav",
+      "duration_ms": 140,
+      "peak_ms": 5,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "type"
+      ],
+      "default_db": -10,
+      "sha256": "c643d4ce31991b4c9e83e672dbf321a60a288abe04a7274c2c91f291e265e711",
+      "measured": {
+        "low_share": 0.146,
+        "high_share": 0.092,
+        "hf_share": 0.013,
+        "short_rms_dbfs": -17.5
+      }
+    },
+    {
+      "id": "key-3",
+      "title": "Key press 3",
+      "family": "type",
+      "file": "key-3.wav",
+      "duration_ms": 140,
+      "peak_ms": 6,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "type"
+      ],
+      "default_db": -11,
+      "sha256": "4b1f974d7a27fe4982bda95b958ef1f10ed92b80a08ff7cf72e3ca574794a72b",
+      "measured": {
+        "low_share": 0.409,
+        "high_share": 0.073,
+        "hf_share": 0.005,
+        "short_rms_dbfs": -17.1
+      }
+    },
+    {
+      "id": "chime",
+      "title": "Chime",
+      "family": "chime",
+      "file": "chime.wav",
+      "duration_ms": 2000,
+      "peak_ms": 8,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "reveal",
+        "accent"
+      ],
+      "default_db": -21,
+      "sha256": "932bfa4b30504e488a05e955b3e5e20d42cd830e13f70425f4d64b927d8a9a57",
+      "measured": {
+        "low_share": 0.002,
+        "high_share": 0.017,
+        "hf_share": 0,
+        "short_rms_dbfs": -7.2
+      }
+    },
+    {
+      "id": "bell-outro",
+      "title": "Outro bell",
+      "family": "chime",
+      "file": "bell-outro.wav",
+      "duration_ms": 2200,
+      "peak_ms": 131,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "outro"
+      ],
+      "default_db": -20,
+      "sha256": "b50d70f3a65b634e56d7ae3d02671ff5648eb0bec44c88845222892bcc47279e",
+      "measured": {
+        "low_share": 0.042,
+        "high_share": 0.001,
+        "hf_share": 0,
+        "short_rms_dbfs": -7.8
+      }
+    },
+    {
+      "id": "blip-up",
+      "title": "Blip up",
+      "family": "ui",
+      "file": "blip-up.wav",
+      "duration_ms": 180,
+      "peak_ms": 9,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "reveal",
+        "click"
+      ],
+      "default_db": -20,
+      "sha256": "df850520dd7921d4450dda59232566ad8737934aa284903cf394df8f2fbfda5d",
+      "measured": {
+        "low_share": 0.024,
+        "high_share": 0.003,
+        "hf_share": 0,
+        "short_rms_dbfs": -7.5
+      }
+    },
+    {
+      "id": "blip-down",
+      "title": "Blip down",
+      "family": "ui",
+      "file": "blip-down.wav",
+      "duration_ms": 180,
+      "peak_ms": 8,
+      "character": "balanced",
+      "hf_risk": "low",
+      "uses": [
+        "click",
+        "outro"
+      ],
+      "default_db": -21,
+      "sha256": "e734bebb9123e6fc52c11cbfcff420a23c4b7450b4f2b967c44ceb2918ec54e8",
+      "measured": {
+        "low_share": 0.007,
+        "high_share": 0.009,
+        "hf_share": 0,
+        "short_rms_dbfs": -7.3
+      }
+    },
+    {
+      "id": "glitch",
+      "title": "Glitch",
+      "family": "glitch",
+      "file": "glitch.wav",
+      "duration_ms": 450,
+      "peak_ms": 7,
+      "character": "bright",
+      "hf_risk": "high",
+      "uses": [
+        "transition",
+        "accent"
+      ],
+      "default_db": -18,
+      "sha256": "d3f729e24c577ebaedcb0a02aa94922a51b97da23b06f360631d2db55c4940f2",
+      "measured": {
+        "low_share": 0.32,
+        "high_share": 0.435,
+        "hf_share": 0.178,
+        "short_rms_dbfs": -14.2
+      }
+    }
+  ]
+}

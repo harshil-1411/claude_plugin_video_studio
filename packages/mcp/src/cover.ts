@@ -64,6 +64,51 @@ export interface CoverResult {
   warnings: string[];
 }
 
+/** Bump when autoCoverTime picks differently (part of the thumbnail key when the focal time is automatic). */
+export const COVER_AUTO_VERSION = 1;
+/** Scene start skipped when picking the cover time: the incoming transition and the entrance settle. */
+export const COVER_SKIP_MS = 500;
+/** Shortest usable hold (after trimming) for an automatic cover time. */
+export const COVER_MIN_HOLD_MS = 300;
+/** Scene purposes preferred after the hook: where the payoff, result or call to action sits. */
+export const COVER_PAYOFF_PURPOSES: ReadonlySet<string> = new Set(["payoff", "reveal", "cta"]);
+
+/** A scene on the reel's clock, for the automatic cover time. */
+export interface CoverScene {
+  start_ms: number;
+  duration_ms: number;
+  purpose: string;
+  /** Length of the transition blended over this scene's start (ms), if any. */
+  transition_ms?: number;
+}
+
+/**
+ * Automatic cover time (spec.cover without `focal_time_sec`): the midpoint of the longest settled
+ * hold (a still stretch: text fully in, nothing moving). Each scene's first COVER_SKIP_MS (or its
+ * incoming transition, if longer; at most half the scene) and its last frame are left out, so a
+ * crossfade or an entrance is never picked. Holds in the hook scene win, then the payoff/cta
+ * scenes, then any scene; a hold must keep COVER_MIN_HOLD_MS after trimming. Ties go to the
+ * earlier hold. Null when no hold qualifies (the caller falls back to the hook midpoint).
+ */
+export function autoCoverTime(holds: readonly { start_ms: number; end_ms: number }[], scenes: readonly CoverScene[], frameMs: number): number | null {
+  type Cand = { tier: number; start: number; end: number };
+  const cands: Cand[] = [];
+  for (const sc of scenes) {
+    const skip = Math.min(Math.max(COVER_SKIP_MS, sc.transition_ms ?? 0), sc.duration_ms / 2);
+    const from = sc.start_ms + skip;
+    const to = sc.start_ms + sc.duration_ms - frameMs;
+    const tier = sc.purpose === "hook" ? 0 : COVER_PAYOFF_PURPOSES.has(sc.purpose) ? 1 : 2;
+    for (const h of holds) {
+      const start = Math.max(from, h.start_ms);
+      const end = Math.min(to, h.end_ms);
+      if (end - start >= COVER_MIN_HOLD_MS) cands.push({ tier, start, end });
+    }
+  }
+  if (!cands.length) return null;
+  const best = cands.reduce((a, c) => (c.tier < a.tier || (c.tier === a.tier && c.end - c.start > a.end - a.start) ? c : a));
+  return Math.round((best.start + best.end) / 2);
+}
+
 /** The largest `aspect` rect inside a W×H frame, anchored centre/top/bottom. */
 export function cropRect(width: number, height: number, aspect: AspectRatio, anchor: "center" | "top" | "bottom" = "center"): PxRect {
   const [aw, ah] = aspect.split(":").map(Number) as [number, number];

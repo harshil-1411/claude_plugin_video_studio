@@ -16,6 +16,7 @@ import {
   resolveTargets,
   voiceMode,
   MIN_CUE_GAP_MS,
+  type ClicheRules,
   type CreativeBrief,
   type DeterministicKind,
   type TitleRules,
@@ -34,12 +35,14 @@ import {
   getStyle,
   languageScript,
   loadMotionPage,
+  resolveTokens,
   scriptsIn,
   subjectEdgeHits,
 } from "@video-studio/renderer";
 import { loadBrief } from "./pipeline-core.js";
 import { socialCopyParts } from "./social-copy.js";
-import { findResearchSpecsDir, loadTitleRules } from "./research-specs.js";
+import { findResearchSpecsDir, loadClicheRules, loadTitleRules } from "./research-specs.js";
+import { type SfxCatalog, type SfxCatalogSound, findSfxDir, isBundledSfx, loadSfxCatalog } from "./sfx.js";
 import { loadSeries } from "./series.js";
 import { projectSpecPaths } from "./spec-validate.js";
 
@@ -155,8 +158,10 @@ export interface LintOptions {
   specsDir?: string | null;
   /** styles directory (tests); default: the bundled one. */
   stylesDir?: string | null;
-  /** research-specs directory (tests); default: the bundled one. None: the title lint is skipped. */
+  /** research-specs directory (tests); default: the bundled one. None: the title and cliché lints are skipped. */
   researchSpecsDir?: string | null;
+  /** sfx/ catalogue directory (tests); default: the bundled one. */
+  sfxDir?: string | null;
 }
 
 /** The parts of renders/<quality>/render-state.json lint reads (written by the pipeline). */
@@ -667,7 +672,12 @@ function checkCover(spec: VideoSpec, contracts: readonly PlatformContract[], ren
   }
 }
 
-function checkBanned(spec: VideoSpec, brand: Brand | undefined, out: LintFinding[]): void {
+/**
+ * brand_banned_phrase: brand `voice.banned_phrases` in the spec's text and, when targets have no
+ * `publish` override, in the generated social-copy draft (skipped for a phrase the spec already
+ * shows: fixing the spec fixes the draft).
+ */
+export function checkBanned(spec: VideoSpec, brand: Brand | undefined, out: LintFinding[], draft?: GeneratedCopy): void {
   const banned = brand?.voice?.banned_phrases ?? [];
   if (banned.length === 0) return;
   const fields: Array<{ where: string; scene_id?: string; text: string }> = [];
@@ -680,14 +690,25 @@ function checkBanned(spec: VideoSpec, brand: Brand | undefined, out: LintFinding
   for (const [id, p] of Object.entries(spec.publish ?? {})) fields.push({ where: `publish.${id}`, text: [p.post_caption, ...(p.hashtags ?? [])].join(" ") });
   for (const phrase of banned) {
     const needle = phrase.toLowerCase();
+    let inSpec = false;
     for (const f of fields) {
       if (!f.text.toLowerCase().includes(needle)) continue;
+      inSpec = true;
       out.push({
         id: "brand_banned_phrase",
         severity: "error",
         ...(f.scene_id ? { scene_id: f.scene_id } : {}),
         message: `banned brand phrase "${phrase}" appears in ${f.where}`,
         fix: `rewrite ${f.where} without "${phrase}" (brand.yaml voice.banned_phrases)`,
+      });
+    }
+    if (!inSpec && draft && draft.text.toLowerCase().includes(needle)) {
+      out.push({
+        id: "brand_banned_phrase",
+        severity: "error",
+        ...(draft.targets.length === 1 ? { target: draft.targets[0]! } : {}),
+        message: `banned brand phrase "${phrase}" appears in ${draft.where}`,
+        fix: `${draft.fix} without "${phrase}" (brand.yaml voice.banned_phrases)`,
       });
     }
   }
@@ -1617,11 +1638,15 @@ export function checkLoopSeam(spec: Pick<VideoSpec, "master" | "acceptance">, st
  * The active style's avoid list: the spec's style, else its series bible's (none when neither
  * names one or the pack can't be read).
  */
-async function styleAvoid(spec: VideoSpec, stylesDir: string | null, projectDir: string): Promise<{ id: string; avoid?: string[] } | undefined> {
+/** The spec's style pack (or its series bible's), when it loads. */
+async function lintStyle(spec: VideoSpec, stylesDir: string | null, projectDir: string): Promise<Awaited<ReturnType<typeof getStyle>> | undefined> {
   const series = !spec.style && spec.series ? await loadSeries(projectDir, spec.series).catch(() => undefined) : undefined;
   const id = spec.style ?? series?.series.style;
   if (!id) return undefined;
-  const style = await getStyle(stylesDir, id, projectDir).catch(() => undefined);
+  return getStyle(stylesDir, id, projectDir).catch(() => undefined);
+}
+
+function styleAvoid(style: Awaited<ReturnType<typeof getStyle>> | undefined): { id: string; avoid?: string[] } | undefined {
   return style ? { id: style.id, ...(style.motion.avoid ? { avoid: style.motion.avoid } : {}) } : undefined;
 }
 
@@ -1702,13 +1727,25 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   checkFootageQuality(spec, irMedia, findings);
   checkLogo(state, boxes, findings);
   checkForbidden(spec, brand, findings);
-  checkBannedEffect(spec, await styleAvoid(spec, opts.stylesDir === undefined ? findStylesDir() : opts.stylesDir, paths.root), brand, findings);
+  const style = await lintStyle(spec, opts.stylesDir === undefined ? findStylesDir() : opts.stylesDir, paths.root);
+  checkBannedEffect(spec, styleAvoid(style), brand, findings);
+  let defaultTransition: string | undefined;
+  try {
+    defaultTransition = resolveTokens(brand, {}, style).motion?.transition;
+  } catch {
+    defaultTransition = style?.motion.transition;
+  }
+  checkBusyCrossfade(spec, defaultTransition, findings);
   checkAcceptance(spec, state, findings);
   checkLoopSeam(spec, state, findings);
   checkFlashing(state, findings);
   checkPostCopy(spec, contracts, findings);
-  const titleRules = await loadTitleRules(opts.researchSpecsDir === undefined ? findResearchSpecsDir() : opts.researchSpecsDir);
-  if (titleRules) checkTitleLength(spec, await loadBrief(paths.root), titleRules, findings);
+  const researchDir = opts.researchSpecsDir === undefined ? findResearchSpecsDir() : opts.researchSpecsDir;
+  const brief = await loadBrief(paths.root);
+  const titleRules = await loadTitleRules(researchDir);
+  if (titleRules) checkTitleLength(spec, brief, titleRules, findings);
+  const draft = generatedCopy(spec, brief);
+  checkCliche(spec, await loadClicheRules(researchDir), draft, findings);
   const coverView: CoverView | undefined = state?.cover
     ? {
         ...(state.cover.headline_box ? { headline_box: state.cover.headline_box } : {}),
@@ -1716,8 +1753,12 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
       }
     : manifest?.cover;
   checkCover(spec, contracts, coverView, findings);
-  checkBanned(spec, brand, findings);
+  checkBanned(spec, brand, findings, draft);
   await checkMotionUnsafe(paths.root, spec, findings);
+  const sfxCatalog = loadSfxCatalog(opts.sfxDir === undefined ? findSfxDir() : opts.sfxDir);
+  checkSfxLicense(spec, findings);
+  checkSfxHarshRepeat(spec, sfxCatalog, sceneSpans(state), findings);
+  checkSfxOverVoice(spec, state, tracks, sfxCatalog, findings);
 
   findings.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1));
   const errors = findings.filter((f) => f.severity === "error").length;
@@ -1771,6 +1812,248 @@ export function checkFlashing(state: Pick<RenderStateView, "qa"> | undefined, ou
       severity: "warning",
       message: `${f.spikes} single-frame luma spike(s) at ${times}${f.spikes > f.spike_times_s.length ? ", …" : ""}`,
       fix: "check those frames (qa/report.md lists them): a lone white or black frame is usually a render glitch or a hard flash; replace it or ease it with a short fade",
+    });
+  }
+}
+
+// ------------------------------------------------------------------------------------ copy: clichés
+
+export const CLICHE_FIX = "say it in the product's own words or make a concrete claim";
+
+/** Social copy video-studio drafts for targets without a `publish` override (dist/social_copy.md, the target packages). */
+export interface GeneratedCopy {
+  where: string;
+  text: string;
+  targets: string[];
+  /** How to change it: the override to write. */
+  fix: string;
+}
+
+/** The generated social-copy draft (title, description lines, hashtags) when some target has no `publish` override. */
+export function generatedCopy(spec: VideoSpec, brief: CreativeBrief | undefined): GeneratedCopy | undefined {
+  const targets = resolveTargets(spec).filter((t) => !spec.publish?.[t]);
+  if (!targets.length) return undefined;
+  const p = socialCopyParts(spec, brief);
+  const list = targets.join(", ");
+  return {
+    where: `the generated post copy for ${list} (no publish override)`,
+    text: [p.title, ...p.lines, ...p.hashtags].join("\n"),
+    targets,
+    fix: `write publish.${targets[0]}.post_caption${targets.length > 1 ? " (and the other targets')" : ""}, or edit the brief's chosen_hook, key_messages or desired_action the draft is built from,`,
+  };
+}
+
+const normQuotes = (s: string) => s.replace(/[\u2018\u2019\u02bc]/g, "'").toLowerCase();
+
+/** Whole-word, case-insensitive phrase match (curly and straight apostrophes alike). */
+export function phraseIn(text: string, phrase: string): boolean {
+  const esc = normQuotes(phrase).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}\\p{N}])${esc}(?![\\p{L}\\p{N}])`, "u").test(normQuotes(text));
+}
+
+/**
+ * cliche (warning): stock phrases from research-specs/cliches.yaml in the voiceover, on-screen
+ * text, graphic text, cover headline, publish copy and the generated social-copy draft (the draft
+ * only for phrases the spec does not already show). One finding per field.
+ */
+export function checkCliche(spec: VideoSpec, rules: ClicheRules | undefined, draft: GeneratedCopy | undefined, out: LintFinding[]): void {
+  if (!rules?.phrases.length) return;
+  const fields: Array<{ where: string; scene_id?: string; target?: string; text: string }> = [];
+  for (const s of spec.scenes) {
+    fields.push({ where: `scene ${s.id} voiceover`, scene_id: s.id, text: s.voiceover });
+    if (s.on_screen_text) fields.push({ where: `scene ${s.id} on_screen_text`, scene_id: s.id, text: s.on_screen_text });
+    if (s.deterministic) fields.push({ where: `scene ${s.id} graphic text (deterministic.props)`, scene_id: s.id, text: propsText(s.deterministic.props) });
+  }
+  if (spec.cover) fields.push({ where: "cover.headline", text: spec.cover.headline });
+  for (const [id, p] of Object.entries(spec.publish ?? {})) fields.push({ where: `publish.${id}`, target: id, text: [p.title ?? "", p.post_caption].join("\n") });
+  const seen = new Set<string>();
+  const quote = (list: string[]) => list.map((x) => `"${x}"`).join(", ");
+  for (const f of fields) {
+    const hits = rules.phrases.filter((ph) => phraseIn(f.text, ph));
+    if (!hits.length) continue;
+    for (const h of hits) seen.add(h);
+    out.push({
+      id: "cliche",
+      severity: "warning",
+      ...(f.scene_id ? { scene_id: f.scene_id } : {}),
+      ...(f.target ? { target: f.target } : {}),
+      message: `stock phrase${hits.length > 1 ? "s" : ""} ${quote(hits)} in ${f.where} (research-specs/cliches.yaml)`,
+      fix: `rewrite ${f.where} without ${quote(hits)}: ${CLICHE_FIX}`,
+    });
+  }
+  if (!draft) return;
+  const hits = rules.phrases.filter((ph) => !seen.has(ph) && phraseIn(draft.text, ph));
+  if (!hits.length) return;
+  out.push({
+    id: "cliche",
+    severity: "warning",
+    ...(draft.targets.length === 1 ? { target: draft.targets[0]! } : {}),
+    message: `stock phrase${hits.length > 1 ? "s" : ""} ${quote(hits)} in ${draft.where} (research-specs/cliches.yaml)`,
+    fix: `${draft.fix} without ${quote(hits)}: ${CLICHE_FIX}`,
+  });
+}
+
+// ------------------------------------------------------------------------------------ transitions
+
+/** On-screen words (on_screen_text + graphic text) from which a scene counts as text-dense for a crossfade. */
+export const BUSY_TEXT_WORDS = 6;
+
+/**
+ * busy_crossfade (warning): a crossfade (the scene's own, or the style's default transition) between
+ * two adjacent scenes that are both text-dense (≥ BUSY_TEXT_WORDS on-screen words each) or both
+ * `motion` pages: halfway through, both layers are half visible and neither reads.
+ */
+export function checkBusyCrossfade(spec: Pick<VideoSpec, "scenes">, defaultTransition: string | undefined, out: LintFinding[]): void {
+  const words = (s: VideoSpec["scenes"][number]) => wordCount([s.on_screen_text ?? "", s.deterministic ? propsText(s.deterministic.props) : ""].join(" "));
+  const isMotion = (s: VideoSpec["scenes"][number]) => s.deterministic?.kind === "motion";
+  spec.scenes.forEach((b, i) => {
+    if (i === 0) return;
+    const kind = b.transition ?? defaultTransition;
+    if (kind !== "crossfade") return;
+    const a = spec.scenes[i - 1]!;
+    const [wa, wb] = [words(a), words(b)];
+    const motion = isMotion(a) && isMotion(b);
+    if (!motion && !(wa >= BUSY_TEXT_WORDS && wb >= BUSY_TEXT_WORDS)) return;
+    out.push({
+      id: "busy_crossfade",
+      severity: "warning",
+      scene_id: b.id,
+      message: `the crossfade${b.transition ? "" : " (the style's default transition)"} from ${a.id} into ${b.id} blends two ${motion ? "motion pages" : `text-dense scenes (${wa} and ${wb} on-screen words)`}; mid-transition both are half visible and neither reads`,
+      fix: `set scene ${b.id} transition to "fade_black" or "cut", or stagger: old content out, then new in`,
+    });
+  });
+}
+
+// ------------------------------------------------------------------------------------ sound effects
+
+/** Two effects starting closer than this on the video timeline smear into one sound. */
+export const SFX_MIN_GAP_MS = 250;
+/** Uses of one bright or high-hf_risk bundled sound after which it gets harsh. */
+export const SFX_BRIGHT_MAX_USES = 3;
+
+interface SfxPlacement {
+  scene_id: string;
+  file: string;
+  /** Where the peak lands (scene start + at_sec) and where the file starts (peak_ms earlier), ms on the video timeline. */
+  peak_ms: number;
+  start_ms: number;
+  sound?: SfxCatalogSound;
+}
+
+/** Every effect on the video timeline: rendered scene spans when known, else the spec durations. */
+function sfxPlacements(spec: Pick<VideoSpec, "scenes">, catalog: SfxCatalog | null, spans: readonly SceneSpan[] | undefined): SfxPlacement[] {
+  const out: SfxPlacement[] = [];
+  let t = 0;
+  for (const s of spec.scenes) {
+    const start = spans?.find((x) => x.id === s.id)?.start ?? t;
+    t += s.duration_sec * 1000;
+    for (const fx of s.sfx ?? []) {
+      const sound = isBundledSfx(fx.file) ? catalog?.sounds.find((x) => `bundled:${x.id}` === fx.file) : undefined;
+      const peak = Math.round(start + fx.at_sec * 1000);
+      // The engine lands the peak on at_sec (trimming the head at the scene start).
+      out.push({ scene_id: s.id, file: fx.file, peak_ms: peak, start_ms: Math.max(start, peak - (sound?.peak_ms ?? 0)), ...(sound ? { sound } : {}) });
+    }
+  }
+  return out.sort((a, b) => a.start_ms - b.start_ms);
+}
+
+/** sfx_license_missing (warning): a project-file effect without `license` on any of its uses (bundled sounds carry the catalogue's CC0). */
+export function checkSfxLicense(spec: Pick<VideoSpec, "scenes">, out: LintFinding[]): void {
+  const files = new Map<string, { scenes: string[]; licensed: boolean }>();
+  for (const s of spec.scenes) {
+    for (const fx of s.sfx ?? []) {
+      if (isBundledSfx(fx.file)) continue;
+      const f = files.get(fx.file) ?? { scenes: [], licensed: false };
+      if (!f.scenes.includes(s.id)) f.scenes.push(s.id);
+      f.licensed ||= !!fx.license;
+      files.set(fx.file, f);
+    }
+  }
+  for (const [file, f] of files) {
+    if (f.licensed) continue;
+    out.push({
+      id: "sfx_license_missing",
+      severity: "warning",
+      scene_id: f.scenes[0]!,
+      message: `sound effect ${file} (${f.scenes.join(", ")}) has no licence, so the manifest and provenance cannot say you may use it`,
+      fix: `add license {id, source} to the sfx entry for ${file} (e.g. {id: "user-owned"} for your own recording, or the SPDX id of its licence), or use a bundled sound (bundled:<id>, CC0)`,
+    });
+  }
+}
+
+/**
+ * sfx_harsh_repeat (warning): one bright or high-hf_risk bundled sound used more than
+ * SFX_BRIGHT_MAX_USES times, or two effects starting under SFX_MIN_GAP_MS apart (a run of bundled
+ * key presses is typing and is exempt).
+ */
+export function checkSfxHarshRepeat(spec: Pick<VideoSpec, "scenes">, catalog: SfxCatalog | null, spans: readonly SceneSpan[] | undefined, out: LintFinding[]): void {
+  const all = sfxPlacements(spec, catalog, spans);
+  if (!all.length) return;
+  const uses = new Map<string, SfxPlacement[]>();
+  for (const p of all) if (p.sound && (p.sound.character === "bright" || p.sound.hf_risk === "high")) uses.set(p.file, [...(uses.get(p.file) ?? []), p]);
+  for (const [file, list] of uses) {
+    if (list.length <= SFX_BRIGHT_MAX_USES) continue;
+    const snd = list[0]!.sound!;
+    out.push({
+      id: "sfx_harsh_repeat",
+      severity: "warning",
+      scene_id: list[SFX_BRIGHT_MAX_USES]!.scene_id,
+      message: `${file} (${snd.character}, hf_risk ${snd.hf_risk}) plays ${list.length} times (in ${[...new Set(list.map((p) => p.scene_id))].join(", ")}); a bright sound repeated gets harsh fast`,
+      fix: `keep ${file} to at most ${SFX_BRIGHT_MAX_USES} uses: drop the ones on minor moments or swap them for a warm or balanced sound (bundled:pop, bundled:hit-soft)`,
+    });
+  }
+  for (let i = 1; i < all.length; i++) {
+    const [a, b] = [all[i - 1]!, all[i]!];
+    const gap = b.start_ms - a.start_ms;
+    if (gap >= SFX_MIN_GAP_MS) continue;
+    if (a.sound?.family === "type" && b.sound?.family === "type") continue;
+    out.push({
+      id: "sfx_harsh_repeat",
+      severity: "warning",
+      scene_id: b.scene_id,
+      message: `sound effects ${a.file} (${a.scene_id}) and ${b.file} (${b.scene_id}) start ${Math.round(gap)} ms apart at ${sec(b.start_ms)}; closer than ${SFX_MIN_GAP_MS} ms they smear into one sound`,
+      fix: `move one of them at least ${SFX_MIN_GAP_MS} ms away (its at_sec), or drop one`,
+    });
+  }
+}
+
+/**
+ * sfx_over_voice (warning): an effect's peak lands inside a spoken word and masks it. Uses the
+ * voice word timings of the render; skipped without them (no render, `timing_source: none`).
+ */
+export function checkSfxOverVoice(
+  spec: Pick<VideoSpec, "scenes">,
+  state: Pick<RenderStateView, "voice" | "scenes"> | undefined,
+  tracks: readonly VoiceTrackView[] | undefined,
+  catalog: SfxCatalog | null,
+  out: LintFinding[],
+): void {
+  if (!state?.voice?.timing_source || state.voice.timing_source === "none" || !tracks?.length) return;
+  const spans = sceneSpans(state);
+  if (!spans) return;
+  const spoken = spokenWords(tracks, spans);
+  const words = new Map<string, Array<{ word: string; start: number; end: number }>>();
+  for (const t of tracks) {
+    const span = spans.find((x) => x.id === t.scene_id);
+    const w = spoken.get(t.scene_id);
+    if (!span || !w) continue;
+    const text = t.words.filter((x) => x.word.trim()).map((x) => x.word.trim());
+    words.set(t.scene_id, w.map((x, k) => ({ ...x, word: text[k] ?? "" })));
+  }
+  const hits = new Map<string, Array<{ p: SfxPlacement; w: { word: string; start: number; end: number } }>>();
+  for (const p of sfxPlacements(spec, catalog, spans)) {
+    const w = (words.get(p.scene_id) ?? []).find((x) => x.start < p.peak_ms && p.peak_ms < x.end);
+    if (w) hits.set(p.scene_id, [...(hits.get(p.scene_id) ?? []), { p, w }]);
+  }
+  for (const [scene, list] of hits) {
+    const start = spans.find((x) => x.id === scene)!.start;
+    const moves = list.map(({ p, w }) => `${p.file} to at_sec ${round2((w.end - start) / 1000)} (after "${w.word}")`);
+    out.push({
+      id: "sfx_over_voice",
+      severity: "warning",
+      scene_id: scene,
+      message: `${list.length} sound effect(s) in ${scene} peak inside a spoken word; ${list[0]!.p.file} lands at ${sec(list[0]!.p.peak_ms)} during "${list[0]!.w.word}" (${sec(list[0]!.w.start)}–${sec(list[0]!.w.end)})`,
+      fix: `move ${moves.join("; ")}, into the pause, or lower its volume_db; a sound under a word masks it`,
     });
   }
 }

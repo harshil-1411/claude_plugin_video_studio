@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -69,5 +69,29 @@ describe("packageTargets (tiny ffmpeg)", () => {
     const cached = (await stat(join(tmp, "renders", "targets", "slow.mp4"))).mtimeMs;
     await packageTargets(input, ["fits", "slow", "gone"]);
     expect((await stat(join(tmp, "renders", "targets", "slow.mp4"))).mtimeMs).toBe(cached);
+  }, 60_000);
+
+  it("marks post.json when the reel's frame 0 is the baked cover", async () => {
+    const input = {
+      root: tmp,
+      distDir: join(tmp, "dist-poster"),
+      renderDir: join(tmp, "renders"),
+      quality: "preview" as const,
+      spec: { publish: {}, cover: { headline: "Hi" } } as unknown as VideoSpec,
+      contracts: [{ ...contract("fits"), cover: { mode: "frame" as const } }],
+      reel: join(tmp, "reel.mp4"),
+      reelFacts: { width: 180, height: 320, fps: 30, duration_sec: 1, bytes: (await stat(join(tmp, "reel.mp4"))).size },
+      coverAtMs: 640,
+      generatedCopy: () => ({ post_caption: "hi", hashtags: ["#a"] }),
+    };
+    const [baked] = await packageTargets({ ...input, posterBaked: true }, ["fits"]);
+    const bakedPost = JSON.parse(await readFile(baked!.post, "utf8"));
+    expect(bakedPost.poster_baked).toBe(true);
+    // Frame-mode platforms point at frame 0, which is the cover.
+    expect(bakedPost.cover.timestamp_ms).toBe(0);
+    const [plain] = await packageTargets(input, ["fits"]);
+    const plainPost = JSON.parse(await readFile(plain!.post, "utf8"));
+    expect(plainPost).not.toHaveProperty("poster_baked");
+    expect(plainPost.cover.timestamp_ms).toBe(640);
   }, 60_000);
 });

@@ -141,6 +141,8 @@ export const CoverRender = z
     path: FilePath,
     square_preview: FilePath.optional(),
     at_ms: z.int().nonnegative().describe("Video time of the frame the cover was composed from."),
+    auto: z.boolean().optional().describe("The time was picked by the engine (the longest settled hold), not set in the spec."),
+    poster_baked: z.boolean().optional().describe("The cover replaces frame 0 of the reel and every target video (cover.bake_first_frame)."),
     headline_box: TextBox.optional(),
     crops: z
       .array(z.strictObject({ id: Id, targets: z.array(Id), rect: PxBox }))

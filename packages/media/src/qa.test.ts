@@ -43,6 +43,13 @@ describe("scene-change parsing and motion stats (pure)", () => {
     ]);
   });
 
+  it("drops changes before `fromS` before merging (a baked poster's cut on frame 1)", () => {
+    const poster = ["[Parsed_scdet_2 @ 0x1] lavfi.scd.score: 80, lavfi.scd.time: 0.066667", "[Parsed_scdet_2 @ 0x1] lavfi.scd.score: 9, lavfi.scd.time: 0.133333"].join("\n");
+    // Without the skip the frame-2 change merges into the poster's cut.
+    expect(parseSceneChanges(poster)).toEqual([{ t: 0.067, score: 80 }]);
+    expect(parseSceneChanges(poster, BIG_CHANGE_SCORE, 1.5 / 15)).toEqual([{ t: 0.133, score: 9 }]);
+  });
+
   it("derives changes/s, cuts/s, the longest static stretch and frozen share", () => {
     const m = motionStats(parseSceneChanges(log), 3, [{ start_s: 1.5, end_s: 3, duration_s: 1.5 }]);
     expect(m).toMatchObject({ changes: 2, cuts: 2, frozen_s: 1.5, frozen_pct: 50 });
@@ -90,6 +97,17 @@ describe("flash and A/V sync measurement (pure)", () => {
     // A two-frame step is a cut, not a spike; noise below the spike threshold is nothing.
     expect(flashStats(luma([100, 100, 235, 235, 235])).spikes).toBe(0);
     expect(flashStats(luma([100, 100 + FLASH_SPIKE_Y - 1, 100])).spikes).toBe(0);
+  });
+
+  it("leaves skipped leading frames out of spikes and transitions, not out of the frame count", () => {
+    // A white poster on frame 0 of a dark reel; then the same with a lone white frame 2 (a spike).
+    const ys = [235, 16, 16, 16, 16, 16];
+    expect(flashStats(luma(ys))).toMatchObject({ frames: 6, spikes: 0, transitions: 1 });
+    const spiky = [235, 16, 235, 16, 16, 16];
+    expect(flashStats(luma(spiky))).toMatchObject({ spikes: 2, transitions: 3 });
+    // Frames 0–1 skipped: frame 1 is no spike candidate and frame 0's leg is gone; frame 2 still counts.
+    expect(flashStats(luma(spiky), 2)).toMatchObject({ frames: 6, spikes: 1, spike_times_s: [0.133], transitions: 2 });
+    expect(flashStats(luma(ys), 2)).toMatchObject({ frames: 6, spikes: 0, transitions: 0 });
   });
 
   it("fails a 5 Hz black/white strobe and passes a slow fade", () => {
@@ -154,6 +172,8 @@ describe.skipIf(!tools)("motion density, frozen share and loop seam on synthetic
       gen(["-f", "lavfi", "-i", `color=c=0x303030:${S}:d=3`, "-f", "lavfi", "-i", "sine=f=440:d=3", ...x264, "-c:a", "aac", "-ar", "48000", "-shortest", p("static.mp4")]),
       // A loop: grey → white box → grey, the last frame equals the first; the tone is steady across the seam.
       gen(["-f", "lavfi", "-i", `color=c=0x303030:${S}:d=2,drawbox=x=40:y=72:w=80:h=144:c=white:t=fill:enable='between(t,0.6,1.4)'`, "-f", "lavfi", "-i", "sine=f=440:d=2", ...x264, "-c:a", "aac", "-ar", "48000", "-shortest", p("loop.mp4")]),
+      // A baked poster: a white frame 0 on a still dark clip.
+      gen(["-f", "lavfi", "-i", `color=c=0x202020:${S}:d=2,drawbox=x=0:y=0:w=iw:h=ih:c=white:t=fill:enable='eq(n,0)'`, ...x264, p("poster.mp4")]),
       // Not a loop: ends on another picture, and the audio fades in from silence (a level jump at the seam).
       gen([
         "-f", "lavfi", "-i", `color=c=0x303030:${S}:d=2,drawbox=x=40:y=72:w=80:h=144:c=white:t=fill:enable='gte(t,1)'`,
@@ -185,6 +205,17 @@ describe.skipIf(!tools)("motion density, frozen share and loop seam on synthetic
     // The thresholds sit between the measured scores: the 10% box (~7.5) is a change, not a cut.
     expect(BIG_CHANGE_SCORE).toBeLessThan(7.5);
     expect(CUT_SCORE).toBeGreaterThan(7.5);
+  }, 60_000);
+
+  it("skip_leading_frames leaves a baked poster out of the change and flash stats", async () => {
+    const base = { width: 160, height: 288, duration_s: 2, require_audio: false };
+    const raw = await technicalQa(p("poster.mp4"), base, { tools: tools! });
+    expect(raw.metrics.motion).toMatchObject({ changes: 1, cuts: 1 });
+    expect(raw.metrics.flash!.transitions).toBeGreaterThan(0);
+    const baked = await technicalQa(p("poster.mp4"), { ...base, skip_leading_frames: 2 }, { tools: tools! });
+    expect(baked.metrics.motion).toMatchObject({ changes: 0, cuts: 0 });
+    expect(baked.metrics.flash).toMatchObject({ frames: 30, spikes: 0, transitions: 0 });
+    expect(baked.checks.find((c) => c.id === "flashing")!.status).toBe("ok");
   }, 60_000);
 
   it("fails a frozen reel above the frozen limit and never excuses it as expected", async () => {
