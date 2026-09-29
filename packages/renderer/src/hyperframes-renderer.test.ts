@@ -1,7 +1,7 @@
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ffprobe, type ProbeResult } from "@video-studio/media";
+import { ffprobe, runFfmpeg, type ProbeResult } from "@video-studio/media";
 import type { Scene } from "@video-studio/schema";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -400,6 +400,42 @@ describe.skipIf(process.env.VS_TEST_RENDER !== "1")("real HyperFrames render (VS
         expect([p.width, p.height]).toEqual([180, 320]);
         expect(Math.abs(p.duration_s - 2)).toBeLessThanOrEqual(0.1);
         console.error(`[hyperframes motion render] ${outPath}: warnings=${JSON.stringify(res.warnings)}`);
+      } finally {
+        if (process.env.VS_KEEP_HYPERFRAMES_TMP !== "1") await rm(out, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
+
+  it(
+    "a motion page reading vs.energy follows the music envelope (dark while quiet, bright while loud)",
+    async () => {
+      const out = await mkdtemp(join(tmpdir(), "vs-hf-energy-"));
+      try {
+        await mkdir(join(out, "motion"), { recursive: true });
+        await writeFile(
+          join(out, "motion", "energy.html"),
+          '<div id="bg" style="position:absolute;left:0;top:0;width:100%;height:100%"></div><script>window.seek = function (t) { var v = Math.round(vs.energy(t) * 255); document.getElementById("bg").style.background = "rgb(" + v + "," + v + "," + v + ")"; };</script>',
+        );
+        const quietLoud = Buffer.from([...Array(15).fill(0), ...Array(15).fill(255)]).toString("base64");
+        const r = createHyperframesRenderer({ quality: "draft" });
+        const outPath = join(out, "s01.mp4");
+        const motion = { ...scene(1), deterministic: { kind: "motion" as const, props: { html: "motion/energy.html", text: [] } } };
+        await r.render({
+          scene: motion,
+          target: { width: 180, height: 320, fps: 30, aspect_ratio: "9:16" },
+          tokens: TOKENS,
+          out_path: outPath,
+          project_dir: out,
+          audio: { fps: 30, rms: quietLoud, low: quietLoud, onset: quietLoud },
+        });
+        const luma = async (t: number) => {
+          const raw = join(out, `luma-${t}.gray`);
+          await runFfmpeg(["-y", "-ss", String(t), "-i", outPath, "-frames:v", "1", "-vf", "scale=1:1", "-f", "rawvideo", "-pix_fmt", "gray", raw]);
+          return (await readFile(raw))[0]!;
+        };
+        expect(await luma(0.2)).toBeLessThan(40);
+        expect(await luma(0.8)).toBeGreaterThan(200);
       } finally {
         if (process.env.VS_KEEP_HYPERFRAMES_TMP !== "1") await rm(out, { recursive: true, force: true });
       }

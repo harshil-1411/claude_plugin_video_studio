@@ -1,6 +1,6 @@
 ---
 name: compare
-description: Build a before/after page for two videos - a project's preview and final render, a render against a variant or short, a clip against its tightened copy, or a render against a reference video to match - with a metrics table (frozen time, changes and cuts per second, static stretch, loudness), side-by-side, stacked and wipe views on one synced clock, frame stepping and per-side sound. Use when the user runs /video-studio:compare, asks to see two versions side by side, or wants to judge a change by watching it.
+description: Build a before/after page for two videos - a project's preview and final render, a render against a variant or short, a clip against its tightened copy, or a render against a reference video to match - with a metrics table (frozen time, changes and cuts per second, moving share, static stretch, loudness), side-by-side, stacked and wipe views on one synced clock, frame stepping and per-side sound. Use when the user runs /video-studio:compare, asks to see two versions side by side, or wants to judge a change by watching it.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+) and ffmpeg.
 allowed-tools: mcp__plugin_video-studio_engine__compare Read
@@ -37,10 +37,13 @@ missing, say which render or file is missing and offer the render skill.
 `mcp__plugin_video-studio_engine__compare {project_dir, a?, b?}`. It returns
 each side's label, duration and resolution, notes on differing durations or
 aspect ratios, and `metrics[]`: duration, frozen seconds and %, big changes
-per second, cuts per second, longest static stretch and integrated loudness
-for both sides. With a reference, each metric has a `verdict` (ours meets or
-misses the reference); summarise the misses in plain words and suggest the
-fix (more visual beats, shorter static stretches, loudness).
+per second, cuts per second, moving % of frames, longest static stretch and
+integrated loudness for both sides. Changes per second count sudden changes
+(cuts, reveals); moving % counts every frame where the picture moves at all,
+so smooth motion and crossfades show up there and not in changes/s. With a
+reference, each metric has a `verdict` (ours meets or misses the reference);
+summarise the misses in plain words and suggest the fix (more visual beats,
+motion through the holds, shorter static stretches, loudness).
 
 ## 3. Hand it over
 

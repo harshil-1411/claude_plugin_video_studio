@@ -614,6 +614,17 @@ describe("taste guard, acceptance and loop seam", () => {
     expect(quiet).toEqual([]);
   });
 
+  it("acceptance_unmet: min_moving_pct against QA's moving share (skipped before QA measured it)", () => {
+    const motion = { changes_per_sec: 1, longest_static_s: 1, frozen_s: 0, frozen_pct: 0 };
+    const out: LintFinding[] = [];
+    checkAcceptance({ acceptance: { min_moving_pct: 60 } } as VideoSpec, { qa: { motion: { ...motion, moving_pct: 34.1 } } }, out);
+    expect(out).toEqual([expect.objectContaining({ id: "acceptance_unmet", severity: "error", message: expect.stringMatching(/moves in 34\.1% of the frames.*minimum 60%/) })]);
+    const quiet: LintFinding[] = [];
+    checkAcceptance({ acceptance: { min_moving_pct: 60 } } as VideoSpec, { qa: { motion: { ...motion, moving_pct: 80 } } }, quiet);
+    checkAcceptance({ acceptance: { min_moving_pct: 60 } } as VideoSpec, { qa: { motion } }, quiet);
+    expect(quiet).toEqual([]);
+  });
+
   it("loop_seam: surfaces QA's seam measurement when master.loop is set", () => {
     const spec = { master: { width: 1080, height: 1920, fps: 30, loop: true } } as VideoSpec;
     const out: LintFinding[] = [];

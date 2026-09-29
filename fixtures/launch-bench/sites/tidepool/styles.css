@@ -1,0 +1,37 @@
+/* Tidepool (invented): colours and fonts as CSS custom properties. */
+:root {
+  --bg: #0b1d2a;
+  --surface: #12293a;
+  --text: #e6f1f7;
+  --muted: #8fa9b8;
+  --primary: #2ec4b6;
+  --secondary: #ff9f1c;
+  --font-heading: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Source Sans 3", system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+h1, h2 {
+  font-family: var(--font-heading);
+  font-weight: 700;
+}
+
+.button {
+  background: var(--primary);
+  color: var(--bg);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--muted);
+}
+
+.badge {
+  background: var(--secondary);
+}

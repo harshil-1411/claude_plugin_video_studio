@@ -17,3 +17,4 @@ export * from "./builder.js";
 export * from "./detect.js";
 export * from "./extractors.js";
 export * from "./ingest.js";
+export * from "./brand-source.js";

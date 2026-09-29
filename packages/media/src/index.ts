@@ -10,3 +10,4 @@ export * from "./letterbox.js";
 export * from "./subject-detect.js";
 export * from "./score.js";
 export * from "./glossary.js";
+export * from "./envelope.js";

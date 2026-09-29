@@ -36,7 +36,10 @@ charts and footage overlays: they are cheaper to get right.
   - `window.__vs`: `fps`, `duration`, `width`/`height` (your canvas),
     `target {width, height, aspect_ratio}`, `text[]`, `beats[]` and
     `downbeats[]` (scene-local seconds from the music bed; empty without
-    one), `cues [{item, at}]` (word cues), `loop`, and `tokens`:
+    one), `cues [{item, at}]` (word cues), `reveals[]` (when each `text`
+    item should start entering; read it with `vs.revealAt(i)`), `loop`,
+    `audio` (the music bed's envelope under this scene, only when there is
+    a bed; read it with `vs.energy`/`bass`/`onset`), and `tokens`:
     `palette {background, text, primary, secondary}` (hex or null),
     `fonts {heading, body, mono}`, optional `weight_heading`,
     `weight_body`, `text_case`, `motion`, `style`, `language`.
@@ -60,6 +63,8 @@ charts and footage overlays: they are cheaper to get right.
 | `vs.lerp(a, b, p)`, `vs.clamp(x, lo, hi)`, `vs.stagger(i, step, start?)` | arithmetic |
 | `vs.rng(seed)` | seeded generator; the only allowed randomness |
 | `vs.beatAt(t)`, `vs.downbeatAt(t)`, `vs.beatIndex(t)` | latest beat / bar start at or before `t` (null or -1 before the first) |
+| `vs.revealAt(i)` | when `text` item `i` starts entering: on the beat, each line readable for its floor (see "Readable reveals") |
+| `vs.energy(t)`, `vs.bass(t)`, `vs.onset(t)` | the music bed's loudness, kick/bass (< 150 Hz) and attack strength at `t`, each 0..1; 0 without a bed (see "Music-reactive motion") |
 
 ### What the lint rejects, and why
 
@@ -126,12 +131,66 @@ Styles list the effects that make motion look templated in
 `motion.avoid`, from this closed set: `shake`, `rgb_split`, `lens_flare`,
 `particle_burst`, `shockwave`, `neon_glow`, `grid_floor`, `flash`,
 `bouncy_easing` (overshooting springs on type: damping far below
-critical). Don't use them by default. Use one only when the user asked
+critical), `eq_bars` (equalizer or waveform bars as decoration). Don't use
+them by default. Use one only when the user asked
 for that look in words ("glitchy", "retro grid"): declare it in
 `props.effects`, note it in `assumptions`, and pick a style that doesn't
 avoid it. Lint `banned_effect` fails an effect the style avoids or that
 `brand.visual.forbidden` names; the brand always wins. Lint only sees what
 you declare, so the creative director also judges the stills.
+
+## Readable reveals
+
+A line the viewer cannot finish reading is noise. Each `text` item must
+stay fully visible for its **reading floor** before the next one replaces
+or pushes it: 0.8 s for 1–3 words, otherwise 0.3 s a word (at least
+1.2 s). `window.__vs.reveals` already holds a time per item that does
+this: item 0 opens the scene, and each later item lands on the first beat
+after the previous one has been readable for its floor. At 120 BPM a short
+line lands every 3rd beat (1.5 s), at 174 BPM every 4th; never one line a
+beat. A word cue (`scene.cues`) wins for its item. Start each line's
+entrance at `vs.revealAt(i)` (or later, e.g. on the next bar; `beat`,
+`line` and `FILL` are from the worked example below):
+
+```js
+var L1 = Math.max(vs.revealAt(1), beat(4));   // line 2: readable, and on the bar
+line(t, "l1", L1, FILL - 0.2);
+```
+
+Use `vs.revealAt` whenever lines replace or follow each other. A page that
+shows several labels together (a UI morph: a pill, a title and a subtitle
+on one card) may time its own copy; check it with `stills`. Lint
+`reveal_too_fast` warns when a page that reads `vs.revealAt` is too short
+for its items' floors (then `revealAt` falls back to a quick reveal and the
+whole set holds at the end: lengthen the scene, or cut words). Fixed kinds get the
+same schedule automatically when `audio.beat_sync` is on and the scene has
+no word cues.
+
+## Music-reactive motion
+
+With a music bed, `vs.energy(t)` (loudness), `vs.bass(t)` (kick and bass)
+and `vs.onset(t)` (attacks, with a short release) follow the track frame by
+frame. They are pure functions of `t`, so seeking, stills and motion blur
+still work. Use them to make a frame *breathe* with the music, never to
+decorate it:
+
+- **Scale or glow breathing, at most 3%:** `1 + 0.03 * vs.bass(t)` on the
+  hero shape, or a soft shadow whose blur grows with `vs.energy(t)`.
+- **Colour warmth:** mix the accent a little toward white on hits,
+  `vs.lerp(0, 0.15, vs.onset(t))`, never a full flash (`flash` is banned).
+- Keep the big changes on beats and bars (`vs.beatAt`, `vs.revealAt`); the
+  envelope only modulates what is already there.
+
+```js
+var pulse = 1 + 0.03 * vs.bass(t);                       // ≤ 3%
+$("shape").style.transform = "scale(" + pulse + ")";
+$("shape").style.boxShadow = "0 0 " + Math.round(40 * vs.energy(t)) + "px " + accent;
+```
+
+Equalizer or waveform bars as decoration are the banned effect `eq_bars`:
+they say "music video template", not your idea. If the user asks for one
+in words, declare `"eq_bars"` in `props.effects` like any banned effect.
+Without a bed the helpers return 0, so the page must look finished at 0.
 
 ## Worked example: a 4 s hook on `synth:pulse` (120 BPM)
 
@@ -209,7 +268,8 @@ Five big changes in 4 s.
     $("flip").style.clipPath = "inset(" + vs.tween(t, FLIP, 0.35, 100, 0, vs.easeInOutQuint) + "% 0 0 0)";
     // Content after its container moves; out before the next change.
     line(t, "l0", 0.12, BAR - 0.3);
-    line(t, "l1", BAR + 0.1, FILL - 0.2);   // holds from ~2.55 s to 3.0 s
+    // Line 2 on the bar, and never before line 1 has been readable for its floor.
+    line(t, "l1", Math.max(vs.revealAt(1), BAR + 0.1), FILL - 0.2);   // holds from ~2.55 s to 3.0 s
   };
 
   window.readyForCapture = document.fonts ? document.fonts.ready : Promise.resolve();

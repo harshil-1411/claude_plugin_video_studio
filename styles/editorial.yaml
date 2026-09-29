@@ -27,4 +27,4 @@ motion:
   stagger_ms: 140
   transition: crossfade
   transition_ms: 400
-  avoid: [shake, rgb_split, particle_burst, shockwave, neon_glow, grid_floor, flash, bouncy_easing]
+  avoid: [shake, rgb_split, particle_burst, shockwave, neon_glow, grid_floor, flash, bouncy_easing, eq_bars]

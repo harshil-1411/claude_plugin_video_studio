@@ -17,6 +17,7 @@ const bundle = join(root, "dist/mcp.mjs");
 const expected = [
   "adapt",
   "analyze",
+  "brand_draft",
   "brief_validate",
   "compare",
   "demo",

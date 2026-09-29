@@ -35,6 +35,8 @@ import {
   buildWordTimeline,
   ffmpegFeatures,
   makeThumbnail,
+  musicEnvelope,
+  sliceEnvelope,
   toTranscript,
   transitionSeconds,
   writeCaptionSet,
@@ -43,8 +45,13 @@ import {
   type RendererPreference,
   type RenderTarget,
   type ResolvedCue,
+  type SceneAudioEnvelope,
   type SceneBeats,
   type SeriesKeyInput,
+  CUE_LEAD_S,
+  REVEAL_ENTRANCE_S,
+  revealItemTexts,
+  revealSchedule,
   createFootageRenderer,
   type SceneRenderEntry,
   type SceneRenderer,
@@ -563,6 +570,59 @@ export function sceneBeatGrids(planScenes: readonly Scene[], fps: number, beatSy
 }
 
 /**
+ * The music bed's envelope under each `motion` scene of the render plan (`window.__vs.audio`, the
+ * kit's `vs.energy` / `vs.bass` / `vs.onset`): the bed's per-frame curves (media envelope.ts,
+ * cached by the bed's hash and fps), placed as the mix places the bed (`start_sec`, `loop`) and
+ * sliced to the scene's frame-aligned slot. Empty without a bed or without motion scenes, so
+ * other specs' requests and cache keys are unchanged.
+ */
+export async function sceneAudioEnvelopes(
+  planScenes: readonly Scene[],
+  fps: number,
+  music: ResolvedMusic | undefined,
+  o: { cacheDir?: string; signal?: AbortSignal } = {},
+): Promise<Map<string, SceneAudioEnvelope>> {
+  const out = new Map<string, SceneAudioEnvelope>();
+  if (!music || !hasMotionScenes(planScenes)) return out;
+  const env = await musicEnvelope(music.path, fps, { sha256: music.sha256, ...(o.cacheDir ? { cacheDir: o.cacheDir } : {}), ...(o.signal ? { signal: o.signal } : {}) });
+  const { bounds } = frameTimeline(planScenes, fps);
+  planScenes.forEach((s, i) => {
+    if (s.deterministic?.kind !== "motion") return;
+    out.set(s.id, sliceEnvelope(env, { fromFrame: bounds[i]!, frames: bounds[i + 1]! - bounds[i]!, startSec: music.bed.start_sec ?? 0, loop: music.bed.loop ?? true }));
+  });
+  return out;
+}
+
+/**
+ * Readable reveals on the beat (Phase 6.7): with `audio.beat_sync` on, each beat-reveal kind scene
+ * with two or more items and no word cues gets its items placed by the reveal schedule
+ * (reveal-schedule.ts: every item readable for its floor, landing on the scene's beats). The
+ * times travel as cues (entrance start + CUE_LEAD_S), so both renderers and the cache key use
+ * them unchanged; item 0 keeps its default opening. A scene too short for every floor
+ * (`too_dense`) keeps its default quick stagger (lint `reveal_too_fast` reports it).
+ */
+export function beatRevealCues(planScenes: readonly Scene[], fps: number, beatSync: RenderState["beat_sync"] | undefined, enabled: boolean): Map<string, ResolvedCue[]> {
+  const out = new Map<string, ResolvedCue[]>();
+  if (!enabled || !beatSync || beatSync.grid_only) return out;
+  const grids = sceneBeatGrids(planScenes, fps, beatSync, true);
+  const { bounds } = frameTimeline(planScenes, fps);
+  planScenes.forEach((s, i) => {
+    if (s.cues?.length) return;
+    const texts = revealItemTexts(s);
+    const g = grids.get(s.id);
+    if (!texts || texts.length < 2 || !g?.beats_s.length) return;
+    const duration = (bounds[i + 1]! - bounds[i]!) / fps;
+    const r = revealSchedule({ texts, beats: g.beats_s, downbeats: g.downbeats_s, duration, entrance: REVEAL_ENTRANCE_S });
+    if (r.too_dense) return;
+    out.set(
+      s.id,
+      r.times.slice(1).map((t, k) => ({ item: k + 1, at_s: Math.round((t + CUE_LEAD_S) * 1000) / 1000 })),
+    );
+  });
+  return out;
+}
+
+/**
  * d. Scene clips: render every plan scene (cached by sidecar keys); with renderer "auto", scenes
  * that fail are retried with ffmpeg. Throws when a scene still has no clip. Also resolves the
  * target contracts and layout zones the scenes (and later captions, logo and cover) use.
@@ -579,6 +639,8 @@ export async function stageScenes(
     sceneCues: Map<string, ResolvedCue[]>;
     /** The render plan's beat grid (stagePlanTiming); `motion` scenes get their slice of it. */
     beatSync?: RenderState["beat_sync"];
+    /** The music bed: `motion` scenes get its envelope (`window.__vs.audio`). */
+    music?: ResolvedMusic;
     /** Series bible key input per scene id (scenes with series_refs). */
     seriesKeys?: ReadonlyMap<string, SeriesKeyInput>;
   },
@@ -607,6 +669,13 @@ export async function stageScenes(
   const contracts = await loadTargetContracts(spec);
   const zones = layoutZones(target, contracts);
   const sceneBeats = sceneBeatGrids(planScenes, target.fps, input.beatSync);
+  const sceneAudio = await sceneAudioEnvelopes(planScenes, target.fps, input.music, { cacheDir: join(resolveDataDir(env).cache, "envelope"), ...(signal ? { signal } : {}) }).catch((e: unknown) => {
+    warnings.push(`motion audio: the music bed's envelope could not be read (${errMsg(e).slice(0, 200)}); vs.energy / bass / onset read 0`);
+    return new Map<string, SceneAudioEnvelope>();
+  });
+  // Beat sync on: text reveals of scenes without word cues land on beats, each readable for its floor.
+  const revealCues = beatRevealCues(planScenes, target.fps, input.beatSync, spec.audio?.beat_sync?.enabled === true);
+  const allCues = new Map([...revealCues, ...sceneCues]);
   const baseOpts = {
     project_dir: root,
     dir: scenesDir,
@@ -619,8 +688,9 @@ export async function stageScenes(
     ...(signal ? { signal } : {}),
     footage: footage.byScene,
     footageRenderer: o.footageRenderer ?? createFootageRenderer({ encodePreset: o.encodePreset ?? (quality === "preview" ? "ultrafast" : "veryfast") }),
-    ...(sceneCues.size ? { cues: sceneCues } : {}),
+    ...(allCues.size ? { cues: allCues } : {}),
     ...(sceneBeats.size ? { beats: sceneBeats } : {}),
+    ...(sceneAudio.size ? { audio: sceneAudio } : {}),
     ...(input.seriesKeys?.size ? { series: input.seriesKeys } : {}),
     // Blur only the final render: previews stay sharp and fast (cost grows by the sub-frame count).
     ...(quality === "final" && spec.master?.motion_blur ? { motionBlur: spec.master.motion_blur } : {}),

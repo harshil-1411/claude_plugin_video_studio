@@ -1,0 +1,9 @@
+{
+  "name": "@fieldnote-labs/fieldnote",
+  "version": "0.3.1",
+  "description": "Field notes for API teams: every endpoint change, written up for you.",
+  "private": true,
+  "scripts": {
+    "dev": "echo never run by video-studio"
+  }
+}

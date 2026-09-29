@@ -38,6 +38,8 @@ export interface CompareMetrics {
   frozen_pct: number;
   changes_per_sec: number;
   cuts_per_sec: number;
+  /** Share of frame steps (percent) where the picture moves at all: smooth motion and crossfades count. */
+  moving_pct: number | null;
   longest_static_sec: number;
   integrated_lufs: number | null;
 }
@@ -204,6 +206,7 @@ function sideMetrics(v: VideoAnalysis): CompareMetrics {
     frozen_pct: v.motion.frozen_pct,
     changes_per_sec: v.motion.changes_per_sec,
     cuts_per_sec: v.motion.cuts_per_sec,
+    moving_pct: v.motion.moving_pct ?? null,
     longest_static_sec: v.motion.longest_static_s,
     integrated_lufs: v.integrated_lufs,
   };
@@ -219,6 +222,8 @@ export const COMPARE_TOLERANCE = {
   frozen_sec: 0.5,
   /** Changes and cuts per second at least this share of the reference's. */
   rate_share: 0.9,
+  /** Moving share at most this many percentage points below the reference's. */
+  moving_pct_points: 5,
   /** Longest static stretch at most this share above the reference's (plus 0.1 s). */
   static_share: 1.1,
   /** Integrated loudness within this many LU of the reference's. */
@@ -231,6 +236,7 @@ const METRIC_LABELS: Record<keyof CompareMetrics, string> = {
   frozen_pct: "Frozen (% of runtime)",
   changes_per_sec: "Big changes per second",
   cuts_per_sec: "Cuts per second",
+  moving_pct: "Moving (% of frames)",
   longest_static_sec: "Longest static stretch (s)",
   integrated_lufs: "Loudness (LUFS integrated)",
 };
@@ -257,6 +263,10 @@ export function metricRows(a: Pick<CompareSideResult, "metrics" | "reference">, 
         const ok = o >= r * T.rate_share;
         const what = id === "changes_per_sec" ? "big changes" : "cuts";
         return { meets: ok, verdict: ok ? `meets: at least the reference's pace of ${what}` : `misses: fewer ${what} per second than the reference` };
+      }
+      case "moving_pct": {
+        const ok = o >= r - T.moving_pct_points;
+        return { meets: ok, verdict: ok ? "meets: the picture moves at least as much of the time as the reference" : "misses: the picture sits still more of the time than the reference" };
       }
       case "longest_static_sec": {
         const ok = o <= r * T.static_share + 0.1;

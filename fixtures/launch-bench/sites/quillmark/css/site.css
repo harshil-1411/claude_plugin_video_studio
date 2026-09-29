@@ -1,0 +1,20 @@
+/* Quillmark (invented): literal colours only, no custom properties. */
+body {
+  background-color: #fdfcf7;
+  color: #22303c;
+  font-family: "Nunito Sans", Helvetica, Arial, sans-serif;
+}
+h1, h2, h3 {
+  font-family: Lora, Georgia, serif;
+  color: #22303c;
+}
+a { color: #6a4c93; }
+.cta { background: #6a4c93; color: #ffffff; }
+.cta:hover { background: rgb(88, 62, 124); }
+.tag { background: #6a4c93; }
+.note { border-left: 3px solid #6a4c93; }
+.alert { background: #f25f5c; color: #ffffff; }
+.alert-soft { background: rgba(242, 95, 92, 0.15); }
+.warn { color: #f25f5c; }
+footer { background: #efece3; color: hsl(210, 27%, 18%); }
+code { font-family: "Fira Code", monospace; }

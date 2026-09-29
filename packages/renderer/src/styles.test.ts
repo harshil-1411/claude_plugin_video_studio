@@ -49,10 +49,11 @@ describe("styles/ packs", () => {
 
   it("every core pack has a taste guard (motion.avoid) that fits its personality", async () => {
     const avoid = Object.fromEntries(await Promise.all(CORE.map(async (id) => [id, new Set((await getStyle(dir, id)).motion.avoid ?? [])] as const)));
-    // Nobody shakes the camera or splits RGB channels for polish; neon glow and synthwave grid floors date a piece.
-    for (const id of CORE) for (const e of ["shake", "neon_glow", "grid_floor"]) expect(avoid[id]!.has(e as never), `${id} avoids ${e}`).toBe(true);
+    // Nobody shakes the camera or splits RGB channels for polish; neon glow, synthwave grid floors and
+    // decorative equalizer bars date a piece.
+    for (const id of CORE) for (const e of ["shake", "neon_glow", "grid_floor", "eq_bars"]) expect(avoid[id]!.has(e as never), `${id} avoids ${e}`).toBe(true);
     // Calm packs ban every stock effect.
-    expect(avoid.minimal!.size).toBe(9);
+    expect(avoid.minimal!.size).toBe(10);
     expect(avoid.editorial!.size).toBeGreaterThanOrEqual(8);
     // Energetic keeps on-beat flashes and its spring overshoot; technical keeps a one-frame glitch on a cut.
     expect(avoid.energetic!.has("flash")).toBe(false);

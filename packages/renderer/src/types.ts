@@ -77,10 +77,28 @@ export interface SceneRenderRequest {
    */
   beats?: SceneBeats;
   /**
+   * The music bed's envelope under this scene (scene-local frames), when the render has a bed and
+   * the scene is a `motion` page: `window.__vs.audio`, read by `vs.energy` / `vs.bass` / `vs.onset`.
+   * Other kinds ignore it.
+   */
+  audio?: SceneAudioEnvelope;
+  /**
    * Motion blur for a `motion` scene (final renders only): sub-frames the producer averages per
    * output frame. Absent: a plain render. Other kinds ignore it.
    */
   motion_blur?: { subframes: number };
+}
+
+/**
+ * The music bed's per-frame envelope inside one scene (media envelope.ts): frame `k` of the scene
+ * is byte `k` of each curve; each value is 0..255 (0..1 of the bed's 98th percentile). Base64, so
+ * the page stays small (4 characters per 3 frames per curve).
+ */
+export interface SceneAudioEnvelope {
+  fps: number;
+  rms: string;
+  low: string;
+  onset: string;
 }
 
 /** Beat and downbeat times inside one scene, in scene-local seconds. */

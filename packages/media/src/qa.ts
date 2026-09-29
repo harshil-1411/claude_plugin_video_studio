@@ -56,6 +56,7 @@ export interface QaExpectations {
 export interface QaAcceptance {
   min_changes_per_sec?: number;
   max_frozen_pct?: number;
+  min_moving_pct?: number;
   max_static_sec?: number;
   hold_ms?: number;
 }
@@ -75,6 +76,16 @@ export const BIG_CHANGE_SCORE = 5;
  * quarter of the frame scores about the same, so the cut rate is an estimate, not an edit list.
  */
 export const CUT_SCORE = 15;
+/**
+ * A frame counts as moving when its mean absolute luma difference from the previous frame
+ * (`signalstats` YDIF, 8-bit code values over the whole picture) is at least this. Measured on
+ * synthetic 160x288 clips at 15 fps (YDIF is a mean, so it barely depends on resolution): a static
+ * card stays below 0.01, and x264's quality ramp and keyframe refreshes on a textured still reach
+ * 0.14 at CRF 23 (renders use CRF 20; at CRF 28 a few frames reach 0.35); a slow zoom of 3%/s
+ * scores 0.46–1.1, a 40 px/s box on a flat card 1.3–2.7, a 1 s crossfade about 9.5 on every fade
+ * frame. Slower drifts (a 1.5‰-per-frame zoom dips to 0.4) sit near the line.
+ */
+export const MOVING_YDIF = 0.3;
 /** Changes closer than this merge into one (a flash or a multi-frame dissolve is one change). */
 export const CHANGE_MERGE_S = 0.1;
 /** Frozen share of the runtime (percent) above which `frozen_frames` fails, unless acceptance sets another. */
@@ -156,6 +167,12 @@ export interface MotionStats {
   /** Frozen time (freezedetect intervals ≥ 1 s) and its share of the runtime. */
   frozen_s: number;
   frozen_pct: number;
+  /**
+   * Share of frame-to-frame steps (percent) where the picture moves at all (YDIF ≥ MOVING_YDIF):
+   * smooth motion and crossfades count, a hold does not, a hard cut counts one frame. Set by
+   * `analyzeVideo`.
+   */
+  moving_pct?: number;
 }
 
 /** First vs last frame and the audio level either side of a loop's seam. */
@@ -321,11 +338,25 @@ export function motionStats(changes: readonly SceneChange[], durationS: number, 
  * kept per instance. `bitDepth` scales YAVG to 8-bit code values.
  */
 export function parseLuma(stderr: string, bitDepth = 8): LumaSample[] {
+  return parseSignalstat(stderr, "YAVG", bitDepth);
+}
+
+/**
+ * Per-frame mean absolute luma difference from the previous frame (`signalstats` YDIF, 8-bit code
+ * values; the first frame has no previous and reads 0), parsed like {@link parseLuma}.
+ */
+export function parseFrameDiff(stderr: string, bitDepth = 8): LumaSample[] {
+  return parseSignalstat(stderr, "YDIF", bitDepth);
+}
+
+function parseSignalstat(stderr: string, key: "YAVG" | "YDIF", bitDepth: number): LumaSample[] {
   const scale = bitDepth > 8 ? 2 ** (bitDepth - 8) : 1;
+  const tag = `lavfi.signalstats.${key}=`;
+  const valueRe = new RegExp(`lavfi\\.signalstats\\.${key}=(-?[\\d.]+)`);
   const pending = new Map<string, number>();
   const out: LumaSample[] = [];
   for (const line of stderr.split(/\r?\n/)) {
-    if (!line.includes("pts_time:") && !line.includes("lavfi.signalstats.YAVG=")) continue;
+    if (!line.includes("pts_time:") && !line.includes(tag)) continue;
     const who = /\[Parsed_metadata_\d+ @ ([^\]]+)\]/.exec(line)?.[1] ?? "";
     const pts = /\bpts_time:\s*(-?[\d.]+(?:e-?\d+)?)/.exec(line);
     if (pts) {
@@ -333,7 +364,7 @@ export function parseLuma(stderr: string, bitDepth = 8): LumaSample[] {
       if (Number.isFinite(t)) pending.set(who, t);
       continue;
     }
-    const y = /lavfi\.signalstats\.YAVG=(-?[\d.]+)/.exec(line);
+    const y = valueRe.exec(line);
     const t = pending.get(who);
     if (!y || t === undefined) continue;
     pending.delete(who);
@@ -341,6 +372,18 @@ export function parseLuma(stderr: string, bitDepth = 8): LumaSample[] {
     if (Number.isFinite(v)) out.push({ t: r3(t), y: v / scale });
   }
   return out;
+}
+
+/**
+ * Share of frame steps (percent, one decimal) whose YDIF is at least {@link MOVING_YDIF}. The first
+ * frame has no previous one; frames before `skipLeading` (a baked poster and its cut back) are left
+ * out. 0 with fewer than two frames.
+ */
+export function movingPct(diffs: readonly LumaSample[], skipLeading = 0): number {
+  const steps = diffs.slice(Math.max(1, Math.floor(skipLeading)));
+  if (!steps.length) return 0;
+  const moving = steps.filter((d) => d.y >= MOVING_YDIF).length;
+  return Math.round((moving / steps.length) * 1000) / 10;
 }
 
 /** Limited-range 8-bit luma to approximate relative luminance (0–1): normalise, then the sRGB EOTF. */
@@ -510,8 +553,8 @@ export interface VideoAnalysis extends LoudnessStats {
 }
 
 /**
- * One ffprobe plus one decode pass: blackdetect, freezedetect, scdet and per-frame mean luma
- * (signalstats) on the video, silencedetect and ebur128 on the audio. Shared by technical QA and
+ * One ffprobe plus one decode pass: blackdetect, freezedetect, scdet, per-frame mean luma and
+ * frame difference (signalstats YAVG and YDIF) on the video, silencedetect and ebur128 on the audio. Shared by technical QA and
  * `compare` (a reference video).
  */
 export async function analyzeVideo(
@@ -522,7 +565,7 @@ export async function analyzeVideo(
   const probe = o.probe ?? (await ffprobe(videoPath, opts));
   const args = ["-i", videoPath];
   const black = blackThreshold(o.background);
-  if (probe.has_video) args.push("-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=${black.pix_th},freezedetect=n=-60dB:d=1.0,scdet=t=${BIG_CHANGE_SCORE},signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG`);
+  if (probe.has_video) args.push("-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=${black.pix_th},freezedetect=n=-60dB:d=1.0,scdet=t=${BIG_CHANGE_SCORE},signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG,metadata=mode=print:key=lavfi.signalstats.YDIF`);
   if (probe.has_audio) args.push("-map", "0:a:0", "-af", "silencedetect=n=-50dB:d=1.0,ebur128=peak=true:framelog=quiet");
   args.push("-f", "null", "-");
   const { stderr } = await runFfmpeg(args, { ...opts, keepStderr: true });
@@ -532,6 +575,7 @@ export async function analyzeVideo(
   const skipBefore = skip > 0 && probe.fps ? (skip - 0.5) / probe.fps : 0;
   const changes = probe.has_video ? parseSceneChanges(stderr, BIG_CHANGE_SCORE, skipBefore) : [];
   const motion = motionStats(changes, probe.duration_s, det.freeze);
+  if (probe.has_video) motion.moving_pct = movingPct(parseFrameDiff(stderr, probe.bit_depth ?? 8), skip);
   const flash = flashStats(probe.has_video ? parseLuma(stderr, probe.bit_depth ?? 8) : [], skip);
   return { probe, ...det, motion, flash, black_threshold: black };
 }
@@ -716,9 +760,9 @@ export async function technicalQa(videoPath: string, expect: QaExpectations, opt
 const fmtS = (n: number) => `${Math.round(n * 100) / 100}s`;
 
 /**
- * frozen_frames, motion_density, longest_static and (with acceptance.hold_ms) hold. Frozen time
+ * frozen_frames, motion_density, moving (when measured), longest_static and (with acceptance.hold_ms) hold. Frozen time
  * fails above the limit (default {@link DEFAULT_MAX_FROZEN_PCT}%): a frozen reel reads as a
- * slideshow, whatever made it. Density and static stretch fail only against acceptance numbers.
+ * slideshow, whatever made it. Density, moving share and static stretch fail only against acceptance numbers.
  */
 export function motionChecks(m: MotionStats, freeze: readonly TimeRange[], acc: QaAcceptance): QaCheck[] {
   const out: QaCheck[] = [];
@@ -743,6 +787,19 @@ export function motionChecks(m: MotionStats, freeze: readonly TimeRange[], acc: 
       detail: `${perSec}; minimum ${acc.min_changes_per_sec}/s`,
       ...(ok ? {} : { fix: "Add visual beats: stage each scene as several states (reveals, match cuts, camera moves) or split long scenes." }),
     });
+  }
+  if (m.moving_pct !== undefined) {
+    const moving = `picture moving in ${m.moving_pct}% of frames (smooth motion and crossfades count, holds do not)`;
+    if (acc.min_moving_pct === undefined) out.push({ id: "moving", status: "ok", detail: `${moving}; no acceptance minimum set` });
+    else {
+      const ok = m.moving_pct >= acc.min_moving_pct;
+      out.push({
+        id: "moving",
+        status: ok ? "ok" : "fail",
+        detail: `${moving}; minimum ${acc.min_moving_pct}%`,
+        ...(ok ? {} : { fix: "Keep the picture alive through the holds: a slow camera drift or zoom, easing elements, a looping accent or a crossfade, or shorten the still stretches." }),
+      });
+    }
   }
   const where = m.longest_static_at ? ` (${m.longest_static_at.start_s.toFixed(2)}–${m.longest_static_at.end_s.toFixed(2)}s)` : "";
   if (acc.max_static_sec === undefined) out.push({ id: "longest_static", status: "ok", detail: `longest stretch without a big change ${fmtS(m.longest_static_s)}${where}; no acceptance maximum set` });
@@ -802,7 +859,7 @@ export function formatQaMarkdown(r: QaReport): string {
     `- Frozen: ${r.metrics.freeze.length ? fmtRanges(r.metrics.freeze) : "none"}`,
     ...(r.metrics.motion
       ? [
-          `- Motion: ${r.metrics.motion.changes} big changes (${r.metrics.motion.changes_per_sec}/s), ${r.metrics.motion.cuts} cuts (${r.metrics.motion.cuts_per_sec}/s), longest static ${r.metrics.motion.longest_static_s}s, frozen ${r.metrics.motion.frozen_pct}%`,
+          `- Motion: ${r.metrics.motion.changes} big changes (${r.metrics.motion.changes_per_sec}/s), ${r.metrics.motion.cuts} cuts (${r.metrics.motion.cuts_per_sec}/s), longest static ${r.metrics.motion.longest_static_s}s, frozen ${r.metrics.motion.frozen_pct}%${r.metrics.motion.moving_pct !== undefined ? `, moving ${r.metrics.motion.moving_pct}% of frames` : ""}`,
         ]
       : []),
     ...(r.metrics.flash

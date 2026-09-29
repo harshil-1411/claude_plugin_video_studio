@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { initProject, projectPaths } from "@video-studio/core";
-import { type IngestOptions, formatIngestSummary, ingest } from "@video-studio/ingestion";
+import { type IngestOptions, draftBrand, formatBrandDraft, formatIngestSummary, ingest } from "@video-studio/ingestion";
 import { AspectRatio, LanguageTag, Platform, PlatformTargetId, ProviderFamily, voiceMode } from "@video-studio/schema";
 import { z } from "zod";
 import { type DoctorDeps, defaultDoctorDeps, formatDoctorReport, runDoctor } from "./doctor.js";
@@ -272,6 +272,26 @@ export function createServer(options: ServerOptions = {}): McpServer {
     safe(async ({ project_dir, id, offset, max_chars }: { project_dir: string; id: string; offset?: number; max_chars?: number }) => {
       const r = await sourceSection(resolveInputPath(project_dir, cwd()), id, { ...(offset !== undefined ? { offset } : {}), ...(max_chars ? { max_chars } : {}) });
       return toolResult(formatSourceSection(r), r as unknown as Record<string, unknown>, { maxArray: 1000, maxString: 200_000 });
+    }),
+  );
+
+  server.registerTool(
+    "brand_draft",
+    {
+      title: "Draft a brand from the source",
+      description:
+        "Draft a Brand v2 for <project_dir> from a local repo folder or an http(s) URL (default: the project's ingested repo, else its URL source) and write project/brand.draft.yaml; project/brand.yaml is never written (the user accepts the draft by saving it as brand.yaml). Repo: stylesheets (CSS/SCSS/Less) and a Tailwind-style config read as text (never loaded or run), :root/html/body custom properties, colour usage, font-family stacks and @font-face files, logo candidates (public/, assets/, static/, src/assets/: logo*, *mark*, icon*, favicon*), package.json name; node_modules, build output and hidden folders are skipped. URL: the page's HTML (no JS runs), inline <style>, up to 8 same-site linked stylesheets (512 KB each), theme-color, og:site_name, and logo candidates (an <img> named logo, icon links, og:image last), all through the SSRF-guarded fetch (private addresses refused unless the user set VS_ALLOW_PRIVATE_URLS=1). Roles: background and text from the page's own body/html declarations, else names (--bg, --text, --primary, --brand, --accent, --secondary, Tailwind keys), else usage; text failing WCAG 4.5:1 on the background is replaced by white or near-black. Fonts: a repo's self-hosted font files are copied into fonts/<Family>/ with the licence file next to them; otherwise the nearest bundled font (Inter, Noto Sans, JetBrains Mono) is named and the substitution reported. The chosen logo is copied or downloaded (images only, 2 MB cap) into assets/brand/. Returns {draft_rel, name, palette {background, text, accent?, secondary?} each {value, how, evidence (file:line or URL:line)}, contrast, fonts {heading, body, mono?}, logo?, logo_candidates[], colours_seen[], substitutions[], warnings[], brand}.",
+      inputSchema: {
+        project_dir: z.string().min(1).describe("Project folder (the draft goes to its project/brand.draft.yaml)"),
+        source: z.string().min(1).optional().describe("A local repo folder (relative to the server's working directory) or an http(s) URL; default: the project's ingested repo or URL source"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    safe(async ({ project_dir, source }: { project_dir: string; source?: string }) => {
+      const root = resolveInputPath(project_dir, cwd());
+      const src = source === undefined || /^https?:\/\//i.test(source) ? source : resolveInputPath(source, cwd());
+      const r = await draftBrand(root, { ...(src ? { source: src } : {}), cwd: cwd(), env, ...(options.ingestOptions?.fetch ? { fetch: options.ingestOptions.fetch } : {}) });
+      return jsonResult(formatBrandDraft(r), r as unknown as Record<string, unknown>);
     }),
   );
 
@@ -598,7 +618,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Re-run technical QA",
       description:
-        "Re-run technical QA (ffprobe size/aspect/duration/codecs, blackdetect, freezedetect, scene changes, silencedetect, EBU R128 loudness vs -14 LUFS) on the latest rendered reel of <project_dir> (or the given quality), write qa/report.{json,md} and refresh dist/render-manifest.json. Motion: frozen_frames fails above spec.acceptance.max_frozen_pct (default 15% of the runtime); motion_density (big changes/s) and longest_static fail only against spec.acceptance; with master.loop, loop_seam checks first vs last frame SSIM and the audio jump. Returns {status: pass|warn|fail, findings[] {id, status, detail, fix}}.",
+        "Re-run technical QA (ffprobe size/aspect/duration/codecs, blackdetect, freezedetect, scene changes, silencedetect, EBU R128 loudness vs -14 LUFS) on the latest rendered reel of <project_dir> (or the given quality), write qa/report.{json,md} and refresh dist/render-manifest.json. Motion: frozen_frames fails above spec.acceptance.max_frozen_pct (default 15% of the runtime); motion_density (big changes/s), moving (share of frames where the picture moves at all; smooth motion and crossfades count) and longest_static fail only against spec.acceptance; with master.loop, loop_seam checks first vs last frame SSIM and the audio jump. Returns {status: pass|warn|fail, findings[] {id, status, detail, fix}}.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Rendered project folder"),
         quality: QUALITY.optional().describe("Which render to check (default: the latest)"),
@@ -765,7 +785,7 @@ export function createServer(options: ServerOptions = {}): McpServer {
     {
       title: "Before/after comparison page",
       description:
-        "Build a before/after page for two videos of <project_dir> at qa/compare/index.html, with both videos copied next to it as a.mp4/b.mp4 (self-contained: inline CSS/JS, no network; the folder can be zipped and shared). Views: side by side, stacked and wipe (draggable divider); one play/pause, scrubber and time readout drive both in sync, frame step (arrow keys), speed, per-side mute (b audible by default). Default: a = this project's preview render, b = its final render; with a {reference} side the other side defaults to this project's latest render. Both sides are measured (duration, frozen seconds and %, big changes/s, cuts/s, longest static stretch, integrated loudness) into a table on the page, and with a reference each metric gets a meets/misses verdict for ours. Returns {html, a: {label, path, duration_sec, width, height, metrics}, b, metrics[] {id, a, b, meets, verdict}}. You cannot open a browser: give the user the path to open.",
+        "Build a before/after page for two videos of <project_dir> at qa/compare/index.html, with both videos copied next to it as a.mp4/b.mp4 (self-contained: inline CSS/JS, no network; the folder can be zipped and shared). Views: side by side, stacked and wipe (draggable divider); one play/pause, scrubber and time readout drive both in sync, frame step (arrow keys), speed, per-side mute (b audible by default). Default: a = this project's preview render, b = its final render; with a {reference} side the other side defaults to this project's latest render. Both sides are measured (duration, frozen seconds and %, big changes/s, cuts/s, moving % of frames, longest static stretch, integrated loudness) into a table on the page, and with a reference each metric gets a meets/misses verdict for ours. Returns {html, a: {label, path, duration_sec, width, height, metrics}, b, metrics[] {id, a, b, meets, verdict}}. You cannot open a browser: give the user the path to open.",
       inputSchema: {
         project_dir: z.string().min(1).describe("Project folder (the page is written to its qa/compare/)"),
         a: compareSide.optional(),

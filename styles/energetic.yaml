@@ -27,4 +27,4 @@ motion:
   stagger_ms: 70
   transition: whip
   transition_ms: 250
-  avoid: [shake, rgb_split, lens_flare, particle_burst, neon_glow, grid_floor]
+  avoid: [shake, rgb_split, lens_flare, particle_burst, neon_glow, grid_floor, eq_bars]

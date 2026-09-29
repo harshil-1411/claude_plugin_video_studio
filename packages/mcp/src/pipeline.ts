@@ -136,7 +136,7 @@ async function renderProjectLocked(projectDir: string, o: RenderProjectOptions):
   const { sceneCues, cueLog } = resolveWordCues(run, planScenes, nativeTracks, trackById, timeline.slotMs);
 
   // d. scene clips
-  const scenes = await stageScenes(run, { spec, planScenes, tokens: inputs.tokens, target, tp, footage, sceneCues, beatSync: timing.beatSync, ...(inputs.series ? { seriesKeys: inputs.series.usage.keys } : {}) });
+  const scenes = await stageScenes(run, { spec, planScenes, tokens: inputs.tokens, target, tp, footage, sceneCues, beatSync: timing.beatSync, ...(music ? { music } : {}), ...(inputs.series ? { seriesKeys: inputs.series.usage.keys } : {}) });
   const { ordered, used, placeholders, reasons, zones, contracts } = scenes;
 
   // e. captions; e'. music ducking and per-scene audio

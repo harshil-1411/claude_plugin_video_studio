@@ -16,6 +16,10 @@ interface Kit {
   beatAt(t: number): number | null;
   downbeatAt(t: number): number | null;
   beatIndex(t: number): number;
+  energy(t: number): number;
+  bass(t: number): number;
+  onset(t: number): number;
+  revealAt(i: number): number;
 }
 
 /** Evaluate the kit in a fresh context, as the page does (`window.vs`). */
@@ -111,5 +115,39 @@ describe("motion kit", () => {
     expect(vs.downbeatAt(9)).toBe(1.25);
     // No grid: no beats.
     expect(kit().beatAt(5)).toBeNull();
+  });
+
+  it("audio helpers: 0..1, linear between frames, pure; 0 without a bed", () => {
+    const b64 = (xs: number[]) => Buffer.from(xs).toString("base64");
+    const audio = { fps: 10, rms: b64([0, 255, 51, 0]), low: b64([255, 0, 0, 0]), onset: b64([0, 0, 255, 0]) };
+    const vs = kit({ audio });
+    expect(vs.energy(0)).toBe(0);
+    expect(vs.energy(0.1)).toBe(1);
+    expect(vs.energy(0.05)).toBeCloseTo(0.5);
+    expect(vs.energy(0.15)).toBeCloseTo(0.6);
+    expect(vs.bass(0)).toBe(1);
+    expect(vs.bass(0.05)).toBeCloseTo(0.5);
+    expect(vs.onset(0.2)).toBe(1);
+    expect(vs.onset(99)).toBe(0);
+    expect(vs.energy(-1)).toBe(0);
+    // Any call order gives the same values (the lazy decode is invisible).
+    const times = [0.15, 0.05, 0.3, 0.15, 0.05];
+    const a = times.map((t) => vs.energy(t));
+    expect(a[0]).toBe(a[3]);
+    expect(a[1]).toBe(a[4]);
+    expect(kit({ audio }).energy(0.05)).toBe(a[1]);
+    for (const k of [kit(), kit({ audio: { fps: 0, rms: "", low: "", onset: "" } })]) {
+      expect(k.energy(1)).toBe(0);
+      expect(k.bass(1)).toBe(0);
+      expect(k.onset(1)).toBe(0);
+    }
+  });
+
+  it("revealAt reads window.__vs.reveals; always a number", () => {
+    const vs = kit({ reveals: [0, 1.5, 3] });
+    expect(vs.revealAt(0)).toBe(0);
+    expect(vs.revealAt(2)).toBe(3);
+    expect(vs.revealAt(7)).toBe(3);
+    expect(kit().revealAt(1)).toBe(0);
   });
 });

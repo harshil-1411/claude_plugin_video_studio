@@ -112,6 +112,7 @@ describe("MCP server (in-memory)", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       "adapt",
       "analyze",
+      "brand_draft",
       "brief_validate",
       "compare",
       "demo",
@@ -188,6 +189,22 @@ describe("MCP server (in-memory)", () => {
 
     const both = (await client.callTool({ name: "spec_validate", arguments: { project_dir: root, spec_path: SPEC } })) as CallToolResult;
     expect(both.isError).toBe(true);
+    await close();
+  });
+
+  it("brand_draft writes project/brand.draft.yaml from a repo, with evidence", async () => {
+    const { client, close } = await connect();
+    const root = join(tmp, "brand-proj");
+    const repo = resolve(here, "../../../fixtures/launch-bench/repo");
+    const r = (await client.callTool({ name: "brand_draft", arguments: { project_dir: root, source: repo } })) as CallToolResult;
+    expect(r.isError).toBeFalsy();
+    expect(text(r)).toMatch(/brand draft → project\/brand\.draft\.yaml/);
+    expect(text(r)).toMatch(/primary: #2F9E44 \(custom property --color-brand; src\/styles\.css:\d+\)/);
+    expect((r.structuredContent as { brand: { visual: { palette: Record<string, string> } } }).brand.visual.palette.background).toBe("#F4F7F5");
+    expect(await readFile(join(root, "project", "brand.draft.yaml"), "utf8")).toContain("name: fieldnote");
+    const none = (await client.callTool({ name: "brand_draft", arguments: { project_dir: join(tmp, "brand-empty") } })) as CallToolResult;
+    expect(none.isError).toBe(true);
+    expect(text(none)).toMatch(/no source given/);
     await close();
   });
 

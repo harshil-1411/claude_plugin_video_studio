@@ -70,6 +70,10 @@ const WIN = 441;
 const FRAME_S = HOP / SR;
 /** Frame index → onset time: a rise shows first in the frame whose window just reaches the attack. */
 const ONSET_OFFSET_S = (WIN - HOP) / SR;
+/** Length (s) of one analysis frame of {@link onsetEnvelope} and {@link lowBandFrames} (10 ms). */
+export const BEAT_FRAME_S = FRAME_S;
+/** Time (s) of onset-envelope frame `i`: `i × BEAT_FRAME_S + BEAT_ONSET_OFFSET_S`. */
+export const BEAT_ONSET_OFFSET_S = ONSET_OFFSET_S;
 
 /** Onset strength per 10 ms frame: positive rise of log energy over the previous two frames. */
 export function onsetEnvelope(pcm: Float32Array): Float32Array {
@@ -460,7 +464,8 @@ export function analyzePcm(pcm: Float32Array): BeatAnalysis {
   };
 }
 
-export async function detectBeats(audioPath: string, opts: { signal?: AbortSignal; tools?: FfmpegTools } = {}): Promise<BeatAnalysis> {
+/** Decode the first audio stream of a file to mono float PCM at {@link BEAT_SAMPLE_RATE} (the analysis input). */
+export async function decodeMonoPcm(audioPath: string, opts: { signal?: AbortSignal; tools?: FfmpegTools } = {}): Promise<Float32Array> {
   const work = await mkdtemp(join(tmpdir(), "vs-beats-"));
   try {
     const out = join(work, "mono.f32");
@@ -469,11 +474,14 @@ export async function detectBeats(audioPath: string, opts: { signal?: AbortSigna
       ...(opts.tools ? { tools: opts.tools } : {}),
     });
     const buf = await readFile(out);
-    const pcm = new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
-    return analyzePcm(pcm);
+    return new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
   } finally {
     await rm(work, { recursive: true, force: true });
   }
+}
+
+export async function detectBeats(audioPath: string, opts: { signal?: AbortSignal; tools?: FfmpegTools } = {}): Promise<BeatAnalysis> {
+  return analyzePcm(await decodeMonoPcm(audioPath, opts));
 }
 
 /**

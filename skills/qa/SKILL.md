@@ -1,6 +1,6 @@
 ---
 name: qa
-description: Re-run technical QA on a rendered video-studio project - resolution, aspect, duration, codecs, black and frozen frames, motion density, the loop seam, flashing, audio/video sync, silence and loudness against -14 LUFS - and explain each finding with its fix. Use when the user runs /video-studio:qa or asks whether a rendered reel is ready to post.
+description: Re-run technical QA on a rendered video-studio project - resolution, aspect, duration, codecs, black and frozen frames, motion density and moving share, the loop seam, flashing, audio/video sync, silence and loudness against -14 LUFS - and explain each finding with its fix. Use when the user runs /video-studio:qa or asks whether a rendered reel is ready to post.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+) and ffmpeg.
 allowed-tools: mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_engine__review Read
@@ -26,6 +26,13 @@ allowed-tools: mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_
      `acceptance.max_static_sec`; otherwise they are reported for context.
      Smooth continuous motion is not a "big change"; cuts, reveals and new
      states are. `hold` checks `acceptance.hold_ms` the same way.
+   - `moving` (the share of frames where the picture moves at all, frame to
+     frame) complements `motion_density`: a slow zoom, drift or crossfade
+     counts as moving on every frame but is not a big change, while a hard
+     cut is a big change but only one moving frame. A cut-only slideshow
+     scores high changes/s and a low moving %; a slow Ken Burns the reverse.
+     It fails only below `acceptance.min_moving_pct`. Fix: keep the holds
+     alive (a slow camera move, easing elements, a crossfade).
    - `loop_seam` (with `master.loop`): the last frame must match the first
      (SSIM ≥ 0.99) and the audio level must not jump across the seam
      (under 6 dB).

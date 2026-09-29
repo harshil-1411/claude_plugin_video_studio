@@ -1,0 +1,12 @@
+/* Emberly (invented): the built stylesheet a Tailwind-style build would serve. */
+body{margin:0}
+.bg-paper{background-color:#fff8f0}
+.text-ink{color:#1d1a17}
+.bg-brand{background-color:#e4572e}
+.text-brand{color:#e4572e}
+.hover\:bg-brand-600:hover{background-color:#c2410c}
+.text-paper{color:#fff8f0}
+.text-moss{color:#4c6b3c}
+.font-sans{font-family:Manrope,ui-sans-serif,system-ui,sans-serif}
+.font-display{font-family:Fraunces,Georgia,serif}
+.font-mono{font-family:"IBM Plex Mono",ui-monospace,monospace}

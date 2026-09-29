@@ -1,0 +1,31 @@
+/* Fieldnote (invented): a mini repo stylesheet with a self-hosted font. */
+@font-face {
+  font-family: "Field Sans";
+  src: url("./fonts/FieldSans-Regular.woff2") format("woff2"),
+       url("./fonts/FieldSans-Regular.ttf") format("truetype");
+  font-weight: 400;
+}
+
+:root {
+  --color-background: #f4f7f5;
+  --color-foreground: #1b2b24;
+  --color-brand: #2f9e44;
+  --color-accent: #1971c2;
+}
+
+html {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: "Field Sans", "Helvetica Neue", sans-serif;
+}
+
+.btn-primary { background: var(--color-brand); color: #ffffff; }
+.link { color: var(--color-accent); }
+pre, code { font-family: "JetBrains Mono", Menlo, monospace; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: #0f1512;
+    --color-foreground: #e3ece6;
+  }
+}

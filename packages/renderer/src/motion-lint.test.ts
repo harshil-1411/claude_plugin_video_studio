@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { type MotionFile, lintMotionPage, loadMotionPage } from "./motion-lint.js";
+import { type MotionFile, lintMotionPage, loadMotionPage, motionPageReferences, motionScriptsReference } from "./motion-lint.js";
 
 const FIXTURES = fileURLToPath(new URL("./__fixtures__/motion/", import.meta.url));
 
@@ -178,5 +178,29 @@ describe("loadMotionPage", () => {
     const b = await loadMotionPage(root, "motion/morph.html");
     expect(b.sha256).toBe(a.sha256);
     expect(b.files.find((f) => f.ref === "morph.css")!.sha256).not.toBe(a.files.find((f) => f.ref === "morph.css")!.sha256);
+  });
+});
+
+describe("motionScriptsReference", () => {
+  const page = (js: string, type = "") => `<html><body><script${type}>${js}</script></body></html>`;
+  it("finds a name used as a variable or a property, in inline scripts and script files", () => {
+    expect(motionScriptsReference(page("var a = vs.revealAt(1);"), new Map(), ["revealAt"])).toBe(true);
+    expect(motionScriptsReference(page('var a = window.vs["revealAt"](1);'), new Map(), ["revealAt"])).toBe(true);
+    expect(motionScriptsReference(page("import x from './a.js'; revealAt(2);", ' type="module"'), new Map(), ["revealAt"])).toBe(true);
+    expect(motionScriptsReference("<script src=\"s.js\"></script>", new Map([["s.js", "var t = window.__vs.reveals[0];"]]), ["revealAt", "reveals"])).toBe(true);
+  });
+  it("ignores declarations, keys, comments, strings and data scripts", () => {
+    expect(motionScriptsReference(page("var o = { revealAt: 1 }; // vs.revealAt(0)\nvar s = 'revealAt';"), new Map(), ["revealAt"])).toBe(false);
+    expect(motionScriptsReference('<!-- <script>vs.revealAt(0)</script> --><script type="application/json">{"revealAt":1}</script>', new Map(), ["revealAt"])).toBe(false);
+    expect(motionScriptsReference(page("vs.beatAt(1)"), new Map([["x.js", "not ( valid"]]), ["revealAt"])).toBe(false);
+  });
+  it("reads a loaded page's script files", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vs-mref-"));
+    mkdirSync(join(root, "motion"));
+    writeFileSync(join(root, "motion", "p.html"), '<script src="p.js"></script>');
+    writeFileSync(join(root, "motion", "p.js"), "window.seek = function (t) { return t > vs.revealAt(1); };");
+    const p = await loadMotionPage(root, "motion/p.html");
+    expect(await motionPageReferences(p, ["revealAt"])).toBe(true);
+    expect(await motionPageReferences(p, ["energy"])).toBe(false);
   });
 });

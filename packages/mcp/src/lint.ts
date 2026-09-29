@@ -35,6 +35,13 @@ import {
   getStyle,
   languageScript,
   loadMotionPage,
+  motionPageReferences,
+  MOTION_REVEAL_ENTRANCE_S,
+  REVEAL_ENTRANCE_S,
+  readingFloor,
+  revealItemTexts,
+  revealSchedule,
+  revealShortfalls,
   resolveTokens,
   scriptsIn,
   subjectEdgeHits,
@@ -177,7 +184,7 @@ interface RenderStateView {
   cover?: { headline_box?: TextBox; crops?: Array<{ id: string; targets: string[]; x: number; y: number; w: number; h: number }> };
   voice?: { timing_source?: string; tracks_path?: string };
   voice_mode?: string;
-  beat_sync?: { bpm?: number | null; beats?: number; moved_cuts?: number; beat_times_ms?: number[]; downbeat_times_ms?: number[]; snap?: "beat" | "downbeat" };
+  beat_sync?: { bpm?: number | null; beats?: number; moved_cuts?: number; beat_times_ms?: number[]; downbeat_times_ms?: number[]; snap?: "beat" | "downbeat"; grid_only?: boolean };
   qa?: QaStateView;
   cues?: Array<{ scene_id: string; word: string; item: number; at_ms?: number; status: string }>;
   logo?: { path: string; box: PxBox; scenes: string[] };
@@ -185,7 +192,7 @@ interface RenderStateView {
 
 /** The QA metrics render-state keeps (pipeline `RenderState.qa`). */
 interface QaStateView {
-  motion?: { changes_per_sec: number; longest_static_s: number; frozen_s: number; frozen_pct: number; cuts_per_sec?: number };
+  motion?: { changes_per_sec: number; longest_static_s: number; frozen_s: number; frozen_pct: number; cuts_per_sec?: number; moving_pct?: number };
   loop_seam?: { ssim: number | null; audio_jump_db: number | null };
   /** Flash and flicker on the reel (lane A, `checkFlashing`). */
   flash?: { spikes: number; spike_times_s: number[]; flash_rate_max: number; flash_window?: { start_s: number; end_s: number } };
@@ -1324,6 +1331,99 @@ export async function checkMotionUnsafe(root: string, spec: VideoSpec, out: Lint
   }
 }
 
+// ------------------------------------------------------------------------------------ reveals
+
+/** Seconds every item of `texts` needs on screen, one after another: entrance + reading floor each. */
+function revealNeedSec(texts: readonly string[], entrance: number): number {
+  return Math.ceil(texts.reduce((a, t) => a + entrance + readingFloor(t), 0) * 10) / 10;
+}
+
+/**
+ * Lint `reveal_too_fast` (warning): on-screen text items that replace or push each other before
+ * they can be read (reveal-schedule.ts: 0.8 s for 1–3 words, else 0.3 s a word, at least 1.2 s,
+ * after the entrance). The same floors and schedule the renderer uses:
+ * - word-cued items of text kinds (typography, kinetic_text, diagram, ...): consecutive cued items
+ *   whose spoken words come too close for the first to be read;
+ * - with beat sync on, uncued text scenes too short for the readable beat schedule (the render
+ *   kept the quick default stagger);
+ * - `motion` pages that read `vs.revealAt` / `window.__vs.reveals` (static check) with more than
+ *   one `text` item, when the scene is too short for the items' floors. Pages that time their own
+ *   copy are left to stills and review.
+ */
+export async function checkRevealPace(root: string, spec: VideoSpec, state: RenderStateView | undefined, out: LintFinding[]): Promise<void> {
+  const spans = sceneSpans(state);
+  const bs = state?.beat_sync;
+  const beatSync = spec.audio?.beat_sync?.enabled === true && !bs?.grid_only && Boolean(bs?.beat_times_ms?.length);
+  const placed = new Map<string, Map<number, number>>();
+  for (const c of state?.cues ?? []) {
+    if (c.status !== "placed" || c.at_ms === undefined) continue;
+    const m = placed.get(c.scene_id) ?? new Map<number, number>();
+    if (!m.has(c.item)) m.set(c.item, c.at_ms / 1000);
+    placed.set(c.scene_id, m);
+  }
+  for (const s of spec.scenes) {
+    const det = s.deterministic;
+    if (!det) continue;
+    const span = spans?.find((x) => x.id === s.id);
+    const dur = span ? (span.end - span.start) / 1000 : s.duration_sec;
+    if (det.kind === "motion") {
+      const texts = Array.isArray(det.props.text) ? (det.props.text as unknown[]).filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+      if (texts.length < 2) continue;
+      const html = typeof det.props.html === "string" ? det.props.html : "";
+      const page = await loadMotionPage(root, html);
+      // A page that times its own copy (several labels on screen together, a UI morph) can't be
+      // judged statically: stills and review show it. Pages on the reveal schedule are checked.
+      if (page.html === undefined || !(await motionPageReferences(page, ["revealAt", "reveals"]))) continue;
+      if (revealSchedule({ texts, duration: dur, entrance: MOTION_REVEAL_ENTRANCE_S }).too_dense) {
+        const need = revealNeedSec(texts, MOTION_REVEAL_ENTRANCE_S);
+        out.push({
+          id: "reveal_too_fast",
+          severity: "warning",
+          scene_id: s.id,
+          message: `motion scene ${s.id} is ${round2(dur)}s but its ${texts.length} text items need about ${need}s to be read one after another; vs.revealAt falls back to a quick reveal`,
+          fix: `raise scene ${s.id} duration_sec to at least ${need}, cut words, or show fewer text items`,
+        });
+      }
+      continue;
+    }
+    const texts = revealItemTexts(s);
+    if (!texts || texts.length < 2) continue;
+    const cued = placed.get(s.id);
+    if (cued?.size) {
+      const slow: string[] = [];
+      for (let i = 0; i + 1 < texts.length; i++) {
+        const a = cued.get(i);
+        const b = cued.get(i + 1);
+        if (a === undefined || b === undefined) continue;
+        const short = revealShortfalls([texts[i]!, texts[i + 1]!], [Math.max(0, a - CUE_LEAD_S), Math.max(0, b - CUE_LEAD_S)], Infinity, REVEAL_ENTRANCE_S)[0];
+        if (short) slow.push(`item ${i} "${snippet(texts[i]!, 30)}" is readable for ${round2(Math.max(0, short.visible))}s of its ${short.floor}s`);
+      }
+      if (slow.length) {
+        out.push({
+          id: "reveal_too_fast",
+          severity: "warning",
+          scene_id: s.id,
+          message: `scene ${s.id}: word cues bring the next item in before this one can be read: ${slow.join("; ")}`,
+          fix: `cue later words (or drop a cue, so the item keeps the default stagger), shorten the item's text, or say less between the cued words`,
+        });
+      }
+      continue;
+    }
+    if (!beatSync || s.cues?.length || !span) continue;
+    const local = (list: readonly number[] | undefined) => (list ?? []).filter((t) => t >= span.start && t < span.end).map((t) => (t - span.start) / 1000);
+    const r = revealSchedule({ texts, beats: local(bs?.beat_times_ms), downbeats: local(bs?.downbeat_times_ms), duration: dur, entrance: REVEAL_ENTRANCE_S });
+    if (!r.too_dense) continue;
+    const need = revealNeedSec(texts, REVEAL_ENTRANCE_S);
+    out.push({
+      id: "reveal_too_fast",
+      severity: "warning",
+      scene_id: s.id,
+      message: `scene ${s.id} (${det.kind}) is ${round2(dur)}s but its ${texts.length} items need about ${need}s to be read one after another on the beat, so they reveal in a quick stagger instead`,
+      fix: `raise scene ${s.id} duration_sec to at least ${need}, cut words or items, or split the scene in two`,
+    });
+  }
+}
+
 // ------------------------------------------------------------------------------------ inserts
 
 const NUMBER_WORDS: Readonly<Record<string, number>> = Object.freeze({
@@ -1610,6 +1710,10 @@ export function checkAcceptance(spec: Pick<VideoSpec, "acceptance">, state: Pick
   if (a.hold_ms !== undefined && m.longest_static_s * 1000 < a.hold_ms) {
     push(`the longest hold is ${Math.round(m.longest_static_s * 1000)} ms; acceptance.hold_ms wants at least one of ${a.hold_ms} ms`, "hold one key moment still so the motion around it feels earned");
   }
+  // moving_pct is measured from QA_VERSION 6; older renders are skipped until re-checked.
+  if (a.min_moving_pct !== undefined && m.moving_pct !== undefined && m.moving_pct < a.min_moving_pct) {
+    push(`the picture moves in ${m.moving_pct}% of the frames; acceptance.min_moving_pct is minimum ${a.min_moving_pct}%`, "keep something alive between the big changes (a slow push-in, drifting background, breathing glow, staged reveals), re-render and run qa_run");
+  }
 }
 
 /** With master.loop, the loop seam QA measured: first vs last frame SSIM and the audio level jump. */
@@ -1755,6 +1859,7 @@ export async function lintProject(projectDir: string, opts: LintOptions = {}): P
   checkCover(spec, contracts, coverView, findings);
   checkBanned(spec, brand, findings, draft);
   await checkMotionUnsafe(paths.root, spec, findings);
+  await checkRevealPace(paths.root, spec, state, findings);
   const sfxCatalog = loadSfxCatalog(opts.sfxDir === undefined ? findSfxDir() : opts.sfxDir);
   checkSfxLicense(spec, findings);
   checkSfxHarshRepeat(spec, sfxCatalog, sceneSpans(state), findings);

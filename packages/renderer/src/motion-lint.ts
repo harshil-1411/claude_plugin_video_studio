@@ -613,3 +613,54 @@ export async function loadMotionPage(projectDir: string, htmlPath: string): Prom
 export function motionPageDigest(page: MotionPage): { html: string; sha256: string | null; files: Array<{ ref: string; sha256: string }> } {
   return { html: page.html_path, sha256: page.sha256 ?? null, files: page.files.map((f) => ({ ref: f.ref, sha256: f.sha256 })) };
 }
+
+// ------------------------------------------------------------------------------------ usage
+
+/**
+ * Whether any script of a motion page names one of `names` (a variable, or a property such as
+ * `vs.revealAt` / `vs["revealAt"]`): the inline classic and module scripts of `html` plus the
+ * script files in `scripts` (page-relative path → source). Static and conservative: a name built
+ * at run time is not seen. Scripts that do not parse are skipped (the lint reports them).
+ */
+export function motionScriptsReference(html: string, scripts: ReadonlyMap<string, string>, names: readonly string[]): boolean {
+  const wanted = new Set(names);
+  const sources: string[] = [];
+  const masked = html.replace(/<!--[\s\S]*?-->/g, blank);
+  for (const m of masked.matchAll(RAW_BLOCK)) {
+    if (m[1]!.toLowerCase() !== "script") continue;
+    const attrs = parseAttrs(m[2] ?? "");
+    const type = (attrs.get("type") ?? "").trim().toLowerCase();
+    if (JS_TYPES.has(type) && !attrs.has("src") && m[3]!.trim()) sources.push(m[3]!);
+  }
+  sources.push(...scripts.values());
+  for (const code of sources) {
+    const parsed = parseAny(code, undefined);
+    if ("error" in parsed) continue;
+    let found = false;
+    walk(parsed.ast, (n, parent, key) => {
+      if (found) return;
+      if (n.type === "Identifier" && isReference(n, parent, key) && wanted.has(n.name as string)) found = true;
+      else if (n.type === "MemberExpression") {
+        const p = propName(n);
+        if (p !== undefined && wanted.has(p)) found = true;
+      }
+    });
+    if (found) return true;
+  }
+  return false;
+}
+
+/** {@link motionScriptsReference} for a loaded page: reads its local `.js`/`.mjs` files. */
+export async function motionPageReferences(page: MotionPage, names: readonly string[]): Promise<boolean> {
+  if (page.html === undefined) return false;
+  const scripts = new Map<string, string>();
+  for (const f of page.files) {
+    if (!/\.(?:m?js)$/i.test(f.ref)) continue;
+    try {
+      scripts.set(f.ref, await readFile(f.abs, "utf8"));
+    } catch {
+      // unreadable now: the lint already reported it when it was loaded
+    }
+  }
+  return motionScriptsReference(page.html, scripts, names);
+}

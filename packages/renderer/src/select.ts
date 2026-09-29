@@ -5,7 +5,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { canonicalJson, ensureDir, hashFile, readJson, sha256Hex, writeJsonAtomic } from "@video-studio/core";
 import type { LayoutZones } from "@video-studio/platforms";
 import type { DeterministicKind, Scene, TextBox, VideoSpec } from "@video-studio/schema";
-import type { Availability, RenderTarget, ResolvedCue, SceneBeats, SceneRenderRequest, SceneRenderer, VisualTokens } from "./types.js";
+import type { Availability, RenderTarget, ResolvedCue, SceneAudioEnvelope, SceneBeats, SceneRenderRequest, SceneRenderer, VisualTokens } from "./types.js";
 import { createFootageRenderer } from "./footage.js";
 import { MOTION_KIT_VERSION } from "./motion-kit.js";
 import { loadMotionPage, motionPageDigest } from "./motion-lint.js";
@@ -213,6 +213,8 @@ export interface RenderScenesOptions {
   cues?: ReadonlyMap<string, ResolvedCue[]>;
   /** The music beat grid per scene id (scene-local seconds), passed to `motion` pages (see `SceneRenderRequest.beats`). */
   beats?: ReadonlyMap<string, SceneBeats>;
+  /** The music bed's envelope per `motion` scene id (see `SceneRenderRequest.audio`); its hash is part of the scene's cache key. */
+  audio?: ReadonlyMap<string, SceneAudioEnvelope>;
   /** Series bible key input per scene id (only scenes with `series_refs`); part of their cache keys. */
   series?: ReadonlyMap<string, SeriesKeyInput>;
   /** Motion blur for `motion` scenes (the pipeline passes it for final renders only); part of their cache keys. */
@@ -295,16 +297,24 @@ export interface MotionKeyInput {
   files: Array<{ ref: string; sha256: string }>;
   beats?: SceneBeats;
   motion_blur?: { subframes: number };
+  /** The music envelope the page reads: its hash (the bytes travel in the request). */
+  audio?: { sha256: string };
 }
 
 /** The cache-key input of a `motion` scene: page and file hashes, kit version and its beat grid. Undefined for other kinds. */
-export async function motionKeyInput(scene: Scene, projectDir: string, beats?: SceneBeats, motionBlur?: { subframes: number }): Promise<MotionKeyInput | undefined> {
+export async function motionKeyInput(scene: Scene, projectDir: string, beats?: SceneBeats, motionBlur?: { subframes: number }, audio?: SceneAudioEnvelope): Promise<MotionKeyInput | undefined> {
   const det = scene.deterministic;
   if (det?.kind !== "motion") return undefined;
   const html = typeof det.props.html === "string" ? det.props.html : "";
   const page = await loadMotionPage(projectDir, html);
   const beatsUsed = beats && (beats.beats_s.length || beats.downbeats_s.length) ? { beats } : {};
-  return { kit: MOTION_KIT_VERSION, ...motionPageDigest(page), ...beatsUsed, ...(motionBlur ? { motion_blur: motionBlur } : {}) };
+  return {
+    kit: MOTION_KIT_VERSION,
+    ...motionPageDigest(page),
+    ...beatsUsed,
+    ...(motionBlur ? { motion_blur: motionBlur } : {}),
+    ...(audio ? { audio: { sha256: sha256Hex(canonicalJson(audio)) } } : {}),
+  };
 }
 
 /** An image file a scene draws: its reference as written and the file's hash (null when unreadable). */
@@ -464,7 +474,8 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
     if (refs.assets.length) irAssets ??= loadIrAssetPaths(o.project_dir);
     const images = await sceneImages(scene, o.tokens, o.project_dir, refs.assets.length ? await irAssets : undefined);
     const beats = placeholder || footage ? undefined : o.beats?.get(orig.id);
-    const motion = placeholder || footage ? undefined : await motionKeyInput(scene, o.project_dir, beats, o.motionBlur);
+    const audio = placeholder || footage ? undefined : o.audio?.get(orig.id);
+    const motion = placeholder || footage ? undefined : await motionKeyInput(scene, o.project_dir, beats, o.motionBlur, audio);
     const key = sceneCacheKey(scene, o.tokens, o.target, r, placeholder, o.zones, footage ? { sha256: footage.sha256, duration_sec: footage.media.duration_sec, ...(footage.media.content_box ? { content_box: footage.media.content_box } : {}) } : undefined, cues, images, motion, o.series?.get(orig.id));
     const out = join(dir, `${orig.id}.mp4`);
     const sidecarPath = join(dir, `${orig.id}.json`);
@@ -487,7 +498,7 @@ export async function renderScenes(spec: Pick<VideoSpec, "scenes">, o: RenderSce
     try {
       const draw = () =>
         r.render(
-          { scene, target: o.target, tokens: o.tokens, out_path: tmp, project_dir: o.project_dir, ...(o.zones ? { zones: o.zones } : {}), ...(footage ? { footage } : {}), ...(cues?.length ? { cues } : {}), ...(motion?.beats ? { beats: motion.beats } : {}), ...(motion?.motion_blur ? { motion_blur: motion.motion_blur } : {}) },
+          { scene, target: o.target, tokens: o.tokens, out_path: tmp, project_dir: o.project_dir, ...(o.zones ? { zones: o.zones } : {}), ...(footage ? { footage } : {}), ...(cues?.length ? { cues } : {}), ...(motion?.beats ? { beats: motion.beats } : {}), ...(motion?.audio && audio ? { audio } : {}), ...(motion?.motion_blur ? { motion_blur: motion.motion_blur } : {}) },
           { signal: o.signal },
         );
       const res = await (rendererFamily(r) === "hyperframes" ? chromeGate(draw) : draw());

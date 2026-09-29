@@ -1,0 +1,2 @@
+Placeholder licence file for the video-studio launch-bench fixture font (invented; not a real font).
+The real SIL Open Font License 1.1 text would sit here next to a real font.

@@ -1,8 +1,10 @@
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { escapeHtml } from "./hyperframes-highlight.js";
+import { cueItemStarts } from "./cue-timing.js";
 import { MOTION_KIT_SOURCE } from "./motion-kit.js";
 import { parseAttrs } from "./motion-lint.js";
+import { revealSchedule } from "./reveal-schedule.js";
 import { fontFaceCss } from "./tokens.js";
 import type { ResolvedCue, SceneRenderRequest } from "./types.js";
 import type { Composition, CompositionAsset } from "./hyperframes-compose.js";
@@ -32,8 +34,9 @@ import type { Composition, CompositionAsset } from "./hyperframes-compose.js";
  * Injected before any author code, first thing in `<head>`:
  * - a Content-Security-Policy meta: local scripts, styles, images, fonts and media only, and no
  *   `connect-src` (the runtime backstop for the static lint in motion-lint.ts);
- * - `window.__vs = { fps, duration, width, height, target, text, beats, downbeats, cues, tokens, loop }`
- *   (JSON with `<`, `>`, `&`, U+2028/2029 escaped, so no value can close the script tag);
+ * - `window.__vs = { fps, duration, width, height, target, text, beats, downbeats, cues, reveals, tokens, loop, audio? }`
+ *   (`reveals`: when each `text` item should start entering, from {@link motionReveals}; `audio`:
+ *   the music bed's envelope under the scene, only with a bed) (JSON with `<`, `>`, `&`, U+2028/2029 escaped, so no value can close the script tag);
  * - the motion kit (`window.vs`, motion-kit.ts).
  *
  * After the author's markup: the timeline adapter, registered synchronously on
@@ -66,6 +69,19 @@ export function scriptJson(value: unknown): string {
     .replace(/&/g, "\\u0026")
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
+}
+
+/** Entrance length (s) the reveal schedule assumes for a motion page's text (a masked line slide). */
+export const MOTION_REVEAL_ENTRANCE_S = 0.45;
+
+/**
+ * When each `text` item of a motion page should start entering (`window.__vs.reveals`,
+ * `vs.revealAt(i)`): the readable schedule on the scene's beat grid (reveal-schedule.ts); items
+ * with a word cue start on their cue (`CUE_LEAD_S` before the word) and later ones never before it.
+ */
+export function motionReveals(texts: readonly string[], duration: number, beats: SceneRenderRequest["beats"], cues: readonly ResolvedCue[]): number[] {
+  const { times } = revealSchedule({ texts, beats: beats?.beats_s ?? [], downbeats: beats?.downbeats_s ?? [], duration, entrance: MOTION_REVEAL_ENTRANCE_S });
+  return cueItemStarts(times, cues, 0);
 }
 
 function ms3(n: number): number {
@@ -183,16 +199,18 @@ export function composeMotion(req: SceneRenderRequest, pageHtml: string, opts: M
     secondary: colour(tokens.color_secondary, "secondary"),
   };
   const cues = opts.cues ?? req.cues ?? [];
+  const text = Array.isArray(props.text) ? props.text.filter((x): x is string => typeof x === "string") : [];
   const vsData = {
     fps: target.fps,
     duration: dur,
     width: canvas.width,
     height: canvas.height,
     target: { width: W, height: H, aspect_ratio: target.aspect_ratio },
-    text: Array.isArray(props.text) ? props.text.filter((x): x is string => typeof x === "string") : [],
+    text,
     beats: (req.beats?.beats_s ?? []).map(ms3),
     downbeats: (req.beats?.downbeats_s ?? []).map(ms3),
     cues: cues.map((c) => ({ item: c.item, at: ms3(c.at_s) })),
+    reveals: motionReveals(text, dur, req.beats, cues).map(ms3),
     loop: props.loop === true,
     tokens: {
       palette,
@@ -204,6 +222,7 @@ export function composeMotion(req: SceneRenderRequest, pageHtml: string, opts: M
       ...(tokens.style ? { style: tokens.style } : {}),
       ...(tokens.language ? { language: tokens.language } : {}),
     },
+    ...(req.audio ? { audio: { fps: req.audio.fps, rms: req.audio.rms, low: req.audio.low, onset: req.audio.onset } } : {}),
   };
 
   // Bundled fonts for the tokens' families, copied under __vs/fonts and referenced relatively.

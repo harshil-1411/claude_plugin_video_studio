@@ -85,6 +85,8 @@ describe("composeMotion", () => {
       beats: [0.5, 1],
       downbeats: [0.5],
       cues: [{ item: 1, at: 1.2 }],
+      // Item 1 is cued: it starts CUE_LEAD_S before its word, not on the schedule.
+      reveals: [0, 1.08],
       loop: true,
       tokens: {
         palette: { background: "#0B0F19", text: "#F5F7FA", primary: "#4F8CFF", secondary: "#22C55E" },
@@ -94,6 +96,38 @@ describe("composeMotion", () => {
     runInNewContext(inlineScripts(html)[1]!, { window });
     expect(window.vs.version).toBe(MOTION_KIT_VERSION);
     expect(window.vs.beatAt(0.7)).toBe(0.5);
+  });
+
+  it("reveals: readable times on the beat grid, one per text item (vs.revealAt)", () => {
+    const beats = { beats_s: [0, 0.5, 1, 1.5, 2, 2.5], downbeats_s: [0, 2] };
+    const three = req({ text: ["Docs in.", "Video out.", "Ship."] });
+    const { html } = composeMotion({ ...three, beats, scene: { ...three.scene, duration_sec: 4.5 } }, MORPH);
+    const window: Record<string, any> = {};
+    runInNewContext(inlineScripts(html)[0]!, { window });
+    // 120 BPM: each 2-word line holds 0.8 s after a 0.45 s entrance, so every 3rd beat.
+    expect(window.__vs.reveals).toEqual([0, 1.5, 2.75]);
+    runInNewContext(inlineScripts(html)[1]!, { window });
+    expect(window.vs.revealAt(1)).toBe(1.5);
+    expect(window.__vs.audio).toBeUndefined();
+    expect(window.vs.energy(1)).toBe(0);
+  });
+
+  it("audio: the scene's envelope reaches the page as base64, read by vs.energy / bass / onset", () => {
+    const b64 = (xs: number[]) => Buffer.from(xs).toString("base64");
+    const audio = { fps: 30, rms: b64([0, 255, 0]), low: b64([255, 255, 0]), onset: b64([0, 0, 255]) };
+    const { html } = composeMotion(req({}, { audio }), MORPH);
+    const window: Record<string, any> = {};
+    runInNewContext(inlineScripts(html)[0]!, { window });
+    expect(window.__vs.audio).toEqual(audio);
+    runInNewContext(inlineScripts(html)[1]!, { window });
+    expect(window.vs.energy(1 / 30)).toBe(1);
+    expect(window.vs.bass(1 / 60)).toBe(1);
+    expect(window.vs.onset(1 / 60)).toBe(0);
+    expect(window.vs.onset(2 / 30)).toBe(1);
+    // A second of 30 fps envelope costs 3 × 40 base64 characters in the page.
+    const second = { fps: 30, rms: b64(Array(30).fill(9)), low: b64(Array(30).fill(9)), onset: b64(Array(30).fill(9)) };
+    const bigger = composeMotion(req({}, { audio: second }), MORPH).html.length - composeMotion(req(), MORPH).html.length;
+    expect(bigger).toBeLessThan(200);
   });
 
   it("text cannot break out of the __vs script", () => {

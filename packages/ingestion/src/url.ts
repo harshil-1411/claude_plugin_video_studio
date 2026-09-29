@@ -96,7 +96,8 @@ export function parseHttpUrl(raw: string, base?: string): URL {
   return u;
 }
 
-async function readCapped(res: Response, maxBytes: number): Promise<Uint8Array> {
+/** Read a response body, refusing more than `maxBytes` (declared or streamed) with a `too_large` {@link UrlFetchError}. */
+export async function readCapped(res: Response, maxBytes: number): Promise<Uint8Array> {
   const declared = Number(res.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) {
     await res.body?.cancel().catch(() => {});

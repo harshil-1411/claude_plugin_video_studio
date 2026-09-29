@@ -107,11 +107,15 @@ describe("compare", () => {
     expect(row("cuts_per_sec")).toMatchObject({ meets: false });
     expect(row("frozen_pct")).toMatchObject({ meets: false, verdict: expect.stringMatching(/more frozen/) });
     expect(row("longest_static_sec")).toMatchObject({ meets: false });
+    // Still preview vs a lively reference: the picture sits still more of the time.
+    expect(r.a.metrics!.moving_pct).toBeLessThan(r.b.metrics!.moving_pct!);
+    expect(row("moving_pct")).toMatchObject({ meets: false, verdict: expect.stringMatching(/^misses: the picture sits still/) });
     expect(row("duration_sec")).toMatchObject({ meets: false, verdict: expect.stringMatching(/shorter than the reference/) });
     expect(row("integrated_lufs")).toMatchObject({ meets: null });
     const html = await readFile(r.html, "utf8");
     expect(html).toContain("Ours vs the reference");
     expect(html).toContain("Big changes per second");
+    expect(html).toContain("Moving (% of frames)");
     expect(html).toMatch(/class="misses">misses: fewer big changes/);
     expect(formatCompare(r)).toMatch(/Cuts per second: a 0, b 1\.\d+; misses/);
 
@@ -125,10 +129,14 @@ describe("compare", () => {
   }, 60_000);
 
   it("verdicts compare ours against the reference with tolerances; no verdict without one", () => {
-    const m = { duration_sec: 10, frozen_sec: 0.5, frozen_pct: 5, changes_per_sec: 1, cuts_per_sec: 0.5, longest_static_sec: 2, integrated_lufs: -14 };
-    const ours = { metrics: { ...m, duration_sec: 10.5, frozen_pct: 6, changes_per_sec: 0.95, integrated_lufs: -15 } };
+    const m = { duration_sec: 10, frozen_sec: 0.5, frozen_pct: 5, changes_per_sec: 1, cuts_per_sec: 0.5, moving_pct: 60, longest_static_sec: 2, integrated_lufs: -14 };
+    const ours = { metrics: { ...m, duration_sec: 10.5, frozen_pct: 6, changes_per_sec: 0.95, moving_pct: 56, integrated_lufs: -15 } };
     const rows = metricRows(ours, { metrics: m, reference: true });
     expect(rows.every((x) => x.meets === true)).toBe(true);
     expect(metricRows({ metrics: m }, { metrics: m }).every((x) => x.meets === null && x.verdict === "")).toBe(true);
+    const still = metricRows({ metrics: { ...m, moving_pct: 50 } }, { metrics: m, reference: true }).find((x) => x.id === "moving_pct")!;
+    expect(still).toMatchObject({ meets: false, a: 50, b: 60 });
+    // An older analysis without the moving share: not measurable.
+    expect(metricRows({ metrics: { ...m, moving_pct: null } }, { metrics: m, reference: true }).find((x) => x.id === "moving_pct")!.meets).toBeNull();
   });
 });

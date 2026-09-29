@@ -17,11 +17,19 @@
  * - `vs.beatAt(t)` / `vs.downbeatAt(t)`: the latest beat (downbeat) at or before `t`, or null;
  *   `vs.beatIndex(t)`: its index, -1 before the first. Times are scene-local seconds from
  *   `window.__vs.beats` / `downbeats` (empty when the video has no beat grid).
+ * - `vs.energy(t)`, `vs.bass(t)`, `vs.onset(t)` (1.1.0): the music bed's loudness, low band
+ *   (< 150 Hz: kick and bass) and attack strength at scene-local `t`, each 0..1, linearly
+ *   interpolated between video frames. They read `window.__vs.audio` (`{ fps, rms, low, onset }`,
+ *   base64 of one byte per frame, media envelope.ts), decoded once on first use; 0 everywhere
+ *   without a music bed.
+ * - `vs.revealAt(i)` (1.1.0): when `props.text` item `i` should start entering
+ *   (`window.__vs.reveals`, reveal-schedule.ts: every item readable for its floor, on the beat).
+ *   Past the list it returns the last time (0 when empty), so it is always a number.
  *
  * Bump MOTION_KIT_VERSION on any change to MOTION_KIT_SOURCE: it is part of each motion scene's
  * cache key, so pages re-render with the new helpers.
  */
-export const MOTION_KIT_VERSION = "1.0.0";
+export const MOTION_KIT_VERSION = "1.1.0";
 
 export const MOTION_KIT_SOURCE = `/* video-studio motion kit ${MOTION_KIT_VERSION} | SPDX-License-Identifier: MIT */
 (function (g) {
@@ -106,9 +114,49 @@ export const MOTION_KIT_SOURCE = `/* video-studio motion kit ${MOTION_KIT_VERSIO
   function beatAt(t) { var b = grid("beats"), i = indexIn(b, t); return i < 0 ? null : b[i]; }
   function downbeatAt(t) { var b = grid("downbeats"), i = indexIn(b, t); return i < 0 ? null : b[i]; }
 
+  var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  function unb64(s) {
+    var out = [], bits = 0, acc = 0;
+    for (var i = 0; i < s.length; i++) {
+      var v = B64.indexOf(s.charAt(i));
+      if (v < 0) continue;
+      acc = (acc << 6) | v; bits += 6;
+      if (bits >= 8) { bits -= 8; out.push((acc >> bits) & 255); }
+    }
+    return out;
+  }
+  var audio = null;
+  function curve(name) {
+    if (!audio) {
+      var a = g.__vs && g.__vs.audio;
+      audio = { fps: a && typeof a.fps === "number" && a.fps > 0 ? a.fps : 0 };
+      ["rms", "low", "onset"].forEach(function (k) { audio[k] = a && typeof a[k] === "string" ? unb64(a[k]) : []; });
+    }
+    return audio.fps ? audio[name] : [];
+  }
+  function level(name, t) {
+    var c = curve(name), n = c.length;
+    if (!n) return 0;
+    var x = num(t, 0) * audio.fps;
+    if (x <= 0) return c[0] / 255;
+    var i = Math.floor(x);
+    if (i >= n - 1) return c[n - 1] / 255;
+    return (c[i] + (c[i + 1] - c[i]) * (x - i)) / 255;
+  }
+  function energy(t) { return level("rms", t); }
+  function bass(t) { return level("low", t); }
+  function onset(t) { return level("onset", t); }
+  function revealAt(i) {
+    var r = grid("reveals");
+    if (!r.length) return 0;
+    var k = Math.max(0, Math.floor(num(i, 0)));
+    return k < r.length ? r[k] : r[r.length - 1];
+  }
+
   var vs = { version: "${MOTION_KIT_VERSION}", spring: spring, springs: springs, ease: ease, linear: ease.linear, easeIn: ease.easeIn, easeOut: ease.easeOut,
     easeInOut: ease.easeInOut, easeOutQuint: ease.easeOutQuint, easeInOutQuint: ease.easeInOutQuint, progress: progress, tween: tween,
-    lerp: lerp, clamp: clamp, stagger: stagger, rng: rng, beatAt: beatAt, downbeatAt: downbeatAt, beatIndex: beatIndex };
+    lerp: lerp, clamp: clamp, stagger: stagger, rng: rng, beatAt: beatAt, downbeatAt: downbeatAt, beatIndex: beatIndex,
+    energy: energy, bass: bass, onset: onset, revealAt: revealAt };
   g.vs = Object.freeze(vs);
 })(typeof window !== "undefined" ? window : globalThis);
 `;

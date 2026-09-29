@@ -13,13 +13,17 @@ import {
   LOOP_AUDIO_JUMP_DB,
   LOOP_SSIM_MIN,
   type LumaSample,
+  MOVING_YDIF,
   analyzeVideo,
   avSyncCheck,
   flashCheck,
   flashStats,
   measureAvSync,
+  motionChecks,
   motionStats,
+  movingPct,
   parseDetections,
+  parseFrameDiff,
   parseLuma,
   parseSceneChanges,
   rmsDb,
@@ -88,6 +92,44 @@ describe("flash and A/V sync measurement (pure)", () => {
     // 10-bit YAVG is scaled down to 8-bit code values; other parsers still read the same log.
     expect(parseLuma(log, 10)[0]!.y).toBe(31.5);
     expect(parseSceneChanges(log)).toEqual([{ t: 0.067, score: 15.625 }]);
+  });
+
+  it("parses per-frame YDIF from its own metadata instance next to YAVG", () => {
+    const log = [
+      "[Parsed_metadata_5 @ 0xa] frame:0    pts:0       pts_time:0",
+      "[Parsed_metadata_5 @ 0xa] lavfi.signalstats.YAVG=100",
+      "[Parsed_metadata_6 @ 0xb] frame:0    pts:0       pts_time:0",
+      "[Parsed_metadata_6 @ 0xb] lavfi.signalstats.YDIF=0",
+      "[Parsed_metadata_5 @ 0xa] frame:1    pts:1       pts_time:0.0666667",
+      "[Parsed_metadata_5 @ 0xa] lavfi.signalstats.YAVG=101",
+      "[Parsed_metadata_6 @ 0xb] frame:1    pts:1       pts_time:0.0666667",
+      "[Parsed_metadata_6 @ 0xb] lavfi.signalstats.YDIF=9.5",
+    ].join("\n");
+    expect(parseFrameDiff(log)).toEqual([
+      { t: 0, y: 0 },
+      { t: 0.067, y: 9.5 },
+    ]);
+    expect(parseLuma(log).map((s) => s.y)).toEqual([100, 101]);
+    expect(parseFrameDiff(log, 10)[1]!.y).toBeCloseTo(2.375, 3);
+  });
+
+  it("moving share: frame steps at or above the threshold, first frame and skipped frames left out", () => {
+    const d = (ys: number[]): LumaSample[] => ys.map((y, i) => ({ t: i / 15, y }));
+    // Frame 0 reads 0 (no previous frame) and is not a step.
+    expect(movingPct(d([0, 1, 1, 0, 0]))).toBe(50);
+    expect(movingPct(d([0, MOVING_YDIF, MOVING_YDIF - 0.01]))).toBe(50);
+    expect(movingPct(d([0]))).toBe(0);
+    // A baked poster: frames 0-1 are left out (frame 1 is the cut back to the reel).
+    expect(movingPct(d([0, 200, 0, 0, 1]), 2)).toBeCloseTo(33.3, 1);
+  });
+
+  it("the moving check is reported, and fails only below acceptance.min_moving_pct", () => {
+    const m = { ...motionStats([], 3, []), moving_pct: 40 };
+    expect(motionChecks(m, [], {}).find((c) => c.id === "moving")).toMatchObject({ status: "ok", detail: expect.stringMatching(/40% of frames.*no acceptance minimum/) });
+    expect(motionChecks(m, [], { min_moving_pct: 40 }).find((c) => c.id === "moving")!.status).toBe("ok");
+    expect(motionChecks(m, [], { min_moving_pct: 60 }).find((c) => c.id === "moving")).toMatchObject({ status: "fail", detail: expect.stringMatching(/minimum 60%/), fix: expect.any(String) });
+    // Not measured (older analyses): no check.
+    expect(motionChecks(motionStats([], 3, []), [], { min_moving_pct: 60 }).some((c) => c.id === "moving")).toBe(false);
   });
 
   it("flags a lone white frame as a spike but not a flash rate", () => {
@@ -320,7 +362,8 @@ describe.skipIf(!tools)("flashing and A/V sync on synthetic clips", () => {
       const { stderr } = await runFfmpeg(["-i", p(clip), "-map", "0:v:0", "-vf", `blackdetect=d=0.5:pix_th=0.1,freezedetect=n=-60dB:d=1.0,scdet=t=${BIG_CHANGE_SCORE}`, "-f", "null", "-"], { tools: tools!, keepStderr: true });
       const before = parseDetections(stderr, a.probe.duration_s);
       expect({ black: a.black, freeze: a.freeze }).toEqual({ black: before.black, freeze: before.freeze });
-      expect(a.motion).toEqual(motionStats(parseSceneChanges(stderr), a.probe.duration_s, before.freeze));
+      const { moving_pct: _moving, ...motion } = a.motion;
+      expect(motion).toEqual(motionStats(parseSceneChanges(stderr), a.probe.duration_s, before.freeze));
       expect(a.flash.frames).toBe(45);
     }
   }, 60_000);
@@ -340,5 +383,58 @@ describe.skipIf(!tools)("flashing and A/V sync on synthetic clips", () => {
     const late = await technicalQa(p("late.mp4"), { width: 160, height: 288, duration_s: 2.2, tolerance_s: 1 }, { tools: tools! });
     expect(late.checks.find((c) => c.id === "av_sync")).toMatchObject({ status: "fail" });
     expect(late.metrics.av_sync!.offset_ms).toBeGreaterThan(150);
+  }, 60_000);
+});
+
+// Smooth-motion share on synthetic clips: 160x288, 3 s, 15 fps, x264 ultrafast.
+describe.skipIf(!tools)("moving share on synthetic clips", () => {
+  let dir: string;
+  const p = (n: string) => join(dir, n);
+  const x264 = ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"];
+  const S = "s=160x288:r=15";
+  const gen = (args: string[]) => runFfmpeg(["-y", ...args], { tools: tools! });
+  const card = (c: string, d: number) => `color=c=${c}:${S}:d=${d},drawbox=x=20:y=40:w=120:h=20:c=white:t=fill,drawbox=x=40:y=200:w=80:h=40:c=0xe94560:t=fill`;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "vs-qa-moving-"));
+    await Promise.all([
+      // A still title card.
+      gen(["-f", "lavfi", "-i", card("0x1a1a2e", 3), ...x264, p("static.mp4")]),
+      // A slow zoom (0.2% per frame, 3%/s) into one large frame of a test pattern (sub-pixel steps).
+      gen(["-f", "lavfi", "-i", "testsrc2=s=1280x2304:r=15:d=0.0667,zoompan=z='1+0.002*on':d=45:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=160x288:fps=15", "-frames:v", "45", ...x264, p("zoom.mp4")]),
+      // Two still cards with a 1 s crossfade between them (1.0–2.0 s).
+      gen(["-f", "lavfi", "-i", card("0x1a1a2e", 2), "-f", "lavfi", "-i", card("0xf0e0c0", 2), "-filter_complex", "[0][1]xfade=transition=fade:duration=1:offset=1", ...x264, p("xfade.mp4")]),
+      // A slideshow: three still cards, two hard cuts.
+      gen(["-f", "lavfi", "-i", `${card("red", 1)}[a];${card("blue", 1)}[b];${card("0xf0e0c0", 1)}[c];[a][b][c]concat=n=3`, ...x264, p("slides.mp4")]),
+    ]);
+  }, 60_000);
+
+  afterAll(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it("separates a still card, a slow zoom, a crossfade and a hard-cut slideshow", async () => {
+    const pct = async (f: string) => (await analyzeVideo(p(f), {}, { tools: tools! })).motion.moving_pct!;
+    const [still, zoom, xfade, slides] = [await pct("static.mp4"), await pct("zoom.mp4"), await pct("xfade.mp4"), await pct("slides.mp4")];
+    expect(still).toBe(0);
+    // Continuous motion: every step moves, although scdet sees no big change.
+    expect(zoom).toBeGreaterThanOrEqual(95);
+    // The 1 s fade is 15 of 44 steps (~34%); the holds either side are still.
+    expect(xfade).toBeGreaterThan(28);
+    expect(xfade).toBeLessThan(40);
+    // Two cut frames of 44 steps.
+    expect(slides).toBeLessThanOrEqual(5);
+    expect(slides).toBeGreaterThan(0);
+  }, 60_000);
+
+  it("holds the render to acceptance.min_moving_pct and reports the share", async () => {
+    const base = { width: 160, height: 288, duration_s: 3, require_audio: false };
+    const good = await technicalQa(p("zoom.mp4"), { ...base, acceptance: { min_moving_pct: 60 } }, { tools: tools! });
+    expect(good.checks.find((c) => c.id === "moving")!.status).toBe("ok");
+    expect(good.metrics.motion!.moving_pct).toBeGreaterThanOrEqual(95);
+    const bad = await technicalQa(p("slides.mp4"), { ...base, acceptance: { min_moving_pct: 60 } }, { tools: tools! });
+    expect(bad.checks.find((c) => c.id === "moving")).toMatchObject({ status: "fail", detail: expect.stringMatching(/minimum 60%/) });
+    const md = await readFile((await writeQaReport(dir, bad)).md, "utf8");
+    expect(md).toMatch(/- Motion: .*moving [\d.]+% of frames/);
   }, 60_000);
 });

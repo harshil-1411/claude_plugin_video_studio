@@ -263,6 +263,15 @@ describe("renderScenes: motion pages", () => {
       const blurred = await renderScenes({ scenes: [motion] }, { project_dir: root, renderers: [r], tokens, target, beats, motionBlur: { subframes: 4 } }).then((x) => x.scenes[0]!);
       expect(blurred.status).toBe("rendered");
       expect(r.requests.at(-1)!.motion_blur).toEqual({ subframes: 4 });
+      // The music envelope is keyed by its hash and reaches the request; a changed envelope re-renders.
+      const env = (rms: string) => new Map([["s01", { fps: 12, rms, low: "AAA=", onset: "AAA=" }]]);
+      const loud = await renderScenes({ scenes: [motion] }, { project_dir: root, renderers: [r], tokens, target, beats, audio: env("/wA=") }).then((x) => x.scenes[0]!);
+      expect(loud.status).toBe("rendered");
+      expect(r.requests.at(-1)!.audio).toEqual({ fps: 12, rms: "/wA=", low: "AAA=", onset: "AAA=" });
+      expect((await renderScenes({ scenes: [motion] }, { project_dir: root, renderers: [r], tokens, target, beats, audio: env("/wA=") })).scenes[0]!.status).toBe("cached");
+      const quiet = await renderScenes({ scenes: [motion] }, { project_dir: root, renderers: [r], tokens, target, beats, audio: env("AP8=") }).then((x) => x.scenes[0]!);
+      expect(quiet.status).toBe("rendered");
+      expect(quiet.cache_key).not.toBe(loud.cache_key);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
