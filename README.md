@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/d860c1b2-8653-455c-9bfa-640ad8a0b849
+
 <div align="center">
 
 <img src="docs/media/hero.svg" alt="video-studio: source documents flow through ingest, plan, render, lint and QA into TikTok, Reels and Shorts packages with captions placed clear of each app's UI" width="100%">
