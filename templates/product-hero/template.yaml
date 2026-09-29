@@ -49,6 +49,21 @@ inputs:
     options: [synthesize a score, my licensed track]
     required: false
     default: synthesize a score
+  - id: flow
+    prompt: What are the two or three steps of using it - where the user starts, the one key action, and what they get?
+    kind: text
+    required: false
+    default: inferred from the source (plan references/product-flow.md)
+  - id: app_url
+    prompt: Is the app running somewhere I can record it (e.g. http://localhost:3000)? You start it; I only record it.
+    kind: text
+    required: false
+  - id: tone
+    prompt: Which tone fits - polished, playful, deadpan, cinematic, energetic, app-store or parody?
+    kind: choice
+    options: [polished, playful, deadpan, cinematic, energetic, app-store, parody]
+    required: false
+    default: cinematic
 beats:
   - purpose: hook
     share: 0.12
@@ -92,3 +107,5 @@ rules:
   - "voice.mode is none; on-screen words are short (four words or fewer per shot) and every claim cites claim_refs."
   - "Declare effects in props.effects; nothing from the style's motion.avoid list."
   - CTA must be an allowed brand CTA if a brand profile is present; otherwise it lives in the post copy.
+  - "The flow scenes show the brief's product_flow (entry, key action, result) on the real product - a demo recording or screen_capture of the user's running app first, then real screenshots from the source, then a motion page rebuilt from the product's own CSS and assets (plan references/product-flow.md)."
+  - "At most one stat or landing-page card, as a frame around the flow, never instead of it."

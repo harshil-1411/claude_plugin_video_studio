@@ -8,7 +8,7 @@ import { isIP } from "node:net";
  * reserved and IPv4-mapped/-compatible IPv6 forms of those are refused.
  *
  * The user (never the model) can opt out for local development with `VS_ALLOW_PRIVATE_URLS=1`
- * in the engine's environment.
+ * in the engine's environment; link-local addresses (cloud metadata) stay refused even then.
  */
 
 export interface ResolvedAddress {
@@ -116,10 +116,27 @@ export class BlockedAddressError extends Error {
     readonly url: string,
     readonly host: string,
     readonly ip: string,
+    /** Link-local (cloud metadata): refused even with the opt-out. */
+    readonly always = false,
   ) {
-    super(`refusing to fetch ${url}: ${host} resolves to a private or local address (${ip}). Set ${ALLOW_PRIVATE_URLS_ENV}=1 in the engine's environment to allow local URLs.`);
+    super(
+      always
+        ? `refusing to fetch ${url}: ${host} resolves to a link-local address (${ip}), where cloud metadata lives; this is refused even with ${ALLOW_PRIVATE_URLS_ENV}=1`
+        : `refusing to fetch ${url}: ${host} resolves to a private or local address (${ip}). Set ${ALLOW_PRIVATE_URLS_ENV}=1 in the engine's environment to allow local URLs.`,
+    );
     this.name = "BlockedAddressError";
   }
+}
+
+/** Link-local addresses (169.254.0.0/16, incl. the cloud metadata address, and fe80::/10), also in IPv4-mapped form. */
+export function isLinkLocal(ip: string): boolean {
+  const bare = (ip.startsWith("[") && ip.endsWith("]") ? ip.slice(1, -1) : ip).toLowerCase().split("%")[0]!;
+  const v = isIP(bare);
+  if (v === 4) return bare.startsWith("169.254.");
+  if (v !== 6) return false;
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(bare);
+  if (mapped) return mapped[1]!.startsWith("169.254.");
+  return /^fe[89ab][0-9a-f]:/.test(bare);
 }
 
 export interface HostCheckOptions {
@@ -134,9 +151,16 @@ export interface HostCheckOptions {
  * the caller's connect; no lookup given).
  */
 export async function checkUrlHost(url: URL, opts: HostCheckOptions): Promise<ResolvedAddress[] | undefined> {
-  if (opts.allowPrivate) return undefined;
   const host = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
   const literal = isIP(host);
+  if (opts.allowPrivate) {
+    // The local-dev opt-out allows loopback and private networks, never link-local: that is where
+    // cloud metadata lives (169.254.169.254), and no dev server is served from it.
+    const addrs = literal ? [{ address: host, family: (literal === 6 ? 6 : 4) as 4 | 6 }] : opts.lookup ? await opts.lookup(host) : undefined;
+    const bad = addrs?.find((a) => isLinkLocal(a.address));
+    if (bad) throw new BlockedAddressError(url.href, url.hostname, bad.address, true);
+    return addrs?.length ? addrs : undefined;
+  }
   if (literal) {
     if (isPrivateAddress(host)) throw new BlockedAddressError(url.href, url.hostname, host);
     return [{ address: host, family: literal === 6 ? 6 : 4 }];

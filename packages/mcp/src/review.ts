@@ -2,10 +2,12 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { projectPaths } from "@video-studio/core";
-import { escapeFilterOption, escapeFilterPath, escapeFiltergraph, runFfmpeg } from "@video-studio/media";
+import { escapeFilterOption, escapeFilterPath, escapeFiltergraph, runFfmpeg, transitionSeconds } from "@video-studio/media";
 import { findFontsDir } from "@video-studio/renderer";
 import { type Quality, resolveRender } from "./golden.js";
 import { type LintFinding, type LintSeverity, lintProject } from "./lint.js";
+import { DEFAULT_TRANSITION_MS } from "./pipeline-core.js";
+import { createRenderRun, stageInputs } from "./pipeline-stages.js";
 
 /**
  * review: images of a finished render for Claude to look at before handing it over. A contact
@@ -14,6 +16,8 @@ import { type LintFinding, type LintSeverity, lintProject } from "./lint.js";
  * labelled with its scene and time. Tiles of scenes with lint findings get a coloured border (red:
  * error, amber: warning) and strip tiles show the word cues spoken on them, so Claude knows where
  * to look first. Read-only apart from qa/review/ and the qa/lint.{json,md} the lint pass writes.
+ * With `transitions`, the sheet shows one tile at the middle of each transition instead (stills
+ * cannot: transitions are drawn at assembly), placed and sized exactly as the assembly placed them.
  */
 
 export type ReviewMode = "sheet" | "strip" | "crop";
@@ -34,6 +38,12 @@ export interface ReviewOptions {
   /** Tile width in px (default: sheet 240, strip 180, crop 540). */
   width?: number;
   cols?: number;
+  /**
+   * Sheet of transitions: one tile at the midpoint of each transition on the reel (cuts get none),
+   * from the render's scene slots and the transition length the assembly actually used. With
+   * `scene`, only the transitions into and out of it.
+   */
+  transitions?: boolean;
 }
 
 export interface ReviewTile {
@@ -47,6 +57,8 @@ export interface ReviewTile {
   severity?: LintSeverity;
   /** Word cues spoken nearest this frame (strip mode), also drawn on the tile. */
   cues?: string[];
+  /** `transitions` sheets: the join this tile shows (`to` is the tile's scene). */
+  transition?: { from: string; to: string; kind: string; duration_sec: number };
 }
 
 /** One scene with lint findings, for the result's `flagged` list. */
@@ -91,6 +103,8 @@ export interface ReviewResult {
   flagged: ReviewFlag[];
   /** The lint pass behind the flags (absent when lint could not run; see notes). */
   lint?: { status: "pass" | "warn" | "fail"; errors: number; warnings: number; report_md: string };
+  /** A `transitions` sheet. */
+  transitions?: true;
   notes: string[];
 }
 
@@ -212,6 +226,58 @@ export async function tileSheet(dir: string, cols: number, rows: number, image: 
   );
 }
 
+/** One transition of the reel: `from` → `to`, its kind, length and midpoint on the reel's clock. */
+export interface TransitionMoment {
+  from: string;
+  to: string;
+  kind: string;
+  /** Where the incoming slot starts (s): the transition runs from here for `duration_sec`. */
+  start_sec: number;
+  duration_sec: number;
+  mid_sec: number;
+  label: string;
+}
+
+/**
+ * The transitions of an assembled reel, as the assembly draws them (media `concatVideos`): scene
+ * `i` > 0 with a transition kind other than cut blends in over `transitionSeconds(ms, its slot,
+ * fps)` from the first frame of its slot (slots are whole frames, so starts are summed in frames);
+ * a length under two frames is a cut. `kinds[i]` is scene i's own transition, else the style's
+ * default; `ms` the style's transition length (else {@link DEFAULT_TRANSITION_MS}).
+ */
+export function transitionMoments(
+  slots: ReadonlyArray<{ scene_id: string; duration_ms: number }>,
+  kinds: ReadonlyArray<string | undefined>,
+  ms: number,
+  fps: number,
+): TransitionMoment[] {
+  const out: TransitionMoment[] = [];
+  let frames = 0;
+  slots.forEach((s, i) => {
+    const start = frames / fps;
+    frames += Math.max(1, Math.round((s.duration_ms * fps) / 1000));
+    const kind = kinds[i];
+    if (i === 0 || !kind || kind === "cut") return;
+    const d = transitionSeconds(ms, s.duration_ms, fps);
+    if (d === 0) return;
+    const mid = Math.round((start + d / 2) * 1000) / 1000;
+    const from = slots[i - 1]!.scene_id;
+    out.push({ from, to: s.scene_id, kind, start_sec: Math.round(start * 1000) / 1000, duration_sec: Math.round(d * 1000) / 1000, mid_sec: mid, label: `${from}→${s.scene_id} ${kind} @ ${mid.toFixed(2)}s` });
+  });
+  return out;
+}
+
+/** The render's transitions: its scene slots with the spec's and style's transitions, resolved as the render resolves them. */
+async function renderTransitions(root: string, quality: Quality | undefined, slots: ReadonlyArray<{ scene_id: string; duration_ms: number }>, fps: number): Promise<TransitionMoment[]> {
+  const { spec, tokens } = await stageInputs(createRenderRun(root, { quality: quality ?? "preview" }));
+  const ids = spec.scenes.map((s) => s.id);
+  if (ids.join("\0") !== slots.map((s) => s.scene_id).join("\0")) {
+    throw new Error(`transitions: the spec's scenes (${ids.join(", ")}) differ from the render's (${slots.map((s) => s.scene_id).join(", ")}); render again first`);
+  }
+  const kinds = spec.scenes.map((s) => s.transition ?? tokens.motion?.transition);
+  return transitionMoments(slots, kinds, tokens.motion?.transition_ms ?? DEFAULT_TRANSITION_MS, fps);
+}
+
 export async function reviewRender(projectDir: string, opts: ReviewOptions = {}): Promise<ReviewResult> {
   const mode = opts.mode ?? "sheet";
   const r = await resolveRender(projectDir, opts.quality);
@@ -236,8 +302,17 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
   const clamp = (x: number) => Math.min(lastT, Math.max(0, x));
   const round3 = (x: number) => Math.round(x * 1000) / 1000;
 
-  let tiles: Array<{ time: number; tag?: string }>;
-  if (opts.times?.length) {
+  let tiles: Array<{ time: number; tag?: string; label?: string; transition?: ReviewTile["transition"] }>;
+  if (opts.transitions) {
+    if (mode !== "sheet" || opts.times?.length) throw new Error("transitions is a sheet of its own: leave out mode (or use sheet) and times");
+    if (!r.state?.scenes?.length) throw new Error("transitions: this render has no render state with scene slots; render it again");
+    let moments = await renderTransitions(r.root, r.quality, r.state.scenes, fps);
+    if (only) moments = moments.filter((m) => m.from === only!.id || m.to === only!.id);
+    if (!moments.length) {
+      throw new Error(`no transitions to show${only ? ` around ${only.id}` : ""}: every join is a cut (no scene transition and no style default, or slots too short for two frames)`);
+    }
+    tiles = moments.map((m) => ({ time: clamp(m.mid_sec), label: m.label, transition: { from: m.from, to: m.to, kind: m.kind, duration_sec: m.duration_sec } }));
+  } else if (opts.times?.length) {
     tiles = opts.times.map((x) => ({ time: clamp(x) }));
   } else if (mode === "strip") {
     // Whole frames only: the first frame at or after the start, the last one before the end.
@@ -273,7 +348,7 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
       });
     }
   }
-  const wholeSheet = mode === "sheet" && !opts.times?.length && !only && spans.length > 0;
+  const wholeSheet = mode === "sheet" && !opts.times?.length && !only && spans.length > 0 && !opts.transitions;
   const maxTiles = wholeSheet ? REVIEW_MAX_SHEET_TILES : REVIEW_MAX_TILES;
   if (tiles.length > maxTiles) {
     notes.push(`${tiles.length} tiles requested; showing the first ${maxTiles} (review one scene at a time with scene)`);
@@ -313,9 +388,9 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
   const haveFont = Boolean(font);
 
   const out: ReviewTile[] = tiles.map((x, i) => {
-    const scene_id = sceneAt(x.time);
-    const label = [scene_id, x.tag, `${round3(x.time).toFixed(2)}s`].filter(Boolean).join(" ");
-    return { index: i, time_sec: round3(x.time), ...(scene_id ? { scene_id } : {}), label };
+    const scene_id = x.transition?.to ?? sceneAt(x.time);
+    const label = x.label ?? [scene_id, x.tag, `${round3(x.time).toFixed(2)}s`].filter(Boolean).join(" ");
+    return { index: i, time_sec: round3(x.time), ...(scene_id ? { scene_id } : {}), label, ...(x.transition ? { transition: x.transition } : {}) };
   });
 
   // Lint the same render and flag the tiles of scenes with findings. Lint problems never break review.
@@ -360,7 +435,7 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
     }
     for (const tile of out) if (tile.cues) tile.label += ` cue ${tile.cues.map((w) => `"${w}"`).join(" ")}`;
     if (!haveFont) notes.push("bundled fonts not found: tiles are unlabelled; use the tiles list for times");
-    const base = `${mode}-${r.quality ?? "render"}${opts.scene ? `-${opts.scene}` : ""}`;
+    const base = `${opts.transitions ? "transitions" : mode}-${r.quality ?? "render"}${opts.scene ? `-${opts.scene}` : ""}`;
     // Drop this review's images from an earlier run (a split sheet may now have fewer pages).
     const stale = (f: string) => f === `${base}.jpg` || (f.startsWith(`${base}-p`) && /^\d+\.jpg$/.test(f.slice(base.length + 2)));
     for (const f of await readdir(outDir)) if (stale(f)) await rm(join(outDir, f), { force: true });
@@ -390,6 +465,7 @@ export async function reviewRender(projectDir: string, opts: ReviewOptions = {})
       tiles: out,
       flagged,
       ...(lint ? { lint } : {}),
+      ...(opts.transitions ? { transitions: true as const } : {}),
       notes,
     };
   } finally {
@@ -401,8 +477,8 @@ export function formatReview(r: ReviewResult): string {
   const pages = r.pages ?? [];
   const lines = [
     (pages.length > 1
-      ? `review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${pages.length} images (each ≤ ${REVIEW_MAX_IMAGE_PX} px; Read every one, flagged first):`
-      : `review ${r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${r.cols}×${r.rows} → ${r.image}`
+      ? `review ${r.transitions ? "transitions" : r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${pages.length} images (each ≤ ${REVIEW_MAX_IMAGE_PX} px; Read every one, flagged first):`
+      : `review ${r.transitions ? "transitions" : r.mode}: ${r.tiles.length} frame(s) of the ${r.quality ?? ""} render (${r.source}) in ${r.cols}×${r.rows} → ${r.image}`
     ).replace(/ {2}/g, " "),
     ...(pages.length > 1
       ? pages.map(
@@ -419,6 +495,9 @@ export function formatReview(r: ReviewResult): string {
         : []),
     ...(r.tiles.some((t) => t.cues)
       ? [`word cues: ${r.tiles.flatMap((t) => (t.cues ?? []).map((w) => `"${w}" at ${t.time_sec.toFixed(2)}s (tile ${t.index + 1})`)).join(", ")}; check the cued item is appearing on that tile`]
+      : []),
+    ...(r.transitions
+      ? [`each tile is the middle of one transition (both scenes half visible): check the blend reads (no two text blocks on top of each other, no flash, no half-drawn layout); a busy blend wants fade_black, a cut, or old content out before new comes in`]
       : []),
     `Read the image${pages.length > 1 ? "s" : ""} and check: text fits and is readable, nothing sits under captions or app UI, graphics land when their words are spoken, crops keep faces and subjects, transitions are clean.`,
     ...r.notes.map((n) => `note: ${n}`),

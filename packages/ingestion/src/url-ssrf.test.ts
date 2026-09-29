@@ -123,6 +123,15 @@ describe("fetchPage SSRF guard", () => {
     const page = await fetchPage("http://127.0.0.1:9/admin", { fetch: f.impl, lookup: DNS, allowPrivateAddresses: true });
     expect(page.status).toBe(200);
   });
+
+  it("keeps link-local (cloud metadata) refused even with the opt-out", async () => {
+    const f = fakeFetch({ "http://169.254.169.254/latest/meta-data": { body: PAGE }, "http://metadata.example/": { body: PAGE }, "http://ten.example/": { body: PAGE } });
+    for (const url of ["http://169.254.169.254/latest/meta-data", "http://metadata.example/", "http://[fe80::1]/"]) {
+      await expect(fetchPage(url, { fetch: f.impl, lookup: DNS, allowPrivateAddresses: true })).rejects.toThrow(/link-local/);
+    }
+    // Private networks are still allowed for local development.
+    expect((await fetchPage("http://ten.example/", { fetch: f.impl, lookup: DNS, allowPrivateAddresses: true })).status).toBe(200);
+  });
 });
 
 describe("pinned transport and ingest env override (local server)", () => {

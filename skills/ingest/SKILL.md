@@ -18,6 +18,8 @@ allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_
   tests, `npx`, config files or git hooks. The engine only reads files.
 - Do not fetch extra pages or clone repos on your own. For a GitHub URL, ask
   the user to clone it locally (`git clone --depth 1 <url>`), then ingest the folder.
+- A web page's own scripts run only through `render_js`, only after the user
+  approves, and only in the engine's isolated browser (see below).
 
 ## Steps
 
@@ -48,6 +50,43 @@ allowed-tools: mcp__plugin_video-studio_engine__ingest mcp__plugin_video-studio_
    the fix is another span or clip, or replace / re-record the audio. Phone
    footage records its `rotation` (width/height are the displayed size), and
    HDR (PQ/HLG) footage is marked `hdr: true` and tonemapped to SDR at render.
+
+## Pages built by JavaScript (render_js)
+
+Ingest fetches a web page without running its scripts. A page that builds its
+content with JavaScript comes back nearly empty, with a `thin_content`
+warning. The engine can render it instead, in an isolated headless Chrome:
+
+- **What happens.** The page's own scripts run in a fresh browser profile that
+  is deleted afterwards. Every request the page makes goes through the same
+  private-address guard as normal ingest, and cloud-metadata addresses stay
+  blocked even with `VS_ALLOW_PRIVATE_URLS=1`. Websockets, media, downloads,
+  popups and permission prompts are blocked. Nothing on the page is clicked
+  or typed. Fixed overlays such as cookie banners are hidden, the page is
+  scrolled a section at a time so lazy content loads, and the rendered text
+  is extracted like any page. Screenshots of the top and up to three
+  sections, at the video's aspect, become image assets.
+- **When the client can show approval dialogs**, a `thin_content` page is
+  offered right away: the engine asks the user and, if they approve,
+  re-ingests it rendered (`render_js.rendered` in the result). If they
+  decline (`render_js.declined`), do not ask again. Suggest pasting the
+  text or saving the page as `.html` instead.
+- **Otherwise** the result lists the page under `render_js.suggested`. Ask
+  the user in plain words, for example: "This page builds its content with
+  JavaScript. Shall I render it in an isolated headless Chrome? Its scripts
+  would run there. Nothing is clicked, and every request is checked like a
+  normal fetch." Only if they say yes, call ingest again with the URL and
+  `"render_js": true`. Never pass `render_js: true` without that yes, and
+  never for a page the user did not give you.
+- The grant is recorded in `project/consent.json` with the URL. Provenance
+  marks the source `method: "rendered"`, and a `js_rendered` warning says
+  what ran and which requests were blocked. Mention both.
+- If it fails because Chrome or puppeteer-core is missing, relay the fix from
+  the error (the optional HyperFrames install, see `/video-studio:doctor`).
+  If the page is still thin after rendering, its content is probably behind a
+  login, a click or a consent wall. Ask the user to paste the text or save
+  the page.
+- Local saved pages (`.html`) are never rendered.
 
 ## Video URLs
 
@@ -142,7 +181,8 @@ only after a transcript.
   `source/content-ir.json` (Read it), each with its evidence ref,
   e.g. `repo:README.md#L6-L7`. Quote; do not paraphrase numbers.
 - **Warnings**: group by code and explain in plain words, for example
-  `thin_content` (page renders client-side, little text), `scanned_pdf`
+  `thin_content` (page renders client-side, little text; see render_js above),
+  `js_rendered` (the page's scripts ran in the isolated browser), `scanned_pdf`
   (no OCR), `needs_transcript` (footage with audio, not yet transcribed),
   `secret_excluded` (a file was left out because it looked like it
   holds a secret), `repo_truncated`, `ingest_failed`.

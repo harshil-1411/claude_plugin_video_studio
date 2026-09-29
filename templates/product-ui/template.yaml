@@ -10,6 +10,22 @@ default_duration_sec: 35
 duration_range: { min_sec: 20, max_sec: 75 }
 pacing: { avg_shot_sec: 5, max_words_per_sec: 2.6 }
 caption_preset: minimal
+inputs:
+  - id: flow
+    prompt: What are the two or three steps of using it - where the user starts, the one key action, and what they get?
+    kind: text
+    required: false
+    default: inferred from the source (plan references/product-flow.md)
+  - id: app_url
+    prompt: Is the app running somewhere I can record it (e.g. http://localhost:3000)? You start it; I only record it.
+    kind: text
+    required: false
+  - id: tone
+    prompt: Which tone fits - polished, playful, deadpan, cinematic, energetic, app-store or parody?
+    kind: choice
+    options: [polished, playful, deadpan, cinematic, energetic, app-store, parody]
+    required: false
+    default: app-store
 beats:
   - purpose: hook
     share: 0.10
@@ -53,4 +69,6 @@ rules:
   - Features appear in the order a user meets them; name each once, in a lower third or callout.
   - Every number, percentage or comparison cites a ContentIR ref in claim_refs.
   - CTA must be an allowed brand CTA if a brand profile is present.
+  - "The flow scenes show the brief's product_flow (entry, key action, result) on the real product - a demo recording or screen_capture of the user's running app first, then real screenshots from the source, then a motion page rebuilt from the product's own CSS and assets (plan references/product-flow.md)."
+  - "At most one stat or landing-page card, as a frame around the flow, never instead of it."
 default_style: minimal

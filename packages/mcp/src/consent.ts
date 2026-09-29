@@ -12,7 +12,7 @@ import type { PaidVoiceDecision } from "./policy.js";
  * and re-used for the same subject (same model file, same demo script, same paid synthesis).
  */
 
-export type ConsentAction = "model_download" | "demo_capture" | "paid_voice";
+export type ConsentAction = "model_download" | "demo_capture" | "paid_voice" | "render_js";
 
 export interface ConsentRecord {
   action: ConsentAction;
@@ -151,6 +151,22 @@ export function demoConsentRequest(script: DemoScript, flag: boolean | undefined
     approveTitle: "Approve recording this URL",
     flag,
     flagName: "confirm",
+  };
+}
+
+/** Ingest render_js: run this web page's scripts in the engine's isolated headless Chrome. */
+export function renderJsConsentRequest(url: string, flag: boolean | undefined): ConsentRequest {
+  return {
+    action: "render_js",
+    subject: `render_js:${url}`,
+    detail: url,
+    message:
+      `Render ${url} in an isolated headless Chrome so its JavaScript can build the page? The page's own scripts run (in a fresh browser profile that is deleted afterwards); ` +
+      `every request it makes goes through the same private-address guard as normal ingest, nothing on the page is clicked or typed, and screenshots of the page are saved in this project (source/assets/). ` +
+      `Only approve if you trust the site enough to open it in a browser.`,
+    approveTitle: "Approve rendering this page with its scripts",
+    flag,
+    flagName: "render_js",
   };
 }
 

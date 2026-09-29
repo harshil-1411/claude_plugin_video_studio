@@ -33,6 +33,18 @@ changes and no voice is synthesized, so it takes seconds, not minutes.
 3. Fix the page (`motion/*.html`) or the spec and run `stills` again on the
    changed scenes. Render only when the sheet looks right.
 
+Stills hand each page the same data the render does. That includes the
+music envelope (`vs.energy`, `vs.bass`, `vs.onset`) of `motion` pages and,
+with `audio.beat_sync` on, the beat-placed reveals of text scenes. So a
+still at time t matches the render's frame at t. Before the first render,
+reveals sit on the bed's beats at spec durations (a note says so), and the
+render can still move cuts.
+
+**Transitions are not in stills.** Crossfades and other transitions are
+drawn when the scenes are assembled, and stills draw one scene at a time.
+After a render, use `review` with `transitions: true` to see each
+transition at its midpoint.
+
 Every `motion` scene is also checked automatically before it renders: the
 page is seeked to the same times in a different order and the frames must
 be identical, else the scene fails with `nondeterministic_scene` (a clock,

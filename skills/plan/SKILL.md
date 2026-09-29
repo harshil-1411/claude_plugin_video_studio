@@ -26,6 +26,8 @@ Load references only when you reach the step that needs them:
   the spec gets a `motion` scene.
 - `references/sound-design.md`: sound effects (the bundled `bundled:<id>`
   library, when a sound lands, density per tone, levels).
+- `references/product-flow.md`: product templates and launch videos (the
+  source rubric, the flow as the centrepiece, how to show the real product).
 - `references/series.md`: a series bible (`series.yaml`) for episodic content, a recurring host or motif, or one look across videos.
 
 ## Safety rules (always)
@@ -87,6 +89,12 @@ Ask the user only when a value cannot be reasonably inferred **and** a wrong
 guess would waste the plan (usually the desired action or the audience for a
 generic source). Hold those questions for step 3's inputs round, so the
 user answers once. Otherwise proceed and let the user correct the assumptions.
+
+**Tone preset.** Map the tone (and any free-text direction, e.g. "fake
+Series A launch from 2016") to the nearest preset in
+`research-specs/tones.yaml` (`polished`, `playful`, `deadpan`, `cinematic`,
+`energetic`, `app-store`, `parody`) and set `tone_preset`; keep the words
+in `tone`. `spec_scaffold` applies it under the template and the brief.
 
 **Ambition becomes numbers.** Turn vague superlatives ("go all out", "make
 it pop", "like the reference", "premium") into `brief.acceptance` and say so
@@ -177,6 +185,13 @@ Write `<project_dir>/project/creative-brief.yaml` (fields in
 points; `inputs` and `acceptance` from steps 2-3). Call `brief_validate
 {project_dir}` and fix every error before going on.
 
+**Product templates** (`product-demo`, `product-ui`, `devtool-launch`,
+`product-launch`, `product-hero`): answer the rubric in
+`references/product-flow.md` from the source (don't ask the user), then
+fill `product_flow` (2–4 steps, entry → key action → result, with evidence
+refs) and `tone_preset`. `brief_validate` warns when `product_flow` is
+missing.
+
 ### 6. Spec
 
 1. Call `spec_scaffold {project_dir, template_id, target_duration_sec,
@@ -187,7 +202,12 @@ points; `inputs` and `acceptance` from steps 2-3). Call `brief_validate
    `voice.mode: "none"` and `audio.music`. It copies `acceptance` into the
    spec (the brief's numbers win over the template's pacing), sets
    `master.loop` for looping pieces, and gives `motion` beats
-   `props {html: "motion/<id>.html", text: []}`. Keep its structure unless the story needs a
+   `props {html: "motion/<id>.html", text: []}`. With a `tone_preset` (the
+   brief's, or `tone_preset` passed to it) it also sets the preset's first
+   transition on every scene after the first, the music bed's
+   `volume_db`, and the preset's acceptance hints under the template's and
+   the brief's; its notes give the sound-effect density and flag a scene
+   count outside the preset's range. Keep its structure unless the story needs a
    beat split or merged; keep ids `s01`, `s02`, ... in order.
    - `style`: `minimal` (quiet, clean), `editorial` (story and quotes),
      `technical` (code, diagrams), `energetic` (bold, fast cuts). Pass the
@@ -205,6 +225,12 @@ points; `inputs` and `acceptance` from steps 2-3). Call `brief_validate
 2. Fill every scene following `references/script-writing.md` and
    `references/visual-strategy.md`:
    - **One idea per scene.** A second idea means a second scene.
+   - **Product templates:** the `step`/`demo` beats show the brief's
+     `product_flow`, one step per scene, on the real product (a `demo`
+     recording or `screen_capture` first, then real screenshots, then a
+     `motion` page rebuilt from the product's own CSS and assets), with at
+     most one landing or stat card around them
+     (`references/product-flow.md`).
    - **Story arc** (`references/storytelling.md`): after the hook, open a
      loop within the first ~40% (a `question`, `problem`,
      `contrarian_claim` or `story` scene), order the points from least to

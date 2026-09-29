@@ -27,7 +27,7 @@ import { type ExtractorRegistry, createExtractors } from "./extractors.js";
 import { displayPath } from "./refs.js";
 import type { FetchRepo } from "./repo.js";
 import type { ExtractInput, ExtractedSource, Extractor } from "./types.js";
-import { type FetchImpl, UrlFetchError } from "./url.js";
+import { type FetchImpl, JS_RENDERED_WARNING, type PageRenderer, UrlFetchError } from "./url.js";
 import { type LookupFn, allowPrivateUrls } from "./net-guard.js";
 import { redactPart } from "./redact.js";
 
@@ -69,6 +69,12 @@ export interface IngestOptions {
   replace?: boolean;
   /** Preferred subtitle language for video URLs (default en; English is always requested too). */
   subtitleLanguage?: string;
+  /**
+   * Render http(s) web pages in a browser (their scripts run) instead of fetching them: the engine's
+   * isolated headless Chrome, only after the user approved it (`ingest render_js`). Local files,
+   * repos and video URLs are unaffected.
+   */
+  renderPage?: PageRenderer;
   /** Cancels downloads and media probing. */
   signal?: AbortSignal;
 }
@@ -85,6 +91,8 @@ export interface SourceProvenance {
   cache_key: string;
   /** Video URL sources: URL, final URL, bytes, platform metadata (the downloaded file's sha256 is `sha256`). */
   remote?: Source["remote"];
+  /** Web pages whose scripts ran in the engine's isolated headless Chrome (`render_js`); absent: fetched, scripts never run. */
+  method?: "rendered";
 }
 
 export interface Provenance {
@@ -118,6 +126,8 @@ export interface IngestSummary {
     cache_hit: boolean;
     /** `added` as a new source, or `updated` in place (same id) because it was ingested before. */
     status: "added" | "updated";
+    /** The page's scripts ran in the engine's isolated headless Chrome (`render_js`). */
+    method?: "rendered";
   }>;
   /** Sources in the whole ContentIR (earlier ones included). */
   total_sources: number;
@@ -334,6 +344,7 @@ export async function ingest(inputs: ReadonlyArray<string | IngestInput>, option
   const urlOptions = {
     ...(options.lookup ? { lookup: options.lookup } : {}),
     ...(allowPrivate ? { allowPrivateAddresses: true } : {}),
+    ...(options.renderPage ? { renderPage: options.renderPage } : {}),
   };
   const registry: ExtractorRegistry = {
     ...createExtractors({
@@ -417,6 +428,7 @@ export async function ingest(inputs: ReadonlyArray<string | IngestInput>, option
         cache_hit: hit,
         cache_key: key,
         ...(part.source.remote ? { remote: part.source.remote } : {}),
+        ...(part.warnings.some((w) => w.code === JS_RENDERED_WARNING) ? { method: "rendered" as const } : {}),
       });
     } catch (err) {
       failures.push({ uri: inline(label), ...(kind ? { kind } : {}), error: err instanceof Error ? err.message : String(err) });
@@ -488,6 +500,7 @@ export async function ingest(inputs: ReadonlyArray<string | IngestInput>, option
         evidence: ir.evidence.filter((x) => x.source_id === s.id).length,
         cache_hit: p.cache_hit,
         status: placed[i]!.status,
+        ...(p.method ? { method: p.method } : {}),
       };
     }),
     total_sources: ir.sources.length,
@@ -526,7 +539,7 @@ export function formatIngestSummary(s: IngestSummary): string {
   ];
   for (const src of s.sources) {
     lines.push(
-      `  ${src.id}${src.status === "updated" ? " (updated in place)" : ""} [${src.kind}] ${src.title ? `"${src.title}" ` : ""}${inline(src.uri)} — ${src.sections} sections, ${src.evidence} spans${src.cache_hit ? " (cached)" : ""}`,
+      `  ${src.id}${src.status === "updated" ? " (updated in place)" : ""} [${src.kind}] ${src.title ? `"${src.title}" ` : ""}${inline(src.uri)} — ${src.sections} sections, ${src.evidence} spans${src.cache_hit ? " (cached)" : ""}${src.method === "rendered" ? " (rendered in headless Chrome)" : ""}`,
     );
   }
   const c = s.classification;

@@ -1,11 +1,11 @@
-import { cpSync, existsSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ffprobe, runFfmpeg } from "@video-studio/media";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { LintFinding } from "./lint.js";
-import { REVIEW_MAX_IMAGE_PX, REVIEW_MAX_TILES, type ReviewTile, gridPx, planSheets, applyCues, applyFlags, flagScenes, formatReview, reviewRender, tileDecor } from "./review.js";
+import { REVIEW_MAX_IMAGE_PX, REVIEW_MAX_TILES, type ReviewTile, gridPx, planSheets, applyCues, applyFlags, flagScenes, formatReview, reviewRender, tileDecor, transitionMoments } from "./review.js";
 
 let dir: string;
 
@@ -248,4 +248,75 @@ describe("review flags", () => {
     expect(tileDecor({ label: "a", severity: "error" }, 240, undefined)).toBe(",drawbox=x=0:y=0:w=iw:h=ih:color=0xE5484D:t=6");
     expect(tileDecor({ label: "a", severity: "warning", cues: ["x"] }, 240, "/f.ttf")).toMatch(/color=0xF5A524.*x=8:y=8.*text=cue "x"/);
   });
+});
+
+describe("review transitions", () => {
+  it("places one moment per transition at its midpoint, with the length the assembly uses", () => {
+    const slots = [
+      { scene_id: "s01", duration_ms: 2000 },
+      { scene_id: "s02", duration_ms: 1000 },
+      { scene_id: "s03", duration_ms: 3000 },
+      { scene_id: "s04", duration_ms: 500 },
+      { scene_id: "s05", duration_ms: 100 },
+    ];
+    const m = transitionMoments(slots, [undefined, "crossfade", "cut", "fade_black", "whip"], 400, 30);
+    // s02: 400 ms from its slot start at 2 s → middle 2.20 s. s03 is a cut. s04: capped at 40% of
+    // its 500 ms slot (200 ms) from 6 s. s05: 40 ms is under two frames, so a cut.
+    expect(m.map((x) => [x.label, x.start_sec, x.duration_sec])).toEqual([
+      ["s01→s02 crossfade @ 2.20s", 2, 0.4],
+      ["s03→s04 fade_black @ 6.10s", 6, 0.2],
+    ]);
+    // The style's longer default is capped at 1.5 s (on the frame grid); slot starts are summed in whole frames.
+    const long = transitionMoments([{ scene_id: "a", duration_ms: 1510 }, { scene_id: "b", duration_ms: 5000 }], [undefined, "slide"], 2000, 15);
+    expect(long).toEqual([{ from: "a", to: "b", kind: "slide", start_sec: 1.533, duration_sec: 1.533, mid_sec: 2.3, label: "a→b slide @ 2.30s" }]);
+    expect(transitionMoments(slots, [], 400, 30)).toEqual([]);
+  });
+
+  let proj: string;
+  beforeAll(async () => {
+    proj = await mkdtemp(join(tmpdir(), "vs-review-tr-"));
+    cpSync(join(import.meta.dirname, "__fixtures__", "lint", "tiktok-low-captions"), proj, { recursive: true });
+    const specPath = join(proj, "project", "video-spec.json");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    spec.scenes[1].transition = "crossfade";
+    writeFileSync(specPath, JSON.stringify(spec));
+    const rdir = join(proj, "renders", "preview");
+    await mkdir(rdir, { recursive: true });
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", "testsrc2=s=180x320:r=15:d=3", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", join(rdir, "reel.mp4")]);
+    await writeFile(
+      join(rdir, "render-state.json"),
+      JSON.stringify({
+        quality: "preview",
+        reel: "renders/preview/reel.mp4",
+        target: { width: 180, height: 320, fps: 15, aspect_ratio: "9:16" },
+        duration_ms: 3000,
+        scenes: [
+          { scene_id: "s01", duration_ms: 1500 },
+          { scene_id: "s02", duration_ms: 1500 },
+        ],
+      }),
+    );
+  }, 60_000);
+  afterAll(() => rm(proj, { recursive: true, force: true }));
+
+  it("draws a tile at each transition's midpoint from the render's slots", async () => {
+    const r = await reviewRender(proj, { quality: "preview", transitions: true });
+    // s02 starts on frame 23 (1500 ms at 15 fps rounds up), the crossfade lasts 400 ms (6 frames).
+    expect(r.tiles.map((t) => [t.label, t.time_sec, t.scene_id])).toEqual([["s01→s02 crossfade @ 1.73s", 1.733, "s02"]]);
+    expect(r.tiles[0]!.transition).toEqual({ from: "s01", to: "s02", kind: "crossfade", duration_sec: 0.4 });
+    expect(r.transitions).toBe(true);
+    expect(r.image_rel).toBe(join("qa", "review", "transitions-preview.jpg"));
+    expect(existsSync(r.image)).toBe(true);
+    expect(formatReview(r)).toMatch(/^review transitions: 1 frame/);
+    expect(formatReview(r)).toMatch(/middle of one transition/);
+  }, 60_000);
+
+  it("explains a render with only cuts and misuse", async () => {
+    await expect(reviewRender(proj, { quality: "preview", transitions: true, scene: "s01", mode: "strip" })).rejects.toThrow(/sheet of its own/);
+    const specPath = join(proj, "project", "video-spec.json");
+    const spec = JSON.parse(readFileSync(specPath, "utf8"));
+    spec.scenes[1].transition = "cut";
+    writeFileSync(specPath, JSON.stringify(spec));
+    await expect(reviewRender(proj, { quality: "preview", transitions: true })).rejects.toThrow(/every join is a cut/);
+  }, 60_000);
 });

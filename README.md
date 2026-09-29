@@ -41,6 +41,7 @@ Turning knowledge into short videos usually means a timeline editor, a caption t
 - 🎬 **Motion written as code.** Claude can write a scene as an HTML page drawn by a pure `seek(t)` function: springs, morphs, match cuts and kinetic type at the level of hand-made motion design. Every page runs under a strict security policy, is checked for unsafe code before it renders, and is proven deterministic (the same time always draws the same frame).
 - 📏 **Pacing you can measure.** QA counts big visual changes per second, the longest still stretch and frozen time, and fails a slideshow-paced reel. Vague asks like "make it pop" become acceptance numbers the render must meet, and `compare` scores your render against a reference video you like.
 - 🎯 **Style from a reference reel.** `analyze` measures how a reel you like moves (entrance times, easing, stagger, holds) without keeping anything from it, and `write_style` turns that into a style pack in your project.
+- 🚀 **Launch videos in one command.** `/video-studio:launch` turns your repo or site into an 18–22 s reel of the product in use, in its own colours, fonts and logo (drafted from the source for you to accept), with a synthesized score, sound effects and a poster on frame 0 for chat previews. One approval, after the preview.
 - 🎵 **Music that drives the cut.** Beat analysis finds beats, downbeats and the drop; cuts snap to them and sound effects land on their peak. No track? `synth:` scores are composed locally, CC0, with an exact beat grid.
 - 📱 **One source, every platform.** Per-platform packages (video, cover, captions, post copy, QA) for Instagram Reels, YouTube Shorts, TikTok, LinkedIn and Facebook, with text and captions kept clear of each app's UI.
 - ✅ **Grounded and reproducible.** Every on-screen claim cites your sources (`verify`), `video.lock` pins every tool and asset, and scenes re-render only when something they use changes.
@@ -54,7 +55,7 @@ Turning knowledge into short videos usually means a timeline editor, a caption t
 | **Planning** | Story-arc plans with hooks and a hook-strength check, 24 templates that ask for the inputs they need first, a beat-level plan at the approval step, series bibles for recurring characters and looks, A/B `variants` (hooks, covers, 15 s / 30 s cuts) |
 | **Visuals** | 16 scene kinds including Claude-written `motion` pages, 4 style packs with banned-effect lists plus project styles measured from a reference reel, brand kits, camera moves, transitions, word cues that land graphics on spoken words, count-ups, optional motion blur |
 | **Review before render** | `stills` sheets at chosen times, beats or downbeats; a determinism and loop-seam check for every `motion` page |
-| **Audio** | System TTS or ElevenLabs, 4 CC0 beds plus locally synthesized scores, beat and downbeat snapping, sound effects on their peak, ducking, −14 LUFS |
+| **Audio** | System TTS or ElevenLabs, 4 CC0 beds plus locally synthesized scores, beat and downbeat snapping, a synthesized CC0 sound-effect library, sound effects on their peak, motion that reacts to the music, ducking, −14 LUFS |
 | **Footage** | Local transcription (~99 languages, speaker turns) with a glossary for names, best-clip `shorts`, subject tracking for vertical reframes, cutaways, `tighten` for pauses and filler words (paced like your own edits, every join checked for clipped words), redaction, letterbox removal |
 | **Captions and languages** | Phrase captions clear of platform UI, keyword emphasis, sound-event captions, `localize` with Devanagari, Japanese and Arabic fonts, RTL and CJK line breaking |
 | **Checks** | 30+ lint rules (UI zones, contrast, reading speed, caption sync, insert timing, cuts on the beat, story arc, title length, brand rules, banned effects, acceptance numbers, loop seams, unsafe motion pages), technical QA (loudness, black, frozen, motion density, loop seam, flashing, A/V sync), `review` contact sheets, `compare` against a reference |
@@ -255,6 +256,7 @@ flowchart LR
 | Command | What it does |
 |---|---|
 | `/video-studio:create` | The whole flow, from a source or an idea to packages, with an approval step |
+| `/video-studio:launch` | A short launch reel of something you built, from its repo or URL: the product in use, its own brand, one approval after the preview |
 | `/video-studio:plan` · `validate` | Brief, grounded spec and storyboard, built on a story arc (hook, open loop, escalation, payoff, CTA); explains every validation issue |
 | `/video-studio:render` · `qa` · `export` | Local render (preview, then final; cancel anytime), technical QA (including flashing and A/V sync), per-platform packages (`sign` for C2PA; `timeline` for a DaVinci Resolve or Final Cut project) |
 | `/video-studio:lint` · `verify` | Platform contract checks with a fix loop (UI zones, caption readability and sync, cuts on the beat, story arc); claim coverage against the sources |
@@ -274,7 +276,7 @@ flowchart LR
 - **No generative video or avatars yet.** Adapters are planned (Phase 7, needs keys; the key fields already exist in Configure and do nothing until then). Until then those scenes render as titled placeholder cards, and `prompt_pack` writes ready-to-paste prompts for each generator. Sora is intentionally not supported.
 - **No posting or analytics.** It produces packages and post copy; you upload them. Platform "trending sounds" are added in each app, and `post.json` reminds you of that.
 - **HyperFrames is optional, except for `motion` scenes.** The built-in ffmpeg renderer covers every other scene kind. `motion` pages (Claude-written code) need HyperFrames and Google Chrome; without them they render as a reported text stand-in.
-- **Some checks are approximations.** Flash detection measures average brightness (it follows WCAG 2.3.1 but does not measure red flashes); the title-length band is a rule of thumb, reported as a warning only; motion density counts sudden changes, not smooth motion.
+- **Some checks are approximations.** Flash detection measures average brightness (it follows WCAG 2.3.1 but does not measure red flashes); the title-length band is a rule of thumb, reported as a warning only; motion density counts sudden changes, and `moving_pct` counts frames that move at all (smooth motion and crossfades included), so a very slow drift can sit near its threshold.
 - **The editor timeline is a starting point.** It places every scene on its exact frame and keeps the audio and captions, but transitions become markers rather than rebuilt dissolves.
 - **Whisper models are downloaded only with your consent** (about 148 MB; 488 MB for the speaker-turn model). You can supply SRT/VTT captions instead.
 - **Speaker turns are English-only** and label two alternating speakers (S1/S2); rename them if there are more.
@@ -330,6 +332,10 @@ VS_DEBUG_CAPTURE=1 …                                                          
 ## Contributing
 
 Guides for adding [archetypes](docs/contributing/archetypes.md), [style packs](docs/contributing/styles.md), [platform packs](docs/contributing/platform-packs.md) and [providers](docs/contributing/providers.md) are in `docs/contributing/`. Ingested content is always treated as untrusted data: the plugin never executes code from sources.
+
+## Credits
+
+Some ideas re-expressed from latent-spaces/brag (MIT).
 
 ## License
 

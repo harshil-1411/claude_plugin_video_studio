@@ -1,6 +1,6 @@
 ---
 name: review
-description: Look at a rendered video-studio reel as images - a contact sheet of every scene's opening, middle and closing frame, a strip of every frame in a span (motion, transitions, word cues), or full-resolution crops (captions, small text, faces) - and report or fix what is wrong. Use when the user runs /video-studio:review, asks how a render looks, or before handing over a preview or final render.
+description: Look at a rendered video-studio reel as images - a contact sheet of every scene's opening, middle and closing frame, a sheet of every transition at its midpoint, a strip of every frame in a span (motion, transitions, word cues), or full-resolution crops (captions, small text, faces) - and report or fix what is wrong. Use when the user runs /video-studio:review, asks how a render looks, or before handing over a preview or final render.
 license: Apache-2.0
 compatibility: Requires the video-studio plugin's bundled `engine` MCP server (Node.js 22.13+) and ffmpeg.
 allowed-tools: mcp__plugin_video-studio_engine__review Read
@@ -47,6 +47,18 @@ are on); then check every scene:
   as `cue_unmatched` flags. A long span is
   sampled evenly up to 48 frames; narrow it with `from_sec`/`to_sec` for
   every frame.
+- `transitions: true`: one tile at the middle of every transition, labelled
+  `s02→s03 crossfade @ 12.40s` (its `transition` field gives the kind and
+  length). Cuts get no tile. Tiles use the render's scene slots and the
+  length the assembly actually used: the scene's `transition`, else the
+  style's default, capped at 40% of the incoming scene and 1.5 s, and a cut
+  when that is under two frames. At the middle both scenes are half visible.
+  Check that the blend reads: no two blocks of text on top of each other, no
+  flash, no half-built layout. A busy blend wants `fade_black`, a `cut`, or
+  a stagger (old content out, then new in). Add `scene` to see only the
+  transitions into and out of one scene, and use a strip over a transition
+  to see every frame. `stills` can't show transitions: they are drawn at
+  assembly.
 - `mode: "crop", crop: {x, y, w, h}` (fractions of the frame) with `times`:
   full-resolution detail such as the caption band (`{x: 0, y: 0.65, w: 1,
   h: 0.25}`), small labels or a face.

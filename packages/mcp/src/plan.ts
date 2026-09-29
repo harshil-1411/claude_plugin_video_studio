@@ -12,6 +12,7 @@ import {
   type Platform,
   type Scene,
   type Template,
+  type TonePreset,
   VideoSpec,
   parseYamlOrJson,
   defaultMaster,
@@ -204,11 +205,13 @@ export function checkTemplateInputs(tpl: Template, brief: CreativeBrief, out: { 
 }
 
 /**
- * The spec's acceptance checks: the template's pacing density fields, overridden field by field by
- * the brief's acceptance. Undefined when neither sets anything (older templates stay unchanged).
+ * The spec's acceptance checks: a tone preset's hints, overridden by the template's pacing density
+ * fields, overridden field by field by the brief's acceptance. Undefined when none sets anything
+ * (older templates stay unchanged).
  */
-export function resolveAcceptance(tpl: Template, brief: CreativeBrief | null): Acceptance | undefined {
+export function resolveAcceptance(tpl: Template, brief: CreativeBrief | null, tone?: TonePreset): Acceptance | undefined {
   const merged: Acceptance = {
+    ...(tone?.acceptance ?? {}),
     ...(tpl.pacing.min_changes_per_sec !== undefined ? { min_changes_per_sec: tpl.pacing.min_changes_per_sec } : {}),
     ...(tpl.pacing.max_frozen_pct !== undefined ? { max_frozen_pct: tpl.pacing.max_frozen_pct } : {}),
     ...(brief?.acceptance ?? {}),
@@ -245,6 +248,42 @@ export interface ScaffoldOptions {
   music?: string;
   /** Default: the template's voice_mode (narrated unless the archetype has no speech, or its speech is in the footage). */
   voice_mode?: "narrated" | "none" | "native";
+  /** Tone preset id from research-specs/tones.yaml; default: the brief's tone_preset. */
+  tone_preset?: string;
+}
+
+/** What each sfx density means in practice (research-specs/tones.yaml notes). */
+const SFX_DENSITY: Record<TonePreset["sfx"], string> = {
+  none: "no effects; the bed and the voice carry it",
+  sparse: "~1 accent per 5 s",
+  moderate: "~1 per scene, on its main change",
+  dense: "~1 per beat of the story, cuts included",
+};
+
+/**
+ * The tone preset to apply: the option, else the brief's. An unknown id in the option throws (listing the
+ * presets); an unknown id in the brief is ignored with a note (brief_validate reports it as an error).
+ */
+async function resolveTone(id: string | undefined, fromOption: boolean, notes: string[]): Promise<{ id: string; preset: TonePreset } | null> {
+  if (!id) return null;
+  const tones = await loadToneRules(findResearchSpecsDir());
+  if (!tones) {
+    notes.push(`tone preset "${id}" not applied: research-specs/tones.yaml was not found`);
+    return null;
+  }
+  const preset = tones.presets[id];
+  if (preset) return { id, preset };
+  const known = Object.keys(tones.presets).join(", ");
+  if (fromOption) throw new Error(`unknown tone preset "${id}"; available: ${known}`);
+  notes.push(`ignored unknown tone preset "${id}" from the brief (available: ${known}); run brief_validate`);
+  return null;
+}
+
+/** A preset's scene range, written for 15–25 s, scaled up for longer pieces (shorter ones keep it). */
+function toneSceneRange(preset: TonePreset, target: number): { min: number; max: number } {
+  if (target <= 25) return preset.scenes;
+  const f = target / 20;
+  return { min: Math.max(1, Math.round(preset.scenes.min * f)), max: Math.max(1, Math.round(preset.scenes.max * f)) };
 }
 
 export interface SceneGuidance {
@@ -309,6 +348,7 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
   }
   const ir = await loadContentIr(planPaths(projectDir).contentIr);
   if (!ir) notes.push("no valid source/content-ir.json; claim_refs cannot be suggested");
+  const tone = await resolveTone(opts.tone_preset ?? brief?.tone_preset, opts.tone_preset !== undefined, notes);
 
   const target = opts.target_duration_sec ?? brief?.target_duration_sec ?? tpl.default_duration_sec;
   const platform = opts.platform ?? brief?.platform ?? tpl.platforms[0]!;
@@ -376,14 +416,28 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
     } else if (b.suggested_deterministic_kind) scene.deterministic = { kind: b.suggested_deterministic_kind, props: {} };
     if (b.suggested_visual_strategy === "generated_video") scene.visual_requirements = { continuity_refs: [], modality: "video" };
     if (FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy)) scene.audio = { mode: sceneAudioMode };
+    // The tone preset's default transition, into every scene after the first (a transition is always "in").
+    if (tone && i > 0) scene.transition = tone.preset.transitions[0]!;
     return scene;
   });
 
-  const acceptance = resolveAcceptance(tpl, brief);
+  const acceptance = resolveAcceptance(tpl, brief, tone?.preset);
   if (acceptance) {
+    const sources = [tone?.preset.acceptance ? `tone preset "${tone.id}"` : "", tpl.pacing.min_changes_per_sec !== undefined || tpl.pacing.max_frozen_pct !== undefined ? "the template's pacing" : "", brief?.acceptance ? "the brief" : ""].filter(Boolean);
+    notes.push(`acceptance ${JSON.stringify(acceptance)} copied into the spec (from ${sources.join(" < ")}; later wins per field); QA and lint hold the render to it`);
+  }
+  if (tone) {
+    const p = tone.preset;
     notes.push(
-      `acceptance ${JSON.stringify(acceptance)} copied into the spec (${brief?.acceptance ? "the brief's values win over the template's" : "from the template's pacing"}); QA and lint hold the render to it`,
+      `tone preset "${tone.id}" (${p.label}: ${p.feel}) applied under the template and the brief: transition "${p.transitions[0]}" into each scene (also fits: ${p.transitions.slice(1).join(", ") || "none"})${music ? `, music bed at ${p.bed_db} dB` : ""}; sfx ${p.sfx}: ${SFX_DENSITY[p.sfx]}; see references/sound-design.md`,
     );
+    const range = toneSceneRange(p, target);
+    if (beats.length < range.min || beats.length > range.max) {
+      notes.push(`scene count ${beats.length} is outside the "${tone.id}" range ${range.min}–${range.max} for ${target}s (about ${p.avg_shot_sec}s a shot); keep the template's beats, but merge or split scenes if the tone matters more`);
+    }
+    if (p.caption_case && p.caption_case !== "as_written") {
+      notes.push(`caption_case ${p.caption_case}: write on-screen text and motion-page copy in ${p.caption_case} case (the spec has no caption-case field yet)`);
+    }
   }
   if (beats.some((b) => b.suggested_deterministic_kind === "motion")) {
     notes.push(
@@ -411,7 +465,7 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
     // Without speech there are no captions to burn in (native speech is captioned from the transcript).
     captions: { preset: tpl.caption_preset, burn_in: mode !== "none" },
     ...(style ? { style } : {}),
-    ...(music ? { audio: { music: { file: music } } } : {}),
+    ...(music ? { audio: { music: { file: music, ...(tone ? { volume_db: tone.preset.bed_db } : {}) } } } : {}),
     ...(acceptance ? { acceptance } : {}),
     scenes,
   };

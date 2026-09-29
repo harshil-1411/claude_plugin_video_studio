@@ -274,6 +274,20 @@ assumptions: []
     expect(bad.errors.map((e) => e.path)).toEqual(["tone_preset"]);
     expect(bad.errors[0]!.fix).toContain("polished");
   });
+
+  it("product templates accept flow, app_url and tone inputs", async () => {
+    const base = JSON.parse(await readFile(join(examples, "explain-vector-db.creative-brief.json"), "utf8")) as Record<string, unknown>;
+    for (const template of ["product-demo", "product-ui", "devtool-launch", "product-launch"]) {
+      const inputs = { flow: "opens the upload page; drops a PDF; gets a summary", app_url: "http://localhost:3000", tone: "deadpan" };
+      const root = await exampleProject(`brief-product-${template}`, { brief: JSON.stringify({ ...base, template, inputs, tone_preset: "deadpan", product_flow: [{ step: "a" }, { step: "b" }] }) });
+      const r = await validateBrief(root, templatesDir);
+      expect(r.errors, template).toEqual([]);
+      expect(r.warnings.filter((w) => w.path.startsWith("inputs.") || w.path === "product_flow"), template).toEqual([]);
+      const tpl = await getTemplate(templatesDir, template);
+      expect(tpl.inputs?.find((i) => i.id === "tone")?.options).toContain("deadpan");
+      expect(tpl.rules.join(" ")).toMatch(/screen_capture/);
+    }
+  });
 });
 
 describe("storyboard: motion scenes", () => {
@@ -561,6 +575,51 @@ ${extra}`;
     expect(b.spec.acceptance).toEqual({ min_changes_per_sec: 1, max_frozen_pct: 5, hold_ms: 400, loop: true });
     expect(b.spec.master).toEqual({ width: 1080, height: 1920, fps: 30, loop: true });
     expect(validateVideoSpecSemantics(b.spec).errors.filter((e) => e.path === "master.loop")).toEqual([]);
+  });
+
+  it("applies the brief's tone preset under the template and the brief: transitions, acceptance, bed level, notes", async () => {
+    const root = await exampleProject("scaffold-tone", { brief: BRIEF("inputs: { reference: r.mp4 }\ntone_preset: deadpan\n") });
+    const r = await scaffoldSpec(root, tplDir, { template_id: "reel-motion" });
+    // Deadpan lists [cut, fade_black]: the first is the default transition into every scene after the first.
+    expect(r.spec.scenes[0]!.transition).toBeUndefined();
+    expect(r.spec.scenes.slice(1).map((s) => s.transition)).toEqual(["cut", "cut"]);
+    // Preset hints sit under the template's pacing numbers.
+    expect(r.spec.acceptance).toEqual({ hold_ms: 1200, min_changes_per_sec: 0.8, max_frozen_pct: 5 });
+    expect(r.spec.audio?.music).toEqual({ file: "synth:pulse", volume_db: -24 });
+    const notes = r.notes.join("\n");
+    expect(notes).toMatch(/tone preset "deadpan"/);
+    expect(notes).toMatch(/sparse: ~1 accent per 5 s; see references\/sound-design\.md/);
+    expect(notes).not.toMatch(/scene count/);
+    expect(VideoSpec.safeParse(r.spec).success).toBe(true);
+
+    // Order: preset < template pacing < brief acceptance.
+    await writeFile(
+      join(root, "project/creative-brief.yaml"),
+      BRIEF("inputs: { reference: r.mp4 }\ntone_preset: polished\nacceptance: { max_frozen_pct: 10, hold_ms: 500 }\n"),
+    );
+    const p = await scaffoldSpec(root, tplDir, { template_id: "reel-motion" });
+    expect(p.spec.acceptance).toEqual({ min_changes_per_sec: 0.8, hold_ms: 500, max_frozen_pct: 10 });
+    expect(p.spec.scenes.slice(1).map((s) => s.transition)).toEqual(["crossfade", "crossfade"]);
+    expect(p.spec.audio?.music?.volume_db).toBe(-20);
+
+    // The option overrides the brief's preset; a template whose beats fall outside the preset's range gets a note.
+    const e = await scaffoldSpec(root, tplDir, { template_id: "reel-motion", tone_preset: "energetic" });
+    expect(e.spec.scenes.slice(1).map((s) => s.transition)).toEqual(["cut", "cut"]);
+    expect(e.spec.audio?.music?.volume_db).toBe(-14);
+    const eNotes = e.notes.join("\n");
+    expect(eNotes).toMatch(/tone preset "energetic"/);
+    expect(eNotes).toMatch(/scene count 3 is outside .*6–8/);
+    expect(eNotes).toMatch(/caption_case upper/);
+    await expect(scaffoldSpec(root, tplDir, { template_id: "reel-motion", tone_preset: "sarcastic" })).rejects.toThrow(/unknown tone preset "sarcastic".*deadpan/);
+  });
+
+  it("without a tone preset nothing tone-related is added", async () => {
+    const root = await exampleProject("scaffold-no-tone", { brief: BRIEF("inputs: { reference: r.mp4 }\n") });
+    const r = await scaffoldSpec(root, tplDir, { template_id: "reel-motion" });
+    expect(r.spec.scenes.every((s) => s.transition === undefined)).toBe(true);
+    expect(r.spec.audio?.music).toEqual({ file: "synth:pulse" });
+    expect(r.spec.acceptance).toEqual({ min_changes_per_sec: 0.8, max_frozen_pct: 5 });
+    expect(r.notes.join(" ")).not.toMatch(/tone preset/);
   });
 
   it("templates without the new fields scaffold exactly as before (no acceptance, no loop)", async () => {

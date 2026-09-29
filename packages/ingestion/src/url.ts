@@ -11,6 +11,7 @@ import { Readability } from "@mozilla/readability";
 import { Defuddle } from "defuddle/node";
 import { parseHTML } from "linkedom";
 import { markdownToParts, parseMarkdown, stripInline, type MdSection } from "./markdown.js";
+import { writeProjectAsset } from "./office-common.js";
 import { BlockedAddressError, type LookupFn, type ResolvedAddress, checkUrlHost, defaultLookup } from "./net-guard.js";
 import { slugify, uniquify, urlRef } from "./refs.js";
 import type { ExtractInput, ExtractedSource, Extractor } from "./types.js";
@@ -141,6 +142,8 @@ const NULL_BODY_STATUS = new Set([101, 103, 204, 205, 304]);
  * the socket's `lookup` returns only `pinned`, so a second DNS answer (DNS rebinding) can never
  * redirect the connection to a private address. TLS still verifies the certificate against the
  * URL's host name. Compressed bodies are decoded here (the size cap applies to decoded bytes).
+ * `init.method` / a string or byte `init.body` are honoured for the rendered-page transport
+ * (a page's own POST and CORS preflight requests); ingest itself only GETs.
  */
 export function pinnedFetch(url: string, init: RequestInit | undefined, pinned: readonly ResolvedAddress[]): Promise<Response> {
   const u = new URL(url);
@@ -157,7 +160,7 @@ export function pinnedFetch(url: string, init: RequestInit | undefined, pinned: 
     const req = mod.request(
       u,
       {
-        method: "GET",
+        method: init?.method ?? "GET",
         headers: { "accept-encoding": "gzip, deflate, br", ...headersOf(init) },
         agent: false,
         lookup: lookup as unknown as typeof import("node:dns").lookup,
@@ -190,7 +193,8 @@ export function pinnedFetch(url: string, init: RequestInit | undefined, pinned: 
       },
     );
     req.on("error", reject);
-    req.end();
+    const body = init?.body;
+    req.end(typeof body === "string" || body instanceof Uint8Array ? body : undefined);
   });
 }
 
@@ -476,11 +480,50 @@ export async function extractHtml(html: string, url: string, minChars = MIN_CONT
   return best;
 }
 
-export interface UrlExtractorOptions extends FetchOptions {
-  minContentChars?: number;
+/**
+ * A page rendered by a real browser (the engine's isolated headless Chrome, `ingest render_js`):
+ * the DOM after its scripts ran, where it ended up, and screenshots of the top and a few sections.
+ * The extractor treats the HTML exactly like a fetched page (defuddle, then Readability; scripts
+ * in it are never run again) and saves the screenshots as image assets.
+ */
+export interface RenderedPage {
+  /** `document.documentElement.outerHTML` after rendering. */
+  html: string;
+  /** URL after redirects and client-side navigation. */
+  finalUrl: string;
+  /** PNG screenshots, top first. */
+  screenshots: Array<{ png: Uint8Array; label: string }>;
+  /** Facts for the warning (requests made and blocked, time spent). */
+  notes?: string[];
+  /** Requests the browser guard refused (first 50), with the reason. */
+  blocked?: Array<{ url: string; reason: string }>;
 }
 
-export const URL_EXTRACTOR_VERSION = "1";
+/** Renders an http(s) page in a browser (injected by the engine; ingestion never starts one itself). */
+export type PageRenderer = (url: string, o: { signal?: AbortSignal }) => Promise<RenderedPage>;
+
+export interface UrlExtractorOptions extends FetchOptions {
+  minContentChars?: number;
+  /**
+   * Render http(s) pages with this browser instead of fetching them (the user approved running the
+   * page's scripts). Local saved pages are still read from disk and never rendered.
+   */
+  renderPage?: PageRenderer;
+}
+
+/** 2: the thin_content advice names render_js. */
+export const URL_EXTRACTOR_VERSION = "2";
+/** Version of the rendered path (`renderPage`): its own cache keys, apart from fetched pages. */
+export const URL_RENDERED_EXTRACTOR_VERSION = "1-rendered-1";
+/** Warning code on a source whose page was rendered with its scripts (provenance `method: "rendered"`). */
+export const JS_RENDERED_WARNING = "js_rendered";
+
+/** The thin-content warning's advice: what to do about a page that renders client-side. */
+export function thinContentMessage(textLength: number, url: string, rendered: boolean): string {
+  return rendered
+    ? `Only ${textLength} characters of main content were extracted from ${url}, even after running its scripts in a browser. The content may sit behind a login, a click or a consent wall; paste the text or save the page instead.`
+    : `Only ${textLength} characters of main content were extracted from ${url}. The page may render client-side: ingest it again with render_js: true (after the user approves) to run its scripts in an isolated headless Chrome.`;
+}
 
 /**
  * A saved web page on disk (`.html`/`.htm`), read like a fetched page. Its "URL" is the file name
@@ -520,23 +563,32 @@ const isLocalPage = (uri: string) => !/^https?:\/\//i.test(uri) && /\.html?$/i.t
 /** Build a URL extractor; inject `fetch` for tests or custom transports. */
 export function createUrlExtractor(options: UrlExtractorOptions = {}): Extractor {
   const minChars = options.minContentChars ?? MIN_CONTENT_CHARS;
-  // inputDigest() fetches the page to hash its body; extract() then reuses that
+  const render = options.renderPage;
+  // inputDigest() fetches (or renders) the page to hash its body; extract() then reuses that
   // response instead of fetching again. Bounded so cache hits cannot leak pages.
-  const prefetched = new Map<string, FetchedPage>();
-  const remember = (uri: string, page: FetchedPage) => {
+  const prefetched = new Map<string, FetchedPage & { rendered?: RenderedPage }>();
+  const remember = (uri: string, page: FetchedPage & { rendered?: RenderedPage }) => {
     prefetched.set(uri, page);
     while (prefetched.size > 4) prefetched.delete(prefetched.keys().next().value!);
   };
+  const load = async (input: ExtractInput): Promise<FetchedPage & { rendered?: RenderedPage }> => {
+    if (isLocalPage(input.uri)) return loadLocalPage(input.uri);
+    if (!render) return fetchPage(input.uri, options);
+    parseHttpUrl(input.uri);
+    const rendered = await render(input.uri, input.signal ? { signal: input.signal } : {});
+    const body = new TextEncoder().encode(rendered.html);
+    return { url: input.uri, finalUrl: rendered.finalUrl, status: 200, mediaType: "text/html", charset: "utf-8", body, rendered };
+  };
   return {
-    version: URL_EXTRACTOR_VERSION,
+    version: render ? URL_RENDERED_EXTRACTOR_VERSION : URL_EXTRACTOR_VERSION,
     kinds: ["url"],
     async inputDigest(input: ExtractInput): Promise<string> {
-      const page = isLocalPage(input.uri) ? await loadLocalPage(input.uri) : await fetchPage(input.uri, options);
+      const page = await load(input);
       remember(input.uri, page);
       return createHash("sha256").update(page.body).digest("hex");
     },
     async extract(input: ExtractInput): Promise<ExtractedSource> {
-      const page = prefetched.get(input.uri) ?? (isLocalPage(input.uri) ? await loadLocalPage(input.uri) : await fetchPage(input.uri, options));
+      const page = prefetched.get(input.uri) ?? (await load(input));
       prefetched.delete(input.uri);
       const sha256 = createHash("sha256").update(page.body).digest("hex");
       const body = decode(page.body, page.charset);
@@ -560,9 +612,22 @@ export function createUrlExtractor(options: UrlExtractorOptions = {}): Extractor
         }
       }
       if (textLength < minChars) {
+        warnings.push({ code: "thin_content", message: thinContentMessage(textLength, page.finalUrl, page.rendered !== undefined) });
+      }
+      // Screenshots of a rendered page: content-addressed image assets, like images in documents.
+      const assets: ExtractedSource["assets"] = [];
+      if (page.rendered) {
+        const shots = page.rendered.screenshots;
+        if (input.projectDir) {
+          for (const [i, shot] of shots.entries()) {
+            assets.push(await writeProjectAsset(input.projectDir, shot.png, "png", "image", urlRef(page.finalUrl, `screenshot-${i + 1}-${slugify(shot.label, "section")}`)));
+          }
+        }
         warnings.push({
-          code: "thin_content",
-          message: `Only ${textLength} characters of main content were extracted from ${page.finalUrl}. The page may render client-side; a browser-based fetch would be needed (not implemented yet).`,
+          code: JS_RENDERED_WARNING,
+          message:
+            `${page.finalUrl} was rendered with its scripts running in an isolated headless Chrome (fresh profile deleted afterwards, every request checked by the SSRF guard, nothing clicked)` +
+            `${assets.length ? `; ${assets.length} screenshot(s) saved as image assets` : ""}${page.rendered.notes?.length ? `; ${page.rendered.notes.join("; ")}` : ""}.`,
         });
       }
 
@@ -590,7 +655,7 @@ export function createUrlExtractor(options: UrlExtractorOptions = {}): Extractor
         source: { kind: "url", uri: page.finalUrl, sha256, ...(title ? { title } : {}) },
         sections,
         evidence,
-        assets: [],
+        assets,
         warnings,
       };
     },

@@ -57,6 +57,26 @@ describe("ingest", () => {
     await expect(ingest(["missing.pdf"], { projectDir: join(tmp, "p2"), noCache: true, cwd: tmp })).rejects.toBeInstanceOf(IngestError);
   });
 
+  it("render_js: web pages go through the renderer, and provenance records method rendered", async () => {
+    const projectDir = join(tmp, "rendered");
+    const html = "<html><head><title>Orbitdesk</title></head><body><article><h1>Orbitdesk</h1><p>" + "Orbitdesk gives small support teams one shared inbox for email, chat and forms. ".repeat(4) + "</p></article></body></html>";
+    const { summary, provenance, ir } = await ingest(["https://app.example.com/", "Plain notes about the launch.\n\nSecond line."], {
+      projectDir,
+      now: NOW,
+      noCache: true,
+      cwd: tmp,
+      renderPage: async (url) => ({ html, finalUrl: url, screenshots: [{ png: new Uint8Array([9, 9, 9]), label: "top" }] }),
+    });
+    expect(provenance.sources.map((p) => [p.kind, p.method, p.extractor_version])).toEqual([
+      ["url", "rendered", "1-rendered-1"],
+      ["text", undefined, "1"],
+    ]);
+    expect(summary.sources[0]).toMatchObject({ kind: "url", method: "rendered" });
+    expect(summary.sources[1]!.method).toBeUndefined();
+    expect(ir.assets).toHaveLength(1);
+    expect(formatIngestSummary(summary)).toMatch(/\(rendered in headless Chrome\)/);
+  });
+
   it("caches extraction keyed on content, and misses after the file changes", async () => {
     const cacheDir = join(tmp, "cache");
     const file = join(tmp, "note.md");

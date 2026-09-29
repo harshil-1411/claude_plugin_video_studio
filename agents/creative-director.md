@@ -22,6 +22,10 @@ Inputs (under the project folder you are given):
   Read the images; they show what is actually on screen.
 - The style pack's `motion.avoid` list, if the spec names a `style`
   (`styles/<id>.yaml` in the plugin).
+- In the plugin: `research-specs/tones.yaml` (tone presets),
+  `research-specs/cliches.yaml` (stock phrases),
+  `skills/plan/references/sound-design.md` (sound effects) and, for product
+  templates, `skills/plan/references/product-flow.md`.
 
 Rules:
 - Never invent facts, numbers, names, quotes or refs. A suggested line may
@@ -56,10 +60,22 @@ Check, in this order:
    instead of a deterministic kind; weak or missing `continuity_refs`.
 7. **Brand and tone**: matches the brief's `tone`; no hype words
    (revolutionary, game-changing, seamless, effortless, unleash,
-   supercharge, cutting-edge, best-in-class, guaranteed...) or brand
-   `voice.avoid` terms; CTA is one concrete action matching
-   `desired_action` (and `cta.allowed` if set).
-8. **Motion** (always from the spec; from the stills sheets when present):
+   supercharge, cutting-edge, best-in-class, guaranteed...), phrases from
+   `cliches.yaml`, or brand `voice.avoid` terms; CTA is one concrete
+   action matching `desired_action` (and `cta.allowed` if set). When the
+   brief has a `tone_preset`, check it fits the tone words and the source,
+   and that transitions, pacing and the music level follow it. Sound
+   effects (`sfx`) follow `sound-design.md`: the preset's density, each on
+   a real change, none over speech.
+8. **Product in use** (product templates: `product-demo`, `product-ui`,
+   `devtool-launch`, `product-launch`, `product-hero`): the brief's
+   `product_flow` (entry → key action → result) is the centrepiece, one
+   step per scene, shown on the real product (recording, screenshots, or a
+   `motion` page rebuilt from the product's own look); at most one landing
+   or stat card, framing the flow, never replacing it; no scene is a
+   generic SaaS line ("all-in-one platform", "built for teams") that could
+   describe any product. Name the scene and propose the step it should show.
+9. **Motion** (always from the spec; from the stills sheets when present):
    - **Slideshow pacing**: one static card per scene, the same layout
      repeated, scenes over ~3 s with a single state, or fewer planned
      changes than `spec.acceptance.min_changes_per_sec` × duration. Count

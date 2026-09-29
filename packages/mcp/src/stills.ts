@@ -9,8 +9,13 @@ import {
   type CaptureSession,
   type CaptureSessionOptions,
   HYPERFRAMES_KINDS,
+  type LayoutZones,
+  type RenderTarget,
   type ResolvedCue,
+  type SceneAudioEnvelope,
   type SceneBeats,
+  type SceneRenderRequest,
+  type VisualTokens,
   captureTrace,
   chromeGate,
   composeScene,
@@ -25,15 +30,16 @@ import type { Scene } from "@video-studio/schema";
 import { resolveHyperframesProducer } from "./hyperframes.js";
 import { resolveMusic } from "./music.js";
 import { type Quality, type RenderState, loadTargetContracts, renderDir, targetFor } from "./pipeline-core.js";
-import { createRenderRun, musicBeatGrid, sceneBeatGrids, stageInputs } from "./pipeline-stages.js";
+import { beatRevealCues, createRenderRun, hasMotionScenes, musicBeatGrid, sceneAudioEnvelopes, sceneBeatGrids, stageInputs } from "./pipeline-stages.js";
+import type { ResolvedMusic } from "./music.js";
 import { RenderLockedError, renderLockHolder } from "./render-lock.js";
 import { REVIEW_MAX_SHEET_TILES, type ReviewPage, planSheets, reviewFont, tileDecor, tileSheet } from "./review.js";
 
 /**
  * stills: frames of the composed scene pages at chosen moments, drawn in headless Chrome before
  * the full render (not a render: nothing in renders/ or dist/ changes). Each HyperFrames scene is
- * composed exactly as the renderer composes it (same composer, assets, tokens, zones, word cues
- * and beat grid), opened with the producer's own puppeteer-core, and seeked through the timeline
+ * composed exactly as the renderer composes it (same composer, assets, tokens, zones, word cues,
+ * beat grid, beat-placed reveals and, for motion pages, the music envelope `__vs.audio`), opened with the producer's own puppeteer-core, and seeked through the timeline
  * it registers on `window.__timelines[<id>]`. Times are explicit scene-local seconds, every beat
  * or downbeat of the music inside the scene, or `count` evenly spaced frames (default: in, mid,
  * out). Tiles are labelled with scene, moment and time and tiled into sheets under
@@ -182,6 +188,45 @@ export function planDurations(scenes: readonly Scene[], state: Pick<RenderState,
 
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
 
+/** What the render hands each scene's page besides the scene itself, per scene id. */
+export interface StillsPageData {
+  /** Word cues (the render's placed ones) over the beat-placed reveals, as the render merges them. */
+  cues: Map<string, ResolvedCue[]>;
+  /** The beat grid inside each motion page. */
+  beats: Map<string, SceneBeats>;
+  /** The music bed's envelope under each motion page (`__vs.audio`). */
+  audio: Map<string, SceneAudioEnvelope>;
+}
+
+/**
+ * The per-scene page data of the render plan, from the same helpers the render's scene stage uses:
+ * beat-placed reveal cues (`beatRevealCues`, when `audio.beat_sync` is on) with the render's word
+ * cues on top, the motion pages' beat grids, and their envelopes. `beatSyncOn` with a grid read
+ * only for the pages (no render yet) still places reveals on it, as the render will.
+ */
+export function stillsPageData(
+  planScenes: readonly Scene[],
+  fps: number,
+  o: { grid?: RenderState["beat_sync"]; beatSyncOn: boolean; wordCues?: ReadonlyMap<string, ResolvedCue[]>; audio?: ReadonlyMap<string, SceneAudioEnvelope> },
+): StillsPageData {
+  const revealGrid = o.grid && o.beatSyncOn && o.grid.grid_only ? (({ grid_only: _g, ...rest }) => rest)(o.grid) : o.grid;
+  const cues = new Map([...beatRevealCues(planScenes, fps, revealGrid, o.beatSyncOn), ...(o.wordCues ?? new Map())]);
+  const beats = new Map([...sceneBeatGrids(planScenes, fps, o.grid)].filter(([, b]) => b.beats_s.length || b.downbeats_s.length));
+  return { cues, beats, audio: new Map(o.audio ?? []) };
+}
+
+/** The composer request for one still scene: the render's request, minus the clip it would write. */
+export function stillRequest(
+  scene: Scene,
+  base: { target: RenderTarget; tokens: VisualTokens; project_dir: string; zones: LayoutZones; out_path: string },
+  data: StillsPageData,
+): SceneRenderRequest {
+  const cues = data.cues.get(scene.id);
+  const beats = data.beats.get(scene.id);
+  const audio = data.audio.get(scene.id);
+  return { scene, ...base, ...(cues?.length ? { cues } : {}), ...(beats ? { beats } : {}), ...(audio ? { audio } : {}) };
+}
+
 export async function stillsProject(projectDir: string, opts: StillsOptions = {}, deps: StillsDeps = {}): Promise<StillsResult> {
   const env = deps.env ?? process.env;
   const quality: Quality = opts.quality ?? "preview";
@@ -207,13 +252,18 @@ export async function stillsProject(projectDir: string, opts: StillsOptions = {}
   // The beat grid: the render's, else the music bed's (same detection or synthesized grid the render uses).
   let grid: RenderState["beat_sync"] | undefined;
   let gridSource: StillsResult["grid"]["source"] = "none";
+  // The music bed, resolved once (a synthesized score is cached), for the grid and the motion envelope.
+  let musicP: Promise<ResolvedMusic> | undefined;
+  const musicBed = () => {
+    const total = plan.scenes.reduce((a, s) => a + s.duration_sec, 0);
+    return (musicP ??= resolveMusic(spec.audio!.music!, root, env, { durationSec: total, cacheDir: join(resolveDataDir(env).cache, "score") }));
+  };
   if (plan.from === "render-state" && state?.beat_sync?.beat_times_ms?.length) {
     grid = state.beat_sync;
     gridSource = "render-state";
   } else if (spec.audio?.music) {
     try {
-      const total = plan.scenes.reduce((a, s) => a + s.duration_sec, 0);
-      const music = await resolveMusic(spec.audio.music, root, env, { durationSec: total, cacheDir: join(resolveDataDir(env).cache, "score") });
+      const music = await musicBed();
       const g = await musicBeatGrid(plan.scenes, new Map(), music, { cacheDir: join(resolveDataDir(env).cache, "beats") });
       grid = g.grid;
       gridSource = "music";
@@ -226,7 +276,6 @@ export async function stillsProject(projectDir: string, opts: StillsOptions = {}
     throw new Error(`stills at ${opts.at}: this project has no beat grid (${spec.audio?.music ? "no clear beat in the music bed" : "no audio.music bed"}); pass times or count instead`);
   }
   const allGrids = sceneBeatGrids(plan.scenes, target.fps, grid, true);
-  const motionGrids = sceneBeatGrids(plan.scenes, target.fps, grid);
 
   // Word cues as the render placed them (scene-local), only when the render matches the spec.
   const cues = new Map<string, ResolvedCue[]>();
@@ -237,6 +286,19 @@ export async function stillsProject(projectDir: string, opts: StillsOptions = {}
     }
     for (const list of cues.values()) list.sort((a, b) => a.at_s - b.at_s);
   }
+
+  // The motion pages' envelope of the bed, sliced as the render slices it (vs.energy / bass / onset).
+  let audio: Map<string, SceneAudioEnvelope> | undefined;
+  if (spec.audio?.music && hasMotionScenes(plan.scenes)) {
+    try {
+      audio = await sceneAudioEnvelopes(plan.scenes, target.fps, await musicBed(), { cacheDir: join(resolveDataDir(env).cache, "envelope") });
+    } catch (e) {
+      notes.push(`motion audio: the music bed's envelope could not be read (${e instanceof Error ? e.message : String(e)}); vs.energy / bass / onset read 0`);
+    }
+  }
+  const beatSyncOn = spec.audio?.beat_sync?.enabled === true;
+  if (beatSyncOn && gridSource === "music") notes.push("beat sync: no matching render yet, so reveals sit on the bed's beats at spec durations (the render may still move cuts)");
+  const pageData = stillsPageData(plan.scenes, target.fps, { grid, beatSyncOn, wordCues: cues, ...(audio ? { audio } : {}) });
 
   if (opts.scenes?.length) {
     const unknown = opts.scenes.filter((id) => !plan.scenes.some((s) => s.id === id));
@@ -293,16 +355,7 @@ export async function stillsProject(projectDir: string, opts: StillsOptions = {}
         const mine = planned.tiles.filter((t) => t.scene_id === s.id);
         if (!mine.length) continue;
         for (const f of await readdir(framesDir)) if (f.startsWith(`${s.id}-`) && f.endsWith(".png")) await rm(join(framesDir, f), { force: true });
-        const req = {
-          scene: s,
-          target,
-          tokens,
-          out_path: join(framesDir, `${s.id}.unused.mp4`),
-          project_dir: root,
-          zones,
-          ...(cues.get(s.id)?.length ? { cues: cues.get(s.id)! } : {}),
-          ...(motionGrids.get(s.id) ? { beats: motionGrids.get(s.id)! } : {}),
-        };
+        const req = stillRequest(s, { target, tokens, out_path: join(framesDir, `${s.id}.unused.mp4`), project_dir: root, zones }, pageData);
         let page;
         captureTrace(`stills: ${s.id}: composing the page`);
         try {

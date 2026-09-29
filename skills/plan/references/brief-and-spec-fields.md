@@ -53,7 +53,7 @@ are strict: unknown keys are errors.
 | `language` | yes | BCP-47 |
 | `tone` | yes | list of strings |
 | `tone_preset` | no | nearest preset from `research-specs/tones.yaml`: `polished`, `playful` (default), `deadpan`, `cinematic`, `energetic`, `app-store`, `parody`. Sets pacing, transitions, sound density and bed level; free-text direction stays in `tone` |
-| `product_flow` | for product templates | 2–4 `{step, evidence_ref?}`: the product in use (entry → key action → result); the centrepiece scenes show these steps |
+| `product_flow` | for product templates | 2–4 `{step, evidence_ref?}`: the product in use (entry → key action → result); the centrepiece scenes show these steps (`product-flow.md`) |
 | `desired_action` | yes | what the viewer does after watching |
 | `key_messages` | no | 2-4 grounded points |
 | `hook_candidates` | yes, ≥ 1 (write ≥ 3) | `{text, mechanism, scores}` |

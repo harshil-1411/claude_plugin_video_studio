@@ -1,8 +1,9 @@
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SourceRef } from "@video-studio/schema";
-import { USER_AGENT, UrlFetchError, createUrlExtractor, extractHtml, fetchPage, type FetchImpl } from "./url.js";
+import { URL_RENDERED_EXTRACTOR_VERSION, USER_AGENT, UrlFetchError, createUrlExtractor, extractHtml, fetchPage, type FetchImpl, type PageRenderer } from "./url.js";
 
 const FIXTURES = join(import.meta.dirname, "../../../fixtures/html");
 const fixture = (name: string) => readFileSync(join(FIXTURES, name), "utf8");
@@ -129,7 +130,51 @@ describe("urlExtractor", () => {
     expect(out.source.title).toBe("Dashboard");
     expect(out.evidence).toEqual([]);
     expect(out.warnings.map((w) => w.code)).toEqual(["thin_content"]);
-    expect(out.warnings[0]!.message).toMatch(/browser/);
+    expect(out.warnings[0]!.message).toMatch(/may render client-side: ingest it again with render_js: true .* isolated headless Chrome/);
+  });
+
+  it("render_js: extracts the rendered DOM, saves screenshots as image assets, never renders local files", async () => {
+    const url = "https://app.example.com/";
+    const calls: string[] = [];
+    const renderPage: PageRenderer = async (u) => {
+      calls.push(u);
+      return {
+        html: fixture("docs-install.html"),
+        finalUrl: "https://app.example.com/docs",
+        screenshots: [
+          { png: new Uint8Array([1, 2, 3]), label: "top" },
+          { png: new Uint8Array([4, 5, 6]), label: "section 3" },
+        ],
+        notes: ["12 request(s) made (80 KB), 2 blocked (2 private address (10.0.0.5))"],
+      };
+    };
+    const { impl, calls: fetched } = fakeFetch({});
+    const ex = createUrlExtractor({ fetch: impl, renderPage });
+    expect(ex.version).toBe(URL_RENDERED_EXTRACTOR_VERSION);
+    const projectDir = mkdtempSync(join(tmpdir(), "vs-url-rendered-"));
+    const digest = await ex.inputDigest!({ uri: url, kind: "url", projectDir });
+    const out = await ex.extract({ uri: url, kind: "url", projectDir });
+    expect(calls).toEqual([url]); // rendered once: extract reuses the digest's render
+    expect(fetched).toEqual([]);
+    expect(out.source).toMatchObject({ kind: "url", uri: "https://app.example.com/docs", sha256: digest });
+    expect(out.evidence.length).toBeGreaterThan(0);
+    expect(out.assets.map((a) => [a.kind, a.source_ref])).toEqual([
+      ["image", "url:https://app.example.com/docs#screenshot-1-top"],
+      ["image", "url:https://app.example.com/docs#screenshot-2-section-3"],
+    ]);
+    for (const a of out.assets) expect(existsSync(join(projectDir, a.path))).toBe(true);
+    expect(out.warnings.map((w) => w.code)).toEqual(["js_rendered"]);
+    expect(out.warnings[0]!.message).toMatch(/rendered with its scripts running in an isolated headless Chrome .*2 screenshot\(s\) saved as image assets; 12 request\(s\) made/);
+    // A thin page even after rendering: the advice changes.
+    const thin = await createUrlExtractor({ renderPage: async (u) => ({ html: fixture("spa-shell.html"), finalUrl: u, screenshots: [] }) }).extract({ uri: url, kind: "url" });
+    expect(thin.warnings.map((w) => w.code)).toEqual(["thin_content", "js_rendered"]);
+    expect(thin.warnings[0]!.message).toMatch(/even after running its scripts in a browser/);
+    // A saved page on disk is read, never rendered.
+    calls.length = 0;
+    const local = await ex.extract({ uri: join(FIXTURES, "docs-install.html"), kind: "url", projectDir });
+    expect(calls).toEqual([]);
+    expect(local.warnings.map((w) => w.code)).not.toContain("js_rendered");
+    await expect(ex.extract({ uri: "ftp://app.example.com/", kind: "url" })).rejects.toMatchObject({ code: "invalid_url" });
   });
 
   it("records the Readability fallback as a warning", async () => {

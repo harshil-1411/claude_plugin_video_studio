@@ -5,7 +5,7 @@ import { ffprobe, runFfmpeg } from "@video-studio/media";
 import type { CaptureSession } from "@video-studio/renderer";
 import type { Scene } from "@video-studio/schema";
 import { beforeAll, describe, expect, it } from "vitest";
-import { formatStills, planDurations, planStillTimes, stillsProject } from "./stills.js";
+import { formatStills, planDurations, planStillTimes, stillRequest, stillsPageData, stillsProject } from "./stills.js";
 
 const LINT_FIXTURE = join(import.meta.dirname, "__fixtures__", "lint", "tiktok-low-captions");
 const MOTION_FIXTURES = join(import.meta.dirname, "..", "..", "renderer", "src", "__fixtures__", "motion");
@@ -54,6 +54,56 @@ describe("planStillTimes", () => {
     const r = planStillTimes(many, 30);
     expect(r.tiles).toHaveLength(90);
     expect(r.notes.at(-1)).toMatch(/120 frames requested; showing the first 90/);
+  });
+});
+
+describe("stillRequest (the render's page data)", () => {
+  const scene = (id: string, duration: number, det: Scene["deterministic"], extra: Partial<Scene> = {}): Scene => ({
+    id,
+    duration_sec: duration,
+    purpose: "point",
+    voiceover: "",
+    visual_strategy: "motion_graphic",
+    deterministic: det,
+    visual_requirements: { continuity_refs: [] },
+    claim_refs: [],
+    ...extra,
+  });
+  const beatsMs = (s: number) => Array.from({ length: s * 2 }, (_, i) => i * 500);
+  const grid = { bpm: 120, beats: 20, moved_cuts: 0, beat_times_ms: beatsMs(10), downbeat_times_ms: beatsMs(10).filter((_, i) => i % 4 === 0) };
+  const scenes = [
+    scene("s01", 2, { kind: "motion", props: { html: "motion/a.html", text: ["a"] } }),
+    scene("s02", 5, { kind: "typography", props: { lines: ["One.", "Two.", "Three."] } }),
+    scene("s03", 3, { kind: "typography", props: { lines: ["Cued.", "Line."] } }),
+  ];
+  const env = { fps: 30, rms: "AAAA", low: "AAAA", onset: "AAAA" } as never;
+  const base = { target: { width: 180, height: 320, fps: 30 } as never, tokens: {} as never, project_dir: "/p", zones: {} as never, out_path: "/p/x.mp4" };
+
+  it("carries the motion page's envelope and beats, and beat-placed reveals for text scenes", () => {
+    const data = stillsPageData(scenes, 30, { grid, beatSyncOn: true, wordCues: new Map([["s03", [{ item: 1, at_s: 0.9 }]]]), audio: new Map([["s01", env]]) });
+    const motion = stillRequest(scenes[0]!, base, data);
+    expect(motion.audio).toBe(env);
+    expect(motion.beats).toEqual({ beats_s: [0, 0.5, 1, 1.5], downbeats_s: [0] });
+    expect(motion.cues).toBeUndefined();
+    // s02 starts at 2 s: beats every 0.5 s; the readable schedule puts items 1 and 2 on beats (+ cue lead).
+    const typo = stillRequest(scenes[1]!, base, data);
+    expect(typo.cues?.map((c) => c.item)).toEqual([1, 2]);
+    expect(typo.audio).toBeUndefined();
+    expect(typo.beats).toBeUndefined();
+    // The render's word cues win over the reveal schedule.
+    expect(stillRequest(scenes[2]!, base, data).cues).toEqual([{ item: 1, at_s: 0.9 }]);
+    expect(typo).toMatchObject({ scene: scenes[1], out_path: "/p/x.mp4", project_dir: "/p" });
+  });
+
+  it("places reveals on a pages-only grid when beat sync is on (no render yet), never when it is off", () => {
+    const pagesOnly = { ...grid, grid_only: true as const };
+    expect(stillsPageData(scenes, 30, { grid: pagesOnly, beatSyncOn: true }).cues.get("s02")?.length).toBe(2);
+    const off = stillsPageData(scenes, 30, { grid: pagesOnly, beatSyncOn: false });
+    expect(off.cues.size).toBe(0);
+    expect(stillRequest(scenes[1]!, base, off).cues).toBeUndefined();
+    // No grid: no beats, no reveals, no audio.
+    const none = stillsPageData(scenes, 30, { beatSyncOn: true });
+    expect([none.cues.size, none.beats.size, none.audio.size]).toEqual([0, 0, 0]);
   });
 });
 

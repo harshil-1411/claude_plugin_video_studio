@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Popup probe</title>
+  </head>
+  <body>
+    <!-- render_js fixture: the page tries to open new windows on its own; none may open or load. -->
+    <main>
+      <h1>Popup probe</h1>
+      <p id="status">This page tries to open two new windows as soon as it loads: one with window.open and one by clicking a link with target blank from its own script. The render must stay on this page and neither window may load.</p>
+    </main>
+    <script>
+      var w = window.open("/opened-by-window-open.html");
+      document.getElementById("status").setAttribute("data-open", w === null ? "null" : "window");
+      var a = document.createElement("a");
+      a.href = "/opened-by-link.html";
+      a.target = "_blank";
+      document.body.appendChild(a);
+      a.click();
+    </script>
+  </body>
+</html>

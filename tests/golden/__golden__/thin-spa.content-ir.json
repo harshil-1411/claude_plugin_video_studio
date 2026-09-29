@@ -26,7 +26,7 @@
   "warnings": [
     {
       "code": "thin_content",
-      "message": "Only 0 characters of main content were extracted from https://app.example.com/dashboard. The page may render client-side; a browser-based fetch would be needed (not implemented yet).",
+      "message": "Only 0 characters of main content were extracted from https://app.example.com/dashboard. The page may render client-side: ingest it again with render_js: true (after the user approves) to run its scripts in an isolated headless Chrome.",
       "source_id": "src-1"
     }
   ]
