@@ -154,7 +154,7 @@ describe("spec_scaffold", () => {
     expect(r.spec).toMatchObject({ master: { width: 1080, height: 1920, fps: 30 }, targets: ["instagram"] });
     expect(short.spec.master).toEqual({ width: 1920, height: 1080, fps: 30 });
     expect(short.spec.targets).toBeUndefined();
-    expect(r.notes.join(" ")).toMatch(/add cover \{headline, focal_time_sec\}/);
+    expect(r.notes.join(" ")).toMatch(/add cover \{headline\}: .*omit focal_time_sec/);
   });
 
   it("text-over-music scaffolds without voice, with the lofi bed and on-screen word budgets", async () => {
@@ -324,6 +324,9 @@ describe("storyboard_render", () => {
     expect(p.map((x) => x.flag)).toEqual(["too_fast", "dead_air", null, null]);
     expect(p[0]!.fix).toMatch(/cut about 2 words/);
     expect(p[3]!.start_sec).toBe(9);
+    // Text over music (no voice) has no dead air.
+    const silent = scenePace([{ ...base, id: "s01", duration_sec: 4, voiceover: "" }], "none");
+    expect(silent[0]!.flag).toBeNull();
   });
 });
 

@@ -361,7 +361,7 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
   const beats = tpl.beats.filter((b) => includeOptional || !b.optional);
   const dropped = tpl.beats.length - beats.length;
   notes.push(
-    "add cover {headline, focal_time_sec}: a short headline (≤ 6 words) and a moment inside the hook scene",
+    "add cover {headline}: a short headline (≤ 6 words); omit focal_time_sec and the engine picks the longest settled hold (hook first), or set it to a moment inside the hook scene. bake_first_frame: true puts it on frame 0 for chat-app previews (not with a loop)",
     targets.length
       ? `add publish.<target> {post_caption, hashtags} for ${targets.join(", ")}; post copy is separate from voiceover and captions`
       : "no platform targets: publish copy is optional",
@@ -536,7 +536,7 @@ export function countWords(text: string): number {
   return text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 }
 
-export function scenePace(scenes: Scene[]): ScenePace[] {
+export function scenePace(scenes: Scene[], voiceMode: "narrated" | "none" | "native" = "narrated"): ScenePace[] {
   let t = 0;
   return scenes.map((s) => {
     const start = t;
@@ -549,7 +549,9 @@ export function scenePace(scenes: Scene[]): ScenePace[] {
     if (wps > PACE.max_wps) {
       flag = "too_fast";
       fix = `cut about ${Math.ceil(words - PACE.max_wps * s.duration_sec)} words or lengthen the scene to ${Math.ceil((words / PACE.max_wps) * 10) / 10}s`;
-    } else if (wps < PACE.min_wps && s.duration_sec > PACE.dead_air_min_sec && !silentEndCard) {
+    } else if (voiceMode === "narrated" && wps < PACE.min_wps && s.duration_sec > PACE.dead_air_min_sec && !silentEndCard) {
+      // Only narrated videos have dead air: with no voice (text over music) or speech in the
+      // footage, a scene without voiceover is the design.
       flag = "dead_air";
       fix = `add about ${Math.ceil(PACE.min_wps * s.duration_sec - words)} words or shorten the scene`;
     }
@@ -565,7 +567,7 @@ const truncate = (s: string, n = 100) => {
 };
 
 export function renderStoryboardMarkdown(spec: VideoSpec, ir: ContentIR | null): { markdown: string; pacing: ScenePace[]; errors: PlanIssue[]; warnings: PlanIssue[] } {
-  const pacing = scenePace(spec.scenes);
+  const pacing = scenePace(spec.scenes, spec.voice?.mode ?? "narrated");
   const evidence = new Map(ir?.evidence.map((e) => [e.ref, e.text]) ?? []);
   const claims = new Map(ir?.claims.map((c) => [c.id, c.text]) ?? []);
   const sem = validateVideoSpecSemantics(spec, ir ?? undefined);

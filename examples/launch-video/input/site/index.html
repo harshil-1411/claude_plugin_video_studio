@@ -1,0 +1,68 @@
+<!doctype html>
+<!-- Invented product site for the video-studio launch example. Not a real brand. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Checkmint | Meeting notes in, action list out</title>
+  <meta name="description" content="Checkmint turns messy meeting notes into a tidy action list: every task with an owner and a due date.">
+  <meta name="theme-color" content="#f6f3ea">
+  <meta property="og:site_name" content="Checkmint">
+  <link rel="icon" type="image/png" href="assets/logo-mark.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <img class="logo" src="assets/logo-mark.png" alt="Checkmint logo">
+    <span class="wordmark">Checkmint</span>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>Meeting notes in. Action list out.</h1>
+      <p class="claim">Paste the notes from any meeting and Checkmint pulls out every to-do, with an owner and a due date, in about three seconds.</p>
+      <a class="button" href="#try">Tidy my notes</a>
+    </section>
+
+    <section class="how" id="try">
+      <h2>How it works</h2>
+      <div class="steps">
+        <article class="step">
+          <span class="num">1</span>
+          <h3>Paste your notes</h3>
+          <p>Drop in the notes exactly as you took them. Half sentences are fine.</p>
+          <p class="notes">Priya sends the Q3 deck by Friday<br>
+Sam fixes the login bug before Tuesday<br>
+everyone review pricing page??</p>
+        </article>
+        <article class="step">
+          <span class="num">2</span>
+          <h3>Press Tidy it</h3>
+          <p>One button. Checkmint reads who said they would do what, and by when.</p>
+          <button class="tidy" type="button">Tidy it</button>
+        </article>
+        <article class="step">
+          <span class="num">3</span>
+          <h3>Get the list</h3>
+          <p>Every action on its own line, with an owner and a due date, ready to copy.</p>
+          <p class="summary">3 actions · 3 owners</p>
+          <table class="actions">
+            <tr><th>Action</th><th>Owner</th><th>Due</th></tr>
+            <tr><td>Send the Q3 deck</td><td><span class="owner">Priya</span></td><td class="due">Fri</td></tr>
+            <tr><td>Fix the login bug</td><td><span class="owner">Sam</span></td><td class="due">Tue</td></tr>
+            <tr><td>Review the pricing page</td><td><span class="owner">Everyone</span></td><td class="due">Thu</td></tr>
+          </table>
+          <button class="tidy" type="button">Copy list</button>
+        </article>
+      </div>
+    </section>
+
+    <section class="faq">
+      <h2>Where do my notes go?</h2>
+      <p>Nowhere. Checkmint tidies your notes in the browser tab you pasted them into.</p>
+    </section>
+  </main>
+
+  <footer>Checkmint: stop rereading the notes. checkmint.example</footer>
+</body>
+</html>

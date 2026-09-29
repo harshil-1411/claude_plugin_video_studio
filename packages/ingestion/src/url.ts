@@ -362,7 +362,13 @@ function listToMd(el: Element, depth: number): string {
   return lines.join("\n");
 }
 
-function blocksToMd(root: Element, out: string[]): void {
+/**
+ * Whole-page mode (product and landing pages): button labels are copy too (a call to action), while
+ * footers, asides, headers' navigation and cookie dialogs are chrome.
+ */
+const PAGE_SKIP = new Set(["footer", "aside", "dialog"]);
+
+function blocksToMd(root: Element, out: string[], page = false): void {
   for (const child of Array.from(root.childNodes)) {
     if (child.nodeType === 3) {
       const t = collapse(child.textContent ?? "");
@@ -372,7 +378,13 @@ function blocksToMd(root: Element, out: string[]): void {
     if (child.nodeType !== 1) continue;
     const el = child as Element;
     const tag = el.tagName.toLowerCase();
-    if (SKIP.has(tag)) continue;
+    if (page && tag === "button") {
+      // A call to action ("Tidy my notes"); one-word controls ("Share", "Menu") are chrome.
+      const t = collapse(el.textContent ?? "").replace(/\n/g, " ");
+      if (t.split(" ").length >= 2) out.push(`${BUTTON_MARK}${t}`);
+      continue;
+    }
+    if (SKIP.has(tag) || (page && (PAGE_SKIP.has(tag) || el.getAttribute("aria-hidden") === "true" || el.hasAttribute("hidden")))) continue;
     const h = /^h([1-6])$/.exec(tag);
     if (h) {
       const t = collapse(inlineText(el)).replace(/\n/g, " ");
@@ -389,7 +401,7 @@ function blocksToMd(root: Element, out: string[]): void {
       out.push("```" + lang + "\n" + code + "\n```");
     } else if (tag === "blockquote") {
       const inner: string[] = [];
-      blocksToMd(el, inner);
+      blocksToMd(el, inner, page);
       if (inner.length) out.push(inner.join("\n\n").split("\n").map((l) => `> ${l}`).join("\n"));
     } else if (tag === "table") {
       const rows = Array.from(el.querySelectorAll("tr")).map(
@@ -399,16 +411,34 @@ function blocksToMd(root: Element, out: string[]): void {
     } else if (tag === "hr") {
       continue;
     } else {
-      blocksToMd(el, out);
+      blocksToMd(el, out, page);
     }
   }
 }
 
 /** Minimal HTML → markdown over a DOM element: headings, paragraphs, lists, code, quotes, tables. */
-export function htmlToMarkdown(root: Element): string {
+export function htmlToMarkdown(root: Element, opts: { page?: boolean } = {}): string {
   const out: string[] = [];
-  blocksToMd(root, out);
+  blocksToMd(root, out, opts.page === true);
   return out.join("\n\n");
+}
+
+/** Distinct lower-case words of 3+ letters (digits kept), for comparing two extractions. */
+function wordSet(markdown: string): Set<string> {
+  return new Set((stripInline(markdown).toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []));
+}
+
+/** Marks a button label among whole-page blocks (removed before anything is output). */
+const BUTTON_MARK = "\u0001";
+
+/** A page block counts as dropped by the article extractor when this share of its words is missing. */
+export const DROPPED_BLOCK_MISSING = 0.6;
+/** Lines this short are compared as a phrase (a headline, a button, a list item). */
+const SHORT_COPY_WORDS = 8;
+
+/** Lower-case words joined by single spaces, punctuation and markdown removed: for phrase matching. */
+function phrase(markdown: string): string {
+  return (stripInline(markdown).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(" ");
 }
 
 // ---------------------------------------------------------------------------
@@ -417,6 +447,8 @@ export interface HtmlExtraction {
   title?: string;
   markdown: string;
   method: "defuddle" | "readability" | "none";
+  /** Page blocks (headline, list items, button labels) the article extractor dropped, appended under "Also on the page". */
+  added?: number;
   /** Length of the extracted plain text. */
   textLength: number;
 }
@@ -430,6 +462,54 @@ function plainLength(markdown: string): number {
 const noNetwork: FetchImpl = async () => {
   throw new Error("network access disabled during extraction");
 };
+
+/**
+ * A product or landing page is not an article: defuddle keeps the prose and drops the headline,
+ * feature lists and button copy a video about the product needs. Blocks of the whole page (nav,
+ * footer, aside, scripts and one-word controls skipped) whose words are mostly missing from the
+ * extraction are appended under "Also on the page", in page order.
+ */
+function withDroppedBlocks(best: HtmlExtraction, html: string): HtmlExtraction {
+  try {
+    const { document } = parseHTML(html);
+    const body = (document as unknown as Document).body;
+    if (!body) return best;
+    const blocks: string[] = [];
+    blocksToMd(body as unknown as Element, blocks, true);
+    const kept = wordSet(best.markdown);
+    const keptText = phrase(best.markdown);
+    // The title is already the source's title; a heading repeating it is not dropped copy.
+    const seen = new Set<string>(best.title ? [phrase(best.title)] : []);
+    // Only structured copy: headings, list items and button labels (bylines, site names and
+    // other loose text stay out).
+    const structured = /^(#{1,6}\s|-\s|\d+\.\s|\u0001)/;
+    const dropped = blocks.flatMap((b) => b.split("\n")).filter((line) => {
+      if (!structured.test(line)) return false;
+      const words = wordSet(line);
+      if (words.size < 2) return false;
+      const text = phrase(line.replace(/^(#{1,6}|-|\d+\.)\s+/, ""));
+      if (!text || seen.has(text)) return false;
+      // Short copy (a headline, a button, a list item) must appear as a phrase; its words alone
+      // are usually all over the article. Longer blocks count as dropped when most words are.
+      let isDropped: boolean;
+      if (text.split(" ").length <= SHORT_COPY_WORDS) isDropped = !keptText.includes(text);
+      else {
+        let missing = 0;
+        for (const w of words) if (!kept.has(w)) missing++;
+        isDropped = missing / words.size >= DROPPED_BLOCK_MISSING;
+      }
+      if (isDropped) seen.add(text);
+      return isDropped;
+    });
+    if (!dropped.length) return best;
+    // Headings become plain lines inside the appendix; list markers are kept.
+    const appendix = dropped.map((l) => l.replace(/^#{1,6}\s+/, "").replace(BUTTON_MARK, "")).join("\n\n");
+    const markdown = `${best.markdown}\n\n## Also on the page\n\n${appendix}`;
+    return { ...best, markdown, textLength: plainLength(markdown), added: dropped.length };
+  } catch {
+    return best;
+  }
+}
 
 /**
  * Extract title + main content as markdown: defuddle first, Readability when
@@ -457,7 +537,7 @@ export async function extractHtml(html: string, url: string, minChars = MIN_CONT
   } catch {
     // fall through to Readability
   }
-  if (best.textLength >= minChars) return best;
+  if (best.textLength >= minChars) return withDroppedBlocks(best, html);
 
   try {
     const { document } = parseHTML(html);
@@ -512,7 +592,7 @@ export interface UrlExtractorOptions extends FetchOptions {
 }
 
 /** 2: the thin_content advice names render_js. */
-export const URL_EXTRACTOR_VERSION = "2";
+export const URL_EXTRACTOR_VERSION = "3";
 /** Version of the rendered path (`renderPage`): its own cache keys, apart from fetched pages. */
 export const URL_RENDERED_EXTRACTOR_VERSION = "1-rendered-1";
 /** Warning code on a source whose page was rendered with its scripts (provenance `method: "rendered"`). */
@@ -609,6 +689,12 @@ export function createUrlExtractor(options: UrlExtractorOptions = {}): Extractor
         textLength = ex.textLength;
         if (ex.method === "readability") {
           warnings.push({ code: "readability_fallback", message: "defuddle returned too little content; used Readability instead." });
+        }
+        if (ex.added) {
+          warnings.push({
+            code: "page_additions",
+            message: `the article extractor dropped ${ex.added} block(s) of page copy (headline, list items or button labels, as on a product page); they are kept under "Also on the page".`,
+          });
         }
       }
       if (textLength < minChars) {

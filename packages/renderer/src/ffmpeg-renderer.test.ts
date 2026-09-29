@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -24,13 +24,15 @@ import {
   motionTiming,
   revealChains,
   sceneMotionChains,
+  scriptFonts,
   sceneMotionParams,
   textRoute,
   zoomPanExprs,
 } from "./ffmpeg-renderer.js";
 import { findStylesDir, getStyle } from "./styles.js";
 import { applyTextCase } from "./text-layout.js";
-import { createFontResolver, resolveTokens, targetForAspect } from "./tokens.js";
+import { scanProjectFonts } from "./project-fonts.js";
+import { createFontResolver, findFontsDir, resolveTokens, targetForAspect, withProjectFonts } from "./tokens.js";
 import type { RenderTarget } from "./types.js";
 
 // Tiny clips only: 180x320, 1 s, 15 fps, x264 ultrafast.
@@ -678,4 +680,54 @@ describe("scene motion", () => {
       }
     }, T);
   });
+});
+
+describe("project fonts (fonts/<Family>/ in the project)", () => {
+  // fonts/Field Sans/ holds copies of the bundled Inter: the folder (CSS) name is "Field Sans", the internal name stays "Inter".
+  let proj: string;
+  let pt: ReturnType<typeof resolveTokens>;
+  const bundled = findFontsDir({})!;
+  beforeAll(async () => {
+    proj = await mkdtemp(join(tmpdir(), "vs-ffr-pfonts-"));
+    await mkdir(join(proj, "fonts", "Field Sans"), { recursive: true });
+    await copyFile(join(bundled, "Inter/Inter-Regular.ttf"), join(proj, "fonts", "Field Sans", "FieldSans-Regular.ttf"));
+    await copyFile(join(bundled, "Inter/Inter-Bold.ttf"), join(proj, "fonts", "Field Sans", "Inter-Bold.ttf"));
+    const { index } = await scanProjectFonts(proj);
+    pt = withProjectFonts(resolveTokens({ brand: { name: "x" }, visual: { fonts: { heading: "Field Sans", body: "Field Sans" } } }), index);
+  });
+  afterAll(async () => {
+    await rm(proj, { recursive: true, force: true });
+  });
+
+  it("draws with the project's files (by CSS/folder name) ahead of an injected resolver, and the same bytes as bundled Inter", async () => {
+    const calls: string[] = [];
+    const inner = createFontResolver();
+    const r = createFfmpegRenderer({ encodePreset: "ultrafast", fontResolver: (family, weight) => (calls.push(family), inner(family, weight)) });
+    const out = join(proj, "p.mp4");
+    await r.render({ scene: scene("typography", { lines: ["Field", "Sans"] }), target, tokens: pt, out_path: out, project_dir: proj });
+    // Heading and body resolved to project files without asking the injected resolver; only mono went through it.
+    expect(calls).toEqual([pt.font_mono]);
+    const plain = join(proj, "plain.mp4");
+    await createFfmpegRenderer({ encodePreset: "ultrafast" }).render({ scene: scene("typography", { lines: ["Field", "Sans"] }), target, tokens: resolveTokens(), out_path: plain, project_dir: proj });
+    const viaDefault = join(proj, "d.mp4");
+    await createFfmpegRenderer({ encodePreset: "ultrafast" }).render({ scene: scene("typography", { lines: ["Field", "Sans"] }), target, tokens: pt, out_path: viaDefault, project_dir: proj });
+    expect(sha256Hex(await readFile(viaDefault))).toBe(sha256Hex(await readFile(plain)));
+  }, T);
+
+  it("gives libass the project font's internal family and links its files (not bundled Inter) into the fonts dir", async () => {
+    const comp = composeScene(scene("typography", { lines: ["نموذج Whisper"] }), target, pt);
+    const { index } = await scanProjectFonts(proj);
+    const libassDir = join(proj, "libass");
+    const res = await scriptFonts(comp, pt, createFontResolver(process.env, { projectFonts: index }), { heading: 700, body: undefined, mono: undefined }, {
+      fontsDir: bundled,
+      libassDir,
+      libass: true,
+      project: index,
+    });
+    expect(res.ass!.latin.heading.family).toBe("Inter");
+    expect(res.ass!.latin.body.family).toBe("Inter");
+    const links = await Promise.all((await readdir(libassDir)).map(async (n) => [n, await readlink(join(libassDir, n))] as const));
+    const inter = links.filter(([, src]) => /Inter|FieldSans/.test(src)).map(([, src]) => src).sort();
+    expect(inter).toEqual([join(index!.root, "fonts/Field Sans/FieldSans-Regular.ttf"), join(index!.root, "fonts/Field Sans/Inter-Bold.ttf")].sort());
+  }, T);
 });

@@ -2,13 +2,13 @@ import { copyFile, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { ensureDir, hashFile, projectPaths, readJson, writeJsonAtomic } from "@video-studio/core";
 import { type FlashStats, type MotionStats, type QaReport, technicalQa, transitionSeconds, writeQaReport } from "@video-studio/media";
-import { type SceneRenderEntry, findFontsDir, findStylesDir, getStyle, LAYOUT_VERSION, parseFontChain, resolveTokens } from "@video-studio/renderer";
+import { type SceneRenderEntry, findFontsDir, findStylesDir, getStyle, LAYOUT_VERSION, parseFontChain, projectFontIndexFromTokens, resolveTokens, scanProjectFonts, withProjectFonts } from "@video-studio/renderer";
 import { CreativeBrief, RenderManifest, type SceneRender, VideoSpec, parseYamlOrJson, resolveTargets, type C2paRecord } from "@video-studio/schema";
 import { ZONES_VERSION, findPlatformSpecsDir, loadContracts } from "@video-studio/platforms";
 import { type C2paDeps, type SourceFacts, classifySource, signVideos } from "./c2pa.js";
 import { COVER_VERSION } from "./cover.js";
 import { POSTER_SKIP_FRAMES, POSTER_VERSION } from "./poster.js";
-import { LOCK_FILE, buildLock, listFiles, lockAssets, lockFonts, serializeLock, withSeriesAssets } from "./lock.js";
+import { LOCK_FILE, buildLock, listFiles, lockAssets, lockFonts, projectFontProvenance, serializeLock, withSeriesAssets } from "./lock.js";
 import { acquireRenderLock } from "./render-lock.js";
 import { type LintResult, lintProject } from "./lint.js";
 import { socialCopy, socialCopyParts } from "./social-copy.js";
@@ -493,6 +493,8 @@ async function exportFromState(
   } catch {
     source = null;
   }
+  // The project's own font files the render used, with their licence files (absent without any).
+  const projectFonts = await projectFontProvenance(root, state.fonts ?? []);
   const provenance = {
     ...(source && typeof source === "object" ? (source as Record<string, unknown>) : { sources: [] }),
     render: {
@@ -510,6 +512,7 @@ async function exportFromState(
         : {}),
       ...(state.timing_adjustments.length ? { timing_adjustments: state.timing_adjustments } : {}),
       ...(state.series ? { series: state.series } : {}),
+      ...(projectFonts.length ? { fonts: projectFonts } : {}),
       ...(state.sound_events ? { captions: { sound_events: state.sound_events } } : {}),
       ...(c2pa && c2paSource ? { c2pa: { ...c2pa, digital_source_type: c2paSource.digital_source_type, reasons: c2paSource.reasons } } : {}),
       scenes: state.scenes.map((s) => ({
@@ -719,9 +722,12 @@ async function lockFromState(root: string, state: RenderState, projectId: string
     const styleId = state.style?.split("@")[0];
     const style = styleId ? await getStyle(findStylesDir(process.env), styleId, root).catch(() => undefined) : undefined;
     const language = await loadSpecLoose(root).then((r) => r.spec.language).catch(() => undefined);
-    const tokens = resolveTokens(brandFile?.brand, {}, style, language ? { language } : {});
-    const captionFamily = brandFile?.brand.captions?.family ?? parseFontChain(tokens.font_body)[0];
-    fonts = await lockFonts(fontRequests(tokens, captionFamily, state.burn_in), { fontsDir: findFontsDir(process.env) });
+    const captionFamily = brandFile?.brand.captions?.family;
+    const tokens = withProjectFonts(resolveTokens(brandFile?.brand, {}, style, language ? { language } : {}), (await scanProjectFonts(root)).index, captionFamily ? [captionFamily] : []);
+    fonts = await lockFonts(fontRequests(tokens, captionFamily ?? parseFontChain(tokens.font_body)[0], state.burn_in), {
+      fontsDir: findFontsDir(process.env),
+      projectFonts: projectFontIndexFromTokens(tokens, root),
+    });
   }
   const specsDir = findPlatformSpecsDir();
   const contracts = specsDir ? await loadContracts(specsDir) : [];

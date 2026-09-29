@@ -16024,7 +16024,7 @@ const VideoLock = strictObject({
 		weight: int().positive(),
 		file: FilePath,
 		sha256: Sha256
-	})).describe("Font files the render used, sorted by family then weight."),
+	})).describe("Font files the render used, sorted by family then weight. `file` is the bundled path, a host path, or `project:fonts/...` for the project's own fonts."),
 	targets: array(strictObject({
 		id: PlatformTargetId,
 		contract_version: int().positive(),
@@ -23932,27 +23932,126 @@ function bundledFontFile(family, weight, dir) {
 	return existsSync(p) ? p : null;
 }
 /**
-* `@font-face` rules (file:// URLs) for every bundled family named in the tokens' chains, both
-* weights, for the HTML renderer. Empty when the fonts directory is missing, so callers can
-* embed it unconditionally; the chains' other families still apply through the browser.
+* `@font-face` rules (file:// URLs) for the HTML renderer: first the project's own font files
+* (`<project>/fonts/`, from `opts.projectFonts` or the tokens' `project_fonts` with
+* `opts.projectDir`) under every chain name they answer to, at their real weight and style; then
+* every bundled family named in the chains (both weights) that no project font already covers.
+* Empty when there are neither, so callers can embed it unconditionally; the chains' other
+* families still apply through the browser.
 */
 function fontFaceCss(tokens, opts = {}) {
 	const dir = opts.fontsDir === void 0 ? findFontsDir(opts.env ?? process.env) : opts.fontsDir;
-	if (!dir) return "";
-	const used = new Set([
+	const names = [...new Set([
 		tokens.font_heading,
 		tokens.font_body,
 		tokens.font_mono
-	].flatMap((c) => parseFontChain(c ?? "")).map((n) => n.toLowerCase()));
+	].flatMap((c) => parseFontChain(c ?? "")))];
 	const rules = [];
-	for (const f of BUNDLED_FONTS) {
-		if (!used.has(f.family.toLowerCase())) continue;
-		const p = join(dir, f.file);
-		if (!existsSync(p)) continue;
-		const format = f.file.endsWith(".otf") ? "opentype" : "truetype";
-		rules.push(`@font-face { font-family: "${f.family}"; src: url("${pathToFileURL(p).href}") format("${format}"); font-weight: ${f.weight}; font-style: normal; font-display: block; }`);
+	const covered = /* @__PURE__ */ new Set();
+	const project = opts.projectFonts !== void 0 ? opts.projectFonts : opts.projectDir ? projectFontIndexFromTokens(tokens, opts.projectDir) : null;
+	if (project) for (const name of names) {
+		if (GENERIC.has(name.toLowerCase()) || !CSS_FAMILY_NAME.test(name)) continue;
+		const faces = projectFontFaces(project, name);
+		if (!faces.length) continue;
+		covered.add(fontKey(name));
+		const seen = /* @__PURE__ */ new Set();
+		for (const f of faces) {
+			if (seen.has(f.path) || !existsSync(f.path)) continue;
+			seen.add(f.path);
+			rules.push(`@font-face { font-family: "${name}"; src: url("${pathToFileURL(f.path).href}") format("${/\.otf$/i.test(f.path) ? "opentype" : "truetype"}"); font-weight: ${f.weight}; font-style: ${f.italic ? "italic" : "normal"}; font-display: block; }`);
+		}
+	}
+	if (dir) {
+		const used = new Set(names.map((n) => n.toLowerCase()));
+		for (const f of BUNDLED_FONTS) {
+			if (!used.has(f.family.toLowerCase()) || covered.has(fontKey(f.family))) continue;
+			const p = join(dir, f.file);
+			if (!existsSync(p)) continue;
+			const format = f.file.endsWith(".otf") ? "opentype" : "truetype";
+			rules.push(`@font-face { font-family: "${f.family}"; src: url("${pathToFileURL(p).href}") format("${format}"); font-weight: ${f.weight}; font-style: normal; font-display: block; }`);
+		}
 	}
 	return rules.join("\n");
+}
+/** Family names compared without case, spaces or punctuation ("Field Sans" = "FieldSans" = "field-sans"). */
+function fontKey(name) {
+	return name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+/** Family names a @font-face rule may carry verbatim. */
+const CSS_FAMILY_NAME = /^[\p{L}\p{N} ._-]+$/u;
+/** Every project font answering to `name` (internal family or folder alias), non-generic names only. */
+function projectFontFaces(index, name) {
+	if (!index || GENERIC.has(name.trim().toLowerCase())) return [];
+	const k = fontKey(name);
+	if (!k) return [];
+	return index.fonts.filter((f) => fontKey(f.family) === k || fontKey(f.alias) === k);
+}
+/**
+* The project font for `name` at the nearest weight (upright preferred unless `italic`); ties go
+* to the heavier face for weights above 500, else the lighter. Null when no project font answers.
+*/
+function matchProjectFont(index, name, weight, italic = false) {
+	const faces = projectFontFaces(index, name);
+	if (!faces.length) return null;
+	const want = weight ?? 400;
+	const styled = faces.filter((f) => f.italic === italic);
+	const pool = styled.length ? styled : faces;
+	const score = (f) => Math.abs(f.weight - want) * 2 + (f.weight === want ? 0 : want > 500 ? f.weight > want ? 0 : 1 : f.weight < want ? 0 : 1);
+	return [...pool].sort((a, b) => score(a) - score(b) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))[0] ?? null;
+}
+/**
+* The project fonts the tokens carry (`project_fonts`), as an index rooted at `projectDir`. Refs
+* with an absolute path or `..` are ignored, so tokens can never point outside the project.
+* Null when the tokens carry none.
+*/
+function projectFontIndexFromTokens(tokens, projectDir) {
+	const refs = tokens.project_fonts ?? [];
+	if (!refs.length) return null;
+	const fonts = [];
+	for (const r of refs) {
+		if (!r.file || isAbsolute(r.file) || r.file.split(/[\\/]/).includes("..")) continue;
+		fonts.push({
+			path: join(projectDir, r.file),
+			file: r.file,
+			family: r.family,
+			alias: r.name,
+			weight: r.weight,
+			italic: r.italic,
+			sha256: r.sha256
+		});
+	}
+	return fonts.length ? {
+		root: projectDir,
+		fonts
+	} : null;
+}
+/**
+* Tokens with the project fonts their chains (and `extraFamilies`, e.g. a caption family) name:
+* one `project_fonts` ref per (name, file), sorted. The same object when no project font
+* answers, so renders without project fonts keep their cache keys.
+*/
+function withProjectFonts(tokens, index, extraFamilies = []) {
+	if (!index?.fonts.length) return tokens;
+	const names = [...new Set([
+		tokens.font_heading,
+		tokens.font_body,
+		tokens.font_mono
+	].flatMap((c) => parseFontChain(c ?? "")).concat(extraFamilies.flatMap((f) => parseFontChain(f))))];
+	const refs = /* @__PURE__ */ new Map();
+	for (const name of names) for (const f of projectFontFaces(index, name)) refs.set(`${name}\u0000${f.file}`, {
+		name,
+		family: f.family,
+		weight: f.weight,
+		italic: f.italic,
+		file: f.file,
+		sha256: f.sha256
+	});
+	if (!refs.size) return tokens;
+	const sorted = [...refs.values()].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : a.file < b.file ? -1 : a.file > b.file ? 1 : 0);
+	return {
+		...tokens,
+		project_fonts: sorted
+	};
 }
 /** Split a CSS font-family list into names (quotes removed). */
 function parseFontChain(chain) {
@@ -24026,8 +24125,9 @@ var FontNotFoundError = class extends Error {
 	}
 };
 /**
-* Locate a TTF/OTF/TTC file for a CSS-style family chain. For each named family, a bundled file
-* (Inter, Noto Sans, JetBrains Mono in `fonts/`, nearest of Regular/Bold to `weight`) wins first;
+* Locate a TTF/OTF/TTC file for a CSS-style family chain. For each named family, a project font
+* (`deps.projectFonts`: internal or folder name, nearest weight) wins first, then a bundled file
+* (Inter, Noto Sans, JetBrains Mono in `fonts/`, nearest of Regular/Bold to `weight`);
 * otherwise the family is tried with
 * `fc-match -f '%{family}\n%{file}'` and accepted only when fontconfig returns that family
 * (fontconfig otherwise substitutes silently). Then platform fallbacks (macOS Helvetica /
@@ -24045,6 +24145,8 @@ async function resolveFontFile(family, env = process.env, deps = {}, weight) {
 	let substitute = null;
 	for (const name of names) {
 		if (FONT_EXT$1.test(name) && await exists(name)) return name;
+		const own = matchProjectFont(deps.projectFonts, name, weight);
+		if (own && await exists(own.path)) return own.path;
 		const bundled = bundledFontFile(name, weight, fontsDir);
 		if (bundled) return bundled;
 		const out = await fcMatch([
@@ -24072,11 +24174,11 @@ async function resolveFontFile(family, env = process.env, deps = {}, weight) {
 	if (substitute) return substitute;
 	throw new FontNotFoundError(family);
 }
-/** A memoising FontResolver bound to `env`. */
+/** A memoising FontResolver bound to `env` (per exact weight when project fonts are given, else per bundled weight). */
 function createFontResolver(env = process.env, deps = {}) {
 	const cache = /* @__PURE__ */ new Map();
 	return (family, weight) => {
-		const key = `${family}\u0000${bundledWeight(weight)}`;
+		const key = `${family}\u0000${deps.projectFonts?.fonts.length ? weight ?? 400 : bundledWeight(weight)}`;
 		let p = cache.get(key);
 		if (!p) {
 			p = resolveFontFile(family, env, deps, weight);
@@ -24086,14 +24188,29 @@ function createFontResolver(env = process.env, deps = {}) {
 		return p;
 	};
 }
+/**
+* Put the project fonts in front of another resolver (one injected by a caller): the first chain
+* family a project font answers to wins, unless an earlier family is a bundled one (which the
+* base resolver would have used). Everything else goes to `base`.
+*/
+function projectFirstResolver(base, index) {
+	if (!index?.fonts.length) return base;
+	const bundled = new Set(BUNDLED_FONTS.map((f) => f.family.toLowerCase()));
+	return async (family, weight) => {
+		for (const name of parseFontChain(family)) {
+			const own = matchProjectFont(index, name, weight);
+			if (own && await fileExists$1(own.path)) return own.path;
+			if (bundled.has(name.toLowerCase())) break;
+		}
+		return base(family, weight);
+	};
+}
 const metricsCache = /* @__PURE__ */ new Map();
 /**
-* Vertical metrics from a TTF/OTF (first face of a TTC), read from the `head`, `hhea` and `OS/2`
-* tables. Null when the file cannot be read or parsed. Memoised per path.
+* Open a TTF/OTF (first face of a TTC), read its table directory and hand `fn` a reader and the
+* tables' offsets and lengths. Null when the file cannot be read or `fn` throws.
 */
-function readFontMetrics(file) {
-	if (metricsCache.has(file)) return metricsCache.get(file);
-	let out = null;
+function withFontTables(file, fn) {
 	let fd;
 	try {
 		fd = openSync(file, "r");
@@ -24105,29 +24222,102 @@ function readFontMetrics(file) {
 		let base = 0;
 		if (read(0, 4).toString("latin1") === "ttcf") base = read(12, 4).readUInt32BE(0);
 		const n = read(base, 12).readUInt16BE(4);
+		if (n === 0 || n > 512) return null;
 		const dir = read(base + 12, n * 16);
 		const tables = {};
-		for (let i = 0; i < n; i++) tables[dir.toString("latin1", i * 16, i * 16 + 4)] = dir.readUInt32BE(i * 16 + 8);
-		if (tables.head !== void 0 && tables.hhea !== void 0 && tables["OS/2"] !== void 0) {
-			const head = read(tables.head, 54);
-			const hhea = read(tables.hhea, 8);
-			const os2 = read(tables["OS/2"], 78);
-			out = {
-				unitsPerEm: head.readUInt16BE(18),
-				winHeight: os2.readUInt16BE(74) + os2.readUInt16BE(76),
-				winAscent: os2.readUInt16BE(74),
-				hheaAscent: hhea.readInt16BE(4),
-				hheaDescent: hhea.readInt16BE(6)
-			};
-			if (!(out.unitsPerEm > 0 && out.winHeight > 0)) out = null;
-		}
+		for (let i = 0; i < n; i++) tables[dir.toString("latin1", i * 16, i * 16 + 4)] = {
+			offset: dir.readUInt32BE(i * 16 + 8),
+			length: dir.readUInt32BE(i * 16 + 12)
+		};
+		return fn(read, tables);
 	} catch {
-		out = null;
+		return null;
 	} finally {
 		if (fd !== void 0) closeSync(fd);
 	}
+}
+/**
+* Vertical metrics from a TTF/OTF (first face of a TTC), read from the `head`, `hhea` and `OS/2`
+* tables. Null when the file cannot be read or parsed. Memoised per path.
+*/
+function readFontMetrics(file) {
+	if (metricsCache.has(file)) return metricsCache.get(file);
+	const out = withFontTables(file, (read, tables) => {
+		if (!tables.head || !tables.hhea || !tables["OS/2"]) return null;
+		const head = read(tables.head.offset, 54);
+		const hhea = read(tables.hhea.offset, 8);
+		const os2 = read(tables["OS/2"].offset, 78);
+		const m = {
+			unitsPerEm: head.readUInt16BE(18),
+			winHeight: os2.readUInt16BE(74) + os2.readUInt16BE(76),
+			winAscent: os2.readUInt16BE(74),
+			hheaAscent: hhea.readInt16BE(4),
+			hheaDescent: hhea.readInt16BE(6)
+		};
+		return m.unitsPerEm > 0 && m.winHeight > 0 ? m : null;
+	});
 	metricsCache.set(file, out);
 	return out;
+}
+/** One name-table string: UTF-16BE for Unicode/Windows records, Latin-1 (close to Mac Roman) otherwise. */
+function nameString(buf, platform) {
+	if (platform === 0 || platform === 3) {
+		let s = "";
+		for (let i = 0; i + 1 < buf.length; i += 2) s += String.fromCharCode(buf.readUInt16BE(i));
+		return s;
+	}
+	return buf.toString("latin1");
+}
+/**
+* Family name, weight and italic flag of a TTF/OTF (first face of a TTC) from its `name`, `OS/2`
+* and `head` tables. The family is nameID 16 (typographic family) when present, else nameID 1;
+* Windows English records win over other languages and Mac/Unicode records. Null when unreadable.
+*/
+function readFontNames(file) {
+	return withFontTables(file, (read, tables) => {
+		const nt = tables.name;
+		if (!nt || nt.length < 6 || nt.length > 1 << 20) return null;
+		const name = read(nt.offset, nt.length);
+		const count = name.readUInt16BE(2);
+		const strings = name.readUInt16BE(4);
+		const found = [];
+		for (let i = 0; i < count && 6 + (i + 1) * 12 <= name.length; i++) {
+			const r = 6 + i * 12;
+			const platform = name.readUInt16BE(r);
+			const lang = name.readUInt16BE(r + 4);
+			const id = name.readUInt16BE(r + 6);
+			if (id !== 1 && id !== 16) continue;
+			const len = name.readUInt16BE(r + 8);
+			const off = strings + name.readUInt16BE(r + 10);
+			if (off + len > name.length) continue;
+			const value = nameString(name.subarray(off, off + len), platform).replace(/\0/g, "").trim();
+			if (!value) continue;
+			const rank = platform === 3 ? lang === 1033 ? 0 : 1 : platform === 0 ? 2 : 3;
+			found.push({
+				id,
+				rank,
+				value
+			});
+		}
+		const pick = (id) => found.filter((f) => f.id === id).sort((a, b) => a.rank - b.rank)[0]?.value;
+		const family = pick(16) ?? pick(1);
+		if (!family) return null;
+		let weight = 400;
+		let italic = false;
+		const os2 = tables["OS/2"];
+		if (os2 && os2.length >= 64) {
+			const b = read(os2.offset, 64);
+			const w = b.readUInt16BE(4);
+			if (w >= 1 && w <= 1e3) weight = w;
+			italic = (b.readUInt16BE(62) & 1) === 1;
+		}
+		if (!italic && tables.head) italic = (read(tables.head.offset, 46).readUInt16BE(44) & 2) === 2;
+		return {
+			family,
+			weight,
+			italic
+		};
+	});
 }
 /**
 * libass font size for a wanted em size: libass scales a font so that its OS/2 win height
@@ -24142,13 +24332,18 @@ function assFontSize(emPx, metrics) {
 * libass only reads font files directly inside its `fontsdir` (not sub-directories), while
 * `fonts/` keeps one directory per family. Link the given font files (default: every bundled
 * font present) flat into `destDir` and return it, for `subtitles=…:fontsdir=` / `ass=…:fontsdir=`.
-* Symlinks, so nothing is copied; existing links are replaced.
+* Symlinks, so nothing is copied; existing links are replaced. Two files with the same name (a
+* project copy of a bundled font) get distinct link names (`2-<name>`, …).
 */
 async function prepareLibassFontsDir(destDir, files, fontsDir = findFontsDir()) {
 	await mkdir(destDir, { recursive: true });
 	const list = files ?? (fontsDir ? BUNDLED_FONTS.map((f) => join(fontsDir, f.file)).filter((p) => existsSync(p)) : []);
+	const taken = /* @__PURE__ */ new Map();
 	for (const src of list) {
-		const dest = join(destDir, basename(src));
+		let name = basename(src);
+		for (let n = 2; taken.has(name) && taken.get(name) !== src; n++) name = `${n}-${basename(src)}`;
+		taken.set(name, src);
+		const dest = join(destDir, name);
 		try {
 			if (await readlink(dest) === src) continue;
 			await unlink(dest);
@@ -24186,6 +24381,108 @@ const BLENDING_TRANSITIONS = /* @__PURE__ */ new Set([
 function exitFadeMs(motion) {
 	if (!motion) return 0;
 	return BLENDING_TRANSITIONS.has(motion.transition) ? 0 : motion.exit_ms;
+}
+const MAX_DEPTH$1 = 3;
+const FONT_FILE = /\.(ttf|otf)$/i;
+const LICENSE_FILE$1 = /^(ofl|license|licence|copying)([-_.][\w.-]*)?$/i;
+const toPosix$6 = (p) => p.split(sep).join("/");
+/**
+* Scan `<projectDir>/fonts/` (up to three folders deep) for TTF/OTF files. Symlinks are never
+* followed (neither files nor folders, nor a symlinked `fonts/` itself), so the index only ever
+* holds files inside the project. Sorted by path.
+*/
+async function scanProjectFonts(projectDir, opts = {}) {
+	const warnings = [];
+	const maxFiles = opts.maxFiles ?? 64;
+	const maxBytes = opts.maxBytes ?? 33554432;
+	let root;
+	try {
+		root = await realpath(projectDir);
+		const st = await lstat(join(root, "fonts"));
+		if (st.isSymbolicLink()) warnings.push("fonts: fonts/ is a symbolic link; project fonts not used (copy the files into the project)");
+		if (!st.isDirectory()) return {
+			index: null,
+			warnings
+		};
+	} catch {
+		return {
+			index: null,
+			warnings
+		};
+	}
+	const fontsDir = join(root, "fonts");
+	const files = [];
+	const licenses = /* @__PURE__ */ new Map();
+	let over = 0;
+	const walk = async (dir, depth) => {
+		let entries;
+		try {
+			entries = await readdir(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+		for (const e of entries) {
+			if (e.name.startsWith(".")) continue;
+			const abs = join(dir, e.name);
+			const rel = toPosix$6(relative(root, abs));
+			if (e.isSymbolicLink()) {
+				warnings.push(`fonts: ${rel} is a symbolic link; not used (copy the file into the project)`);
+				continue;
+			}
+			if (e.isDirectory()) {
+				if (depth < MAX_DEPTH$1) await walk(abs, depth + 1);
+				continue;
+			}
+			if (!e.isFile()) continue;
+			if (LICENSE_FILE$1.test(e.name) && !licenses.has(dir)) licenses.set(dir, rel);
+			if (!FONT_FILE.test(e.name)) continue;
+			if (files.length >= maxFiles) {
+				over++;
+				continue;
+			}
+			files.push(abs);
+		}
+	};
+	await walk(fontsDir, 1);
+	if (over) warnings.push(`fonts: more than ${maxFiles} font files in fonts/; ${over} not used`);
+	const fonts = [];
+	for (const abs of files) {
+		const rel = toPosix$6(relative(root, abs));
+		try {
+			if ((await lstat(abs)).size > maxBytes) {
+				warnings.push(`fonts: ${rel} is larger than ${maxBytes} bytes; not used`);
+				continue;
+			}
+			const names = readFontNames(abs);
+			if (!names) {
+				warnings.push(`fonts: ${rel} is not a readable TrueType/OpenType font; not used`);
+				continue;
+			}
+			const parts = relative(fontsDir, abs).split(sep);
+			const alias = parts.length > 1 ? parts[0] : names.family;
+			const license = licenses.get(dirname(abs));
+			fonts.push({
+				path: abs,
+				file: rel,
+				family: names.family,
+				alias,
+				weight: names.weight,
+				italic: names.italic,
+				sha256: createHash("sha256").update(await readFile(abs)).digest("hex"),
+				...license ? { license } : {}
+			});
+		} catch {
+			warnings.push(`fonts: ${rel} could not be read; not used`);
+		}
+	}
+	return {
+		index: fonts.length ? {
+			root,
+			fonts
+		} : null,
+		warnings
+	};
 }
 //#endregion
 //#region ../platforms/dist/registry.js
@@ -28061,8 +28358,14 @@ const ROLES = [
 	"body",
 	"mono"
 ];
-/** Family name libass should ask for: the bundled family of a bundled file, else the chain's first named family. */
-function assFamily(file, chain, fontsDir) {
+/**
+* Family name libass should ask for: a project font's internal name (libass matches the name
+* table, not the folder or CSS name), the bundled family of a bundled file, else the chain's
+* first named family.
+*/
+function assFamily(file, chain, fontsDir, project) {
+	const own = project?.fonts.find((f) => f.path === file);
+	if (own) return own.family;
 	const hit = fontsDir ? BUNDLED_FONTS.find((b) => join(fontsDir, b.file) === file) : void 0;
 	if (hit) return hit.family;
 	return parseFontChain(chain).find((n) => !/^(sans-serif|serif|monospace|system-ui|ui-monospace|ui-sans-serif)$/i.test(n)) ?? "sans-serif";
@@ -28071,7 +28374,7 @@ function assFamily(file, chain, fontsDir) {
 * Resolve the fonts a composition's text needs beyond the three role fonts: a script font per
 * role for CJK/Hangul drawtext lines, and libass fonts (flat fonts dir, Latin + script
 * families, size scales) for lines that need shaping. Returns warnings for scripts without a
-* bundled font.
+* bundled font. Exported for tests.
 */
 async function scriptFonts(comp, tokens, resolve, weights, o) {
 	const warnings = [];
@@ -28103,8 +28406,12 @@ async function scriptFonts(comp, tokens, resolve, weights, o) {
 	const assFont = async (chain, role) => {
 		const file = await resolve(chain, weights[role]);
 		files.add(file);
-		const family = assFamily(file, chain, o.fontsDir);
-		for (const b of BUNDLED_FONTS) if (b.family === family && o.fontsDir) files.add(join(o.fontsDir, b.file));
+		const family = assFamily(file, chain, o.fontsDir, o.project);
+		const own = o.project?.fonts.filter((f) => f.family === family) ?? [];
+		for (const f of own) files.add(f.path);
+		if (!own.length) {
+			for (const b of BUNDLED_FONTS) if (b.family === family && o.fontsDir) files.add(join(o.fontsDir, b.file));
+		}
 		const metrics = readFontMetrics(file);
 		return {
 			family,
@@ -28230,17 +28537,20 @@ function createFfmpegRenderer(opts = {}) {
 				body: tokens.weight_body,
 				mono: void 0
 			};
+			const project = projectFontIndexFromTokens(tokens, req.project_dir);
+			const resolveFont = !project ? fontResolver : opts.fontResolver ? projectFirstResolver(opts.fontResolver, project) : createFontResolver(process.env, { projectFonts: project });
 			const fonts = {
-				heading: await fontResolver(tokens.font_heading, weights.heading),
-				body: await fontResolver(tokens.font_body, weights.body),
-				mono: await fontResolver(tokens.font_mono)
+				heading: await resolveFont(tokens.font_heading, weights.heading),
+				body: await resolveFont(tokens.font_body, weights.body),
+				mono: await resolveFont(tokens.font_mono)
 			};
 			const frames = frameCount(scene.duration_sec, target.fps);
 			const tmp = await mkdtemp(join(tmpdir(), "vs-ffr-"));
 			try {
 				const needsAss = comp.elements.some((e) => e.type === "text" && textRoute(e.text).kind === "ass");
-				const extra = await scriptFonts(comp, tokens, fontResolver, weights, {
+				const extra = await scriptFonts(comp, tokens, resolveFont, weights, {
 					fontsDir: opts.fontsDir === void 0 ? findFontsDir() : opts.fontsDir,
+					project,
 					libassDir: join(tmp, "fonts"),
 					libass: needsAss && await hasAssFilter(tools)
 				});
@@ -28816,10 +29126,12 @@ function createFootageRenderer(opts = {}) {
 			try {
 				let overlay = null;
 				if (comp) {
+					const project = projectFontIndexFromTokens(tokens, req.project_dir);
+					const resolveFont = !project ? fontResolver : opts.fontResolver ? projectFirstResolver(opts.fontResolver, project) : createFontResolver(process.env, { projectFonts: project });
 					const fonts = {
-						heading: await fontResolver(tokens.font_heading, tokens.weight_heading ?? 700),
-						body: await fontResolver(tokens.font_body, tokens.weight_body),
-						mono: await fontResolver(tokens.font_mono)
+						heading: await resolveFont(tokens.font_heading, tokens.weight_heading ?? 700),
+						body: await resolveFont(tokens.font_body, tokens.weight_body),
+						mono: await resolveFont(tokens.font_mono)
 					};
 					overlay = buildFilterGraph(comp, target, plan.frames / target.fps, fonts, tmp, {
 						...tokens.motion ? { motion: tokens.motion } : {},
@@ -35614,9 +35926,14 @@ function composeMotion(req, pageHtml, opts = {}) {
 			onset: req.audio.onset
 		} } : {}
 	};
-	const faces = fontFaceCss(tokens, opts.fontsDir === void 0 ? {} : { fontsDir: opts.fontsDir }).replace(/url\("(file:[^"]+)"\)/g, (_m, href) => {
+	const faces = fontFaceCss(tokens, {
+		...opts.fontsDir === void 0 ? {} : { fontsDir: opts.fontsDir },
+		projectDir: req.project_dir
+	}).replace(/url\("(file:[^"]+)"\)/g, (_m, href) => {
 		const src = fileURLToPath(href);
-		const dest = `${MOTION_INTERNAL_DIR}/fonts/${basename(src).replace(/[^A-Za-z0-9._-]/g, "_")}`;
+		const name = basename(src).replace(/[^A-Za-z0-9._-]/g, "_");
+		let dest = `${MOTION_INTERNAL_DIR}/fonts/${name}`;
+		for (let n = 2; assets.some((a) => a.dest === dest && a.src !== src); n++) dest = `${MOTION_INTERNAL_DIR}/fonts/${n}-${name}`;
 		if (!assets.some((a) => a.dest === dest)) assets.push({
 			src,
 			dest
@@ -37208,9 +37525,9 @@ function lookCss(look) {
 * Families that get a `local()` @font-face: all but the bundled script families already served
 * from files (a failing later `local()` rule would shadow the bundled face).
 */
-function localFaceNames(names, bundledFaces) {
+function localFaceNames(names, bundledFaces, projectNames = /* @__PURE__ */ new Set()) {
 	const script = new Set(BUNDLED_FONTS.filter((f) => f.script).map((f) => f.family));
-	return names.filter((n) => !(script.has(n) && bundledFaces.includes(`font-family: "${n}"`)));
+	return names.filter((n) => !((script.has(n) || projectNames.has(n)) && bundledFaces.includes(`font-family: "${n}"`)));
 }
 /**
 * Script rules, only for scenes with non-Latin text: strict kinsoku for CJK, and for RTL pages a
@@ -37656,15 +37973,18 @@ function buildComposition(req, opts = {}) {
 		...t.text_align ? { text_align: t.text_align } : {},
 		...t.motion ? { motion: t.motion } : {}
 	};
-	const bundledFaces = fontFaceCss(scriptTokens).replace(/url\("(file:[^"]+)"\)/g, (_m, href) => {
+	const bundledFaces = fontFaceCss(scriptTokens, { projectDir: project_dir }).replace(/url\("(file:[^"]+)"\)/g, (_m, href) => {
 		const src = fileURLToPath(href);
-		const dest = `assets/fonts/${basename(src).replace(/[^A-Za-z0-9._-]/g, "_")}`;
+		const name = basename(src).replace(/[^A-Za-z0-9._-]/g, "_");
+		let dest = `assets/fonts/${name}`;
+		for (let n = 2; assets.some((a) => a.dest === dest && a.src !== src); n++) dest = `assets/fonts/${n}-${name}`;
 		if (!assets.some((a) => a.dest === dest)) assets.push({
 			src,
 			dest
 		});
 		return `url("${dest}")`;
 	});
+	const projectFontNames = new Set((scriptTokens.project_fonts ?? []).map((f) => f.name));
 	const compositionId = compositionIdFor(scene.id);
 	const d = fmtSec(dur);
 	const cam = cameraMarkup(scene.motion, dur, W, t.motion?.easing);
@@ -37677,7 +37997,7 @@ function buildComposition(req, opts = {}) {
 <meta name="viewport" content="width=${W}, height=${H}">
 <title>${esc$1(`${scene.id} ${det.kind}`)}</title>
 <style>
-${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}${cam ? cam.css : ""}${cueCss.length ? `\n/* word cues */\n${cueCss.join("\n")}` : ""}
+${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces, projectFontNames), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}${cam ? cam.css : ""}${cueCss.length ? `\n/* word cues */\n${cueCss.join("\n")}` : ""}
 </style>
 </head>
 <body>
@@ -40537,7 +40857,8 @@ async function renderCover(o) {
 		const filters = [];
 		let font = null;
 		try {
-			font = await (o.fontResolver ?? createFontResolver(o.env ?? process.env))(scriptFirstChain(o.tokens.font_heading, dominantScript(o.headline)), 700);
+			const project = o.projectDir ? projectFontIndexFromTokens(o.tokens, o.projectDir) : null;
+			font = await (o.fontResolver ? projectFirstResolver(o.fontResolver, project) : createFontResolver(o.env ?? process.env, project ? { projectFonts: project } : {}))(scriptFirstChain(o.tokens.font_heading, dominantScript(o.headline)), 700);
 		} catch (e) {
 			warnings.push(`cover: no font for "${o.tokens.font_heading}" (${e instanceof Error ? e.message : String(e)}); cover has no headline`);
 		}
@@ -40776,8 +41097,9 @@ const GENERIC_FAMILIES$1 = /* @__PURE__ */ new Set([
 /**
 * Resolve each request the way the renderers do (bundled fonts first, then host fonts) and hash
 * the file. Bundled files are recorded as `fonts/<family dir>/<file>` (relative to the plugin
-* root); host files as `host/<basename>`, so the lock never holds a machine-specific path.
-* Requests that resolve to no file are skipped (the render reported that already).
+* root); the project's own fonts (`<project>/fonts/`, tried first) as `project:<project-relative
+* path>` at the file's real weight; host files as `host/<basename>`, so the lock never holds a
+* machine-specific path. Requests that resolve to no file are skipped (the render reported that already).
 *
 * Script fonts: a chain that names a bundled script family (Noto Sans JP / Devanagari / Arabic,
 * added by `withLanguage` for a non-Latin spec language) also locks that family's file at the
@@ -40785,7 +41107,10 @@ const GENERIC_FAMILIES$1 = /* @__PURE__ */ new Set([
 * though the chain's first family resolves to a Latin font.
 */
 async function lockFonts(requests, opts) {
-	const resolve = opts.resolver ?? createFontResolver(opts.env ?? process.env, { fontsDir: opts.fontsDir });
+	const resolve = opts.resolver ?? createFontResolver(opts.env ?? process.env, {
+		fontsDir: opts.fontsDir,
+		...opts.projectFonts ? { projectFonts: opts.projectFonts } : {}
+	});
 	const out = /* @__PURE__ */ new Map();
 	const scriptFamilies = new Set(BUNDLED_FONTS.filter((f) => f.script).map((f) => f.family.toLowerCase()));
 	const expanded = [];
@@ -40803,6 +41128,17 @@ async function lockFonts(requests, opts) {
 		} catch {
 			continue;
 		}
+		const own = opts.projectFonts?.fonts.find((f) => f.path === file);
+		if (own) {
+			const entry = {
+				family: parseFontChain(r.chain).find((n) => !GENERIC_FAMILIES$1.has(n.toLowerCase())) ?? own.family,
+				weight: own.weight,
+				file: `${PROJECT_FONT_PREFIX}${own.file}`,
+				sha256: await hashFile(file)
+			};
+			out.set(`${entry.family}\u0000${entry.weight}\u0000${entry.file}`, entry);
+			continue;
+		}
 		const weight = r.weight >= 600 ? 700 : 400;
 		const inBundle = opts.fontsDir ? toPosix$4(relative(opts.fontsDir, file)) : "";
 		const bundled = inBundle && !inBundle.startsWith("..") && !isAbsolute(inBundle) ? BUNDLED_FONTS.find((f) => f.file === inBundle) : void 0;
@@ -40815,6 +41151,35 @@ async function lockFonts(requests, opts) {
 		out.set(`${entry.family}\u0000${entry.weight}\u0000${entry.file}`, entry);
 	}
 	return [...out.values()];
+}
+/** Lock `fonts[].file` prefix of a font from the project's own `fonts/` folder (the rest is project-relative). */
+const PROJECT_FONT_PREFIX = "project:";
+const LICENSE_FILE = /^(ofl|license|licence|copying)([-_.][\w.-]*)?$/i;
+/**
+* The project fonts among locked fonts, for provenance: file (project-relative), family, weight,
+* hash and the licence file next to it (OFL.txt, LICENSE, …; null when there is none). Empty
+* when the render used no project font.
+*/
+async function projectFontProvenance(root, fonts) {
+	const out = [];
+	const licenses = /* @__PURE__ */ new Map();
+	for (const f of fonts) {
+		if (!f.file.startsWith("project:")) continue;
+		const file = f.file.slice(8);
+		const dir = dirname(file);
+		if (!licenses.has(dir)) {
+			const lic = (await readdir(join(root, dir)).catch(() => [])).filter((n) => LICENSE_FILE.test(n)).sort()[0];
+			licenses.set(dir, lic ? toPosix$4(join(dir, lic)) : null);
+		}
+		out.push({
+			family: f.family,
+			weight: f.weight,
+			file,
+			sha256: f.sha256,
+			license: licenses.get(dir) ?? null
+		});
+	}
+	return out;
 }
 /** Hash project-relative input files that exist; missing ones are skipped. */
 async function lockAssets(root, relPaths) {
@@ -42514,7 +42879,7 @@ function checkCover(spec, contracts, rendered, out) {
 			id: "cover_missing",
 			severity: "warning",
 			message: `no cover: ${needing.map((c) => `${c.name} (${c.cover.mode})`).join(", ")} ${needing.length === 1 ? "uses" : "use"} a cover image or frame`,
-			fix: "add cover {headline, focal_time_sec} to the spec, with focal_time_sec inside the hook scene where the headline is on screen"
+			fix: "add cover {headline} to the spec (the engine picks the frame; or set focal_time_sec inside the hook scene where the headline is on screen)"
 		});
 		return;
 	}
@@ -43574,7 +43939,14 @@ function checkAcceptance(spec, state, out) {
 	const a = spec.acceptance;
 	const m = state?.qa?.motion;
 	if (!a || !m) return;
-	const push = (message, fix) => out.push({
+	const motionIds = new Set((spec.scenes ?? []).filter((s) => s.deterministic?.kind === "motion").map((s) => s.id));
+	const standIns = (state?.scenes ?? []).filter((s) => motionIds.has(s.scene_id) && s.renderer !== void 0 && !/hyperframes/i.test(s.renderer)).map((s) => s.scene_id);
+	const push = (message, fix) => out.push(standIns.length ? {
+		id: "acceptance_unmet",
+		severity: "warning",
+		message: `${message} (measured on text stand-ins for motion scenes ${standIns.join(", ")}; not a verdict)`,
+		fix: `render with HyperFrames (--renderer hyperframes) to judge the motion; then: ${fix}`
+	} : {
 		id: "acceptance_unmet",
 		severity: "error",
 		message,
@@ -228254,7 +228626,16 @@ function listToMd(el, depth) {
 	}
 	return lines.join("\n");
 }
-function blocksToMd(root, out) {
+/**
+* Whole-page mode (product and landing pages): button labels are copy too (a call to action), while
+* footers, asides, headers' navigation and cookie dialogs are chrome.
+*/
+const PAGE_SKIP = /* @__PURE__ */ new Set([
+	"footer",
+	"aside",
+	"dialog"
+]);
+function blocksToMd(root, out, page = false) {
 	for (const child of Array.from(root.childNodes)) {
 		if (child.nodeType === 3) {
 			const t = collapse(child.textContent ?? "");
@@ -228264,7 +228645,12 @@ function blocksToMd(root, out) {
 		if (child.nodeType !== 1) continue;
 		const el = child;
 		const tag = el.tagName.toLowerCase();
-		if (SKIP.has(tag)) continue;
+		if (page && tag === "button") {
+			const t = collapse(el.textContent ?? "").replace(/\n/g, " ");
+			if (t.split(" ").length >= 2) out.push(`${BUTTON_MARK}${t}`);
+			continue;
+		}
+		if (SKIP.has(tag) || page && (PAGE_SKIP.has(tag) || el.getAttribute("aria-hidden") === "true" || el.hasAttribute("hidden"))) continue;
 		const h = /^h([1-6])$/.exec(tag);
 		if (h) {
 			const t = collapse(inlineText(el)).replace(/\n/g, " ");
@@ -228281,20 +228667,34 @@ function blocksToMd(root, out) {
 			out.push("```" + lang + "\n" + code + "\n```");
 		} else if (tag === "blockquote") {
 			const inner = [];
-			blocksToMd(el, inner);
+			blocksToMd(el, inner, page);
 			if (inner.length) out.push(inner.join("\n\n").split("\n").map((l) => `> ${l}`).join("\n"));
 		} else if (tag === "table") {
 			const rows = Array.from(el.querySelectorAll("tr")).map((tr) => `| ${Array.from(tr.children).map((c) => collapse(inlineText(c)).replace(/\|/g, "\\|")).join(" | ")} |`);
 			if (rows.length) out.push(rows.join("\n"));
 		} else if (tag === "hr") continue;
-		else blocksToMd(el, out);
+		else blocksToMd(el, out, page);
 	}
 }
 /** Minimal HTML → markdown over a DOM element: headings, paragraphs, lists, code, quotes, tables. */
-function htmlToMarkdown(root) {
+function htmlToMarkdown(root, opts = {}) {
 	const out = [];
-	blocksToMd(root, out);
+	blocksToMd(root, out, opts.page === true);
 	return out.join("\n\n");
+}
+/** Distinct lower-case words of 3+ letters (digits kept), for comparing two extractions. */
+function wordSet(markdown) {
+	return new Set(stripInline(markdown).toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []);
+}
+/** Marks a button label among whole-page blocks (removed before anything is output). */
+const BUTTON_MARK = "";
+/** A page block counts as dropped by the article extractor when this share of its words is missing. */
+const DROPPED_BLOCK_MISSING = .6;
+/** Lines this short are compared as a phrase (a headline, a button, a list item). */
+const SHORT_COPY_WORDS = 8;
+/** Lower-case words joined by single spaces, punctuation and markdown removed: for phrase matching. */
+function phrase(markdown) {
+	return (stripInline(markdown).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(" ");
 }
 function plainLength(markdown) {
 	return stripInline(markdown.replace(/^#{1,6}\s+/gm, "").replace(/^```.*$/gm, "")).replace(/\s+/g, " ").trim().length;
@@ -228302,6 +228702,52 @@ function plainLength(markdown) {
 const noNetwork = async () => {
 	throw new Error("network access disabled during extraction");
 };
+/**
+* A product or landing page is not an article: defuddle keeps the prose and drops the headline,
+* feature lists and button copy a video about the product needs. Blocks of the whole page (nav,
+* footer, aside, scripts and one-word controls skipped) whose words are mostly missing from the
+* extraction are appended under "Also on the page", in page order.
+*/
+function withDroppedBlocks(best, html) {
+	try {
+		const { document } = parseHTML(html);
+		const body = document.body;
+		if (!body) return best;
+		const blocks = [];
+		blocksToMd(body, blocks, true);
+		const kept = wordSet(best.markdown);
+		const keptText = phrase(best.markdown);
+		const seen = new Set(best.title ? [phrase(best.title)] : []);
+		const structured = /^(#{1,6}\s|-\s|\d+\.\s|\u0001)/;
+		const dropped = blocks.flatMap((b) => b.split("\n")).filter((line) => {
+			if (!structured.test(line)) return false;
+			const words = wordSet(line);
+			if (words.size < 2) return false;
+			const text = phrase(line.replace(/^(#{1,6}|-|\d+\.)\s+/, ""));
+			if (!text || seen.has(text)) return false;
+			let isDropped;
+			if (text.split(" ").length <= SHORT_COPY_WORDS) isDropped = !keptText.includes(text);
+			else {
+				let missing = 0;
+				for (const w of words) if (!kept.has(w)) missing++;
+				isDropped = missing / words.size >= DROPPED_BLOCK_MISSING;
+			}
+			if (isDropped) seen.add(text);
+			return isDropped;
+		});
+		if (!dropped.length) return best;
+		const appendix = dropped.map((l) => l.replace(/^#{1,6}\s+/, "").replace(BUTTON_MARK, "")).join("\n\n");
+		const markdown = `${best.markdown}\n\n## Also on the page\n\n${appendix}`;
+		return {
+			...best,
+			markdown,
+			textLength: plainLength(markdown),
+			added: dropped.length
+		};
+	} catch {
+		return best;
+	}
+}
 /**
 * Extract title + main content as markdown: defuddle first, Readability when
 * defuddle yields fewer than `minChars` characters. Scripts are never run
@@ -228329,7 +228775,7 @@ async function extractHtml(html, url, minChars = 200) {
 			textLength: plainLength(markdown)
 		};
 	} catch {}
-	if (best.textLength >= minChars) return best;
+	if (best.textLength >= minChars) return withDroppedBlocks(best, html);
 	try {
 		const { document } = parseHTML(html);
 		const doc = document;
@@ -228429,7 +228875,7 @@ function createUrlExtractor(options = {}) {
 		};
 	};
 	return {
-		version: render ? URL_RENDERED_EXTRACTOR_VERSION : "2",
+		version: render ? URL_RENDERED_EXTRACTOR_VERSION : "3",
 		kinds: ["url"],
 		async inputDigest(input) {
 			const page = await load(input);
@@ -228456,6 +228902,10 @@ function createUrlExtractor(options = {}) {
 				if (ex.method === "readability") warnings.push({
 					code: "readability_fallback",
 					message: "defuddle returned too little content; used Readability instead."
+				});
+				if (ex.added) warnings.push({
+					code: "page_additions",
+					message: `the article extractor dropped ${ex.added} block(s) of page copy (headline, list items or button labels, as on a product page); they are kept under "Also on the page".`
 				});
 			}
 			if (textLength < minChars) warnings.push({
@@ -249065,6 +249515,19 @@ async function gatherRepo(root) {
 			evidence: `${rel} (meta theme-color)`
 		};
 		bodyClasses = classesOf(document);
+		if (name.evidence === "the repo folder name") {
+			const meta = (sel) => document.querySelector(sel)?.getAttribute("content")?.trim() || void 0;
+			const site = meta("meta[property=\"og:site_name\"]") ?? meta("meta[name=\"application-name\"]");
+			const title = document.querySelector("title")?.textContent?.trim();
+			if (site) name = {
+				value: site,
+				evidence: `${rel} (og:site_name)`
+			};
+			else if (title) name = {
+				value: title.split(/\s+[|–—-]\s+|\s*[|–—]\s*/)[0].trim() || title,
+				evidence: `${rel} (<title>)`
+			};
+		}
 		break;
 	}
 	return {
@@ -249560,6 +250023,12 @@ async function copyFontFiles(root, project, family, faces, warnings) {
 * (never `brand.yaml`), with the chosen logo in `assets/brand/` and a repo's font files in `fonts/`.
 * Every value carries its evidence; substitutions and warnings say what was guessed or replaced.
 */
+/** A local source path as the draft shows it: relative to the project (no user name or home path in a file that gets shared). */
+function shownPath(project, path) {
+	const rel = relative(project, path);
+	if (rel === "") return ".";
+	return rel.startsWith("..") || resolve(rel) === rel ? basename(path) : rel.split(sep).join("/");
+}
 async function draftBrand(projectDir, opts = {}) {
 	const project = resolve(projectDir);
 	const rawSource = opts.source ?? await defaultSource(project);
@@ -249682,7 +250151,7 @@ async function draftBrand(projectDir, opts = {}) {
 	const cl = (label, p) => p ? [`${label}: ${p.value} from ${p.how} (${p.evidence})`] : [];
 	const fl = (label, f) => f ? [`${label} font: ${f.family}${f.substituted ? ` (stands in for ${f.source_family ?? "a system font"})` : ""}${f.evidence ? ` (${f.evidence})` : ""}${f.files ? `; files ${f.files.join(", ")}` : ""}`] : [];
 	const header = [
-		`Brand draft from the ${g.kind} ${g.uri} (${BRAND_DRAFT_VERSION}, ${(opts.now ?? (() => /* @__PURE__ */ new Date()))().toISOString().slice(0, 10)}).`,
+		`Brand draft from the ${g.kind} ${g.kind === "repo" ? shownPath(project, g.uri) : g.uri} (${BRAND_DRAFT_VERSION}, ${(opts.now ?? (() => /* @__PURE__ */ new Date()))().toISOString().slice(0, 10)}).`,
 		"Review it, then save it as project/brand.yaml: brand_draft never writes brand.yaml.",
 		"Evidence:",
 		`name: ${g.name.value} (${g.name.evidence})`,
@@ -251139,7 +251608,7 @@ async function stageInputs(run) {
 	const styleId = effectiveStyleId(spec.style, seriesLoaded?.series);
 	const look = seriesLook(seriesLoaded?.series, spec.style, styleId ? await getStyle(findStylesDir(env), styleId, root) : void 0);
 	const style = look.style;
-	const tokens = resolveTokens$1(brand, look.defaults, style, { language: spec.language });
+	let tokens = resolveTokens$1(brand, look.defaults, style, { language: spec.language });
 	if (brand?.visual?.logo_placement?.position === "none") delete tokens.logo_path;
 	const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
 	const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
@@ -251147,9 +251616,27 @@ async function stageInputs(run) {
 		...style?.captions,
 		...brand?.captions
 	} : void 0;
+	const scan = await scanProjectFonts(root);
+	warnings.push(...scan.warnings);
+	tokens = withProjectFonts(tokens, scan.index, brandCaptions?.family ? [brandCaptions.family] : []);
+	const used = new Set((tokens.project_fonts ?? []).map((f) => f.file));
+	const projectFonts = scan.index && used.size ? {
+		root: scan.index.root,
+		fonts: scan.index.fonts.filter((f) => used.has(f.file))
+	} : null;
 	const fontsDir = findFontsDir(env);
 	const fonts = bundledFontsStatus(fontsDir);
-	if (fonts.missing.length) warnings.push(`fonts: bundled fonts missing (${fonts.missing.join(", ")}${fontsDir ? ` in ${fontsDir}` : "; no fonts/ directory found"}); using host fonts, so text may look different on other machines`);
+	const chains = [
+		tokens.font_heading,
+		tokens.font_body,
+		tokens.font_mono
+	].map((c) => parseFontChain(c));
+	const shadowed = (family) => chains.every((names) => {
+		const i = names.findIndex((n) => fontKey(n) === fontKey(family));
+		return i === -1 || names.slice(0, i + 1).some((n) => projectFontFaces(projectFonts, n).length > 0);
+	});
+	const missing = fonts.missing.filter((file) => !projectFonts || !shadowed(BUNDLED_FONTS.find((b) => b.file === file)?.family ?? ""));
+	if (missing.length) warnings.push(`fonts: bundled fonts missing (${missing.join(", ")}${fontsDir ? ` in ${fontsDir}` : "; no fonts/ directory found"}); using host fonts, so text may look different on other machines`);
 	return {
 		spec,
 		irPath,
@@ -251162,6 +251649,7 @@ async function stageInputs(run) {
 		brandCaptions,
 		fontsDir,
 		fonts,
+		projectFonts,
 		...series ? { series } : {}
 	};
 }
@@ -251729,11 +252217,14 @@ async function stageCaptions(run, input) {
 		recursive: true,
 		force: true
 	});
+	const captionFamily = brandCaptions?.family ?? parseFontChain(tokens.font_body)[0] ?? "sans-serif";
+	const captionOwn = matchProjectFont(projectFontIndexFromTokens(tokens, root), captionFamily, brandCaptions?.weight ?? 400);
+	const captionFonts = captionOwn ? (input.inputs.projectFonts?.fonts ?? []).filter((f) => f.family === captionOwn.family) : [];
 	const assOpts = {
 		width: target.width,
 		height: target.height,
 		preset: captionPreset === "bold" ? "bold" : "minimal",
-		font: brandCaptions?.family ?? parseFontChain(tokens.font_body)[0] ?? "sans-serif",
+		font: captionOwn?.family ?? captionFamily,
 		highlight: tokens.color_primary,
 		box: zones.caption,
 		...spec.captions.position ? { positionY: spec.captions.position.y } : {},
@@ -251791,7 +252282,9 @@ async function stageCaptions(run, input) {
 		cues,
 		captionSet,
 		captionFiles,
-		assOpts
+		assOpts,
+		captionFamily,
+		captionFonts
 	};
 }
 /** e'. Music bed ducking spans; e''. per-scene audio: footage sound (native / mix), crossfades and one-shots. */
@@ -251822,7 +252315,7 @@ async function stageAssembly(run, input) {
 	const { target, encodePreset } = input.tp;
 	const { planScenes, ordered, zones, hasAudio, music } = input;
 	const { bounds, frameMs, slotMs } = input.timeline;
-	const { placements, captionFiles, assOpts } = input.captions;
+	const { placements, captionFiles, assOpts, captionFonts } = input.captions;
 	const { useSceneAudio, sceneAudio, sceneAudioOn, musicSpeech, musicMute } = input.audio;
 	const rdir = renderDir(root, quality);
 	const transitionMs = tokens.motion?.transition_ms ?? 400;
@@ -251881,7 +252374,11 @@ async function stageAssembly(run, input) {
 		} } : {},
 		ass: burn ? assSha : null,
 		captions: burn ? assOpts : null,
-		fonts: burn ? fonts.present : null
+		fonts: burn ? fonts.present : null,
+		...burn && captionFonts.length ? { project_fonts: captionFonts.map((f) => ({
+			file: f.file,
+			sha256: f.sha256
+		})) } : {}
 	}));
 	const master = join(rdir, "master.mp4");
 	const reel = join(rdir, "reel.mp4");
@@ -251937,7 +252434,7 @@ async function stageAssembly(run, input) {
 			...burn ? {
 				reel,
 				assPath: captionFiles.ass,
-				...fontsDir ? { fontsDir: await prepareLibassFontsDir(join(rdir, "fonts"), void 0, fontsDir) } : {}
+				...await libassFontsFor(join(rdir, "fonts"), fontsDir, fonts.present, captionFonts)
 			} : {}
 		}, {
 			...encodePreset ? { encode: { preset: encodePreset } } : {},
@@ -251957,6 +252454,20 @@ async function stageAssembly(run, input) {
 		prev,
 		reuse
 	};
+}
+/**
+* The libass fonts folder for burned-in captions: the bundled fonts, with the caption's project
+* font files replacing any bundled family of the same internal name (libass could pick either).
+* The folder is rebuilt, so links from an earlier render's project fonts never linger.
+*/
+async function libassFontsFor(dest, fontsDir, present, own) {
+	if (!own.length) return fontsDir ? { fontsDir: await prepareLibassFontsDir(dest, void 0, fontsDir) } : {};
+	await rm(dest, {
+		recursive: true,
+		force: true
+	});
+	const families = new Set(own.map((f) => fontKey(f.family)));
+	return { fontsDir: await prepareLibassFontsDir(dest, [...fontsDir ? present.filter((file) => !families.has(fontKey(BUNDLED_FONTS.find((b) => b.file === file)?.family ?? ""))).map((file) => join(fontsDir, file)) : [], ...own.map((f) => f.path)], fontsDir) };
 }
 /**
 * g. Cover (spec.cover: headline frame at the focal time) or thumbnail at the hook scene's
@@ -252023,6 +252534,7 @@ async function stageCover(run, input) {
 			zones,
 			tokens,
 			contracts,
+			projectDir: root,
 			env,
 			...signal ? { signal } : {}
 		});
@@ -252107,12 +252619,12 @@ async function stagePoster(run, input) {
 /** Tool versions, locked fonts and the RenderState persisted at renders/<quality>/render-state.json (before QA fills `qa`). */
 async function stageRenderState(run, input) {
 	const { env, root, quality, started_at, preference, voiceChoice, warnings } = run;
-	const { spec, irPath, brandFile, style, tokens, fontsDir, captionPreset } = input.inputs;
+	const { spec, irPath, brandFile, style, tokens, fontsDir, captionPreset, projectFonts } = input.inputs;
 	const { target, timingSource, footage, music, cueLog } = input;
 	const { voice, reason: voiceReason, mode, hasAudio } = input.vs;
 	const { timing_adjustments, beatSync } = input.timing;
 	const { ordered, used, reasons, sceneStart, sceneEnd } = input.scenes;
-	const { totalMs, cues, captionSet, captionFiles, assOpts } = input.captions;
+	const { totalMs, cues, captionSet, captionFiles, captionFamily } = input.captions;
 	const { sceneAudio, sceneAudioOn } = input.audio;
 	const { segments, burn, logo, assemblyKey, master, reel, thumbnail, prev, reuse } = input.asm;
 	const { thumbnailKey, coverState } = input.cover;
@@ -252128,9 +252640,10 @@ async function stageRenderState(run, input) {
 	for (const e of ordered) if (e.renderer && e.renderer_version) tool_versions[e.renderer] = e.renderer_version;
 	tool_versions[`voice:${voice.backend}`] = voice.backend === "silent" ? "n/a" : "local";
 	if (style) tool_versions.style = styleRef(style);
-	const lockedFonts = await lockFonts(fontRequests(tokens, assOpts.font, burn), {
+	const lockedFonts = await lockFonts(fontRequests(tokens, captionFamily, burn), {
 		fontsDir,
-		env
+		env,
+		projectFonts
 	});
 	const specSha = sha256Hex(canonicalJson(spec));
 	const irSha = await exists(irPath) ? await hashFile(irPath) : void 0;
@@ -252708,6 +253221,7 @@ async function exportFromState(root, state, now, opts = {}) {
 	} catch {
 		source = null;
 	}
+	const projectFonts = await projectFontProvenance(root, state.fonts ?? []);
 	const provenance = {
 		...source && typeof source === "object" ? source : { sources: [] },
 		render: {
@@ -252746,6 +253260,7 @@ async function exportFromState(root, state, now, opts = {}) {
 			})) } : {},
 			...state.timing_adjustments.length ? { timing_adjustments: state.timing_adjustments } : {},
 			...state.series ? { series: state.series } : {},
+			...projectFonts.length ? { fonts: projectFonts } : {},
 			...state.sound_events ? { captions: { sound_events: state.sound_events } } : {},
 			...c2pa && c2paSource ? { c2pa: {
 				...c2pa,
@@ -253078,8 +253593,12 @@ async function lockFromState(root, state, projectId, outputs) {
 		const styleId = state.style?.split("@")[0];
 		const style = styleId ? await getStyle(findStylesDir(process.env), styleId, root).catch(() => void 0) : void 0;
 		const language = await loadSpecLoose(root).then((r) => r.spec.language).catch(() => void 0);
-		const tokens = resolveTokens$1(brandFile?.brand, {}, style, language ? { language } : {});
-		fonts = await lockFonts(fontRequests(tokens, brandFile?.brand.captions?.family ?? parseFontChain(tokens.font_body)[0], state.burn_in), { fontsDir: findFontsDir(process.env) });
+		const captionFamily = brandFile?.brand.captions?.family;
+		const tokens = withProjectFonts(resolveTokens$1(brandFile?.brand, {}, style, language ? { language } : {}), (await scanProjectFonts(root)).index, captionFamily ? [captionFamily] : []);
+		fonts = await lockFonts(fontRequests(tokens, captionFamily ?? parseFontChain(tokens.font_body)[0], state.burn_in), {
+			fontsDir: findFontsDir(process.env),
+			projectFonts: projectFontIndexFromTokens(tokens, root)
+		});
 	}
 	const specsDir = findPlatformSpecsDir();
 	const contracts = specsDir ? await loadContracts(specsDir) : [];
@@ -273916,7 +274435,7 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 	const includeOptional = opts.include_optional ?? target >= tpl.default_duration_sec;
 	const beats = tpl.beats.filter((b) => includeOptional || !b.optional);
 	const dropped = tpl.beats.length - beats.length;
-	notes.push("add cover {headline, focal_time_sec}: a short headline (≤ 6 words) and a moment inside the hook scene", targets.length ? `add publish.<target> {post_caption, hashtags} for ${targets.join(", ")}; post copy is separate from voiceover and captions` : "no platform targets: publish copy is optional");
+	notes.push("add cover {headline}: a short headline (≤ 6 words); omit focal_time_sec and the engine picks the longest settled hold (hook first), or set it to a moment inside the hook scene. bake_first_frame: true puts it on frame 0 for chat-app previews (not with a loop)", targets.length ? `add publish.<target> {post_caption, hashtags} for ${targets.join(", ")}; post copy is separate from voiceover and captions` : "no platform targets: publish copy is optional");
 	if (dropped > 0) notes.push(`dropped ${dropped} optional beat(s) because target ${target}s < template default ${tpl.default_duration_sec}s`);
 	const durations = allocateDurations(beats.map((b) => b.share), target);
 	const mode = opts.voice_mode ?? tpl.voice_mode ?? "narrated";
@@ -274054,7 +274573,7 @@ const PACE = {
 function countWords(text) {
 	return text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 }
-function scenePace(scenes) {
+function scenePace(scenes, voiceMode = "narrated") {
 	let t = 0;
 	return scenes.map((s) => {
 		const start = t;
@@ -274067,7 +274586,7 @@ function scenePace(scenes) {
 		if (wps > PACE.max_wps) {
 			flag = "too_fast";
 			fix = `cut about ${Math.ceil(words - PACE.max_wps * s.duration_sec)} words or lengthen the scene to ${Math.ceil(words / PACE.max_wps * 10) / 10}s`;
-		} else if (wps < PACE.min_wps && s.duration_sec > PACE.dead_air_min_sec && !silentEndCard) {
+		} else if (voiceMode === "narrated" && wps < PACE.min_wps && s.duration_sec > PACE.dead_air_min_sec && !silentEndCard) {
 			flag = "dead_air";
 			fix = `add about ${Math.ceil(PACE.min_wps * s.duration_sec - words)} words or shorten the scene`;
 		}
@@ -274089,7 +274608,7 @@ const truncate = (s, n = 100) => {
 	return flat.length > n ? `${flat.slice(0, n - 1).trimEnd()}…` : flat;
 };
 function renderStoryboardMarkdown(spec, ir) {
-	const pacing = scenePace(spec.scenes);
+	const pacing = scenePace(spec.scenes, spec.voice?.mode ?? "narrated");
 	const evidence = new Map(ir?.evidence.map((e) => [e.ref, e.text]) ?? []);
 	const claims = new Map(ir?.claims.map((c) => [c.id, c.text]) ?? []);
 	const sem = validateVideoSpecSemantics(spec, ir ?? void 0);

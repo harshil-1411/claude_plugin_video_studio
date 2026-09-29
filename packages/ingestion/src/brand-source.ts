@@ -580,6 +580,14 @@ async function gatherRepo(root: string): Promise<Gathered> {
     const tc = document.querySelector('meta[name="theme-color"]')?.getAttribute("content");
     if (tc && parseColor(tc)) themeColor = { value: tc, evidence: `${rel} (meta theme-color)` };
     bodyClasses = classesOf(document);
+    // A static site has no package.json: the page names the product better than its folder.
+    if (name.evidence === "the repo folder name") {
+      const meta = (sel: string) => document.querySelector(sel)?.getAttribute("content")?.trim() || undefined;
+      const site = meta('meta[property="og:site_name"]') ?? meta('meta[name="application-name"]');
+      const title = document.querySelector("title")?.textContent?.trim();
+      if (site) name = { value: site, evidence: `${rel} (og:site_name)` };
+      else if (title) name = { value: title.split(/\s+[|–—-]\s+|\s*[|–—]\s*/)[0]!.trim() || title, evidence: `${rel} (<title>)` };
+    }
     break;
   }
   return { kind: "repo", uri: root, root, styles, logos, name, ...(themeColor ? { themeColor } : {}), bodyClasses, warnings };
@@ -1054,6 +1062,14 @@ async function copyFontFiles(root: string, project: string, family: string, face
  * (never `brand.yaml`), with the chosen logo in `assets/brand/` and a repo's font files in `fonts/`.
  * Every value carries its evidence; substitutions and warnings say what was guessed or replaced.
  */
+/** A local source path as the draft shows it: relative to the project (no user name or home path in a file that gets shared). */
+function shownPath(project: string, path: string): string {
+  const rel = relative(project, path);
+  if (rel === "") return ".";
+  // Outside the project: the folder's own name only.
+  return rel.startsWith("..") || resolve(rel) === rel ? basename(path) : rel.split(sep).join("/");
+}
+
 export async function draftBrand(projectDir: string, opts: BrandDraftOptions = {}): Promise<BrandDraftResult> {
   const project = resolve(projectDir);
   const rawSource = opts.source ?? (await defaultSource(project));
@@ -1158,7 +1174,7 @@ export async function draftBrand(projectDir: string, opts: BrandDraftOptions = {
   const fl = (label: string, f?: FontPick) =>
     f ? [`${label} font: ${f.family}${f.substituted ? ` (stands in for ${f.source_family ?? "a system font"})` : ""}${f.evidence ? ` (${f.evidence})` : ""}${f.files ? `; files ${f.files.join(", ")}` : ""}`] : [];
   const header = [
-    `Brand draft from the ${g.kind} ${g.uri} (${BRAND_DRAFT_VERSION}, ${(opts.now ?? (() => new Date()))().toISOString().slice(0, 10)}).`,
+    `Brand draft from the ${g.kind} ${g.kind === "repo" ? shownPath(project, g.uri) : g.uri} (${BRAND_DRAFT_VERSION}, ${(opts.now ?? (() => new Date()))().toISOString().slice(0, 10)}).`,
     "Review it, then save it as project/brand.yaml: brand_draft never writes brand.yaml.",
     "Evidence:",
     `name: ${g.name.value} (${g.name.evidence})`,

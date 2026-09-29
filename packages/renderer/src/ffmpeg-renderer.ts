@@ -34,7 +34,20 @@ import {
   wrapText,
 } from "./text-layout.js";
 import { type Script, baseDirection, charScript, dominantScript, hasCjk, needsShaping, scriptFontFamilies, scriptsIn, textDirection } from "./script.js";
-import { BUNDLED_FONTS, type FontResolver, assFontSize, createFontResolver, findFontsDir, parseFontChain, prepareLibassFontsDir, readFontMetrics, scriptFirstChain } from "./tokens.js";
+import {
+  BUNDLED_FONTS,
+  type FontResolver,
+  type ProjectFontIndex,
+  assFontSize,
+  createFontResolver,
+  findFontsDir,
+  parseFontChain,
+  prepareLibassFontsDir,
+  projectFirstResolver,
+  projectFontIndexFromTokens,
+  readFontMetrics,
+  scriptFirstChain,
+} from "./tokens.js";
 import type { Availability, LayoutZones, MotionTokens, RenderTarget, ResolvedCue, SceneRenderRequest, SceneRenderResult, SceneRenderer, VisualTokens } from "./types.js";
 import { COUNT_UP_ENTRANCE_LEAD_S, countUpSpan, countUpSteps, countUpTiming, withEarlyFirstStep } from "./count-up.js";
 import { countUpWindow, cueItemStarts } from "./cue-timing.js";
@@ -2125,8 +2138,14 @@ function hasAssFilter(tools: FfmpegTools): Promise<boolean> {
 
 const ROLES: readonly FontRole[] = ["heading", "body", "mono"];
 
-/** Family name libass should ask for: the bundled family of a bundled file, else the chain's first named family. */
-function assFamily(file: string, chain: string, fontsDir: string | null): string {
+/**
+ * Family name libass should ask for: a project font's internal name (libass matches the name
+ * table, not the folder or CSS name), the bundled family of a bundled file, else the chain's
+ * first named family.
+ */
+function assFamily(file: string, chain: string, fontsDir: string | null, project?: ProjectFontIndex | null): string {
+  const own = project?.fonts.find((f) => f.path === file);
+  if (own) return own.family;
   const hit = fontsDir ? BUNDLED_FONTS.find((b) => join(fontsDir, b.file) === file) : undefined;
   if (hit) return hit.family;
   return parseFontChain(chain).find((n) => !/^(sans-serif|serif|monospace|system-ui|ui-monospace|ui-sans-serif)$/i.test(n)) ?? "sans-serif";
@@ -2136,14 +2155,14 @@ function assFamily(file: string, chain: string, fontsDir: string | null): string
  * Resolve the fonts a composition's text needs beyond the three role fonts: a script font per
  * role for CJK/Hangul drawtext lines, and libass fonts (flat fonts dir, Latin + script
  * families, size scales) for lines that need shaping. Returns warnings for scripts without a
- * bundled font.
+ * bundled font. Exported for tests.
  */
-async function scriptFonts(
+export async function scriptFonts(
   comp: Pick<Composition, "elements">,
   tokens: VisualTokens,
   resolve: FontResolver,
   weights: Record<FontRole, number | undefined>,
-  o: { fontsDir: string | null; libassDir: string; libass: boolean },
+  o: { fontsDir: string | null; libassDir: string; libass: boolean; project?: ProjectFontIndex | null },
 ): Promise<{ scripts?: FontFiles["scripts"]; ass?: AssTextFonts; warnings: string[] }> {
   const warnings: string[] = [];
   const chains: Record<FontRole, string> = { heading: tokens.font_heading, body: tokens.font_body, mono: tokens.font_mono };
@@ -2169,9 +2188,12 @@ async function scriptFonts(
   const assFont = async (chain: string, role: FontRole): Promise<AssFont> => {
     const file = await resolve(chain, weights[role]);
     files.add(file);
-    const family = assFamily(file, chain, o.fontsDir);
-    // Both weights of a bundled family, so libass can switch with \b.
-    for (const b of BUNDLED_FONTS) if (b.family === family && o.fontsDir) files.add(join(o.fontsDir, b.file));
+    const family = assFamily(file, chain, o.fontsDir, o.project);
+    // Every weight of the family, so libass can switch with \b: a project font's files (and then
+    // no bundled file of the same name, which libass could pick instead), else the bundled pair.
+    const own = o.project?.fonts.filter((f) => f.family === family) ?? [];
+    for (const f of own) files.add(f.path);
+    if (!own.length) for (const b of BUNDLED_FONTS) if (b.family === family && o.fontsDir) files.add(join(o.fontsDir, b.file));
     const metrics = readFontMetrics(file);
     return {
       family,
@@ -2280,17 +2302,21 @@ export function createFfmpegRenderer(opts: FfmpegRendererOptions = {}): SceneRen
       // Bold headings by default, matching the HTML renderer (bundled Inter has a real Bold);
       // style/brand weights pick the nearest bundled file (600+ Bold, lighter Regular).
       const weights: Record<FontRole, number | undefined> = { heading: tokens.weight_heading ?? 700, body: tokens.weight_body, mono: undefined };
+      // The project's own fonts (tokens.project_fonts, in the cache key) come before bundled and host fonts.
+      const project = projectFontIndexFromTokens(tokens, req.project_dir);
+      const resolveFont = !project ? fontResolver : opts.fontResolver ? projectFirstResolver(opts.fontResolver, project) : createFontResolver(process.env, { projectFonts: project });
       const fonts: FontFiles = {
-        heading: await fontResolver(tokens.font_heading, weights.heading),
-        body: await fontResolver(tokens.font_body, weights.body),
-        mono: await fontResolver(tokens.font_mono),
+        heading: await resolveFont(tokens.font_heading, weights.heading),
+        body: await resolveFont(tokens.font_body, weights.body),
+        mono: await resolveFont(tokens.font_mono),
       };
       const frames = frameCount(scene.duration_sec, target.fps);
       const tmp = await mkdtemp(join(tmpdir(), "vs-ffr-"));
       try {
         const needsAss = comp.elements.some((e) => e.type === "text" && textRoute(e.text).kind === "ass");
-        const extra = await scriptFonts(comp, tokens, fontResolver, weights, {
+        const extra = await scriptFonts(comp, tokens, resolveFont, weights, {
           fontsDir: opts.fontsDir === undefined ? findFontsDir() : opts.fontsDir,
+          project,
           libassDir: join(tmp, "fonts"),
           libass: needsAss && (await hasAssFilter(tools)),
         });

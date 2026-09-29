@@ -39,6 +39,25 @@ export interface VisualTokens {
    * Without it, renderers detect the script from the text itself.
    */
   language?: string;
+  /**
+   * Font files from the project's own `fonts/` folder that the chains name (see
+   * `withProjectFonts`), with their hashes: part of every cache key that takes the tokens, so a
+   * replaced font file re-renders. Absent without project fonts, so other keys do not move.
+   */
+  project_fonts?: ProjectFontRef[];
+}
+
+/** A project font file a chain family resolves to (project-relative path and hash). */
+export interface ProjectFontRef {
+  /** The family name the chains use for it: the internal name or the folder name (alias). */
+  name: string;
+  /** Internal family (name table nameID 16, else 1): what libass and fontconfig match. */
+  family: string;
+  weight: number;
+  italic: boolean;
+  /** Project-relative posix path, e.g. `fonts/FieldSans/FieldSans-Regular.ttf`. */
+  file: string;
+  sha256: string;
 }
 
 /** Resolved motion tokens (style pack, overridden by brand.motion). */

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "ir_id": "ir-e1018ccf6e34",
+  "ir_schema_version": "1.0",
+  "created_at": "2026-09-29T18:52:25.327Z",
+  "sources": [
+    {
+      "source_id": "src-1",
+      "uri": "index.html",
+      "kind": "url",
+      "sha256": "6a00461380098921dd665dda6f83f8d015bffc3be1b08b785044836048c30b6e",
+      "title": "Meeting notes in, action list out",
+      "extractor_version": "2",
+      "fetched_at": "2026-09-29T18:52:25.327Z",
+      "cache_hit": false,
+      "cache_key": "f5f0a8cd4a66e6bf4840b82b0473f5abf5cf1986db9ca6e1d3e1bfbc76bbbb62"
+    }
+  ],
+  "failures": []
+}

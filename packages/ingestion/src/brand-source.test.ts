@@ -136,6 +136,8 @@ describe("brand_draft from a repo folder", () => {
     expect(draft).toMatchObject({ version: 2, brand: { name: "fieldnote" }, visual: { palette: { background: "#F4F7F5", text: "#1B2B24", primary: "#2F9E44", secondary: "#1971C2" }, logo: "assets/brand/logo.svg" } });
     const text = await readFile(join(dir, BRAND_DRAFT_PATH), "utf8");
     expect(text).toMatch(/^# Brand draft from the repo /);
+    // The source path is shown relative to the project: no home folder in a file that gets shared.
+    expect(text.split("\n")[0]).toMatch(/^# Brand draft from the repo fieldnote-repo \(/);
     expect(text).toContain("# primary: #2F9E44 from custom property --color-brand (src/styles.css:12)");
     expect(await readFile(join(dir, "project", "brand.yaml"), "utf8")).toBe("brand: { name: Keep me }\n");
     expect(formatBrandDraft(r)).toMatch(/primary: #2F9E44 \(custom property --color-brand; src\/styles\.css:12\)/);
@@ -144,7 +146,8 @@ describe("brand_draft from a repo folder", () => {
   it("tidepool (CSS variables): roles from body's var() references, fonts substituted with evidence", async () => {
     const dir = await project();
     const r = await draftBrand(dir, { source: site("tidepool") });
-    expect(r.name.value).toBe("tidepool");
+    // A static site without package.json is named by its page, not its folder.
+    expect(r.name).toEqual({ value: "Tidepool", evidence: "index.html (og:site_name)" });
     expect([r.palette.background.value, r.palette.text.value, r.palette.accent?.value, r.palette.secondary?.value]).toEqual(["#0B1D2A", "#E6F1F7", "#2EC4B6", "#FF9F1C"]);
     expect(r.palette.background.how).toBe("body background (--bg)");
     expect(r.fonts.heading).toMatchObject({ family: "Inter", source_family: "Space Grotesk", substituted: true, evidence: "styles.css:21" });

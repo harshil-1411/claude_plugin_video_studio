@@ -184,3 +184,25 @@ describe("urlExtractor", () => {
     expect(out.warnings.map((w) => w.code)).toEqual(["readability_fallback", "thin_content"]);
   });
 });
+
+describe("extractHtml on a product page", () => {
+  const PRODUCT = `<!doctype html><html><head><title>Checkmint</title></head><body><nav><a>Home</a><a>Pricing</a></nav><main>
+<h1>Meeting notes in. Action list out.</h1>
+<p>Checkmint turns the notes from any meeting into a tidy list of actions, each with an owner and a due date, in one press.</p>
+<h2>How it works</h2><ol><li>Paste your notes from the call.</li><li>Press Tidy it.</li><li>Get the list with owners and dates.</li></ol>
+<ul><li>Send the Q3 deck (Priya, Fri)</li><li>Book the venue (Sam, Tue)</li></ul>
+<button>Tidy my notes</button><button>Share</button>
+<p>Teams use it after every call: nobody rewrites the notes, and every action has a name next to it by the time the call ends.</p>
+</main><footer>© 2026 Checkmint · legal terms · privacy policy</footer></body></html>`;
+
+  it("keeps list items and button labels the article extractor dropped, and no chrome", async () => {
+    const r = await extractHtml(PRODUCT, "https://checkmint.example/");
+    expect(r.title).toBe("Meeting notes in. Action list out.");
+    const [, appendix = ""] = r.markdown.split("## Also on the page");
+    expect(appendix).toContain("Send the Q3 deck (Priya, Fri)");
+    expect(appendix).toContain("Book the venue (Sam, Tue)");
+    expect(appendix).toContain("Tidy my notes");
+    expect(r.added).toBe(3);
+    for (const chrome of ["Share", "Pricing", "privacy policy"]) expect(r.markdown).not.toContain(chrome);
+  });
+});

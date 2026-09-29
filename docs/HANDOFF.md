@@ -1,12 +1,23 @@
-# Handoff: video-studio (2026-09-27, v0.4.0)
+# Handoff: video-studio (2026-09-30, v0.4.0 + Phase 6.7 → 0.5.0)
 
-**Version 0.4.0** (tags `v0.1.0`, `v0.2.0`, `v0.3.0`, `v0.4.0`). **Git:** branch `main` only, pushed to https://github.com/harshil-1411/claude_plugin_video_studio. The working tree is clean. There is no CI by the user's choice; the user's **pre-push hook** runs `node scripts/check.mjs --push` on every push (8 steps, about 5 min; tags run it too).
+**Version 0.4.0 tagged; 0.5.0 (Phase 6.7) is on `main`, untagged until the user's Mac checks pass** (tags `v0.1.0`, `v0.2.0`, `v0.3.0`, `v0.4.0`). **Git:** branch `main` only, pushed to https://github.com/harshil-1411/claude_plugin_video_studio. The working tree is clean. There is no CI by the user's choice; the user's **pre-push hook** runs `node scripts/check.mjs --push` on every push (8 steps, about 5 min; tags run it too).
 
 Read this with `.claude/CLAUDE.md` (architecture rules and commands) and `docs/PLAN.md` (roadmap). Everything below "History" is how each phase was built.
 
 ## Start here (read first)
 
-**State.** Phases 0–6, 6.5 (directed motion), 6.6 (craft and hygiene) and the local part of 8 are done. Phase 7 (paid AI video providers) and Phase 9 (publishing) are not started; both need the user's keys or accounts.
+**Phase 6.7 (launch craft), 2026-09-29/30.** Planned from a read-only review of latent-spaces/brag (MIT; ideas re-expressed, nothing copied) plus hardening; plan in `docs/PLAN.md`, details in `CHANGELOG.md` [Unreleased] 0.5.0. Commits: W0 `06362dd`, W1 `c1fa8e3`, W2 `6889f45`, W3 `86a432a`, W4 (project fonts, `examples/launch-video/`, fixes from its run, docs) committed after W3.
+- **Added:** `/video-studio:launch`; `brand_draft`; project fonts (`<project>/fonts/`); `product_flow`, `tone_preset` and `research-specs/tones.yaml` applied by `spec_scaffold`; synthesized CC0 `sfx/` (`bundled:<id>`) and `sound-design.md`; `footage.av_offset_ms`; `cover.bake_first_frame` and automatic cover time; `__vs.audio` + kit 1.1.0 (`energy`/`bass`/`onset`/`revealAt`); the reveal schedule; QA `moving_pct` (`QA_VERSION` 6) and `acceptance.min_moving_pct`; lint `cliche`, `busy_crossfade`, `reveal_too_fast`, three `sfx_*` rules; `review transitions`; `ingest render_js` (isolated Chrome, consent).
+- **Fixed:** whisper compressed-anchor runs (captions ahead of the voice); `spec_scaffold` style check; link-local/metadata stay blocked under `VS_ALLOW_PRIVATE_URLS=1`; banned phrases now checked on the generated post copy.
+- **User checks before tagging 0.5.0 (their Mac, real Chrome):**
+  1. `VS_TEST_RENDER=1 npx vitest run packages/renderer/src/hyperframes-renderer.test.ts` (motion kit 1.1.0, a page drawn from `vs.energy`).
+  2. `VS_TEST_RENDER=1 npx vitest run packages/mcp/src/render-page.test.ts packages/mcp/src/stills.test.ts packages/mcp/src/review.test.ts` (`render_js` on `fixtures/spa`: JS text extracted, metadata probe blocked, no popups).
+  3. `VS_TEST_RENDER=1 npx vitest run tests/golden-frames` (the loop example under kit 1.1.0; its page doesn't use the new helpers, so frames should match).
+  4. `node scripts/render-project.mjs examples/launch-video --voice silent --renderer hyperframes --quality final`, then look at it (`/video-studio:review` with transitions) — the first reel made the launch way. Then decide on goldens for it.
+  5. Listen to a narrated render with `bundled:` sound effects: are the default levels right under the voice?
+- **Known limits:** tone `caption_case` is a note only (no caption case setting); SVG logos can't be the corner overlay; only TTF/OTF project fonts; `moving_pct` near its threshold for very slow drifts.
+
+**State.** Phases 0–6, 6.5 (directed motion), 6.6 (craft and hygiene), 6.7 (launch craft, untagged) and the local part of 8 are done. Phase 7 (paid AI video providers) and Phase 9 (publishing) are not started; both need the user's keys or accounts.
 
 **What changed today (2026-09-27), in one breath:**
 - **v0.3.0 (Phase 6.5):**

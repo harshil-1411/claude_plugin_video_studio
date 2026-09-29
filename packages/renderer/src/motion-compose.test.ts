@@ -201,3 +201,26 @@ describe("composeMotion", () => {
     }
   });
 });
+
+describe("composeMotion project fonts", () => {
+  it("declares project font files under the chain's name and copies them under __vs/fonts", async () => {
+    const { copyFileSync, mkdirSync, mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { scanProjectFonts } = await import("./project-fonts.js");
+    const { findFontsDir, withProjectFonts } = await import("./tokens.js");
+    const bundled = findFontsDir({})!;
+    const root = mkdtempSync(join(tmpdir(), "vs-motion-pfonts-"));
+    try {
+      mkdirSync(join(root, "fonts", "Field Sans"), { recursive: true });
+      copyFileSync(join(bundled, "Inter/Inter-Regular.ttf"), join(root, "fonts", "Field Sans", "FieldSans-Regular.ttf"));
+      const { index } = await scanProjectFonts(root);
+      const tokens = withProjectFonts({ ...TOKENS, font_body: '"Field Sans", Inter, sans-serif' }, index);
+      const c = composeMotion(req({}, { tokens, project_dir: root }), MORPH, { fontsDir: bundled });
+      expect(c.html).toMatch(/@font-face \{ font-family: "Field Sans"; src: url\("__vs\/fonts\/FieldSans-Regular\.ttf"\) format\("truetype"\); font-weight: 400/);
+      expect(c.assets).toContainEqual({ src: join(root, "fonts", "Field Sans", "FieldSans-Regular.ttf"), dest: "__vs/fonts/FieldSans-Regular.ttf" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { hashFile } from "@video-studio/core";
-import { BUNDLED_FONTS, type FontResolver, createFontResolver, parseFontChain } from "@video-studio/renderer";
+import { BUNDLED_FONTS, type FontResolver, type ProjectFontIndex, createFontResolver, parseFontChain } from "@video-studio/renderer";
 import { type LockChange, type LockChangeClass, VideoLock } from "@video-studio/schema";
 
 /**
@@ -33,16 +33,20 @@ const GENERIC_FAMILIES = new Set(["sans-serif", "serif", "monospace", "system-ui
 /**
  * Resolve each request the way the renderers do (bundled fonts first, then host fonts) and hash
  * the file. Bundled files are recorded as `fonts/<family dir>/<file>` (relative to the plugin
- * root); host files as `host/<basename>`, so the lock never holds a machine-specific path.
- * Requests that resolve to no file are skipped (the render reported that already).
+ * root); the project's own fonts (`<project>/fonts/`, tried first) as `project:<project-relative
+ * path>` at the file's real weight; host files as `host/<basename>`, so the lock never holds a
+ * machine-specific path. Requests that resolve to no file are skipped (the render reported that already).
  *
  * Script fonts: a chain that names a bundled script family (Noto Sans JP / Devanagari / Arabic,
  * added by `withLanguage` for a non-Latin spec language) also locks that family's file at the
  * request's weight, because the renderers and captions draw that script's text with it even
  * though the chain's first family resolves to a Latin font.
  */
-export async function lockFonts(requests: readonly FontRequest[], opts: { fontsDir: string | null; env?: NodeJS.ProcessEnv; resolver?: FontResolver }): Promise<LockFont[]> {
-  const resolve = opts.resolver ?? createFontResolver(opts.env ?? process.env, { fontsDir: opts.fontsDir });
+export async function lockFonts(
+  requests: readonly FontRequest[],
+  opts: { fontsDir: string | null; env?: NodeJS.ProcessEnv; resolver?: FontResolver; projectFonts?: ProjectFontIndex | null },
+): Promise<LockFont[]> {
+  const resolve = opts.resolver ?? createFontResolver(opts.env ?? process.env, { fontsDir: opts.fontsDir, ...(opts.projectFonts ? { projectFonts: opts.projectFonts } : {}) });
   const out = new Map<string, LockFont>();
   const scriptFamilies = new Set(BUNDLED_FONTS.filter((f) => f.script).map((f) => f.family.toLowerCase()));
   const expanded: FontRequest[] = [];
@@ -59,6 +63,13 @@ export async function lockFonts(requests: readonly FontRequest[], opts: { fontsD
     } catch {
       continue;
     }
+    const own = opts.projectFonts?.fonts.find((f) => f.path === file);
+    if (own) {
+      const family = parseFontChain(r.chain).find((n) => !GENERIC_FAMILIES.has(n.toLowerCase())) ?? own.family;
+      const entry: LockFont = { family, weight: own.weight, file: `${PROJECT_FONT_PREFIX}${own.file}`, sha256: await hashFile(file) };
+      out.set(`${entry.family}\u0000${entry.weight}\u0000${entry.file}`, entry);
+      continue;
+    }
     const weight = r.weight >= 600 ? 700 : 400;
     const inBundle = opts.fontsDir ? toPosix(relative(opts.fontsDir, file)) : "";
     const bundled = inBundle && !inBundle.startsWith("..") && !isAbsolute(inBundle) ? BUNDLED_FONTS.find((f) => f.file === inBundle) : undefined;
@@ -67,6 +78,36 @@ export async function lockFonts(requests: readonly FontRequest[], opts: { fontsD
     out.set(`${entry.family}\u0000${entry.weight}\u0000${entry.file}`, entry);
   }
   return [...out.values()];
+}
+
+/** Lock `fonts[].file` prefix of a font from the project's own `fonts/` folder (the rest is project-relative). */
+export const PROJECT_FONT_PREFIX = "project:";
+
+const LICENSE_FILE = /^(ofl|license|licence|copying)([-_.][\w.-]*)?$/i;
+
+/**
+ * The project fonts among locked fonts, for provenance: file (project-relative), family, weight,
+ * hash and the licence file next to it (OFL.txt, LICENSE, …; null when there is none). Empty
+ * when the render used no project font.
+ */
+export async function projectFontProvenance(
+  root: string,
+  fonts: readonly LockFont[],
+): Promise<Array<{ family: string; weight: number; file: string; sha256: string; license: string | null }>> {
+  const out: Array<{ family: string; weight: number; file: string; sha256: string; license: string | null }> = [];
+  const licenses = new Map<string, string | null>();
+  for (const f of fonts) {
+    if (!f.file.startsWith(PROJECT_FONT_PREFIX)) continue;
+    const file = f.file.slice(PROJECT_FONT_PREFIX.length);
+    const dir = dirname(file);
+    if (!licenses.has(dir)) {
+      const names = await readdir(join(root, dir)).catch(() => [] as string[]);
+      const lic = names.filter((n) => LICENSE_FILE.test(n)).sort()[0];
+      licenses.set(dir, lic ? toPosix(join(dir, lic)) : null);
+    }
+    out.push({ family: f.family, weight: f.weight, file, sha256: f.sha256, license: licenses.get(dir) ?? null });
+  }
+  return out;
 }
 
 /** Hash project-relative input files that exist; missing ones are skipped. */

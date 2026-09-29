@@ -177,7 +177,7 @@ interface RenderStateView {
   target?: { width: number; height: number; fps: number; aspect_ratio: string };
   duration_ms?: number;
   burn_in?: boolean;
-  scenes?: Array<{ scene_id: string; duration_ms?: number; text_boxes?: TextBox[] }>;
+  scenes?: Array<{ scene_id: string; duration_ms?: number; text_boxes?: TextBox[]; renderer?: string }>;
   captions?: { box?: PxBox; json?: string };
   /** Where the pipeline placed burned-in captions (RenderState.caption_layout). */
   caption_layout?: { box?: PxBox };
@@ -620,7 +620,7 @@ function checkCover(spec: VideoSpec, contracts: readonly PlatformContract[], ren
         id: "cover_missing",
         severity: "warning",
         message: `no cover: ${needing.map((c) => `${c.name} (${c.cover.mode})`).join(", ")} ${needing.length === 1 ? "uses" : "use"} a cover image or frame`,
-        fix: 'add cover {headline, focal_time_sec} to the spec, with focal_time_sec inside the hook scene where the headline is on screen',
+        fix: 'add cover {headline} to the spec (the engine picks the frame; or set focal_time_sec inside the hook scene where the headline is on screen)',
       });
     }
     return;
@@ -1693,11 +1693,24 @@ export function checkBannedEffect(spec: VideoSpec, style: { id: string; avoid?: 
 }
 
 /** spec.acceptance numbers the render misses, from the QA metrics in render state (error each). */
-export function checkAcceptance(spec: Pick<VideoSpec, "acceptance">, state: Pick<RenderStateView, "qa"> | undefined, out: LintFinding[]): void {
+export function checkAcceptance(
+  spec: Pick<VideoSpec, "acceptance"> & { scenes?: VideoSpec["scenes"] },
+  state: Pick<RenderStateView, "qa" | "scenes"> | undefined,
+  out: LintFinding[],
+): void {
   const a = spec.acceptance;
   const m = state?.qa?.motion;
   if (!a || !m) return;
-  const push = (message: string, fix: string) => out.push({ id: "acceptance_unmet", severity: "error", message, fix });
+  // Motion pages drawn by a renderer that can't run them (the ffmpeg text stand-in) say nothing
+  // about the piece's motion: report the numbers, but not as errors.
+  const motionIds = new Set((spec.scenes ?? []).filter((s) => s.deterministic?.kind === "motion").map((s) => s.id));
+  const standIns = (state?.scenes ?? []).filter((s) => motionIds.has(s.scene_id) && s.renderer !== undefined && !/hyperframes/i.test(s.renderer)).map((s) => s.scene_id);
+  const push = (message: string, fix: string) =>
+    out.push(
+      standIns.length
+        ? { id: "acceptance_unmet", severity: "warning", message: `${message} (measured on text stand-ins for motion scenes ${standIns.join(", ")}; not a verdict)`, fix: `render with HyperFrames (--renderer hyperframes) to judge the motion; then: ${fix}` }
+        : { id: "acceptance_unmet", severity: "error", message, fix },
+    );
   if (a.min_changes_per_sec !== undefined && m.changes_per_sec < a.min_changes_per_sec) {
     push(`the render has ${m.changes_per_sec} big changes/s; acceptance.min_changes_per_sec is minimum ${a.min_changes_per_sec}`, "stage more visual beats (new states, reveals, match cuts, camera moves) or split long scenes, re-render and run qa_run");
   }

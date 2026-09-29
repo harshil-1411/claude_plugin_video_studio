@@ -20,7 +20,7 @@ import {
   zoomPanFilter,
 } from "./ffmpeg-renderer.js";
 import { type FocusPoint, coverTrackFilter, prepareFocusTrack } from "./reframe.js";
-import { type FontResolver, createFontResolver } from "./tokens.js";
+import { type FontResolver, createFontResolver, projectFirstResolver, projectFontIndexFromTokens } from "./tokens.js";
 import type { Availability, MotionTokens, RenderTarget, SceneRenderRequest, SceneRenderResult, SceneRenderer } from "./types.js";
 
 /**
@@ -388,10 +388,13 @@ export function createFootageRenderer(opts: FootageRendererOptions = {}): SceneR
       try {
         let overlay: BuiltGraph | null = null;
         if (comp) {
+          // The project's own fonts (brand_draft copies them into <project>/fonts/) come first.
+          const project = projectFontIndexFromTokens(tokens, req.project_dir);
+          const resolveFont = !project ? fontResolver : opts.fontResolver ? projectFirstResolver(opts.fontResolver, project) : createFontResolver(process.env, { projectFonts: project });
           const fonts: FontFiles = {
-            heading: await fontResolver(tokens.font_heading, tokens.weight_heading ?? 700),
-            body: await fontResolver(tokens.font_body, tokens.weight_body),
-            mono: await fontResolver(tokens.font_mono),
+            heading: await resolveFont(tokens.font_heading, tokens.weight_heading ?? 700),
+            body: await resolveFont(tokens.font_body, tokens.weight_body),
+            mono: await resolveFont(tokens.font_mono),
           };
           overlay = buildFilterGraph(comp, target, plan.frames / target.fps, fonts, tmp, {
             ...(tokens.motion ? { motion: tokens.motion } : {}),

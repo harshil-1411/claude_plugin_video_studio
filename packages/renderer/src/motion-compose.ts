@@ -225,10 +225,13 @@ export function composeMotion(req: SceneRenderRequest, pageHtml: string, opts: M
     ...(req.audio ? { audio: { fps: req.audio.fps, rms: req.audio.rms, low: req.audio.low, onset: req.audio.onset } } : {}),
   };
 
-  // Bundled fonts for the tokens' families, copied under __vs/fonts and referenced relatively.
-  const faces = fontFaceCss(tokens, opts.fontsDir === undefined ? {} : { fontsDir: opts.fontsDir }).replace(/url\("(file:[^"]+)"\)/g, (_m, href: string) => {
+  // Project and bundled fonts for the tokens' families, copied under __vs/fonts and referenced relatively
+  // (a project file named like a bundled one gets its own name, `2-<name>`).
+  const faces = fontFaceCss(tokens, { ...(opts.fontsDir === undefined ? {} : { fontsDir: opts.fontsDir }), projectDir: req.project_dir }).replace(/url\("(file:[^"]+)"\)/g, (_m, href: string) => {
     const src = fileURLToPath(href);
-    const dest = `${MOTION_INTERNAL_DIR}/fonts/${basename(src).replace(/[^A-Za-z0-9._-]/g, "_")}`;
+    const name = basename(src).replace(/[^A-Za-z0-9._-]/g, "_");
+    let dest = `${MOTION_INTERNAL_DIR}/fonts/${name}`;
+    for (let n = 2; assets.some((a) => a.dest === dest && a.src !== src); n++) dest = `${MOTION_INTERNAL_DIR}/fonts/${n}-${name}`;
     if (!assets.some((a) => a.dest === dest)) assets.push({ src, dest });
     return `url("${dest}")`;
   });

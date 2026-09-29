@@ -1,0 +1,161 @@
+{
+  "schema_version": "1.0",
+  "id": "ir-e1018ccf6e34",
+  "created_at": "2026-09-29T18:52:25.327Z",
+  "sources": [
+    {
+      "id": "src-1",
+      "kind": "url",
+      "uri": "index.html",
+      "sha256": "6a00461380098921dd665dda6f83f8d015bffc3be1b08b785044836048c30b6e",
+      "title": "Meeting notes in, action list out"
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec-1",
+      "source_id": "src-1",
+      "heading": "Meeting notes in. Action list out.",
+      "text": "Paste the notes from any meeting and Checkmint pulls out every to-do, with an owner and a due date, in about three seconds.\n\nTidy my notes"
+    },
+    {
+      "id": "sec-2",
+      "source_id": "src-1",
+      "heading": "How it works",
+      "text": "1"
+    },
+    {
+      "id": "sec-3",
+      "source_id": "src-1",
+      "heading": "Paste your notes",
+      "text": "Drop in the notes exactly as you took them. Half sentences are fine.\n\nPriya sends the Q3 deck by Friday Sam fixes the login bug before Tuesday everyone review pricing page??\n\n2"
+    },
+    {
+      "id": "sec-4",
+      "source_id": "src-1",
+      "heading": "Press Tidy it",
+      "text": "One button. Checkmint reads who said they would do what, and by when.\n\n3"
+    },
+    {
+      "id": "sec-5",
+      "source_id": "src-1",
+      "heading": "Get the list",
+      "text": "Every action on its own line, with an owner and a due date, ready to copy.\n\n3 actions · 3 owners\n\n| Action | Owner | Due |\n| --- | --- | --- |\n| Send the Q3 deck | Priya | Fri |\n| Fix the login bug | Sam | Tue |\n| Review the pricing page | Everyone | Thu |"
+    },
+    {
+      "id": "sec-6",
+      "source_id": "src-1",
+      "heading": "Where do my notes go?",
+      "text": "Nowhere. Checkmint tidies your notes in the browser tab you pasted them into."
+    }
+  ],
+  "evidence": [
+    {
+      "ref": "url:index.html#meeting-notes-in-action-list-out",
+      "source_id": "src-1",
+      "text": "Paste the notes from any meeting and Checkmint pulls out every to-do, with an owner and a due date, in about three seconds.",
+      "locator": {
+        "selector": "#meeting-notes-in-action-list-out"
+      }
+    },
+    {
+      "ref": "url:index.html#meeting-notes-in-action-list-out-2",
+      "source_id": "src-1",
+      "text": "[Tidy my notes](#try)",
+      "locator": {
+        "selector": "#meeting-notes-in-action-list-out"
+      }
+    },
+    {
+      "ref": "url:index.html#how-it-works",
+      "source_id": "src-1",
+      "text": "1",
+      "locator": {
+        "selector": "#how-it-works"
+      }
+    },
+    {
+      "ref": "url:index.html#paste-your-notes",
+      "source_id": "src-1",
+      "text": "Drop in the notes exactly as you took them. Half sentences are fine.",
+      "locator": {
+        "selector": "#paste-your-notes"
+      }
+    },
+    {
+      "ref": "url:index.html#paste-your-notes-2",
+      "source_id": "src-1",
+      "text": "Priya sends the Q3 deck by Friday  \nSam fixes the login bug before Tuesday  \neveryone review pricing page??",
+      "locator": {
+        "selector": "#paste-your-notes"
+      }
+    },
+    {
+      "ref": "url:index.html#paste-your-notes-3",
+      "source_id": "src-1",
+      "text": "2",
+      "locator": {
+        "selector": "#paste-your-notes"
+      }
+    },
+    {
+      "ref": "url:index.html#press-tidy-it",
+      "source_id": "src-1",
+      "text": "One button. Checkmint reads who said they would do what, and by when.",
+      "locator": {
+        "selector": "#press-tidy-it"
+      }
+    },
+    {
+      "ref": "url:index.html#press-tidy-it-2",
+      "source_id": "src-1",
+      "text": "3",
+      "locator": {
+        "selector": "#press-tidy-it"
+      }
+    },
+    {
+      "ref": "url:index.html#get-the-list",
+      "source_id": "src-1",
+      "text": "Every action on its own line, with an owner and a due date, ready to copy.",
+      "locator": {
+        "selector": "#get-the-list"
+      }
+    },
+    {
+      "ref": "url:index.html#get-the-list-2",
+      "source_id": "src-1",
+      "text": "3 actions · 3 owners",
+      "locator": {
+        "selector": "#get-the-list"
+      }
+    },
+    {
+      "ref": "url:index.html#get-the-list-3",
+      "source_id": "src-1",
+      "text": "| Action | Owner | Due |\n| --- | --- | --- |\n| Send the Q3 deck | Priya | Fri |\n| Fix the login bug | Sam | Tue |\n| Review the pricing page | Everyone | Thu |",
+      "locator": {
+        "selector": "#get-the-list"
+      }
+    },
+    {
+      "ref": "url:index.html#where-do-my-notes-go",
+      "source_id": "src-1",
+      "text": "Nowhere. Checkmint tidies your notes in the browser tab you pasted them into.",
+      "locator": {
+        "selector": "#where-do-my-notes-go"
+      }
+    }
+  ],
+  "entities": [],
+  "claims": [],
+  "assets": [],
+  "classification": {
+    "contains_secrets": false,
+    "contains_pii": false,
+    "contains_likeness": false,
+    "data_class": "public",
+    "notes": []
+  },
+  "warnings": []
+}

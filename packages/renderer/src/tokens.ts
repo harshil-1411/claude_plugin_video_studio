@@ -1,12 +1,12 @@
 import { constants, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { access, mkdir, readlink, symlink, unlink } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runProcess } from "@video-studio/media";
 import type { AspectRatio, Brand, Style } from "@video-studio/schema";
 import { type Script, languageScript, scriptFontFamilies } from "./script.js";
 import { styleRef } from "./styles.js";
-import type { MotionTokens, RenderTarget, VisualTokens } from "./types.js";
+import type { MotionTokens, ProjectFontRef, RenderTarget, VisualTokens } from "./types.js";
 
 /**
  * Visual tokens, font files and render targets shared by the deterministic renderers.
@@ -286,25 +286,141 @@ export function bundledFontFile(family: string, weight: number | undefined, dir:
 }
 
 /**
- * `@font-face` rules (file:// URLs) for every bundled family named in the tokens' chains, both
- * weights, for the HTML renderer. Empty when the fonts directory is missing, so callers can
- * embed it unconditionally; the chains' other families still apply through the browser.
+ * `@font-face` rules (file:// URLs) for the HTML renderer: first the project's own font files
+ * (`<project>/fonts/`, from `opts.projectFonts` or the tokens' `project_fonts` with
+ * `opts.projectDir`) under every chain name they answer to, at their real weight and style; then
+ * every bundled family named in the chains (both weights) that no project font already covers.
+ * Empty when there are neither, so callers can embed it unconditionally; the chains' other
+ * families still apply through the browser.
  */
-export function fontFaceCss(tokens: VisualTokens, opts: { fontsDir?: string | null; env?: Record<string, string | undefined> } = {}): string {
+export function fontFaceCss(
+  tokens: VisualTokens,
+  opts: { fontsDir?: string | null; env?: Record<string, string | undefined>; projectFonts?: ProjectFontIndex | null; projectDir?: string } = {},
+): string {
   const dir = opts.fontsDir === undefined ? findFontsDir(opts.env ?? process.env) : opts.fontsDir;
-  if (!dir) return "";
-  const used = new Set([tokens.font_heading, tokens.font_body, tokens.font_mono].flatMap((c) => parseFontChain(c ?? "")).map((n) => n.toLowerCase()));
+  const names = [...new Set([tokens.font_heading, tokens.font_body, tokens.font_mono].flatMap((c) => parseFontChain(c ?? "")))];
   const rules: string[] = [];
-  for (const f of BUNDLED_FONTS) {
-    if (!used.has(f.family.toLowerCase())) continue;
-    const p = join(dir, f.file);
-    if (!existsSync(p)) continue;
-    const format = f.file.endsWith(".otf") ? "opentype" : "truetype";
-    rules.push(
-      `@font-face { font-family: "${f.family}"; src: url("${pathToFileURL(p).href}") format("${format}"); font-weight: ${f.weight}; font-style: normal; font-display: block; }`,
-    );
+  const covered = new Set<string>();
+  const project = opts.projectFonts !== undefined ? opts.projectFonts : opts.projectDir ? projectFontIndexFromTokens(tokens, opts.projectDir) : null;
+  if (project) {
+    for (const name of names) {
+      if (GENERIC.has(name.toLowerCase()) || !CSS_FAMILY_NAME.test(name)) continue;
+      const faces = projectFontFaces(project, name);
+      if (!faces.length) continue;
+      covered.add(fontKey(name));
+      const seen = new Set<string>();
+      for (const f of faces) {
+        if (seen.has(f.path) || !existsSync(f.path)) continue;
+        seen.add(f.path);
+        rules.push(
+          `@font-face { font-family: "${name}"; src: url("${pathToFileURL(f.path).href}") format("${/\.otf$/i.test(f.path) ? "opentype" : "truetype"}"); font-weight: ${f.weight}; font-style: ${f.italic ? "italic" : "normal"}; font-display: block; }`,
+        );
+      }
+    }
+  }
+  if (dir) {
+    const used = new Set(names.map((n) => n.toLowerCase()));
+    for (const f of BUNDLED_FONTS) {
+      if (!used.has(f.family.toLowerCase()) || covered.has(fontKey(f.family))) continue;
+      const p = join(dir, f.file);
+      if (!existsSync(p)) continue;
+      const format = f.file.endsWith(".otf") ? "opentype" : "truetype";
+      rules.push(
+        `@font-face { font-family: "${f.family}"; src: url("${pathToFileURL(p).href}") format("${format}"); font-weight: ${f.weight}; font-style: normal; font-display: block; }`,
+      );
+    }
   }
   return rules.join("\n");
+}
+
+// ---------------------------------------------------------------------------------- project fonts
+
+/** A TTF/OTF in the project's `fonts/` folder (see project-fonts.ts for the scan). */
+export interface ProjectFont {
+  /** Absolute path. */
+  path: string;
+  /** Project-relative posix path. */
+  file: string;
+  /** Internal family (nameID 16, else 1). */
+  family: string;
+  /** The family folder's name (`fonts/<alias>/…`), which brand_draft names after the CSS family. */
+  alias: string;
+  weight: number;
+  italic: boolean;
+  sha256: string;
+  /** Licence file in the same folder (OFL.txt, LICENSE, …), project-relative. */
+  license?: string;
+}
+
+export interface ProjectFontIndex {
+  /** Absolute project root. */
+  root: string;
+  fonts: ProjectFont[];
+}
+
+/** Family names compared without case, spaces or punctuation ("Field Sans" = "FieldSans" = "field-sans"). */
+export function fontKey(name: string): string {
+  return name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/** Family names a @font-face rule may carry verbatim. */
+const CSS_FAMILY_NAME = /^[\p{L}\p{N} ._-]+$/u;
+
+/** Every project font answering to `name` (internal family or folder alias), non-generic names only. */
+export function projectFontFaces(index: ProjectFontIndex | null | undefined, name: string): ProjectFont[] {
+  if (!index || GENERIC.has(name.trim().toLowerCase())) return [];
+  const k = fontKey(name);
+  if (!k) return [];
+  return index.fonts.filter((f) => fontKey(f.family) === k || fontKey(f.alias) === k);
+}
+
+/**
+ * The project font for `name` at the nearest weight (upright preferred unless `italic`); ties go
+ * to the heavier face for weights above 500, else the lighter. Null when no project font answers.
+ */
+export function matchProjectFont(index: ProjectFontIndex | null | undefined, name: string, weight?: number, italic = false): ProjectFont | null {
+  const faces = projectFontFaces(index, name);
+  if (!faces.length) return null;
+  const want = weight ?? 400;
+  const styled = faces.filter((f) => f.italic === italic);
+  const pool = styled.length ? styled : faces;
+  const score = (f: ProjectFont) => Math.abs(f.weight - want) * 2 + (f.weight === want ? 0 : want > 500 ? (f.weight > want ? 0 : 1) : f.weight < want ? 0 : 1);
+  return [...pool].sort((a, b) => score(a) - score(b) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))[0] ?? null;
+}
+
+/**
+ * The project fonts the tokens carry (`project_fonts`), as an index rooted at `projectDir`. Refs
+ * with an absolute path or `..` are ignored, so tokens can never point outside the project.
+ * Null when the tokens carry none.
+ */
+export function projectFontIndexFromTokens(tokens: Pick<VisualTokens, "project_fonts">, projectDir: string): ProjectFontIndex | null {
+  const refs = tokens.project_fonts ?? [];
+  if (!refs.length) return null;
+  const fonts: ProjectFont[] = [];
+  for (const r of refs) {
+    if (!r.file || isAbsolute(r.file) || r.file.split(/[\\/]/).includes("..")) continue;
+    fonts.push({ path: join(projectDir, r.file), file: r.file, family: r.family, alias: r.name, weight: r.weight, italic: r.italic, sha256: r.sha256 });
+  }
+  return fonts.length ? { root: projectDir, fonts } : null;
+}
+
+/**
+ * Tokens with the project fonts their chains (and `extraFamilies`, e.g. a caption family) name:
+ * one `project_fonts` ref per (name, file), sorted. The same object when no project font
+ * answers, so renders without project fonts keep their cache keys.
+ */
+export function withProjectFonts(tokens: VisualTokens, index: ProjectFontIndex | null | undefined, extraFamilies: readonly string[] = []): VisualTokens {
+  if (!index?.fonts.length) return tokens;
+  const names = [...new Set([tokens.font_heading, tokens.font_body, tokens.font_mono].flatMap((c) => parseFontChain(c ?? "")).concat(extraFamilies.flatMap((f) => parseFontChain(f))))];
+  const refs = new Map<string, ProjectFontRef>();
+  for (const name of names) {
+    for (const f of projectFontFaces(index, name)) {
+      refs.set(`${name}\u0000${f.file}`, { name, family: f.family, weight: f.weight, italic: f.italic, file: f.file, sha256: f.sha256 });
+    }
+  }
+  if (!refs.size) return tokens;
+  const sorted = [...refs.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  return { ...tokens, project_fonts: sorted };
 }
 
 /** Split a CSS font-family list into names (quotes removed). */
@@ -324,6 +440,8 @@ export interface FontResolverDeps {
   exists?: (path: string) => Promise<boolean>;
   /** Bundled fonts directory; undefined: `findFontsDir(env)`, null: do not use bundled fonts. */
   fontsDir?: string | null;
+  /** The project's own fonts (`<project>/fonts/`): tried first for each family, nearest weight. */
+  projectFonts?: ProjectFontIndex | null;
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -381,8 +499,9 @@ export class FontNotFoundError extends Error {
 }
 
 /**
- * Locate a TTF/OTF/TTC file for a CSS-style family chain. For each named family, a bundled file
- * (Inter, Noto Sans, JetBrains Mono in `fonts/`, nearest of Regular/Bold to `weight`) wins first;
+ * Locate a TTF/OTF/TTC file for a CSS-style family chain. For each named family, a project font
+ * (`deps.projectFonts`: internal or folder name, nearest weight) wins first, then a bundled file
+ * (Inter, Noto Sans, JetBrains Mono in `fonts/`, nearest of Regular/Bold to `weight`);
  * otherwise the family is tried with
  * `fc-match -f '%{family}\n%{file}'` and accepted only when fontconfig returns that family
  * (fontconfig otherwise substitutes silently). Then platform fallbacks (macOS Helvetica /
@@ -402,6 +521,8 @@ export async function resolveFontFile(family: string, env: NodeJS.ProcessEnv = p
   for (const name of names) {
     // A direct path is honoured as-is.
     if (FONT_EXT.test(name) && (await exists(name))) return name;
+    const own = matchProjectFont(deps.projectFonts, name, weight);
+    if (own && (await exists(own.path))) return own.path;
     const bundled = bundledFontFile(name, weight, fontsDir);
     if (bundled) return bundled;
     const out = await fcMatch(["-f", "%{family}\n%{file}", name], env);
@@ -431,11 +552,11 @@ export async function resolveFontFile(family: string, env: NodeJS.ProcessEnv = p
 
 export type FontResolver = (family: string, weight?: number) => Promise<string>;
 
-/** A memoising FontResolver bound to `env`. */
+/** A memoising FontResolver bound to `env` (per exact weight when project fonts are given, else per bundled weight). */
 export function createFontResolver(env: NodeJS.ProcessEnv = process.env, deps: FontResolverDeps = {}): FontResolver {
   const cache = new Map<string, Promise<string>>();
   return (family, weight) => {
-    const key = `${family}\u0000${bundledWeight(weight)}`;
+    const key = `${family}\u0000${deps.projectFonts?.fonts.length ? (weight ?? 400) : bundledWeight(weight)}`;
     let p = cache.get(key);
     if (!p) {
       p = resolveFontFile(family, env, deps, weight);
@@ -443,6 +564,24 @@ export function createFontResolver(env: NodeJS.ProcessEnv = process.env, deps: F
       cache.set(key, p);
     }
     return p;
+  };
+}
+
+/**
+ * Put the project fonts in front of another resolver (one injected by a caller): the first chain
+ * family a project font answers to wins, unless an earlier family is a bundled one (which the
+ * base resolver would have used). Everything else goes to `base`.
+ */
+export function projectFirstResolver(base: FontResolver, index: ProjectFontIndex | null | undefined): FontResolver {
+  if (!index?.fonts.length) return base;
+  const bundled = new Set(BUNDLED_FONTS.map((f) => f.family.toLowerCase()));
+  return async (family, weight) => {
+    for (const name of parseFontChain(family)) {
+      const own = matchProjectFont(index, name, weight);
+      if (own && (await fileExists(own.path))) return own.path;
+      if (bundled.has(name.toLowerCase())) break;
+    }
+    return base(family, weight);
   };
 }
 
@@ -460,17 +599,17 @@ export interface FontMetrics {
 
 const metricsCache = new Map<string, FontMetrics | null>();
 
+type TableReader = (pos: number, len: number) => Buffer;
+
 /**
- * Vertical metrics from a TTF/OTF (first face of a TTC), read from the `head`, `hhea` and `OS/2`
- * tables. Null when the file cannot be read or parsed. Memoised per path.
+ * Open a TTF/OTF (first face of a TTC), read its table directory and hand `fn` a reader and the
+ * tables' offsets and lengths. Null when the file cannot be read or `fn` throws.
  */
-export function readFontMetrics(file: string): FontMetrics | null {
-  if (metricsCache.has(file)) return metricsCache.get(file)!;
-  let out: FontMetrics | null = null;
+function withFontTables<T>(file: string, fn: (read: TableReader, tables: Record<string, { offset: number; length: number }>) => T | null): T | null {
   let fd: number | undefined;
   try {
     fd = openSync(file, "r");
-    const read = (pos: number, len: number) => {
+    const read: TableReader = (pos, len) => {
       const b = Buffer.alloc(len);
       readSync(fd!, b, 0, len, pos);
       return b;
@@ -480,29 +619,104 @@ export function readFontMetrics(file: string): FontMetrics | null {
     if (read(0, 4).toString("latin1") === "ttcf") base = read(12, 4).readUInt32BE(0);
     const hdr = read(base, 12);
     const n = hdr.readUInt16BE(4);
+    if (n === 0 || n > 512) return null;
     const dir = read(base + 12, n * 16);
-    const tables: Record<string, number> = {};
-    for (let i = 0; i < n; i++) tables[dir.toString("latin1", i * 16, i * 16 + 4)] = dir.readUInt32BE(i * 16 + 8);
-    if (tables.head !== undefined && tables.hhea !== undefined && tables["OS/2"] !== undefined) {
-      const head = read(tables.head, 54);
-      const hhea = read(tables.hhea, 8);
-      const os2 = read(tables["OS/2"], 78);
-      out = {
-        unitsPerEm: head.readUInt16BE(18),
-        winHeight: os2.readUInt16BE(74) + os2.readUInt16BE(76),
-        winAscent: os2.readUInt16BE(74),
-        hheaAscent: hhea.readInt16BE(4),
-        hheaDescent: hhea.readInt16BE(6),
-      };
-      if (!(out.unitsPerEm > 0 && out.winHeight > 0)) out = null;
-    }
+    const tables: Record<string, { offset: number; length: number }> = {};
+    for (let i = 0; i < n; i++) tables[dir.toString("latin1", i * 16, i * 16 + 4)] = { offset: dir.readUInt32BE(i * 16 + 8), length: dir.readUInt32BE(i * 16 + 12) };
+    return fn(read, tables);
   } catch {
-    out = null;
+    return null;
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
+}
+
+/**
+ * Vertical metrics from a TTF/OTF (first face of a TTC), read from the `head`, `hhea` and `OS/2`
+ * tables. Null when the file cannot be read or parsed. Memoised per path.
+ */
+export function readFontMetrics(file: string): FontMetrics | null {
+  if (metricsCache.has(file)) return metricsCache.get(file)!;
+  const out = withFontTables<FontMetrics>(file, (read, tables) => {
+    if (!tables.head || !tables.hhea || !tables["OS/2"]) return null;
+    const head = read(tables.head.offset, 54);
+    const hhea = read(tables.hhea.offset, 8);
+    const os2 = read(tables["OS/2"].offset, 78);
+    const m: FontMetrics = {
+      unitsPerEm: head.readUInt16BE(18),
+      winHeight: os2.readUInt16BE(74) + os2.readUInt16BE(76),
+      winAscent: os2.readUInt16BE(74),
+      hheaAscent: hhea.readInt16BE(4),
+      hheaDescent: hhea.readInt16BE(6),
+    };
+    return m.unitsPerEm > 0 && m.winHeight > 0 ? m : null;
+  });
   metricsCache.set(file, out);
   return out;
+}
+
+/** A font file's own identity: what libass and fontconfig match on. */
+export interface FontNames {
+  /** Typographic family (name table nameID 16), else the family (nameID 1). */
+  family: string;
+  /** OS/2 usWeightClass (400 when the table is missing). */
+  weight: number;
+  /** OS/2 fsSelection ITALIC (or head.macStyle italic). */
+  italic: boolean;
+}
+
+/** One name-table string: UTF-16BE for Unicode/Windows records, Latin-1 (close to Mac Roman) otherwise. */
+function nameString(buf: Buffer, platform: number): string {
+  if (platform === 0 || platform === 3) {
+    let s = "";
+    for (let i = 0; i + 1 < buf.length; i += 2) s += String.fromCharCode(buf.readUInt16BE(i));
+    return s;
+  }
+  return buf.toString("latin1");
+}
+
+/**
+ * Family name, weight and italic flag of a TTF/OTF (first face of a TTC) from its `name`, `OS/2`
+ * and `head` tables. The family is nameID 16 (typographic family) when present, else nameID 1;
+ * Windows English records win over other languages and Mac/Unicode records. Null when unreadable.
+ */
+export function readFontNames(file: string): FontNames | null {
+  return withFontTables<FontNames>(file, (read, tables) => {
+    const nt = tables.name;
+    if (!nt || nt.length < 6 || nt.length > 1 << 20) return null;
+    const name = read(nt.offset, nt.length);
+    const count = name.readUInt16BE(2);
+    const strings = name.readUInt16BE(4);
+    const found: Array<{ id: number; rank: number; value: string }> = [];
+    for (let i = 0; i < count && 6 + (i + 1) * 12 <= name.length; i++) {
+      const r = 6 + i * 12;
+      const platform = name.readUInt16BE(r);
+      const lang = name.readUInt16BE(r + 4);
+      const id = name.readUInt16BE(r + 6);
+      if (id !== 1 && id !== 16) continue;
+      const len = name.readUInt16BE(r + 8);
+      const off = strings + name.readUInt16BE(r + 10);
+      if (off + len > name.length) continue;
+      const value = nameString(name.subarray(off, off + len), platform).replace(/\0/g, "").trim();
+      if (!value) continue;
+      const rank = platform === 3 ? (lang === 0x409 ? 0 : 1) : platform === 0 ? 2 : 3;
+      found.push({ id, rank, value });
+    }
+    const pick = (id: number) => found.filter((f) => f.id === id).sort((a, b) => a.rank - b.rank)[0]?.value;
+    const family = pick(16) ?? pick(1);
+    if (!family) return null;
+    let weight = 400;
+    let italic = false;
+    const os2 = tables["OS/2"];
+    if (os2 && os2.length >= 64) {
+      const b = read(os2.offset, 64);
+      const w = b.readUInt16BE(4);
+      if (w >= 1 && w <= 1000) weight = w;
+      italic = (b.readUInt16BE(62) & 1) === 1;
+    }
+    if (!italic && tables.head) italic = (read(tables.head.offset, 46).readUInt16BE(44) & 2) === 2;
+    return { family, weight, italic };
+  });
 }
 
 /**
@@ -519,13 +733,18 @@ export function assFontSize(emPx: number, metrics: FontMetrics | null): number {
  * libass only reads font files directly inside its `fontsdir` (not sub-directories), while
  * `fonts/` keeps one directory per family. Link the given font files (default: every bundled
  * font present) flat into `destDir` and return it, for `subtitles=…:fontsdir=` / `ass=…:fontsdir=`.
- * Symlinks, so nothing is copied; existing links are replaced.
+ * Symlinks, so nothing is copied; existing links are replaced. Two files with the same name (a
+ * project copy of a bundled font) get distinct link names (`2-<name>`, …).
  */
 export async function prepareLibassFontsDir(destDir: string, files?: readonly string[], fontsDir: string | null = findFontsDir()): Promise<string> {
   await mkdir(destDir, { recursive: true });
   const list = files ?? (fontsDir ? BUNDLED_FONTS.map((f) => join(fontsDir, f.file)).filter((p) => existsSync(p)) : []);
+  const taken = new Map<string, string>();
   for (const src of list) {
-    const dest = join(destDir, basename(src));
+    let name = basename(src);
+    for (let n = 2; taken.has(name) && taken.get(name) !== src; n++) name = `${n}-${basename(src)}`;
+    taken.set(name, src);
+    const dest = join(destDir, name);
     try {
       if ((await readlink(dest)) === src) continue;
       await unlink(dest);

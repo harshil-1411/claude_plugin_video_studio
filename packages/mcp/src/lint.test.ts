@@ -625,6 +625,20 @@ describe("taste guard, acceptance and loop seam", () => {
     expect(quiet).toEqual([]);
   });
 
+  it("acceptance_unmet: a warning, not an error, when motion scenes were drawn as ffmpeg stand-ins", () => {
+    const motion = { changes_per_sec: 0, longest_static_s: 9, frozen_s: 12, frozen_pct: 63.7 };
+    const spec = {
+      acceptance: { max_frozen_pct: 15 },
+      scenes: [{ id: "s01", deterministic: { kind: "motion", props: { html: "motion/s01.html", text: [] } } }],
+    } as unknown as VideoSpec;
+    const stand: LintFinding[] = [];
+    checkAcceptance(spec, { qa: { motion }, scenes: [{ scene_id: "s01", renderer: "ffmpeg-drawtext" }] }, stand);
+    expect(stand).toEqual([expect.objectContaining({ severity: "warning", message: expect.stringMatching(/text stand-ins for motion scenes s01/), fix: expect.stringMatching(/--renderer hyperframes/) })]);
+    const real: LintFinding[] = [];
+    checkAcceptance(spec, { qa: { motion }, scenes: [{ scene_id: "s01", renderer: "hyperframes" }] }, real);
+    expect(real.map((f) => f.severity)).toEqual(["error"]);
+  });
+
   it("loop_seam: surfaces QA's seam measurement when master.loop is set", () => {
     const spec = { master: { width: 1080, height: 1920, fps: 30, loop: true } } as VideoSpec;
     const out: LintFinding[] = [];

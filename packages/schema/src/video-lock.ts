@@ -21,7 +21,7 @@ export const VideoLock = z
     voice: z.strictObject({ backend: Id, voice_id: z.string().optional(), request_hash: Sha256 }),
     fonts: z
       .array(z.strictObject({ family: z.string(), weight: z.int().positive(), file: FilePath, sha256: Sha256 }))
-      .describe("Font files the render used, sorted by family then weight."),
+      .describe("Font files the render used, sorted by family then weight. `file` is the bundled path, a host path, or `project:fonts/...` for the project's own fonts."),
     targets: z
       .array(z.strictObject({ id: PlatformTargetId, contract_version: z.int().positive(), verified: z.iso.date() }))
       .describe("Platform contracts the packages were compiled against, sorted by id."),

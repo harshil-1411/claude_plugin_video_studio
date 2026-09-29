@@ -1,5 +1,6 @@
 export type * from "./types.js";
 export * from "./tokens.js";
+export * from "./project-fonts.js";
 export * from "./text-layout.js";
 export * from "./script.js";
 export * from "./ffmpeg-renderer.js";

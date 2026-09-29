@@ -33,6 +33,10 @@ allowed-tools: mcp__plugin_video-studio_engine__qa_run mcp__plugin_video-studio_
      scores high changes/s and a low moving %; a slow Ken Burns the reverse.
      It fails only below `acceptance.min_moving_pct`. Fix: keep the holds
      alive (a slow camera move, easing elements, a crossfade).
+     `moving` and `frozen_frames` can both be high: frozen means the whole
+     frame barely changes, moving means anything changes (luma). High on
+     both = only small parts move (a breathing glow, a blinking cursor)
+     while the frame reads as still; give those stretches a bigger change.
    - `loop_seam` (with `master.loop`): the last frame must match the first
      (SSIM ≥ 0.99) and the audio level must not jump across the seam
      (under 6 dB).

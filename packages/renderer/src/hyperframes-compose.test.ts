@@ -856,3 +856,37 @@ describe("buildComposition: word cues", () => {
     expect((await lint!.lintHyperframeHtml(hl)).findings.filter((f) => f.severity === "error")).toEqual([]);
   }, 60_000);
 });
+
+describe("project fonts (fonts/<Family>/ in the project)", () => {
+  const faces = (html: string) => [...html.matchAll(/@font-face \{ font-family: "([^"]+)"; src: url\("assets\/fonts\/([^"]+)"\) format\("(\w+)"\); font-weight: (\d+)/g)].map((m) => `${m[1]}|${m[2]}|${m[4]}`);
+
+  it("declares the project's files under the brand's CSS name (the folder alias) and copies them beside the page", async () => {
+    const { scanProjectFonts } = await import("./project-fonts.js");
+    const { findFontsDir, withProjectFonts } = await import("./tokens.js");
+    const { copyFileSync } = await import("node:fs");
+    const bundled = findFontsDir({})!;
+    const root = mkdtempSync(join(tmpdir(), "vs-hf-pfonts-"));
+    try {
+      const fam = join(root, "fonts", "Field Sans");
+      mkdirSync(fam, { recursive: true });
+      // Copies of the bundled Inter: the internal name stays "Inter", the Bold keeps the bundled file name.
+      copyFileSync(join(bundled, "Inter/Inter-Regular.ttf"), join(fam, "FieldSans-Regular.ttf"));
+      copyFileSync(join(bundled, "Inter/Inter-Bold.ttf"), join(fam, "Inter-Bold.ttf"));
+      const { index } = await scanProjectFonts(root);
+      const tokens = withProjectFonts(resolveTokens({ brand: { name: "x" }, visual: { fonts: { heading: "Field Sans", body: "Field Sans" } } }), index);
+      const c = buildComposition(req("typography", { lines: ["Field Sans"] }, { tokens, project_dir: root }));
+      const f = faces(c.html);
+      expect(f).toContain("Field Sans|FieldSans-Regular.ttf|400");
+      expect(f).toContain("Field Sans|Inter-Bold.ttf|700");
+      // No bundled Inter beside the project's Inter-internal files, and no local() rule overriding them.
+      expect(c.assets.filter((a) => a.dest.startsWith("assets/fonts/Inter-")).map((a) => a.src)).toEqual([join(fam, "Inter-Bold.ttf")]);
+      expect(c.html).not.toContain('src: local("Field Sans")');
+      expect(c.html).toContain('--vs-font-body: "Field Sans", "Inter"');
+      // Without project fonts in the tokens the page is unchanged by the folder's presence.
+      const plain = buildComposition(req("typography", { lines: ["Field Sans"] }, { tokens: resolveTokens(), project_dir: root }));
+      expect(plain.html).toBe(buildComposition(req("typography", { lines: ["Field Sans"] }, { tokens: resolveTokens() })).html);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

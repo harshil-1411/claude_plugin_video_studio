@@ -1,0 +1,27 @@
+# Brand draft from the repo input/site (brand-draft-1, 2026-09-29).
+# Accepted as project/brand.yaml with one edit: brand.name "site" (the folder name) -> "Checkmint" (the og:site_name).
+# Evidence:
+# name: site (the repo folder name)
+# background: #F6F3EA from body background (--bg) (styles.css:29)
+# text: #14211C from body color (--text) (styles.css:30)
+# primary: #2BD49A from custom property --primary (styles.css:19)
+# secondary: #FF7A59 from custom property --secondary (styles.css:20)
+# text on background contrast 14.97:1 (WCAG AA needs 4.5:1)
+# heading font: Checkmint Sans (styles.css:36); files fonts/CheckmintSans/CheckmintSans-Bold.ttf, fonts/CheckmintSans/CheckmintSans-Regular.ttf
+# body font: Checkmint Sans (styles.css:31); files fonts/CheckmintSans/CheckmintSans-Bold.ttf, fonts/CheckmintSans/CheckmintSans-Regular.ttf
+# logo: assets/brand/logo-mark.png (named logo: assets/logo-mark.png)
+version: 2
+brand:
+  name: Checkmint
+visual:
+  fonts:
+    heading: Checkmint Sans
+    body: Checkmint Sans
+  weights:
+    heading: 700
+  palette:
+    background: "#F6F3EA"
+    text: "#14211C"
+    primary: "#2BD49A"
+    secondary: "#FF7A59"
+  logo: assets/brand/logo-mark.png

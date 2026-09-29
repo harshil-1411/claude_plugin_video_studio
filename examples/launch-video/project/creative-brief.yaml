@@ -1,0 +1,73 @@
+# Worked example of /video-studio:launch: a 20 s launch reel for Checkmint, an invented product,
+# planned from input/site/index.html only. See ../README.md.
+schema_version: "1.0"
+id: brief-checkmint-launch
+content_ir_id: ir-e1018ccf6e34
+goal: launch
+audience: People who leave meetings with a page of notes and no clear list of who does what by when
+platform: instagram_reels
+aspect_ratio: "9:16"
+targets:
+  - instagram
+  - youtube-shorts
+target_duration_sec: 20
+language: en-US
+tone:
+  - playful
+  - tidy
+  - warm
+tone_preset: playful
+product_flow:
+  - step: "Entry: paste the notes exactly as they were taken (Priya sends the Q3 deck by Friday, ...)"
+    evidence_ref: "url:index.html#paste-your-notes-2"
+  - step: "Key action: press Tidy it; Checkmint reads who said they would do what, and by when"
+    evidence_ref: "url:index.html#press-tidy-it"
+  - step: "Result: the action list, one line per action with an owner and a due date (3 actions, 3 owners)"
+    evidence_ref: "url:index.html#get-the-list-3"
+desired_action: Paste the notes from your last meeting into Checkmint (Tidy my notes)
+key_messages:
+  - Paste the notes from any meeting and Checkmint pulls out every to-do, with an owner and a due date.
+  - One button, Tidy it, reads who said they would do what, and by when.
+  - The result is every action on its own line, ready to copy.
+hook_candidates:
+  - text: Meeting notes in. Action list out.
+    mechanism: demo
+    scores: { relevance: 9, clarity: 10, curiosity: 7, evidence_strength: 10, visual_potential: 10 }
+  - text: Three messy lines become three owned to-dos.
+    mechanism: before_after
+    scores: { relevance: 9, clarity: 8, curiosity: 7, evidence_strength: 9, visual_potential: 9 }
+  - text: Who said they would do what, by when?
+    mechanism: question
+    scores: { relevance: 8, clarity: 8, curiosity: 9, evidence_strength: 8, visual_potential: 6 }
+chosen_hook: Meeting notes in. Action list out.
+template: product-launch
+inputs:
+  flow: "paste your notes -> press Tidy it -> get the list (input/site/index.html, How it works)"
+  tone: playful
+acceptance:
+  max_frozen_pct: 15
+  min_changes_per_sec: 0.6
+  min_moving_pct: 60
+  hold_ms: 400
+assumptions:
+  - field: app_url
+    value: none
+    reason: The product is an invented site with no running app, so the flow is rebuilt as motion pages from the site's own CSS, copy, font and logo (product-flow.md, option 3).
+  - field: tone_preset
+    value: playful
+    reason: The site's register is light and plain-spoken ("Half sentences are fine."); playful is also the preset default.
+  - field: voice.mode
+    value: none
+    reason: Text over a synthesized score renders anywhere without a voice; every on-screen word is the site's own UI copy.
+  - field: target_duration_sec
+    value: "20"
+    reason: The launch skill's default (18-22 s); five scenes of two bars each at 120 BPM (synth:pulse).
+  - field: template
+    value: product-launch
+    reason: A site with a clear pain (a page of notes) and result (an owned action list); product-hero needs a product photo, which a web tool does not have.
+  - field: beats
+    value: hook, step x3, cta
+    reason: The template's problem, demo, proof and payoff beats become the three flow steps (the flow is the centrepiece); the only number on screen is the result's own count.
+  - field: acceptance
+    value: "frozen <= 15 %, >= 0.6 changes/s, >= 60 % moving, 400 ms hold"
+    reason: The launch skill's motion quality bar.

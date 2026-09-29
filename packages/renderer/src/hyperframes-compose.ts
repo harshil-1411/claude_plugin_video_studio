@@ -1530,9 +1530,10 @@ function lookCss(look: Look): string {
  * Families that get a `local()` @font-face: all but the bundled script families already served
  * from files (a failing later `local()` rule would shadow the bundled face).
  */
-function localFaceNames(names: readonly string[], bundledFaces: string): string[] {
+function localFaceNames(names: readonly string[], bundledFaces: string, projectNames: ReadonlySet<string> = new Set()): string[] {
   const script = new Set(BUNDLED_FONTS.filter((f) => f.script).map((f) => f.family));
-  return names.filter((n) => !(script.has(n) && bundledFaces.includes(`font-family: "${n}"`)));
+  // A project font's own @font-face rules are the family; a local() rule after them would replace them.
+  return names.filter((n) => !((script.has(n) || projectNames.has(n)) && bundledFaces.includes(`font-family: "${n}"`)));
 }
 
 /**
@@ -1964,14 +1965,18 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
     ...(t.text_align ? { text_align: t.text_align } : {}),
     ...(t.motion ? { motion: t.motion } : {}),
   };
-  // Bundled font files are copied next to the composition and referenced relatively, so the
-  // page loads nothing from outside its directory and the HTML does not embed host paths.
-  const bundledFaces = fontFaceCss(scriptTokens).replace(/url\("(file:[^"]+)"\)/g, (_m, href: string) => {
+  // Bundled and project font files are copied next to the composition and referenced relatively,
+  // so the page loads nothing from outside its directory and the HTML does not embed host paths.
+  // A project file named like a bundled one gets its own name (`2-<name>`).
+  const bundledFaces = fontFaceCss(scriptTokens, { projectDir: project_dir }).replace(/url\("(file:[^"]+)"\)/g, (_m, href: string) => {
     const src = fileURLToPath(href);
-    const dest = `assets/fonts/${basename(src).replace(/[^A-Za-z0-9._-]/g, "_")}`;
+    const name = basename(src).replace(/[^A-Za-z0-9._-]/g, "_");
+    let dest = `assets/fonts/${name}`;
+    for (let n = 2; assets.some((a) => a.dest === dest && a.src !== src); n++) dest = `assets/fonts/${n}-${name}`;
     if (!assets.some((a) => a.dest === dest)) assets.push({ src, dest });
     return `url("${dest}")`;
   });
+  const projectFontNames = new Set((scriptTokens.project_fonts ?? []).map((f) => f.name));
   const compositionId = compositionIdFor(scene.id);
   const d = fmtSec(dur);
   const cam = cameraMarkup(scene.motion, dur, W, t.motion?.easing);
@@ -1982,7 +1987,7 @@ export function buildComposition(req: SceneRenderRequest, opts: BuildComposition
 <meta name="viewport" content="width=${W}, height=${H}">
 <title>${esc(`${scene.id} ${det.kind}`)}</title>
 <style>
-${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}${cam ? cam.css : ""}${cueCss.length ? `\n/* word cues */\n${cueCss.join("\n")}` : ""}
+${stylesheet(stage, tok.values, localFaceNames(tok.fontNames, bundledFaces, projectFontNames), bundledFaces, look)}${scripts.length ? scriptCss(scripts, rtl, look) : ""}${cam ? cam.css : ""}${cueCss.length ? `\n/* word cues */\n${cueCss.join("\n")}` : ""}
 </style>
 </head>
 <body>

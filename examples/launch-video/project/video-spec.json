@@ -1,0 +1,275 @@
+{
+  "schema_version": "1.0",
+  "id": "checkmint-launch",
+  "title": "Checkmint: meeting notes in, action list out",
+  "content_ir_id": "ir-e1018ccf6e34",
+  "brief_id": "brief-checkmint-launch",
+  "goal": "launch",
+  "audience": "People who leave meetings with a page of notes and no clear list of who does what by when",
+  "platform": "instagram_reels",
+  "aspect_ratio": "9:16",
+  "master": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "targets": [
+    "instagram",
+    "youtube-shorts"
+  ],
+  "target_duration_sec": 20,
+  "language": "en-US",
+  "grounding": "strict",
+  "voice": {
+    "mode": "none",
+    "style": "playful, tidy, warm"
+  },
+  "captions": {
+    "preset": "bold",
+    "burn_in": false
+  },
+  "audio": {
+    "music": {
+      "file": "synth:pulse",
+      "volume_db": -18
+    },
+    "beat_sync": {
+      "enabled": true,
+      "snap": "downbeat"
+    }
+  },
+  "acceptance": {
+    "min_changes_per_sec": 0.6,
+    "max_frozen_pct": 15,
+    "min_moving_pct": 60,
+    "hold_ms": 400
+  },
+  "cover": {
+    "headline": "Every to-do, owned",
+    "bake_first_frame": true
+  },
+  "publish": {
+    "instagram": {
+      "post_caption": "Checkmint turns the notes from any meeting into an action list: every to-do on its own line, with an owner and a due date. Paste your notes, press Tidy it, copy the list.",
+      "hashtags": [
+        "#meetingnotes",
+        "#todolist",
+        "#productivity",
+        "#buildinpublic"
+      ]
+    },
+    "youtube-shorts": {
+      "title": "Checkmint: meeting notes in, action list out",
+      "post_caption": "Paste the notes from any meeting and Checkmint pulls out every to-do, with an owner and a due date. One button: Tidy it.",
+      "hashtags": [
+        "#meetingnotes",
+        "#productivity",
+        "#shorts"
+      ]
+    }
+  },
+  "scenes": [
+    {
+      "id": "s01",
+      "duration_sec": 4,
+      "purpose": "hook",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "motion",
+        "props": {
+          "html": "motion/s01.html",
+          "text": [
+            "Meeting notes in.",
+            "Action list out."
+          ],
+          "effects": [],
+          "loop": false
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": [
+        "url:index.html#meeting-notes-in-action-list-out"
+      ],
+      "sfx": [
+        {
+          "file": "bundled:pop",
+          "at_sec": 2
+        },
+        {
+          "file": "bundled:hit-soft",
+          "at_sec": 3.4
+        }
+      ]
+    },
+    {
+      "id": "s02",
+      "duration_sec": 4,
+      "purpose": "problem",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "motion",
+        "props": {
+          "html": "motion/s02.html",
+          "text": [
+            "Paste your notes",
+            "Checkmint",
+            "Priya sends the Q3 deck by Friday",
+            "Sam fixes the login bug before Tuesday",
+            "everyone review pricing page??",
+            "Tidy it"
+          ],
+          "effects": [],
+          "loop": false
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": [
+        "url:index.html#paste-your-notes",
+        "url:index.html#paste-your-notes-2"
+      ],
+      "transition": "cut",
+      "sfx": [
+        {
+          "file": "bundled:key-1",
+          "at_sec": 1
+        },
+        {
+          "file": "bundled:blip-up",
+          "at_sec": 3
+        }
+      ]
+    },
+    {
+      "id": "s03",
+      "duration_sec": 4,
+      "purpose": "step",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "motion",
+        "props": {
+          "html": "motion/s03.html",
+          "text": [
+            "Press Tidy it",
+            "Checkmint",
+            "Priya sends the Q3 deck by Friday",
+            "Sam fixes the login bug before Tuesday",
+            "everyone review pricing page??",
+            "Tidy it"
+          ],
+          "effects": [],
+          "loop": false
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": [
+        "url:index.html#press-tidy-it",
+        "url:index.html#paste-your-notes-2"
+      ],
+      "transition": "cut",
+      "sfx": [
+        {
+          "file": "bundled:click",
+          "at_sec": 1
+        }
+      ]
+    },
+    {
+      "id": "s04",
+      "duration_sec": 4,
+      "purpose": "result",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "motion",
+        "props": {
+          "html": "motion/s04.html",
+          "text": [
+            "Get the list",
+            "Checkmint",
+            "3 actions · 3 owners",
+            "Send the Q3 deck",
+            "Fix the login bug",
+            "Review the pricing page",
+            "Priya",
+            "Sam",
+            "Everyone",
+            "Fri",
+            "Tue",
+            "Thu"
+          ],
+          "effects": [],
+          "loop": false
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": [
+        "url:index.html#get-the-list",
+        "url:index.html#get-the-list-2",
+        "url:index.html#get-the-list-3"
+      ],
+      "transition": "cut",
+      "sfx": [
+        {
+          "file": "bundled:pop",
+          "at_sec": 2
+        },
+        {
+          "file": "bundled:pop",
+          "at_sec": 2.5
+        },
+        {
+          "file": "bundled:pop",
+          "at_sec": 3
+        },
+        {
+          "file": "bundled:whoosh-soft",
+          "at_sec": 3.8
+        }
+      ]
+    },
+    {
+      "id": "s05",
+      "duration_sec": 4,
+      "purpose": "cta",
+      "voiceover": "",
+      "visual_strategy": "motion_graphic",
+      "deterministic": {
+        "kind": "motion",
+        "props": {
+          "html": "motion/s05.html",
+          "text": [
+            "Checkmint",
+            "Tidy my notes",
+            "checkmint.example"
+          ],
+          "effects": [],
+          "loop": false
+        }
+      },
+      "visual_requirements": {
+        "continuity_refs": []
+      },
+      "claim_refs": [
+        "url:index.html#meeting-notes-in-action-list-out-2"
+      ],
+      "transition": "cut",
+      "sfx": [
+        {
+          "file": "bundled:chime",
+          "at_sec": 0.95
+        }
+      ]
+    }
+  ]
+}

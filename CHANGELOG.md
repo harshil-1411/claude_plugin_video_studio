@@ -3,6 +3,105 @@
 All notable changes to video-studio. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versions may change behaviour).
 
+## [Unreleased] - 0.5.0
+
+The launch-craft release (Phase 6.7): a one-command launch video, a synthesized sound-effect
+library, a poster on frame 0, a brand drafted from the source, music-reactive motion pages,
+readable reveals on the beat, a QA measure that counts smooth motion, and opt-in rendering
+of JavaScript pages. Some ideas were re-expressed from a read-only review of
+latent-spaces/brag (MIT); no text, code or assets were copied.
+
+### Added
+- **Launch videos**
+  - New skill `/video-studio:launch`: a local repo or a website URL to an 18–22 s launch reel
+    with one approval, after the preview. It drafts the brand, answers a product-in-use rubric
+    from the source, picks a template and tone preset, and builds `motion` scenes from the
+    product's own assets and CSS.
+  - `brand_draft` tool: a Brand v2 draft (`project/brand.draft.yaml`) from a repo's CSS, SCSS,
+    Less and Tailwind config (read as text), `@font-face` files, logo candidates and
+    `package.json`, or from a URL's own stylesheets through the SSRF guard. Each value keeps its
+    evidence (`file:line` or URL); text and background are checked for 4.5:1 contrast. It never
+    writes `project/brand.yaml`.
+  - Project fonts: scene renderers, captions and the cover use font files in
+    `<project>/fonts/` (where `brand_draft` copies a repo's own `@font-face` files) before the
+    bundled fonts, matched by folder name or the font's internal name at the nearest weight.
+    Their hashes are part of the cache keys; the lock records them as `project:fonts/...` and
+    provenance names their licence file. Only TTF and OTF are read.
+  - Brief `product_flow` (2–4 steps: entry → key action → result) and `tone_preset`; product
+    templates gain `flow`, `app_url` and `tone` inputs and product-in-use rules; plan reference
+    `product-flow.md`; the creative director checks that the flow is the centrepiece.
+  - Tone presets as data (`research-specs/tones.yaml`: polished, playful, deadpan, cinematic,
+    energetic, app-store, parody). `spec_scaffold` applies one under the template and brief:
+    transitions, acceptance hints and the bed level, with notes for sound density and scene
+    count.
+- **Sound**
+  - `sfx/`: 18 one-shots synthesized with ffmpeg `aevalsrc` (CC0, bitexact, 1.3 MB; whooshes,
+    risers, hits, pop, click, tick, key presses, chime, bell, swipe, blips, glitch) with
+    measured `character`, `hf_risk`, `peak_ms` and `default_db` in `sfx/catalog.json`
+    (`scripts/generate-sfx.mjs`). A spec uses them as `bundled:<id>`; `spec_validate` suggests
+    the closest id; the lock and provenance record the ref, hash and CC0 licence.
+  - Plan reference `sound-design.md`: when a sound lands, density per tone, levels.
+  - `footage.av_offset_ms` (±2 s) shifts a clip's own sound against its picture, for recordings
+    with baked-in delay; captions and ducking follow.
+- **Cover**
+  - `cover.bake_first_frame`: the cover replaces frame 0 of the reel and every target video
+    (frame count, duration and audio unchanged; the clean master untouched), so Slack, X and
+    Discord previews show it. Refused with `master.loop`. Frame-mode platforms point at frame 0.
+  - `cover.focal_time_sec` may be omitted: the engine picks the longest settled hold, preferring
+    the hook, then the payoff scenes (`cover.auto` in the manifest).
+- **Motion**
+  - Music-reactive motion pages: `window.__vs.audio` carries the bed's per-frame energy (`rms`,
+    `low`, `onset`; about 120 bytes per second at 30 fps), and kit 1.1.0 adds `vs.energy`,
+    `vs.bass` and `vs.onset(t)`. The envelope's hash is part of the cache key.
+  - Readable reveals: a reveal schedule puts items on the beat and holds each for its reading
+    floor (0.8 s for 1–3 words, else 0.3 s a word, at least 1.2 s). Beat-synced text kinds without
+    word cues use it; motion pages read it as `__vs.reveals` / `vs.revealAt(i)`.
+  - `stills` pass the same audio envelope and reveal times the render uses.
+- **Checks**
+  - QA `moving` / `moving_pct`: the share of frames that move at all (signalstats YDIF above 0.3,
+    in the same decode pass), so smooth motion and crossfades count; `acceptance.min_moving_pct`;
+    a `compare` row. `QA_VERSION` 6.
+  - Lint `cliche` (stock phrases from `research-specs/cliches.yaml`, warning), `busy_crossfade`,
+    `reveal_too_fast`, `sfx_license_missing`, `sfx_harsh_repeat` and `sfx_over_voice`. Brand
+    banned phrases and clichés are also checked on the generated social-copy draft.
+  - Banned effect `eq_bars` (decorative equalizer bars), avoided by every bundled style.
+  - `review transitions: true`: a tile at each transition's midpoint on the reel.
+- **Ingest**
+  - `ingest render_js` (opt-in, consent recorded in `project/consent.json`): a page built by
+    JavaScript renders once in an isolated headless Chrome (fresh profile, a dead proxy, every
+    request fetched by the engine through the network guard with pinned connections, request,
+    byte and time budgets, no popups, service workers or downloads, nothing clicked). The
+    rendered DOM goes through the same extractors; section screenshots become image assets.
+    Thin pages offer it through an approval dialog.
+
+### Changed
+- Whisper alignment ignores runs of 4 or more word times heard faster than 6 words/s (or in
+  under 40% of their estimated span), so captions no longer run seconds ahead of the voice when
+  whisper compresses a first sentence.
+- `spec_scaffold` refuses an unknown style id up front, listing the available ones.
+- The network guard keeps link-local and cloud-metadata addresses refused even with
+  `VS_ALLOW_PRIVATE_URLS=1`.
+- `thin_content` now points to `render_js`.
+- Web pages: page copy the article extractor drops (list items, headings, button labels, as on a
+  product page) is kept under "Also on the page", with a `page_additions` warning
+  (`URL_EXTRACTOR_VERSION` 3).
+- `brand_draft` names a static site from its page (`og:site_name`, then `<title>`) instead of its
+  folder, and shows the source path relative to the project.
+- `acceptance_unmet` is a warning, not an error, when motion scenes were drawn as ffmpeg text
+  stand-ins; the storyboard no longer flags dead air when the video has no narration; the
+  scaffold's cover note offers the automatic cover time.
+
+### Known limits
+- A tone preset's `caption_case` is a note only: captions have no case setting yet.
+- SVG logos can't be overlaid as the corner logo (the system ffmpeg has no SVG decoder);
+  `brand_draft` prefers raster logos when both exist.
+- Sound-effect default levels come from a loudness target and should be checked by ear on a
+  narrated render.
+- `reading_density` counts a motion page's product-UI copy (a notes box, a list) like any on-screen
+  text, so a launch reel that shows its UI gets reading warnings on those scenes.
+- `moving_pct` is measured against a fixed threshold: a very slow drift can sit near it, and
+  heavily compressed references gain a few moving frames from encoder noise.
+
 ## [0.4.0] - 2026-09-27
 
 The craft and hygiene release (Phase 6.6): checks for flashing, A/V sync, insert timing

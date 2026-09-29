@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { findFontsDir, resolveTokens } from "@video-studio/renderer";
+import { findFontsDir, resolveTokens, scanProjectFonts } from "@video-studio/renderer";
 import type { VideoLock } from "@video-studio/schema";
-import { buildLock, diffLocks, formatLockChanges, listFiles, lockAssets, lockFonts, readLock, serializeLock } from "./lock.js";
+import { buildLock, diffLocks, formatLockChanges, listFiles, lockAssets, lockFonts, projectFontProvenance, readLock, serializeLock } from "./lock.js";
 
 const h = (c: string) => c.repeat(64);
 
@@ -243,6 +243,23 @@ describe("lock files and inputs", () => {
     const host = await lockFonts([{ chain: "Brand Sans, sans-serif", weight: 400 }], { fontsDir, resolver: async () => hostFile });
     expect(host).toEqual([{ family: "Brand Sans", weight: 400, file: "host/Host.ttf", sha256: expect.stringMatching(/^[a-f0-9]{64}$/) }]);
     expect(await lockFonts([{ chain: "Nope", weight: 400 }], { fontsDir, resolver: async () => Promise.reject(new Error("none")) })).toEqual([]);
+  });
+
+  it("lockFonts: project fonts come first, project-relative with their real weight; provenance adds the licence", async () => {
+    const fontsDir = findFontsDir({})!;
+    const root = join(tmp, "pfonts");
+    await mkdir(join(root, "fonts", "Field Sans"), { recursive: true });
+    await copyFile(join(fontsDir, "Inter/Inter-Bold.ttf"), join(root, "fonts", "Field Sans", "FieldSans-Bold.ttf"));
+    await writeFile(join(root, "fonts", "Field Sans", "OFL.txt"), "licence");
+    const { index } = await scanProjectFonts(root);
+    const fonts = await lockFonts([{ chain: '"Field Sans", Inter, sans-serif', weight: 700 }, { chain: '"JetBrains Mono"', weight: 400 }], { fontsDir, projectFonts: index });
+    expect(fonts).toEqual([
+      { family: "Field Sans", weight: 700, file: "project:fonts/Field Sans/FieldSans-Bold.ttf", sha256: "288316099b1e0a47a4716d159098005eef7c0066921f34e3200393dbdb01947f" },
+      { family: "JetBrains Mono", weight: 400, file: "fonts/JetBrainsMono/JetBrainsMono-Regular.ttf", sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+    ]);
+    expect(await projectFontProvenance(root, fonts)).toEqual([
+      { family: "Field Sans", weight: 700, file: "fonts/Field Sans/FieldSans-Bold.ttf", sha256: fonts[0]!.sha256, license: "fonts/Field Sans/OFL.txt" },
+    ]);
   });
 
   it("lockFonts: a chain naming a bundled script family also locks that family's file", async () => {

@@ -3,7 +3,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type RunOptions, escapeFilterOption, escapeFiltergraph, ffprobe, runFfmpeg, secs } from "@video-studio/media";
 import { type LayoutZones, type PxRect, intersect } from "@video-studio/platforms";
-import { COMPLEX_SCRIPTS, type FontResolver, type VisualTokens, assFontSize, createFontResolver, dominantScript, ffColor, fitText, prepareLibassFontsDir, readFontMetrics, scriptFirstChain, scriptFontFamilies } from "@video-studio/renderer";
+import {
+  COMPLEX_SCRIPTS,
+  type FontResolver,
+  type VisualTokens,
+  assFontSize,
+  createFontResolver,
+  dominantScript,
+  ffColor,
+  fitText,
+  prepareLibassFontsDir,
+  projectFirstResolver,
+  projectFontIndexFromTokens,
+  readFontMetrics,
+  scriptFirstChain,
+  scriptFontFamilies,
+} from "@video-studio/renderer";
 import type { AspectRatio, PlatformContract, TextBox } from "@video-studio/schema";
 
 /**
@@ -41,6 +56,8 @@ export interface CoverOptions extends Pick<RunOptions, "signal" | "tools"> {
   contracts?: readonly PlatformContract[];
   /** Resolves a font chain + weight to a file (default: bundled fonts, then host fonts). */
   fontResolver?: FontResolver;
+  /** Project root: the tokens' project fonts (`tokens.project_fonts`, in `<project>/fonts/`) come first. */
+  projectDir?: string;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -199,7 +216,9 @@ export async function renderCover(o: CoverOptions): Promise<CoverResult> {
     let font: string | null = null;
     try {
       // The headline's own script first (a Japanese headline needs Noto Sans JP before Inter).
-      font = await (o.fontResolver ?? createFontResolver(o.env ?? process.env))(scriptFirstChain(o.tokens.font_heading, dominantScript(o.headline)), 700);
+      const project = o.projectDir ? projectFontIndexFromTokens(o.tokens, o.projectDir) : null;
+      const resolveFont = o.fontResolver ? projectFirstResolver(o.fontResolver, project) : createFontResolver(o.env ?? process.env, project ? { projectFonts: project } : {});
+      font = await resolveFont(scriptFirstChain(o.tokens.font_heading, dominantScript(o.headline)), 700);
     } catch (e) {
       warnings.push(`cover: no font for "${o.tokens.font_heading}" (${e instanceof Error ? e.message : String(e)}); cover has no headline`);
     }

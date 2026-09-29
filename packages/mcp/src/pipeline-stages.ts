@@ -56,8 +56,17 @@ import {
   type SceneRenderEntry,
   type SceneRenderer,
   type VisualTokens,
+  type ProjectFont,
+  type ProjectFontIndex,
+  BUNDLED_FONTS,
   bundledFontsStatus,
   findFontsDir,
+  fontKey,
+  matchProjectFont,
+  projectFontFaces,
+  projectFontIndexFromTokens,
+  scanProjectFonts,
+  withProjectFonts,
   findStylesDir,
   getStyle,
   styleRef,
@@ -174,6 +183,8 @@ export interface RenderInputs {
   brandCaptions: (NonNullable<Style["captions"]> & NonNullable<Brand["captions"]>) | undefined;
   fontsDir: ReturnType<typeof findFontsDir>;
   fonts: ReturnType<typeof bundledFontsStatus>;
+  /** The project's own fonts (`<project>/fonts/`) the tokens name (`tokens.project_fonts`), with licence files; null without any. */
+  projectFonts: ProjectFontIndex | null;
   /** The series bible (spec.series) and what the scenes take from it; absent without one. */
   series?: { loaded: LoadedSeries; usage: SeriesUsage };
 }
@@ -194,22 +205,38 @@ export async function stageInputs(run: RenderRun): Promise<RenderInputs> {
   const look = seriesLook(seriesLoaded?.series, spec.style, styleId ? await getStyle(findStylesDir(env), styleId, root) : undefined);
   const style: Style | undefined = look.style;
   // The spec language picks script fonts (Noto JP/Devanagari/Arabic) ahead of the Latin chain.
-  const tokens: VisualTokens = resolveTokens(brand, look.defaults, style, { language: spec.language });
+  let tokens: VisualTokens = resolveTokens(brand, look.defaults, style, { language: spec.language });
   // brand logo_placement "none": no logo anywhere, not even on the end card.
   if (brand?.visual?.logo_placement?.position === "none") delete tokens.logo_path;
   const burnIn = o.captions?.burn_in ?? spec.captions.burn_in;
   const captionPreset = brand?.video?.caption_preset ?? spec.captions.preset;
   // Caption styling: the style's, overridden field by field by the brand's.
   const brandCaptions = style?.captions || brand?.captions ? { ...style?.captions, ...brand?.captions } : undefined;
-  // Bundled fonts (fonts/): libass burn-in, the cover and the scene renderers use them first.
+  // The project's own fonts (fonts/<Family>/, e.g. from brand_draft) come first for every family
+  // they answer to; the files the chains name (and their hashes) join the tokens, so every cache
+  // key that takes the tokens re-renders when a font file changes. No project fonts: tokens unchanged.
+  const scan = await scanProjectFonts(root);
+  warnings.push(...scan.warnings);
+  tokens = withProjectFonts(tokens, scan.index, brandCaptions?.family ? [brandCaptions.family] : []);
+  const used = new Set((tokens.project_fonts ?? []).map((f) => f.file));
+  const projectFonts: ProjectFontIndex | null = scan.index && used.size ? { root: scan.index.root, fonts: scan.index.fonts.filter((f) => used.has(f.file)) } : null;
+  // Bundled fonts (fonts/): libass burn-in, the cover and the scene renderers use them after project fonts.
   const fontsDir = findFontsDir(env);
   const fonts = bundledFontsStatus(fontsDir);
-  if (fonts.missing.length) {
+  // A missing bundled family only matters where no project font stands in front of it.
+  const chains = [tokens.font_heading, tokens.font_body, tokens.font_mono].map((c) => parseFontChain(c));
+  const shadowed = (family: string) =>
+    chains.every((names) => {
+      const i = names.findIndex((n) => fontKey(n) === fontKey(family));
+      return i === -1 || names.slice(0, i + 1).some((n) => projectFontFaces(projectFonts, n).length > 0);
+    });
+  const missing = fonts.missing.filter((file) => !projectFonts || !shadowed(BUNDLED_FONTS.find((b) => b.file === file)?.family ?? ""));
+  if (missing.length) {
     warnings.push(
-      `fonts: bundled fonts missing (${fonts.missing.join(", ")}${fontsDir ? ` in ${fontsDir}` : "; no fonts/ directory found"}); using host fonts, so text may look different on other machines`,
+      `fonts: bundled fonts missing (${missing.join(", ")}${fontsDir ? ` in ${fontsDir}` : "; no fonts/ directory found"}); using host fonts, so text may look different on other machines`,
     );
   }
-  return { spec, irPath, brandFile, brand, style, tokens, burnIn, captionPreset, brandCaptions, fontsDir, fonts, ...(series ? { series } : {}) };
+  return { spec, irPath, brandFile, brand, style, tokens, burnIn, captionPreset, brandCaptions, fontsDir, fonts, projectFonts, ...(series ? { series } : {}) };
 }
 
 // ------------------------------------------------------------------------------------ b. target
@@ -743,6 +770,10 @@ export interface CaptionsStage {
   captionFiles: Awaited<ReturnType<typeof writeCaptionSet>>["files"] | undefined;
   /** ASS caption options (also part of the assembly key when burning in). */
   assOpts: CaptionAssOptions;
+  /** The caption family as the brand/chain names it (`assOpts.font` is libass's name for it). */
+  captionFamily: string;
+  /** Project font files of the caption family (every weight), linked into the libass fonts folder. */
+  captionFonts: ProjectFont[];
 }
 
 export interface CaptionAssOptions {
@@ -794,11 +825,16 @@ export async function stageCaptions(
   const captionsDir = join(renderDir(root, quality), "captions");
   await rm(captionsDir, { recursive: true, force: true });
   // Caption engine: phrases placed in the caption zone (or centred on captions.position.y), brand caption styling.
+  // libass matches a font file's internal family name, so a project font (named by its folder or
+  // CSS name) is asked for by its internal name, and its files go into the libass fonts folder.
+  const captionFamily = brandCaptions?.family ?? parseFontChain(tokens.font_body)[0] ?? "sans-serif";
+  const captionOwn = matchProjectFont(projectFontIndexFromTokens(tokens, root), captionFamily, brandCaptions?.weight ?? 400);
+  const captionFonts = captionOwn ? (input.inputs.projectFonts?.fonts ?? []).filter((f) => f.family === captionOwn.family) : [];
   const assOpts = {
     width: target.width,
     height: target.height,
     preset: captionPreset === "bold" ? ("bold" as const) : ("minimal" as const),
-    font: brandCaptions?.family ?? parseFontChain(tokens.font_body)[0] ?? "sans-serif",
+    font: captionOwn?.family ?? captionFamily,
     highlight: tokens.color_primary,
     box: zones.caption,
     ...(spec.captions.position ? { positionY: spec.captions.position.y } : {}),
@@ -853,7 +889,7 @@ export async function stageCaptions(
   }
   if (!words.length && narrated) warnings.push("no voiceover text: captions and transcript skipped");
   if (!words.length && mode === "native") warnings.push('voice.mode "native": no transcript words in the footage spans; captions and transcript skipped (transcribe the video assets first)');
-  return { placements, totalMs, words, cues, captionSet, captionFiles, assOpts };
+  return { placements, totalMs, words, cues, captionSet, captionFiles, assOpts, captionFamily, captionFonts };
 }
 
 // ------------------------------------------------------------------------------------ e'. audio
@@ -936,7 +972,7 @@ export async function stageAssembly(
   const { target, encodePreset } = input.tp;
   const { planScenes, ordered, zones, hasAudio, music } = input;
   const { bounds, frameMs, slotMs } = input.timeline;
-  const { placements, captionFiles, assOpts } = input.captions;
+  const { placements, captionFiles, assOpts, captionFonts } = input.captions;
   const { useSceneAudio, sceneAudio, sceneAudioOn, musicSpeech, musicMute } = input.audio;
   const rdir = renderDir(root, quality);
   // Scene transitions: the scene's own `transition`, else the style pack's default; cut without either.
@@ -976,6 +1012,8 @@ export async function stageAssembly(
       ass: burn ? assSha : null,
       captions: burn ? assOpts : null,
       fonts: burn ? fonts.present : null,
+      // Project caption fonts by their bytes (absent without them, so other keys do not move).
+      ...(burn && captionFonts.length ? { project_fonts: captionFonts.map((f) => ({ file: f.file, sha256: f.sha256 })) } : {}),
     }),
   );
   const master = join(rdir, "master.mp4");
@@ -1021,14 +1059,28 @@ export async function stageAssembly(
             }
           : {}),
         master,
-        // libass does not search subfolders of fontsdir: hand it a flat folder of the bundled fonts.
-        ...(burn ? { reel, assPath: captionFiles!.ass!, ...(fontsDir ? { fontsDir: await prepareLibassFontsDir(join(rdir, "fonts"), undefined, fontsDir) } : {}) } : {}),
+        // libass does not search subfolders of fontsdir: hand it a flat folder of the bundled fonts
+        // (and the caption's project font files, instead of any bundled family of the same name).
+        ...(burn ? { reel, assPath: captionFiles!.ass!, ...(await libassFontsFor(join(rdir, "fonts"), fontsDir, fonts.present, captionFonts)) } : {}),
       },
       { ...(encodePreset ? { encode: { preset: encodePreset } } : {}), ...(signal ? { signal } : {}) },
     );
     if (!burn) await copyFile(master, reel);
   }
   return { segments, burn, logo, assemblyKey, master, reel, thumbnail, statePath, prev, reuse };
+}
+
+/**
+ * The libass fonts folder for burned-in captions: the bundled fonts, with the caption's project
+ * font files replacing any bundled family of the same internal name (libass could pick either).
+ * The folder is rebuilt, so links from an earlier render's project fonts never linger.
+ */
+async function libassFontsFor(dest: string, fontsDir: string | null, present: readonly string[], own: readonly ProjectFont[]): Promise<{ fontsDir?: string }> {
+  if (!own.length) return fontsDir ? { fontsDir: await prepareLibassFontsDir(dest, undefined, fontsDir) } : {};
+  await rm(dest, { recursive: true, force: true });
+  const families = new Set(own.map((f) => fontKey(f.family)));
+  const bundled = fontsDir ? present.filter((file) => !families.has(fontKey(BUNDLED_FONTS.find((b) => b.file === file)?.family ?? ""))).map((file) => join(fontsDir, file)) : [];
+  return { fontsDir: await prepareLibassFontsDir(dest, [...bundled, ...own.map((f) => f.path)], fontsDir) };
 }
 
 // ------------------------------------------------------------------------------------ g. cover / thumbnail
@@ -1091,7 +1143,7 @@ export async function stageCover(
       if (picked === null) warnings.push(`cover: no settled hold found for the automatic cover time; used the hook scene's midpoint (${(hookMid / 1000).toFixed(2)}s). Set cover.focal_time_sec to choose.`);
       coverAt = picked ?? hookMid;
     }
-    const c = await renderCover({ master, outDir: rdir, atMs: coverAt, headline: spec.cover.headline, zones, tokens, contracts, env: env as NodeJS.ProcessEnv, ...(signal ? { signal } : {}) });
+    const c = await renderCover({ master, outDir: rdir, atMs: coverAt, headline: spec.cover.headline, zones, tokens, contracts, projectDir: root, env: env as NodeJS.ProcessEnv, ...(signal ? { signal } : {}) });
     warnings.push(...c.warnings);
     coverState = {
       path: rel(root, c.cover),
@@ -1171,12 +1223,12 @@ export async function stageRenderState(
   },
 ): Promise<RenderState> {
   const { env, root, quality, started_at, preference, voiceChoice, warnings } = run;
-  const { spec, irPath, brandFile, style, tokens, fontsDir, captionPreset } = input.inputs;
+  const { spec, irPath, brandFile, style, tokens, fontsDir, captionPreset, projectFonts } = input.inputs;
   const { target, timingSource, footage, music, cueLog } = input;
   const { voice, reason: voiceReason, mode, hasAudio } = input.vs;
   const { timing_adjustments, beatSync } = input.timing;
   const { ordered, used, reasons, sceneStart, sceneEnd } = input.scenes;
-  const { totalMs, cues, captionSet, captionFiles, assOpts } = input.captions;
+  const { totalMs, cues, captionSet, captionFiles, captionFamily } = input.captions;
   const { sceneAudio, sceneAudioOn } = input.audio;
   const { segments, burn, logo, assemblyKey, master, reel, thumbnail, prev, reuse } = input.asm;
   const { thumbnailKey, coverState } = input.cover;
@@ -1192,7 +1244,7 @@ export async function stageRenderState(
   tool_versions[`voice:${voice.backend}`] = voice.backend === "silent" ? "n/a" : "local";
   if (style) tool_versions.style = styleRef(style);
 
-  const lockedFonts = await lockFonts(fontRequests(tokens, assOpts.font, burn), { fontsDir, env: env as NodeJS.ProcessEnv });
+  const lockedFonts = await lockFonts(fontRequests(tokens, captionFamily, burn), { fontsDir, env: env as NodeJS.ProcessEnv, projectFonts });
 
   const specSha = sha256Hex(canonicalJson(spec));
   const irSha = (await exists(irPath)) ? await hashFile(irPath) : undefined;

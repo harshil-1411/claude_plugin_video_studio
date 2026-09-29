@@ -1,0 +1,77 @@
+/* Checkmint's look, rebuilt from input/site/styles.css at 1080x1920 (2x the site's sizes).
+   Resting layout only: seek(t) in each scene's script moves things into these positions. */
+#stage *, #stage *::before, #stage *::after { box-sizing: border-box; }
+#stage { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; overflow: hidden; }
+.layer { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; }
+#dots, #dots2 {
+  background-image: radial-gradient(circle, rgba(20, 33, 28, 0.9) 2.4px, rgba(20, 33, 28, 0) 3.2px);
+  background-size: 60px 60px;
+  opacity: 0.08;
+}
+.blob { position: absolute; width: 1100px; height: 1100px; border-radius: 50%; }
+
+/* Step label: one line of display type in a mask. */
+.mask { position: absolute; overflow: hidden; }
+.mask .txt { height: 100%; }
+.label { left: 90px; top: 250px; width: 900px; height: 150px; }
+.label .txt { font-size: 112px; font-weight: 700; line-height: 1.2; letter-spacing: -0.035em; white-space: nowrap; }
+
+/* The app card (the site's .step card: white surface, 1px line, 18px radius, at 2x). */
+.card {
+  position: absolute; left: 90px; top: 560px; width: 900px; height: 880px;
+  background: #ffffff; border: 3px solid #e2ddd0; border-radius: 40px; overflow: hidden;
+  box-shadow: 0 40px 90px rgba(20, 33, 28, 0.14);
+}
+.card-head { position: absolute; left: 48px; top: 40px; height: 80px; display: flex; align-items: center; gap: 22px; }
+.card-head img { width: 76px; height: 76px; }
+.wordmark { font-size: 48px; font-weight: 700; letter-spacing: -0.02em; }
+
+/* Step 1: the notes box (the site's .notes). */
+.notes {
+  position: absolute; left: 45px; top: 160px; width: 804px; height: 470px;
+  border: 4px dashed #5d6b64; border-radius: 28px; overflow: hidden;
+}
+.note { position: absolute; left: 40px; width: 724px; font-size: 44px; font-weight: 400; line-height: 1.28; }
+.note .w { display: inline-block; position: relative; margin-right: 0.26em; }
+.note .hl { position: absolute; left: -8px; right: -8px; top: 2px; bottom: 0; border-radius: 12px; }
+.note .ul { position: absolute; left: 0; right: 0; bottom: -2px; height: 8px; border-radius: 4px; }
+.note .wt { position: relative; }
+.caret { position: absolute; width: 5px; height: 54px; }
+.band { position: absolute; left: 0; width: 804px; height: 130px; }
+
+/* Step 2: the Tidy it button (the site's .tidy pill). */
+.tidy {
+  position: absolute; left: 549px; top: 722px; width: 300px; height: 110px; border-radius: 55px; overflow: hidden;
+  font-size: 46px; font-weight: 700; line-height: 110px; text-align: center;
+}
+.ripple { position: absolute; border-radius: 50%; }
+.cursor { position: absolute; left: 0; top: 0; width: 64px; height: 84px; clip-path: polygon(0 0, 0 78%, 22% 60%, 38% 100%, 54% 94%, 40% 56%, 72% 56%); }
+
+/* Step 3: the action list (the site's table.actions). */
+.count { position: absolute; left: 45px; top: 164px; height: 60px; font-size: 38px; font-weight: 700; }
+.row { position: absolute; left: 45px; width: 804px; height: 180px; border-bottom: 3px solid #e2ddd0; }
+.box { position: absolute; left: 0; top: 10px; width: 64px; height: 64px; border-radius: 16px; border: 5px solid; box-sizing: border-box; overflow: hidden; }
+.box svg { position: absolute; left: 6px; top: 8px; width: 42px; height: 38px; }
+.task { position: absolute; left: 96px; top: 6px; width: 708px; font-size: 50px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; white-space: nowrap; }
+.chips { position: absolute; left: 96px; top: 88px; display: flex; gap: 18px; }
+.owner, .due { height: 58px; padding: 0 26px; border-radius: 29px; font-size: 34px; font-weight: 700; line-height: 58px; }
+.due { border: 3px solid; line-height: 52px; font-weight: 400; }
+.card-head { left: 45px; }
+
+/* Hook: note slips that become list rows. */
+.slip { position: absolute; left: 0; top: 0; width: 820px; height: 150px; border-radius: 24px; background: #ffffff; border: 3px solid #e2ddd0; box-shadow: 0 18px 40px rgba(20, 33, 28, 0.10); }
+.slip .box { left: 30px; top: 43px; }
+.slip .st { position: absolute; top: 0; height: 150px; display: flex; align-items: center; width: 680px; font-size: 40px; line-height: 1.2; }
+.headline { left: 90px; top: 250px; width: 900px; height: 270px; }
+.headline .txt { position: absolute; left: 0; top: 0; width: 900px; font-size: 124px; font-weight: 700; line-height: 1.05; letter-spacing: -0.04em; }
+
+/* End card. */
+.logo { position: absolute; left: 400px; top: 520px; width: 280px; height: 280px; }
+.brandname { left: 90px; top: 850px; width: 900px; height: 190px; }
+.brandname .txt { font-size: 156px; font-weight: 700; line-height: 1.2; letter-spacing: -0.045em; text-align: center; }
+.cta {
+  position: absolute; left: 290px; top: 1100px; width: 500px; height: 124px; border-radius: 62px;
+  font-size: 50px; font-weight: 700; line-height: 124px; text-align: center;
+}
+.url { left: 90px; top: 1270px; width: 900px; height: 60px; }
+.url .txt { font-size: 40px; font-weight: 400; line-height: 1.4; text-align: center; }
