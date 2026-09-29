@@ -19,6 +19,7 @@ export const EffectId = z.enum([
   "grid_floor",
   "flash",
   "bouncy_easing",
+  "eq_bars",
 ]);
 
 /**
@@ -29,6 +30,12 @@ export const Acceptance = z
   .strictObject({
     min_changes_per_sec: z.number().min(0).max(10).optional().describe("Big visual changes per second the render must reach (motion density)."),
     max_frozen_pct: z.number().min(0).max(100).optional().describe("Most of the runtime that may be frozen, in percent (default 15)."),
+    min_moving_pct: z
+      .number()
+      .min(0)
+      .max(100)
+      .optional()
+      .describe("Least share of the runtime, in percent, where the picture is moving at all (smooth motion and crossfades count; a still frame does not)."),
     max_static_sec: z.number().positive().max(60).optional().describe("Longest allowed stretch with no visual change."),
     hold_ms: z.int().min(0).max(5000).optional().describe("At least one deliberate hold this long, so change feels earned (e.g. 400)."),
     loop: z.boolean().optional().describe("The piece must loop seamlessly (last frame flows into the first)."),

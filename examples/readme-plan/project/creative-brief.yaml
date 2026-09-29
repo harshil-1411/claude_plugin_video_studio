@@ -33,6 +33,10 @@ hook_candidates:
     scores: { relevance: 8, clarity: 7, curiosity: 7, evidence_strength: 6, visual_potential: 7 }
 chosen_hook: Stop writing video prompts. Compile your docs instead.
 template: devtool-launch
+product_flow:
+  - step: Point the plugin at a README, a document or a repo
+  - step: Claude writes the brief and scene spec; the engine validates it
+  - step: A video package comes back with captions, thumbnail and provenance
 assumptions:
   - field: goal
     value: launch

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:video-studio:schema:cliche-rules",
+  "title": "ClicheRules",
+  "description": "research-specs/cliches.yaml: stock phrases lint warns about in voiceover, on-screen text, cover and post copy.",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "const": "cliches",
+      "type": "string"
+    },
+    "notes": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "phrases": {
+      "description": "Matched case-insensitively on word boundaries.",
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "schema_version": {
+      "description": "Schema version of this document.",
+      "const": "1.0",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "phrases"
+  ],
+  "type": "object"
+}

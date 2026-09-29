@@ -36,6 +36,12 @@
           "maximum": 10,
           "minimum": 0,
           "type": "number"
+        },
+        "min_moving_pct": {
+          "description": "Least share of the runtime, in percent, where the picture is moving at all (smooth motion and crossfades count; a still frame does not).",
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
         }
       },
       "type": "object"
@@ -261,8 +267,12 @@
       "description": "Cover (thumbnail) text and focal frame.",
       "additionalProperties": false,
       "properties": {
+        "bake_first_frame": {
+          "description": "Replace frame 0 of the reel and every target video with the cover, so chat apps and players that thumbnail the first frame (Slack, X, Discord) show it. Duration, frame count and audio are unchanged; the clean master is left alone. Not allowed with master.loop.",
+          "type": "boolean"
+        },
         "focal_time_sec": {
-          "description": "Video time of the frame the cover is composed from (TikTok uses it as the cover timestamp).",
+          "description": "Video time of the frame the cover is composed from (TikTok uses it as the cover timestamp). Omit it to let the engine pick the longest settled hold (text fully in, not mid-transition), preferring the hook and payoff scenes.",
           "minimum": 0,
           "type": "number"
         },
@@ -273,8 +283,7 @@
         }
       },
       "required": [
-        "headline",
-        "focal_time_sec"
+        "headline"
       ],
       "type": "object"
     },
@@ -552,6 +561,12 @@
                 "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
                 "type": "string"
               },
+              "av_offset_ms": {
+                "description": "Shift the clip's own sound against its picture, in ms: positive delays the sound, negative advances it (fixes recordings with baked-in delay, e.g. a remote-call guest feed). Length is kept.",
+                "maximum": 2000,
+                "minimum": -2000,
+                "type": "integer"
+              },
               "cutaway": {
                 "description": "Cut away from the footage: the scene's deterministic graphic fills the frame while the clip's sound and transcript words keep playing (B-roll over a talking head).",
                 "type": "boolean"
@@ -794,7 +809,7 @@
                   "type": "string"
                 },
                 "file": {
-                  "description": "Project-relative audio file.",
+                  "description": "Project-relative audio file, or bundled:<id> for a sound from the plugin's synthesized CC0 library (sfx/catalog.json).",
                   "minLength": 1,
                   "type": "string"
                 },
@@ -822,6 +837,7 @@
                   "type": "object"
                 },
                 "volume_db": {
+                  "description": "Gain in dB (default 0, or the catalog's default_db for bundled sounds).",
                   "maximum": 6,
                   "minimum": -60,
                   "type": "number"

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { writeFileAtomic } from "@video-studio/core";
+import { findStylesDir, getStyle } from "@video-studio/renderer";
 import {
   type Acceptance,
   type AspectRatio,
@@ -19,6 +20,7 @@ import {
   validateCreativeBriefSemantics,
   validateVideoSpecSemantics,
 } from "@video-studio/schema";
+import { findResearchSpecsDir, loadToneRules } from "./research-specs.js";
 import { getTemplate } from "./templates.js";
 
 /** An actionable finding: where, what, and how to fix it. */
@@ -73,6 +75,9 @@ export interface BriefValidationResult {
   warnings: PlanIssue[];
 }
 
+/** Templates whose centrepiece is the product in use; their briefs should carry a product_flow. */
+export const PRODUCT_TEMPLATES: ReadonlySet<string> = new Set(["product-demo", "product-ui", "devtool-launch", "product-launch", "product-hero"]);
+
 /** Validate `<project>/project/creative-brief.yaml` (or .yml/.json): schema, then semantic warnings and template fit. */
 export async function validateBrief(projectDir: string, templatesDir: string | null): Promise<BriefValidationResult> {
   const found = await findBrief(projectDir);
@@ -92,6 +97,23 @@ export async function validateBrief(projectDir: string, templatesDir: string | n
   const sem = validateCreativeBriefSemantics(brief);
   result.errors.push(...sem.errors);
   result.warnings.push(...sem.warnings);
+  if (brief.tone_preset) {
+    const tones = await loadToneRules(findResearchSpecsDir());
+    if (tones && !(brief.tone_preset in tones.presets)) {
+      result.errors.push({
+        path: "tone_preset",
+        message: `unknown tone preset "${brief.tone_preset}"`,
+        fix: `use one of: ${Object.keys(tones.presets).join(", ")} (research-specs/tones.yaml), and keep free-text direction in tone`,
+      });
+    }
+  }
+  if (brief.template && PRODUCT_TEMPLATES.has(brief.template) && !brief.product_flow) {
+    result.warnings.push({
+      path: "product_flow",
+      message: `template "${brief.template}" shows the product in use, but the brief has no product_flow`,
+      fix: "add product_flow: the 2–4 steps of using it (entry → key action → result) with evidence refs, and build the centrepiece scenes from them (plan references/product-flow.md)",
+    });
+  }
 
   if (brief.template && templatesDir) {
     let tpl: Template | null = null;
@@ -312,6 +334,8 @@ export async function scaffoldSpec(projectDir: string, templatesDir: string, opt
 
   const mode = opts.voice_mode ?? tpl.voice_mode ?? "narrated";
   const style = opts.style ?? tpl.default_style;
+  // Fail here, not at render time: the error lists the bundled and project style ids.
+  if (style) await getStyle(findStylesDir(), style, projectDir);
   const music = opts.music ?? tpl.default_music;
   const footageBeats = beats.some((b) => FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy));
   if (mode === "none") {
@@ -515,7 +539,7 @@ export function renderStoryboardMarkdown(spec: VideoSpec, ir: ContentIR | null):
   const master = resolveMaster(spec);
   const targets = resolveTargets(spec);
   lines.push(`Master: ${master.width}×${master.height} @ ${master.fps} fps · Targets: ${targets.join(", ") || "none"}`, "");
-  if (spec.cover) lines.push(`Cover: "${spec.cover.headline}" at ${spec.cover.focal_time_sec}s`, "");
+  if (spec.cover) lines.push(`Cover: "${spec.cover.headline}" at ${spec.cover.focal_time_sec != null ? `${spec.cover.focal_time_sec}s` : "auto (longest settled hold)"}${spec.cover.bake_first_frame ? ", baked into frame 0" : ""}`, "");
   for (const [id, p] of Object.entries(spec.publish ?? {})) {
     lines.push(`Post (${id}): ${truncate(p.post_caption, 200)}${p.hashtags?.length ? ` ${p.hashtags.join(" ")}` : ""}`, "");
   }

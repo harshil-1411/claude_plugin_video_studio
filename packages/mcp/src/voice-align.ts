@@ -17,6 +17,16 @@ import { resolveWhisperModel } from "./transcribe.js";
 /** A track is re-timed only when at least this share of its words matched what whisper heard. */
 export const ALIGN_MIN_MATCH = 0.5;
 const ALIGN_VERSION = 1;
+/**
+ * Whisper sometimes squeezes a scene's first sentence into a fraction of a second, then leaves a
+ * gap before the real speech. Anchors faster than this (words per second, over a run) are not
+ * trusted: nobody speaks that fast, and trusting them puts captions seconds ahead of the voice.
+ */
+export const MAX_ANCHOR_WPS = 6;
+/** A run is also compressed when whisper heard it in less than this share of its estimated span. */
+export const MIN_ANCHOR_SPAN_SHARE = 0.4;
+/** Shortest run of anchors (words) the guard judges; single fast pairs are normal. */
+export const MIN_SUSPECT_RUN = 4;
 
 /** Matching key: the cue token (lower case, no surrounding punctuation), `%` spelled out. */
 function key(w: string): string {
@@ -48,15 +58,49 @@ function close(a: string, b: string): boolean {
 }
 
 /**
+ * Un-match runs of anchors whose heard timing is implausibly compressed: at least MIN_SUSPECT_RUN
+ * consecutive matched words heard faster than MAX_ANCHOR_WPS, or in under MIN_ANCHOR_SPAN_SHARE of
+ * their estimated span. Their words fall back to estimates placed between trusted anchors.
+ * Mutates `match`; returns how many anchors were dropped.
+ */
+export function dropCompressedRuns(match: number[], expected: readonly WordTiming[], heard: readonly TimedWord[]): number {
+  const idx = match.flatMap((j, i) => (j >= 0 ? [i] : []));
+  const compressed = (a: number, b: number): boolean => {
+    // Pair of consecutive anchors (script indexes a < b): heard interval against the words between them.
+    const dt = heard[match[b]!]!.start_ms - heard[match[a]!]!.start_ms;
+    const de = expected[b]!.start_ms - expected[a]!.start_ms;
+    return dt < ((b - a) * 1000) / MAX_ANCHOR_WPS || (de > 0 && dt < de * MIN_ANCHOR_SPAN_SHARE);
+  };
+  // Judge every consecutive pair first: dropping a run must not change how the next one is judged.
+  const fast = idx.slice(0, -1).map((a, x) => compressed(a, idx[x + 1]!));
+  let dropped = 0;
+  let k = 0;
+  while (k < idx.length - 1) {
+    let e = k;
+    while (e < idx.length - 1 && fast[e]) e++;
+    if (e - k + 1 >= MIN_SUSPECT_RUN) {
+      for (let x = k; x <= e; x++) match[idx[x]!] = -1;
+      dropped += e - k + 1;
+    }
+    k = Math.max(e, k + 1);
+  }
+  return dropped;
+}
+
+/**
  * Re-time `expected` (the script's words with estimated times, scene-local ms) from `heard`
  * (whisper's words, same clock). Longest-common-subsequence matching on normalised words; matched
  * words take whisper's times, the rest are placed between their matched neighbours in proportion to
  * their estimated positions. Output is monotonic and inside [0, durationMs].
  */
-export function alignWords(expected: readonly WordTiming[], heard: readonly TimedWord[], durationMs: number): { words: WordTiming[]; matched: number } {
+export function alignWords(
+  expected: readonly WordTiming[],
+  heard: readonly TimedWord[],
+  durationMs: number,
+): { words: WordTiming[]; matched: number; distrusted: number } {
   const n = expected.length;
   const m = heard.length;
-  if (!n) return { words: [], matched: 0 };
+  if (!n) return { words: [], matched: 0, distrusted: 0 };
   const ek = expected.map((w) => key(w.word));
   const hk = heard.map((w) => key(w.word));
   // LCS table (scenes are short: a few hundred words at most).
@@ -75,6 +119,7 @@ export function alignWords(expected: readonly WordTiming[], heard: readonly Time
     } else if (dp[i + 1]![j]! >= dp[i]![j + 1]!) i++;
     else j++;
   }
+  const distrusted = dropCompressedRuns(match, expected, heard);
   const matched = match.filter((j) => j >= 0).length;
 
   const out: WordTiming[] = expected.map((w) => ({ ...w }));
@@ -119,7 +164,7 @@ export function alignWords(expected: readonly WordTiming[], heard: readonly Time
     w.end_ms = Math.min(Math.max(w.end_ms, w.start_ms), durationMs);
     t = w.start_ms;
   }
-  return { words: out, matched };
+  return { words: out, matched, distrusted };
 }
 
 /** whisper.cpp's binary: WHISPER_CPP_PATH, else whisper-cli / whisper-cpp on PATH. */
@@ -199,6 +244,7 @@ export async function alignVoiceTracks(tracks: readonly SceneVoiceTrack[], o: Al
       warnings.push(`align: ${t.scene_id}: whisper matched only ${r.matched} of ${t.words.length} words; kept estimated timings`);
       continue;
     }
+    if (r.distrusted) warnings.push(`align: ${t.scene_id}: ignored ${r.distrusted} word time(s) whisper compressed (faster than ${MAX_ANCHOR_WPS} words/s); those words keep estimated timings`);
     byId.set(t.scene_id, { ...t, words: r.words, timing_source: "aligned" });
     aligned.push(t.scene_id);
   }

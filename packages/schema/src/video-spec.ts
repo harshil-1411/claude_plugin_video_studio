@@ -152,6 +152,12 @@ export const FootageClip = z
     speed: z.number().min(0.25).max(4).optional().describe("Playback rate (1 = normal)."),
     loop: z.boolean().optional().describe("Loop a clip shorter than the scene (default: hold the last frame)."),
     redact: z.array(RedactRegion).max(12).optional().describe("Regions blurred or boxed in the source frame before it is fitted."),
+    av_offset_ms: z
+      .int()
+      .min(-2000)
+      .max(2000)
+      .optional()
+      .describe("Shift the clip's own sound against its picture, in ms: positive delays the sound, negative advances it (fixes recordings with baked-in delay, e.g. a remote-call guest feed). Length is kept."),
     cutaway: z
       .boolean()
       .optional()
@@ -173,9 +179,9 @@ export const SceneAudio = z
 
 export const SoundEffect = z
   .strictObject({
-    file: NonEmptyString.describe("Project-relative audio file."),
+    file: NonEmptyString.describe("Project-relative audio file, or bundled:<id> for a sound from the plugin's synthesized CC0 library (sfx/catalog.json)."),
     at_sec: z.number().min(0).describe("Offset inside the scene."),
-    volume_db: z.number().min(-60).max(6).optional(),
+    volume_db: z.number().min(-60).max(6).optional().describe("Gain in dB (default 0, or the catalog's default_db for bundled sounds)."),
     license: AudioLicense.optional(),
     caption: z.string().optional().describe("Sound-event caption shown while it plays, e.g. \"[applause]\" (accessibility)."),
   })
@@ -320,7 +326,19 @@ export const MasterCanvas = z
 export const Cover = z
   .strictObject({
     headline: NonEmptyString.describe("Cover/thumbnail text; separate from on-screen text, captions and post captions."),
-    focal_time_sec: z.number().nonnegative().describe("Video time of the frame the cover is composed from (TikTok uses it as the cover timestamp)."),
+    focal_time_sec: z
+      .number()
+      .nonnegative()
+      .optional()
+      .describe(
+        "Video time of the frame the cover is composed from (TikTok uses it as the cover timestamp). Omit it to let the engine pick the longest settled hold (text fully in, not mid-transition), preferring the hook and payoff scenes.",
+      ),
+    bake_first_frame: z
+      .boolean()
+      .optional()
+      .describe(
+        "Replace frame 0 of the reel and every target video with the cover, so chat apps and players that thumbnail the first frame (Slack, X, Discord) show it. Duration, frame count and audio are unchanged; the clean master is left alone. Not allowed with master.loop.",
+      ),
   })
   .describe("Cover (thumbnail) text and focal frame.");
 
@@ -979,7 +997,15 @@ export function validateVideoSpecSemantics(spec: VideoSpec, ir?: ContentIR): Sem
     });
   }
 
-  if (spec.cover && spec.cover.focal_time_sec > total) {
+  if (spec.cover?.bake_first_frame && spec.master?.loop) {
+    errors.push({
+      path: "cover.bake_first_frame",
+      message: "a cover baked into frame 0 breaks the loop seam (the last frame no longer flows into the first)",
+      fix: "remove cover.bake_first_frame for a looping piece; platforms that take a cover upload use cover.jpg instead",
+    });
+  }
+
+  if (spec.cover?.focal_time_sec != null && spec.cover.focal_time_sec > total) {
     errors.push({
       path: "cover.focal_time_sec",
       message: `cover focal time ${spec.cover.focal_time_sec}s is after the end of the video (${round(total)}s)`,

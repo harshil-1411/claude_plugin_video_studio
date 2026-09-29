@@ -60,7 +60,7 @@ export function retimeSpec(spec: VideoSpec, target: number): { change: string; n
   const durations = scaleDurations(spec.scenes.map((s) => s.duration_sec), target);
   spec.scenes.forEach((s, i) => (s.duration_sec = durations[i]!));
   spec.target_duration_sec = target;
-  if (spec.cover) spec.cover.focal_time_sec = round1(spec.cover.focal_time_sec * factor);
+  if (spec.cover?.focal_time_sec != null) spec.cover.focal_time_sec = round1(spec.cover.focal_time_sec * factor);
   const notes: string[] = [];
   if (voiceMode(spec) === "narrated") {
     for (const s of spec.scenes) {

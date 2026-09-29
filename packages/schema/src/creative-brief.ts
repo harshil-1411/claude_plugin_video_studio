@@ -60,6 +60,20 @@ export const CreativeBrief = z
     target_duration_sec: z.number().positive().max(600),
     language: LanguageTag,
     tone: z.array(NonEmptyString),
+    tone_preset: Id.optional().describe(
+      "Nearest tone preset from research-specs/tones.yaml (e.g. polished, playful, deadpan, cinematic, energetic, app-store, parody); sets pacing, transitions, sound density and bed level. Free-text direction stays in tone.",
+    ),
+    product_flow: z
+      .array(
+        z.strictObject({
+          step: NonEmptyString.describe("One step of using the product, e.g. \"drops a PDF on the upload page\"."),
+          evidence_ref: z.string().optional().describe("ContentIR evidence or asset id that shows this step."),
+        }),
+      )
+      .min(2)
+      .max(4)
+      .optional()
+      .describe("The product in use: entry → key action → result. Product templates build their centrepiece scenes from it."),
     desired_action: NonEmptyString.describe("What the viewer should do after watching."),
     key_messages: z.array(NonEmptyString).optional(),
     hook_candidates: z.array(HookCandidate).min(1),

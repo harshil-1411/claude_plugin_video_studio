@@ -1,0 +1,78 @@
+# Tone presets: the pacing, transitions and sound a tone implies, for 15-25 s pieces.
+# Heuristics from editing practice, not rules: the brief's own values and the template win.
+# The plan skill maps free-text direction ("fake Series A launch from 2016") to the nearest preset
+# and keeps the text in brief.tone.
+schema_version: "1.0"
+id: tones
+default: playful
+basis: heuristic
+verified: false
+presets:
+  polished:
+    label: Polished
+    feel: Serious and elegant; confidence through restraint.
+    scenes: { min: 3, max: 4 }
+    avg_shot_sec: 5
+    transitions: [crossfade, fade_black, cut]
+    sfx: sparse
+    bed_db: -20
+    acceptance: { min_changes_per_sec: 0.4, hold_ms: 800 }
+  playful:
+    label: Playful
+    feel: Punchy, warm and clean; room for each moment to land.
+    scenes: { min: 4, max: 5 }
+    avg_shot_sec: 4
+    transitions: [slide, cut, crossfade]
+    sfx: moderate
+    bed_db: -18
+    acceptance: { min_changes_per_sec: 0.6 }
+  deadpan:
+    label: Deadpan
+    feel: Calm and dry; nothing is a joke. Long holds and big empty space.
+    scenes: { min: 3, max: 4 }
+    avg_shot_sec: 5.5
+    transitions: [cut, fade_black]
+    sfx: sparse
+    bed_db: -24
+    acceptance: { hold_ms: 1200 }
+  cinematic:
+    label: Cinematic
+    feel: Trailer scale; big type, dramatic reveals, a swell into the title.
+    scenes: { min: 4, max: 5 }
+    avg_shot_sec: 4.5
+    transitions: [fade_black, zoom, crossfade]
+    sfx: moderate
+    bed_db: -16
+    caption_case: upper
+    acceptance: { min_changes_per_sec: 0.5, hold_ms: 600 }
+  energetic:
+    label: Energetic
+    feel: Fast and loud; some scenes under 2 s, cuts on the beat.
+    scenes: { min: 6, max: 8 }
+    avg_shot_sec: 2.5
+    transitions: [cut, whip, zoom]
+    sfx: dense
+    bed_db: -14
+    caption_case: upper
+    acceptance: { min_changes_per_sec: 1.0, max_frozen_pct: 8 }
+  app-store:
+    label: App Store
+    feel: Clean feature cards that slide in; corporate but not boring.
+    scenes: { min: 4, max: 6 }
+    avg_shot_sec: 3.5
+    transitions: [slide, crossfade]
+    sfx: moderate
+    bed_db: -18
+    acceptance: { min_changes_per_sec: 0.6 }
+  parody:
+    label: Parody launch
+    feel: A startup launch played completely straight; the joke is the seriousness. One claim per scene, hard cuts.
+    scenes: { min: 4, max: 5 }
+    avg_shot_sec: 4
+    transitions: [cut, fade_black]
+    sfx: sparse
+    bed_db: -20
+    acceptance: { hold_ms: 900 }
+notes:
+  - "Scene counts assume 15-25 s; scale them with the duration for longer pieces."
+  - "sfx is a density posture, not a count: sparse ~1 accent per 5 s, moderate ~1 per scene, dense ~1 per beat of the story."

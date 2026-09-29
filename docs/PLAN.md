@@ -344,6 +344,32 @@ Why: a read-only review of the MIT-licensed tubeai-skills repo found eight ideas
     - the timeline imports into Resolve or Final Cut with clips on the right frames;
     - `tighten` on a real talking-head clip leaves no partial words.
 
+### Phase 6.7: Launch craft (local, no keys; planned 2026-09-29) → 0.5.0
+Why: a read-only review of the MIT-licensed latent-spaces/brag skill (a one-command launch video from a web project) found ideas that fill gaps we confirmed in our code. Ideas are re-expressed and nothing is copied (no text, code or assets; its music licence is unverified). The user added known-bug fixes, a brand drafted from the source, music-reactive motion and a one-command launch skill (2026-09-29), and chose synthesized SFX and opt-in JS page rendering.
+
+- **1. Poster on frame 0:** `cover.bake_first_frame` overlays the cover on frame 0 of the reel and each target video (clean master untouched; frame count, duration and audio unchanged), because Slack, X and Discord thumbnail frame 0. An omitted `cover.focal_time_sec` means auto: the longest settled hold, preferring hook and payoff. Refused with `master.loop`; QA spike and scdet stats skip frames 0–1 when baked.
+- **2. Synthesized SFX library:** `scripts/generate-sfx.mjs` → `sfx/catalog.json` (CC0, ffmpeg `aevalsrc`, measured `character`/`hf_risk`, `default_db`, sha256); `SoundEffect.file: bundled:<id>`; lint `sfx_license_missing`, `sfx_harsh_repeat`, `sfx_over_voice`; `plan/references/sound-design.md`.
+- **3. Product in use:** `plan/references/product-flow.md` (source rubric; entry → key action → result; at most one landing or stat card); `CreativeBrief.product_flow`; product templates get `inputs` and name `screen_capture`/`demo`; the creative director checks it.
+- **4. Readable reveals on a beat grid:** an engine reveal schedule with reading floors (0.8 s for 1–3 words, else 0.3 s/word, min 1.2 s), used by deterministic kinds and by motion pages (`__vs.reveals`, `vs.revealAt`); lint `reveal_too_fast`.
+- **5. Transitions you can see:** `review transitions` tiles at each transition midpoint; lint `busy_crossfade`.
+- **6. Tone presets as data:** `research-specs/tones.yaml`, `CreativeBrief.tone_preset`, applied by `spec_scaffold`.
+- **7. Clichés:** `research-specs/cliches.yaml`, lint `cliche` (warn), and banned phrases also checked on the generated social-copy draft.
+- **8. Launch benchmark fixtures:** `fixtures/launch-bench/` (invented sites and a mini repo) for ingest goldens, `brand_draft` and the launch dry run.
+- **9. Whisper anchor guard:** runs of ≥ 4 anchors faster than 6 words/s or under 40% of their estimated span fall back to estimates.
+- **10. `footage.av_offset_ms`** (±2 s) for recordings with baked-in delay.
+- **11. Small fixes:** `spec_scaffold` checks the style id; an end-to-end glossary render test.
+- **12. Brand from source:** `brand_draft` reads a repo's CSS, fonts, logo and `package.json`, or a URL's own stylesheets (no JS), and writes `project/brand.draft.yaml` with evidence for the user to accept.
+- **13. Music-reactive motion and smooth-motion QA:** a per-frame bed envelope (`rms`, `low`, `onset`) as `__vs.audio` with kit helpers; banned effect `eq_bars`; QA `moving_pct` and `acceptance.min_moving_pct` (closes open issue 19).
+- **14. `/video-studio:launch`:** repo or URL → an 18–22 s launch video with one approval gate after the preview.
+- **15. Opt-in JS rendering for URL ingest:** `ingest render_js` (or elicitation on `thin_content`): isolated headless Chrome, every request through `net-guard.ts`, nothing clicked, rendered DOM through the existing extractors, screenshots as assets.
+- **Waves** (at most 2 agents; the lead owns schemas):
+  - **W0 (lead):** contracts (`cover.bake_first_frame` and optional focal time, `bundled:` SFX, `product_flow`, `tone_preset`, `footage.av_offset_ms`, `acceptance.min_moving_pct`, `eq_bars`), `research-specs/tones.yaml` and `cliches.yaml` with loaders, and items 9 and 11 (style check).
+  - **W1:** A = items 1 and 10 · B = item 2, item 7 and the lint half of item 5.
+  - **W2:** A = item 13 engine half and item 4 · B = item 13 QA half and item 12.
+  - **W3:** A (holds Chrome) = item 15 and `review transitions` · B = skills and content for items 3, 6 and 14, plus item 8.
+  - **W4 (lead, with the user):** `examples/launch-video/`, a HyperFrames render and goldens on the user's Mac, docs, `CHANGELOG` 0.5.0.
+- **Exit:** unit and fixture tests for every item and `node scripts/check.mjs --push` green; sandbox renders with `bundled:` SFX, a baked poster, `review transitions` and `moving_pct`; on the user's Mac, `/video-studio:launch` on a launch-bench site end to end with HyperFrames, and `render_js` on a local SPA fixture.
+
 ### Phase 7: Providers, policy and provenance (keys required)
 - **Step 0: shot cards and prompt packs (local, no keys; before any adapter):**
   - **`ShotCard` schema** (`packages/schema/src/shot-card.ts`), attached to `visual_strategy: generative` scenes:

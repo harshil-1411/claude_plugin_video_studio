@@ -1,0 +1,30 @@
+# Stock phrases that make copy sound generic. Lint warns (`cliche`) in voiceover, on-screen text,
+# the cover headline and post copy, including the generated social-copy draft. A brand's own
+# voice.banned_phrases stay errors; this list is a default, not a rule.
+schema_version: "1.0"
+id: cliches
+phrases:
+  - excited to share
+  - thrilled to announce
+  - thrilled to share
+  - game-changer
+  - game changer
+  - revolutionize
+  - revolutionary
+  - streamline your workflow
+  - supercharge
+  - unlock the power
+  - take it to the next level
+  - next-level
+  - seamless experience
+  - cutting-edge
+  - best-in-class
+  - world-class
+  - in today's fast-paced world
+  - look no further
+  - say goodbye to
+  - one-stop shop
+  - leverage the power
+  - empower you to
+notes:
+  - "Use the product's own words and a concrete claim instead."

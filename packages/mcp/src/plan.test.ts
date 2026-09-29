@@ -245,7 +245,7 @@ assumptions: []
     const r = await validateBrief(root, templatesDir);
     expect(r.ok).toBe(false);
     expect(r.errors.map((e) => e.path)).toEqual(["chosen_hook"]);
-    expect(r.warnings.map((w) => w.path)).toEqual(["hook_candidates", "assumptions", "target_duration_sec", "template", "target_duration_sec"]);
+    expect(r.warnings.map((w) => w.path)).toEqual(["hook_candidates", "assumptions", "target_duration_sec", "product_flow", "template", "target_duration_sec"]);
     expect(r.warnings.every((w) => w.fix.length > 0)).toBe(true);
 
     await writeFile(join(root, "project/creative-brief.yaml"), yaml.replace('"Something else"', '"One"').replace("product-launch", "no-such-template"));
@@ -262,6 +262,17 @@ assumptions: []
     expect(r.errors[0]!.fix).toMatch(/creative-brief/);
     const none = await exampleProject("brief-none", { brief: null });
     await expect(validateBrief(none, templatesDir)).rejects.toThrow(/no creative brief found/);
+  });
+
+  it("checks tone_preset against research-specs/tones.yaml", async () => {
+    const base = await readFile(join(examples, "explain-vector-db.creative-brief.json"), "utf8");
+    const brief = JSON.parse(base) as Record<string, unknown>;
+    const root = await exampleProject("brief-tone", { brief: JSON.stringify({ ...brief, tone_preset: "deadpan" }) });
+    expect((await validateBrief(root, templatesDir)).errors).toEqual([]);
+    await writeFile(join(root, "project/creative-brief.yaml"), JSON.stringify({ ...brief, tone_preset: "sarcastic" }));
+    const bad = await validateBrief(root, templatesDir);
+    expect(bad.errors.map((e) => e.path)).toEqual(["tone_preset"]);
+    expect(bad.errors[0]!.fix).toContain("polished");
   });
 });
 
@@ -558,5 +569,11 @@ ${extra}`;
     expect(r.spec.acceptance).toBeUndefined();
     expect(r.spec.master).toEqual({ width: 1080, height: 1920, fps: 30 });
     expect(r.notes.join(" ")).not.toMatch(/acceptance|code-motion/);
+  });
+
+  it("refuses an unknown style id up front, listing the available ones", async () => {
+    const root = await exampleProject("scaffold-style");
+    await expect(scaffoldSpec(root, templatesDir, { template_id: "explain", style: "neon" })).rejects.toThrow(/unknown style "neon"; available: .*editorial/);
+    await expect(scaffoldSpec(root, templatesDir, { template_id: "explain", style: "minimal" })).resolves.toBeTruthy();
   });
 });

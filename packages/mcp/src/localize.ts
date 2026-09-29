@@ -568,16 +568,17 @@ function retime(src: VideoSpec, spec: VideoSpec, language: string, notes: string
     }
   });
   if (changed.length) notes.push(`re-timed for ${language} ${narrated ? "speech" : "reading"} speed: ${changed.join(", ")}`);
-  if (spec.cover) {
+  if (spec.cover?.focal_time_sec != null) {
+    const focal = spec.cover.focal_time_sec;
     let acc = 0;
     let newAcc = 0;
     for (const [i, s] of src.scenes.entries()) {
       const d = s.duration_sec;
       const nd = spec.scenes[i]!.duration_sec;
-      if (spec.cover.focal_time_sec < acc + d || i === src.scenes.length - 1) {
-        const f = Math.min(1, Math.max(0, (spec.cover.focal_time_sec - acc) / d));
+      if (focal < acc + d || i === src.scenes.length - 1) {
+        const f = Math.min(1, Math.max(0, (focal - acc) / d));
         const t = round1(newAcc + f * nd);
-        if (t !== spec.cover.focal_time_sec) notes.push(`cover.focal_time_sec ${spec.cover.focal_time_sec} → ${t} (same point of ${s.id})`);
+        if (t !== focal) notes.push(`cover.focal_time_sec ${focal} → ${t} (same point of ${s.id})`);
         spec.cover.focal_time_sec = t;
         break;
       }

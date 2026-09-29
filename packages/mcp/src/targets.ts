@@ -219,7 +219,7 @@ export async function packageTargets(i: PackageTargetsInput, allTargetIds: reado
     const hashtags = publish ? (publish.hashtags ?? []) : draft!.hashtags;
     const coverTimestamp =
       c.cover.mode === "frame" || c.cover.mode === "file_or_frame"
-        ? Math.round(i.spec.cover ? i.spec.cover.focal_time_sec * 1000 : (i.coverAtMs ?? 0))
+        ? Math.round(i.spec.cover?.focal_time_sec != null ? i.spec.cover.focal_time_sec * 1000 : (i.coverAtMs ?? 0))
         : undefined;
     const post: PostJson = {
       target: c.id,

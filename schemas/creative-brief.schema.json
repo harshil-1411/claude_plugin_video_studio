@@ -36,6 +36,12 @@
           "maximum": 10,
           "minimum": 0,
           "type": "number"
+        },
+        "min_moving_pct": {
+          "description": "Least share of the runtime, in percent, where the picture is moving at all (smooth motion and crossfades count; a still frame does not).",
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
         }
       },
       "type": "object"
@@ -196,6 +202,30 @@
       ],
       "type": "string"
     },
+    "product_flow": {
+      "description": "The product in use: entry → key action → result. Product templates build their centrepiece scenes from it.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ref": {
+            "description": "ContentIR evidence or asset id that shows this step.",
+            "type": "string"
+          },
+          "step": {
+            "description": "One step of using the product, e.g. \"drops a PDF on the upload page\".",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "step"
+        ],
+        "type": "object"
+      },
+      "maxItems": 4,
+      "minItems": 2,
+      "type": "array"
+    },
     "schema_version": {
       "description": "Schema version of this document.",
       "const": "1.0",
@@ -224,6 +254,11 @@
         "type": "string"
       },
       "type": "array"
+    },
+    "tone_preset": {
+      "description": "Nearest tone preset from research-specs/tones.yaml (e.g. polished, playful, deadpan, cinematic, energetic, app-store, parody); sets pacing, transitions, sound density and bed level. Free-text direction stays in tone.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@:-]*$",
+      "type": "string"
     }
   },
   "required": [

@@ -78,7 +78,8 @@
               "neon_glow",
               "grid_floor",
               "flash",
-              "bouncy_easing"
+              "bouncy_easing",
+              "eq_bars"
             ],
             "type": "string"
           },

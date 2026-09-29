@@ -51,6 +51,32 @@ describe("alignWords", () => {
     expect(r.words[1]!.start_ms).toBe(300);
     expect(r.words[3]!.start_ms).toBe(700);
   });
+
+  it("ignores a run whisper compressed into a fraction of a second, then a gap", () => {
+    // The first sentence is heard as ten words inside 0-0.85 s, then nothing until 4.9 s.
+    const text = "In the epic the formation spirals inward like a maze and only one warrior knows the way";
+    const expected = est(text, 8000);
+    const words = text.split(" ");
+    const heard = words.map((word, i) =>
+      i < 10 ? { word, start_ms: i * 85, end_ms: i * 85 + 80 } : { word, start_ms: 4900 + (i - 10) * 380, end_ms: 4900 + (i - 10) * 380 + 330 },
+    );
+    const r = alignWords(expected, heard, 8000);
+    expect(r.distrusted).toBe(10);
+    expect(r.matched).toBe(words.length - 10);
+    // The distrusted words are spread from the start up to the first trusted anchor, not bunched in 0.85 s.
+    expect(r.words[9]!.start_ms).toBeGreaterThan(3500);
+    expect(r.words[10]!.start_ms).toBe(4900);
+    const s = r.words.map((w) => w.start_ms);
+    expect([...s].sort((a, b) => a - b)).toEqual(s);
+  });
+
+  it("keeps fast but plausible speech", () => {
+    const text = "one two three four five six seven eight";
+    const heard = text.split(" ").map((word, i) => ({ word, start_ms: 200 + i * 220, end_ms: 200 + i * 220 + 200 }));
+    const r = alignWords(est(text, 2400), heard, 2400);
+    expect(r.distrusted).toBe(0);
+    expect(r.matched).toBe(8);
+  });
 });
 
 describe("alignVoiceTracks", () => {

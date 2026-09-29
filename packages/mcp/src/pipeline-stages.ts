@@ -982,7 +982,7 @@ export async function stageCover(
   const hookIdx = Math.max(0, planScenes.findIndex((s) => s.purpose === "hook"));
   const hookStart = placements[hookIdx]!.scene_start_ms;
   const hookMid = Math.round(hookStart + slotMs[hookIdx]! / 2);
-  const coverAt = spec.cover ? Math.round(spec.cover.focal_time_sec * 1000) : hookMid;
+  const coverAt = spec.cover?.focal_time_sec != null ? Math.round(spec.cover.focal_time_sec * 1000) : hookMid;
   const thumbnailKey = sha256Hex(
     canonicalJson({
       v: COVER_VERSION,

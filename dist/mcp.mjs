@@ -13533,7 +13533,8 @@ const EffectId = _enum([
 	"neon_glow",
 	"grid_floor",
 	"flash",
-	"bouncy_easing"
+	"bouncy_easing",
+	"eq_bars"
 ]);
 /**
 * Measurable acceptance checks for a piece. The plan skill turns vague asks ("go all out") into
@@ -13542,6 +13543,7 @@ const EffectId = _enum([
 const Acceptance = strictObject({
 	min_changes_per_sec: number().min(0).max(10).optional().describe("Big visual changes per second the render must reach (motion density)."),
 	max_frozen_pct: number().min(0).max(100).optional().describe("Most of the runtime that may be frozen, in percent (default 15)."),
+	min_moving_pct: number().min(0).max(100).optional().describe("Least share of the runtime, in percent, where the picture is moving at all (smooth motion and crossfades count; a still frame does not)."),
 	max_static_sec: number().positive().max(60).optional().describe("Longest allowed stretch with no visual change."),
 	hold_ms: int().min(0).max(5e3).optional().describe("At least one deliberate hold this long, so change feels earned (e.g. 400)."),
 	loop: boolean().optional().describe("The piece must loop seamlessly (last frame flows into the first).")
@@ -13976,374 +13978,6 @@ const Series = strictObject({
 */
 const SeriesRef = string().min(1).refine((p) => !/^([a-zA-Z]:)?[\\/]/.test(p), "must be relative to the project folder").refine((p) => !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p), "must be a file, not a URL").refine((p) => /\.(ya?ml|json)$/i.test(p), "must be a .yaml, .yml or .json file");
 //#endregion
-//#region ../schema/dist/research-spec.js
-/**
-* research-specs/titles.yaml: title heuristics as dated data. They are heuristics, not platform
-* limits: lint reports them as warnings only, and `verified` stays false until someone checks
-* them against the user's own analytics (Phase 9).
-*/
-const TitleRules = strictObject({
-	schema_version: SchemaVersion,
-	id: literal$1("titles"),
-	title_length: strictObject({
-		min_chars: int().positive(),
-		max_chars: int().positive()
-	}).refine((r) => r.min_chars <= r.max_chars, "min_chars must be <= max_chars").describe("Titles outside this band get a title_length warning."),
-	basis: _enum(["heuristic", "measured"]),
-	verified: boolean(),
-	verified_on: date().optional(),
-	notes: array(NonEmptyString).optional()
-}).meta({
-	id: "TitleRules",
-	title: "TitleRules",
-	description: "research-specs/titles.yaml: title heuristics (length band) as dated data; warnings only."
-});
-//#endregion
-//#region ../schema/dist/content-ir.js
-const Source = strictObject({
-	id: Id,
-	kind: SourceKind,
-	uri: NonEmptyString.describe("Original location: file path, URL or repo path."),
-	sha256: Sha256.describe("Hash of the raw source bytes as ingested."),
-	title: string().optional(),
-	remote: strictObject({
-		url: NonEmptyString.describe("The URL the user gave."),
-		via: _enum(["direct", "yt-dlp"]).describe("direct: an http(s) media file fetched by the engine; yt-dlp: a video page (YouTube, Vimeo, Loom…) downloaded by the user's yt-dlp."),
-		final_url: string().optional().describe("URL after redirects (direct downloads)."),
-		webpage_url: string().optional().describe("Canonical page URL reported by yt-dlp."),
-		bytes: int().nonnegative().describe("Size of the downloaded media file."),
-		content_type: string().optional(),
-		extractor: string().optional().describe("yt-dlp extractor, e.g. Youtube."),
-		video_id: string().optional(),
-		uploader: string().optional(),
-		duration_sec: number().nonnegative().optional(),
-		license: string().optional().describe("License the platform reports, if any."),
-		downloader_version: string().optional().describe("yt-dlp version.")
-	}).optional().describe("Set when the source was downloaded from a video URL: where it came from and what the platform reported.")
-});
-const Section = strictObject({
-	id: Id,
-	source_id: Id,
-	heading: string().optional(),
-	text: string().describe("Normalized plain text of the section.")
-});
-const Locator = strictObject({
-	line_start: int().positive().optional(),
-	line_end: int().positive().optional(),
-	page: int().positive().optional(),
-	slide: int().positive().optional(),
-	selector: string().optional().describe("CSS selector or heading anchor for URL/markdown sources."),
-	char_start: int().nonnegative().optional(),
-	char_end: int().nonnegative().optional(),
-	time_start_sec: number().nonnegative().optional(),
-	time_end_sec: number().nonnegative().optional()
-}).describe("Machine-readable position of an evidence span inside its source.");
-const EvidenceSpan = strictObject({
-	ref: SourceRef.describe("Stable source_ref, unique within the ContentIR."),
-	source_id: Id,
-	text: string().describe("Verbatim excerpt from the source."),
-	locator: Locator
-});
-const Entity = strictObject({
-	id: Id,
-	name: NonEmptyString,
-	kind: _enum([
-		"product",
-		"organization",
-		"person",
-		"technology",
-		"concept",
-		"place",
-		"metric",
-		"other"
-	]),
-	aliases: array(string()).optional(),
-	evidence_refs: array(SourceRef).optional()
-});
-const Claim = strictObject({
-	id: Id,
-	text: NonEmptyString,
-	kind: _enum(["quantitative", "qualitative"]),
-	evidence_refs: array(SourceRef).describe("Evidence spans supporting this claim.")
-});
-const Shot = strictObject({
-	start_sec: number().nonnegative(),
-	end_sec: number().positive(),
-	keyframe: Id.optional().describe("Image asset id of a representative frame.")
-});
-const Transcript = strictObject({
-	path: FilePath.describe("Project-relative JSON file with timed words: [{word, start_ms, end_ms, speaker?}]."),
-	source: _enum([
-		"whisper",
-		"srt",
-		"vtt"
-	]).describe("whisper.cpp (local ASR) or a caption file the user supplied."),
-	model: string().optional().describe("ASR model, e.g. ggml-base.en."),
-	language: string().optional().describe("Spoken language: detected by whisper (ISO 639-1, e.g. es), or the one requested."),
-	speakers: boolean().optional().describe("true when speaker turns were detected (tinydiarize); words then carry speaker labels S1, S2, …"),
-	words: int().nonnegative()
-}).describe("Timed transcript of the asset's speech.");
-const FootageNote = strictObject({
-	from_sec: number().nonnegative(),
-	to_sec: number().positive(),
-	subject: string().max(500).optional().describe("Who or what is in the shot."),
-	action: string().max(500).optional().describe("What happens in it."),
-	on_screen_text: string().max(500).optional().describe("Text visible in the frame (slides, signs, UI)."),
-	broll: boolean().optional().describe("true: usable as b-roll / a cutaway (no talking face, no lip sync needed)."),
-	quality: _enum([
-		"good",
-		"ok",
-		"poor"
-	]).optional().describe("Picture quality: focus, exposure, shake."),
-	tags: array(string().min(1).max(40)).max(20).optional(),
-	asset_sha256: Sha256.describe("Hash of the asset file the note was written for; a note whose hash differs from the asset's is stale."),
-	updated_at: IsoDateTime
-}).describe("Claude's own observation of a stretch of footage (footage_notes). Not source evidence: never cited as a claim or evidence ref.");
-const MediaInfo = strictObject({
-	duration_sec: number().nonnegative(),
-	width: int().positive().optional(),
-	height: int().positive().optional(),
-	fps: number().positive().optional(),
-	has_video: boolean(),
-	has_audio: boolean(),
-	shots: array(Shot).optional().describe("Shot boundaries from scene detection."),
-	transcript: Transcript.optional(),
-	subtitles: array(strictObject({
-		path: FilePath.describe("Project-relative .vtt next to the asset."),
-		lang: NonEmptyString.describe("Language code as the platform reports it, e.g. en, en-US, en-orig."),
-		kind: _enum(["manual", "auto"]).describe("manual: uploaded by the creator; auto: the platform's automatic captions.")
-	})).optional().describe("Subtitle files downloaded with a video URL, best first (manual before auto). Import one with transcribe captions_file."),
-	loudness_lufs: number().optional(),
-	content_box: strictObject({
-		x: int().nonnegative(),
-		y: int().nonnegative(),
-		w: int().positive(),
-		h: int().positive()
-	}).optional().describe("The real picture inside baked-in black bars (letterbox/pillarbox), in source pixels; the footage renderer crops to it."),
-	notes: array(FootageNote).optional().describe("Per-shot notes Claude wrote after looking at the footage (footage_look → footage_notes): subject, action, on-screen text, b-roll use, quality. Observations, not evidence."),
-	rotation: union([
-		literal$1(0),
-		literal$1(90),
-		literal$1(180),
-		literal$1(270)
-	]).optional().describe("Display rotation of the video (degrees, counter-clockwise as ffprobe reports it; phone footage). width/height are the displayed size, after rotation."),
-	color_transfer: string().optional().describe("Video transfer characteristic as probed, e.g. bt709, smpte2084 (PQ), arib-std-b67 (HLG)."),
-	color_primaries: string().optional().describe("Video colour primaries as probed, e.g. bt709, bt2020."),
-	bit_depth: int().positive().optional().describe("Bits per luma sample (8, 10, 12)."),
-	hdr: boolean().optional().describe("true for PQ or HLG video (iPhone HDR, HDR10): the footage renderer tonemaps it to SDR BT.709."),
-	quality: strictObject({
-		exposure: _enum([
-			"dark",
-			"ok",
-			"bright"
-		]).optional().describe("Picture exposure from the mean luma and the share of near-black / near-white pixels (video)."),
-		luma_mean: number().min(0).max(255).optional().describe("Mean luma of sampled frames (8-bit code values, 16–235 video range)."),
-		contrast: number().min(0).max(255).optional().describe("Mean spread between the 10th and 90th luma percentiles of sampled frames (8-bit)."),
-		dark_fraction: number().min(0).max(1).optional().describe("Share of sampled pixels that are near black."),
-		bright_fraction: number().min(0).max(1).optional().describe("Share of sampled pixels that are near white."),
-		clipped_audio: boolean().optional().describe("true when the audio hits full scale (≥ −0.1 dBFS) in several places: distortion."),
-		snr_db: number().optional().describe("Speech-clarity proxy: loud (90th percentile) minus quiet (10th percentile) 50 ms RMS levels, in dB. Low means noise or a constant bed under the speech."),
-		notes: array(string()).describe("Plain-language quality problems with a suggestion each; empty when none.")
-	}).optional().describe("Cheap footage quality checks measured at ingest (low-res, low-fps decode).")
-}).describe("Probe results for a video or audio asset.");
-const IrAsset = strictObject({
-	id: Id,
-	kind: _enum([
-		"image",
-		"video",
-		"audio"
-	]),
-	path: FilePath.describe("Project-relative path of the extracted asset."),
-	sha256: Sha256,
-	source_ref: SourceRef.optional(),
-	media: MediaInfo.optional().describe("For video and audio assets.")
-});
-const Classification = strictObject({
-	contains_secrets: boolean(),
-	contains_pii: boolean(),
-	contains_likeness: boolean(),
-	data_class: DataClass,
-	notes: array(string())
-}).describe("Ingestion security label; drives policy routing.");
-const IrWarning = strictObject({
-	code: NonEmptyString,
-	message: NonEmptyString,
-	source_id: Id.optional()
-});
-const ContentIR = strictObject({
-	schema_version: SchemaVersion,
-	id: Id,
-	created_at: IsoDateTime,
-	sources: array(Source).min(1),
-	sections: array(Section),
-	evidence: array(EvidenceSpan),
-	entities: array(Entity),
-	claims: array(Claim),
-	assets: array(IrAsset),
-	classification: Classification,
-	warnings: array(IrWarning)
-}).meta({
-	id: "ContentIR",
-	title: "ContentIR",
-	description: "What the user gave us: normalized source text, evidence spans with stable source_refs, entities, claims, extracted assets and an ingestion security label."
-});
-//#endregion
-//#region ../schema/dist/creative-brief.js
-const HookMechanism = _enum([
-	"curiosity_gap",
-	"contrarian",
-	"statistic",
-	"question",
-	"pain_point",
-	"promise",
-	"story",
-	"demo",
-	"pattern_interrupt",
-	"before_after",
-	"mistake",
-	"contrarian_claim"
-]);
-const HookCandidate = strictObject({
-	text: NonEmptyString,
-	mechanism: HookMechanism,
-	scores: record(string(), number().min(0).max(10)).describe("Rubric scores on a 0-10 scale, e.g. clarity, curiosity, relevance, platform_fit.")
-});
-const Assumption = strictObject({
-	field: NonEmptyString.describe("Brief field that was inferred, e.g. `audience`."),
-	value: string(),
-	reason: NonEmptyString
-}).describe("A value Claude inferred rather than received; surfaced to the user for confirmation.");
-const CreativeBrief = strictObject({
-	schema_version: SchemaVersion,
-	id: Id.optional(),
-	created_at: IsoDateTime.optional(),
-	content_ir_id: Id.optional(),
-	goal: Goal,
-	audience: NonEmptyString,
-	platform: Platform,
-	aspect_ratio: AspectRatio,
-	targets: array(PlatformTargetId).optional().describe("Platform contract ids to compile for; copied to the VideoSpec. Defaults to the primary platform's contract."),
-	target_duration_sec: number().positive().max(600),
-	language: LanguageTag,
-	tone: array(NonEmptyString),
-	desired_action: NonEmptyString.describe("What the viewer should do after watching."),
-	key_messages: array(NonEmptyString).optional(),
-	hook_candidates: array(HookCandidate).min(1),
-	chosen_hook: NonEmptyString.describe("Text of the selected hook; should match a hook candidate."),
-	template: Id.optional(),
-	acceptance: Acceptance.optional().describe("Measurable checks the render must meet; vague asks (\"go all out\") become numbers here. Copied to the VideoSpec."),
-	inputs: record(Id, string()).optional().describe("Answers to the template's inputs, keyed by input id (text, choice value, or project-relative file / asset id)."),
-	assumptions: array(Assumption)
-}).meta({
-	id: "CreativeBrief",
-	title: "CreativeBrief",
-	description: "The creative intent for one video: goal, audience, platform, duration, tone, hooks and surfaced assumptions."
-});
-/** Typical duration and aspect ratio per platform (norms, not hard limits). */
-const PLATFORM_NORMS = {
-	instagram_reels: {
-		min_sec: 7,
-		max_sec: 90,
-		aspect_ratios: ["9:16"]
-	},
-	tiktok: {
-		min_sec: 7,
-		max_sec: 90,
-		aspect_ratios: ["9:16"]
-	},
-	youtube_shorts: {
-		min_sec: 7,
-		max_sec: 90,
-		aspect_ratios: ["9:16"]
-	},
-	youtube: {
-		min_sec: 30,
-		max_sec: 600,
-		aspect_ratios: ["16:9"]
-	},
-	linkedin: {
-		min_sec: 15,
-		max_sec: 180,
-		aspect_ratios: [
-			"1:1",
-			"4:5",
-			"9:16",
-			"16:9"
-		]
-	},
-	x: {
-		min_sec: 7,
-		max_sec: 140,
-		aspect_ratios: [
-			"16:9",
-			"1:1",
-			"9:16"
-		]
-	},
-	generic: {
-		min_sec: 1,
-		max_sec: 600,
-		aspect_ratios: [
-			"9:16",
-			"16:9",
-			"1:1",
-			"4:5"
-		]
-	}
-};
-const normHook = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-/** Cross-field checks for a parsed CreativeBrief (the schema covers structural errors). */
-function validateCreativeBriefSemantics(brief) {
-	const errors = [];
-	const warnings = [];
-	const n = brief.hook_candidates.length;
-	if (n < 3) warnings.push({
-		path: "hook_candidates",
-		message: `only ${n} hook candidate${n === 1 ? "" : "s"}; propose at least 3`,
-		fix: `add ${3 - n} more hook_candidates using different mechanisms (e.g. question, statistic, contrarian) and score each`
-	});
-	const counts = /* @__PURE__ */ new Map();
-	for (const h of brief.hook_candidates) counts.set(h.mechanism, (counts.get(h.mechanism) ?? 0) + 1);
-	const repeated = [...counts].filter(([, c]) => c > 1).map(([m]) => m);
-	if (repeated.length > 0) warnings.push({
-		path: "hook_candidates",
-		message: `hook mechanisms are not distinct (repeated: ${repeated.join(", ")})`,
-		fix: "give each hook candidate a different mechanism so the user gets a real choice"
-	});
-	const chosen = normHook(brief.chosen_hook);
-	if (!brief.hook_candidates.some((h) => normHook(h.text) === chosen)) errors.push({
-		path: "chosen_hook",
-		message: `chosen_hook "${brief.chosen_hook}" is not among hook_candidates`,
-		fix: "set chosen_hook to the exact text of one hook_candidates[].text, or add it as a scored candidate"
-	});
-	if (brief.assumptions.length === 0) warnings.push({
-		path: "assumptions",
-		message: "no assumptions listed",
-		fix: "list every inferred field (audience, platform, duration, tone, goal) with its value and reason so the user can confirm it"
-	});
-	const norm = PLATFORM_NORMS[brief.platform];
-	if (brief.target_duration_sec > norm.max_sec || brief.target_duration_sec < norm.min_sec) warnings.push({
-		path: "target_duration_sec",
-		message: `${brief.target_duration_sec}s is outside the usual ${norm.min_sec}–${norm.max_sec}s for ${brief.platform}`,
-		fix: `choose a duration between ${norm.min_sec} and ${norm.max_sec}s, or record why in assumptions`
-	});
-	if (!norm.aspect_ratios.includes(brief.aspect_ratio)) warnings.push({
-		path: "aspect_ratio",
-		message: `aspect ratio ${brief.aspect_ratio} is unusual for ${brief.platform}`,
-		fix: `use ${norm.aspect_ratios.join(" or ")}`
-	});
-	if (brief.tone.length === 0) warnings.push({
-		path: "tone",
-		message: "tone is empty",
-		fix: "add 1–3 tone words, e.g. clear, confident"
-	});
-	return {
-		ok: errors.length === 0,
-		errors,
-		warnings
-	};
-}
-//#endregion
 //#region ../schema/dist/cues.js
 /**
 * Word cues (`scene.cues`): each deterministic kind reveals a fixed, ordered list of items, and a
@@ -14558,6 +14192,7 @@ const FootageClip = strictObject({
 	speed: number().min(.25).max(4).optional().describe("Playback rate (1 = normal)."),
 	loop: boolean().optional().describe("Loop a clip shorter than the scene (default: hold the last frame)."),
 	redact: array(RedactRegion).max(12).optional().describe("Regions blurred or boxed in the source frame before it is fitted."),
+	av_offset_ms: int().min(-2e3).max(2e3).optional().describe("Shift the clip's own sound against its picture, in ms: positive delays the sound, negative advances it (fixes recordings with baked-in delay, e.g. a remote-call guest feed). Length is kept."),
 	cutaway: boolean().optional().describe("Cut away from the footage: the scene's deterministic graphic fills the frame while the clip's sound and transcript words keep playing (B-roll over a talking head).")
 }).describe("A span of real footage shown in this scene.");
 const SceneAudio = strictObject({
@@ -14571,9 +14206,9 @@ const SceneAudio = strictObject({
 	crossfade_ms: int().min(0).max(3e3).optional().describe("Audio crossfade into this scene.")
 }).describe("What this scene sounds like (footage scenes).");
 const SoundEffect = strictObject({
-	file: NonEmptyString.describe("Project-relative audio file."),
+	file: NonEmptyString.describe("Project-relative audio file, or bundled:<id> for a sound from the plugin's synthesized CC0 library (sfx/catalog.json)."),
 	at_sec: number().min(0).describe("Offset inside the scene."),
-	volume_db: number().min(-60).max(6).optional(),
+	volume_db: number().min(-60).max(6).optional().describe("Gain in dB (default 0, or the catalog's default_db for bundled sounds)."),
 	license: AudioLicense.optional(),
 	caption: string().optional().describe("Sound-event caption shown while it plays, e.g. \"[applause]\" (accessibility).")
 }).describe("A one-shot sound effect.");
@@ -14663,7 +14298,8 @@ const MasterCanvas = strictObject({
 }).describe("Production master canvas every target is compiled from. Defaults to 1080 px on the short side at 30 fps.");
 const Cover = strictObject({
 	headline: NonEmptyString.describe("Cover/thumbnail text; separate from on-screen text, captions and post captions."),
-	focal_time_sec: number().nonnegative().describe("Video time of the frame the cover is composed from (TikTok uses it as the cover timestamp).")
+	focal_time_sec: number().nonnegative().optional().describe("Video time of the frame the cover is composed from (TikTok uses it as the cover timestamp). Omit it to let the engine pick the longest settled hold (text fully in, not mid-transition), preferring the hook and payoff scenes."),
+	bake_first_frame: boolean().optional().describe("Replace frame 0 of the reel and every target video with the cover, so chat apps and players that thumbnail the first frame (Slack, X, Discord) show it. Duration, frame count and audio are unchanged; the clean master is left alone. Not allowed with master.loop.")
 }).describe("Cover (thumbnail) text and focal frame.");
 const Hashtag = string().regex(/^#[\p{L}\p{N}_]+$/u, "expected a hashtag like #devtools (no spaces)");
 const PublishSettings = strictObject({
@@ -15335,7 +14971,12 @@ function validateVideoSpecSemantics(spec, ir) {
 			seenTargets.add(t);
 		});
 	}
-	if (spec.cover && spec.cover.focal_time_sec > total) errors.push({
+	if (spec.cover?.bake_first_frame && spec.master?.loop) errors.push({
+		path: "cover.bake_first_frame",
+		message: "a cover baked into frame 0 breaks the loop seam (the last frame no longer flows into the first)",
+		fix: "remove cover.bake_first_frame for a looping piece; platforms that take a cover upload use cover.jpg instead"
+	});
+	if (spec.cover?.focal_time_sec != null && spec.cover.focal_time_sec > total) errors.push({
 		path: "cover.focal_time_sec",
 		message: `cover focal time ${spec.cover.focal_time_sec}s is after the end of the video (${round(total)}s)`,
 		fix: "pick a moment inside the hook scene, where the cover headline is on screen"
@@ -15491,6 +15132,433 @@ function propsText(props) {
 }
 function round(n) {
 	return Math.round(n * 100) / 100;
+}
+//#endregion
+//#region ../schema/dist/research-spec.js
+/**
+* research-specs/titles.yaml: title heuristics as dated data. They are heuristics, not platform
+* limits: lint reports them as warnings only, and `verified` stays false until someone checks
+* them against the user's own analytics (Phase 9).
+*/
+const TitleRules = strictObject({
+	schema_version: SchemaVersion,
+	id: literal$1("titles"),
+	title_length: strictObject({
+		min_chars: int().positive(),
+		max_chars: int().positive()
+	}).refine((r) => r.min_chars <= r.max_chars, "min_chars must be <= max_chars").describe("Titles outside this band get a title_length warning."),
+	basis: _enum(["heuristic", "measured"]),
+	verified: boolean(),
+	verified_on: date().optional(),
+	notes: array(NonEmptyString).optional()
+}).meta({
+	id: "TitleRules",
+	title: "TitleRules",
+	description: "research-specs/titles.yaml: title heuristics (length band) as dated data; warnings only."
+});
+/** How much sound design a tone carries: none, a few accents, one per beat of the story, or dense. */
+const SfxDensity = _enum([
+	"none",
+	"sparse",
+	"moderate",
+	"dense"
+]);
+/**
+* One tone preset: the pacing, transitions and sound a tone implies. The plan skill maps free-text
+* direction ("fake Series A launch from 2016") to the nearest preset; `spec_scaffold` applies it
+* under the template, and the brief's own values win.
+*/
+const TonePreset = strictObject({
+	label: NonEmptyString,
+	feel: NonEmptyString.describe("One line: how it should feel."),
+	scenes: strictObject({
+		min: int().positive(),
+		max: int().positive()
+	}).refine((r) => r.min <= r.max, "min must be <= max").describe("Scene count for a 15–25 s piece."),
+	avg_shot_sec: number().positive().max(30),
+	transitions: array(Transition).min(1).describe("Transitions that fit; the first is the default."),
+	sfx: SfxDensity,
+	bed_db: number().min(-40).max(0).describe("Music bed level under the mix (the engine default is -18)."),
+	caption_case: _enum([
+		"as_written",
+		"upper",
+		"lower"
+	]).optional(),
+	acceptance: Acceptance.optional().describe("Acceptance hints for the tone, under the template's and the brief's.")
+});
+/** research-specs/tones.yaml: tone presets as data (pacing, transitions, sound). Heuristics, not rules. */
+const ToneRules = strictObject({
+	schema_version: SchemaVersion,
+	id: literal$1("tones"),
+	default: NonEmptyString.describe("Preset used when nothing clearly fits."),
+	presets: record(string().regex(/^[a-z][a-z0-9-]*$/), TonePreset),
+	basis: _enum(["heuristic", "measured"]),
+	verified: boolean(),
+	notes: array(NonEmptyString).optional()
+}).refine((r) => r.default in r.presets, "default must name a preset").meta({
+	id: "ToneRules",
+	title: "ToneRules",
+	description: "research-specs/tones.yaml: tone presets (pacing, transitions, sound density, bed level) as data."
+});
+strictObject({
+	schema_version: SchemaVersion,
+	id: literal$1("cliches"),
+	phrases: array(NonEmptyString).min(1).describe("Matched case-insensitively on word boundaries."),
+	notes: array(NonEmptyString).optional()
+}).meta({
+	id: "ClicheRules",
+	title: "ClicheRules",
+	description: "research-specs/cliches.yaml: stock phrases lint warns about in voiceover, on-screen text, cover and post copy."
+});
+//#endregion
+//#region ../schema/dist/content-ir.js
+const Source = strictObject({
+	id: Id,
+	kind: SourceKind,
+	uri: NonEmptyString.describe("Original location: file path, URL or repo path."),
+	sha256: Sha256.describe("Hash of the raw source bytes as ingested."),
+	title: string().optional(),
+	remote: strictObject({
+		url: NonEmptyString.describe("The URL the user gave."),
+		via: _enum(["direct", "yt-dlp"]).describe("direct: an http(s) media file fetched by the engine; yt-dlp: a video page (YouTube, Vimeo, Loom…) downloaded by the user's yt-dlp."),
+		final_url: string().optional().describe("URL after redirects (direct downloads)."),
+		webpage_url: string().optional().describe("Canonical page URL reported by yt-dlp."),
+		bytes: int().nonnegative().describe("Size of the downloaded media file."),
+		content_type: string().optional(),
+		extractor: string().optional().describe("yt-dlp extractor, e.g. Youtube."),
+		video_id: string().optional(),
+		uploader: string().optional(),
+		duration_sec: number().nonnegative().optional(),
+		license: string().optional().describe("License the platform reports, if any."),
+		downloader_version: string().optional().describe("yt-dlp version.")
+	}).optional().describe("Set when the source was downloaded from a video URL: where it came from and what the platform reported.")
+});
+const Section = strictObject({
+	id: Id,
+	source_id: Id,
+	heading: string().optional(),
+	text: string().describe("Normalized plain text of the section.")
+});
+const Locator = strictObject({
+	line_start: int().positive().optional(),
+	line_end: int().positive().optional(),
+	page: int().positive().optional(),
+	slide: int().positive().optional(),
+	selector: string().optional().describe("CSS selector or heading anchor for URL/markdown sources."),
+	char_start: int().nonnegative().optional(),
+	char_end: int().nonnegative().optional(),
+	time_start_sec: number().nonnegative().optional(),
+	time_end_sec: number().nonnegative().optional()
+}).describe("Machine-readable position of an evidence span inside its source.");
+const EvidenceSpan = strictObject({
+	ref: SourceRef.describe("Stable source_ref, unique within the ContentIR."),
+	source_id: Id,
+	text: string().describe("Verbatim excerpt from the source."),
+	locator: Locator
+});
+const Entity = strictObject({
+	id: Id,
+	name: NonEmptyString,
+	kind: _enum([
+		"product",
+		"organization",
+		"person",
+		"technology",
+		"concept",
+		"place",
+		"metric",
+		"other"
+	]),
+	aliases: array(string()).optional(),
+	evidence_refs: array(SourceRef).optional()
+});
+const Claim = strictObject({
+	id: Id,
+	text: NonEmptyString,
+	kind: _enum(["quantitative", "qualitative"]),
+	evidence_refs: array(SourceRef).describe("Evidence spans supporting this claim.")
+});
+const Shot = strictObject({
+	start_sec: number().nonnegative(),
+	end_sec: number().positive(),
+	keyframe: Id.optional().describe("Image asset id of a representative frame.")
+});
+const Transcript = strictObject({
+	path: FilePath.describe("Project-relative JSON file with timed words: [{word, start_ms, end_ms, speaker?}]."),
+	source: _enum([
+		"whisper",
+		"srt",
+		"vtt"
+	]).describe("whisper.cpp (local ASR) or a caption file the user supplied."),
+	model: string().optional().describe("ASR model, e.g. ggml-base.en."),
+	language: string().optional().describe("Spoken language: detected by whisper (ISO 639-1, e.g. es), or the one requested."),
+	speakers: boolean().optional().describe("true when speaker turns were detected (tinydiarize); words then carry speaker labels S1, S2, …"),
+	words: int().nonnegative()
+}).describe("Timed transcript of the asset's speech.");
+const FootageNote = strictObject({
+	from_sec: number().nonnegative(),
+	to_sec: number().positive(),
+	subject: string().max(500).optional().describe("Who or what is in the shot."),
+	action: string().max(500).optional().describe("What happens in it."),
+	on_screen_text: string().max(500).optional().describe("Text visible in the frame (slides, signs, UI)."),
+	broll: boolean().optional().describe("true: usable as b-roll / a cutaway (no talking face, no lip sync needed)."),
+	quality: _enum([
+		"good",
+		"ok",
+		"poor"
+	]).optional().describe("Picture quality: focus, exposure, shake."),
+	tags: array(string().min(1).max(40)).max(20).optional(),
+	asset_sha256: Sha256.describe("Hash of the asset file the note was written for; a note whose hash differs from the asset's is stale."),
+	updated_at: IsoDateTime
+}).describe("Claude's own observation of a stretch of footage (footage_notes). Not source evidence: never cited as a claim or evidence ref.");
+const MediaInfo = strictObject({
+	duration_sec: number().nonnegative(),
+	width: int().positive().optional(),
+	height: int().positive().optional(),
+	fps: number().positive().optional(),
+	has_video: boolean(),
+	has_audio: boolean(),
+	shots: array(Shot).optional().describe("Shot boundaries from scene detection."),
+	transcript: Transcript.optional(),
+	subtitles: array(strictObject({
+		path: FilePath.describe("Project-relative .vtt next to the asset."),
+		lang: NonEmptyString.describe("Language code as the platform reports it, e.g. en, en-US, en-orig."),
+		kind: _enum(["manual", "auto"]).describe("manual: uploaded by the creator; auto: the platform's automatic captions.")
+	})).optional().describe("Subtitle files downloaded with a video URL, best first (manual before auto). Import one with transcribe captions_file."),
+	loudness_lufs: number().optional(),
+	content_box: strictObject({
+		x: int().nonnegative(),
+		y: int().nonnegative(),
+		w: int().positive(),
+		h: int().positive()
+	}).optional().describe("The real picture inside baked-in black bars (letterbox/pillarbox), in source pixels; the footage renderer crops to it."),
+	notes: array(FootageNote).optional().describe("Per-shot notes Claude wrote after looking at the footage (footage_look → footage_notes): subject, action, on-screen text, b-roll use, quality. Observations, not evidence."),
+	rotation: union([
+		literal$1(0),
+		literal$1(90),
+		literal$1(180),
+		literal$1(270)
+	]).optional().describe("Display rotation of the video (degrees, counter-clockwise as ffprobe reports it; phone footage). width/height are the displayed size, after rotation."),
+	color_transfer: string().optional().describe("Video transfer characteristic as probed, e.g. bt709, smpte2084 (PQ), arib-std-b67 (HLG)."),
+	color_primaries: string().optional().describe("Video colour primaries as probed, e.g. bt709, bt2020."),
+	bit_depth: int().positive().optional().describe("Bits per luma sample (8, 10, 12)."),
+	hdr: boolean().optional().describe("true for PQ or HLG video (iPhone HDR, HDR10): the footage renderer tonemaps it to SDR BT.709."),
+	quality: strictObject({
+		exposure: _enum([
+			"dark",
+			"ok",
+			"bright"
+		]).optional().describe("Picture exposure from the mean luma and the share of near-black / near-white pixels (video)."),
+		luma_mean: number().min(0).max(255).optional().describe("Mean luma of sampled frames (8-bit code values, 16–235 video range)."),
+		contrast: number().min(0).max(255).optional().describe("Mean spread between the 10th and 90th luma percentiles of sampled frames (8-bit)."),
+		dark_fraction: number().min(0).max(1).optional().describe("Share of sampled pixels that are near black."),
+		bright_fraction: number().min(0).max(1).optional().describe("Share of sampled pixels that are near white."),
+		clipped_audio: boolean().optional().describe("true when the audio hits full scale (≥ −0.1 dBFS) in several places: distortion."),
+		snr_db: number().optional().describe("Speech-clarity proxy: loud (90th percentile) minus quiet (10th percentile) 50 ms RMS levels, in dB. Low means noise or a constant bed under the speech."),
+		notes: array(string()).describe("Plain-language quality problems with a suggestion each; empty when none.")
+	}).optional().describe("Cheap footage quality checks measured at ingest (low-res, low-fps decode).")
+}).describe("Probe results for a video or audio asset.");
+const IrAsset = strictObject({
+	id: Id,
+	kind: _enum([
+		"image",
+		"video",
+		"audio"
+	]),
+	path: FilePath.describe("Project-relative path of the extracted asset."),
+	sha256: Sha256,
+	source_ref: SourceRef.optional(),
+	media: MediaInfo.optional().describe("For video and audio assets.")
+});
+const Classification = strictObject({
+	contains_secrets: boolean(),
+	contains_pii: boolean(),
+	contains_likeness: boolean(),
+	data_class: DataClass,
+	notes: array(string())
+}).describe("Ingestion security label; drives policy routing.");
+const IrWarning = strictObject({
+	code: NonEmptyString,
+	message: NonEmptyString,
+	source_id: Id.optional()
+});
+const ContentIR = strictObject({
+	schema_version: SchemaVersion,
+	id: Id,
+	created_at: IsoDateTime,
+	sources: array(Source).min(1),
+	sections: array(Section),
+	evidence: array(EvidenceSpan),
+	entities: array(Entity),
+	claims: array(Claim),
+	assets: array(IrAsset),
+	classification: Classification,
+	warnings: array(IrWarning)
+}).meta({
+	id: "ContentIR",
+	title: "ContentIR",
+	description: "What the user gave us: normalized source text, evidence spans with stable source_refs, entities, claims, extracted assets and an ingestion security label."
+});
+//#endregion
+//#region ../schema/dist/creative-brief.js
+const HookMechanism = _enum([
+	"curiosity_gap",
+	"contrarian",
+	"statistic",
+	"question",
+	"pain_point",
+	"promise",
+	"story",
+	"demo",
+	"pattern_interrupt",
+	"before_after",
+	"mistake",
+	"contrarian_claim"
+]);
+const HookCandidate = strictObject({
+	text: NonEmptyString,
+	mechanism: HookMechanism,
+	scores: record(string(), number().min(0).max(10)).describe("Rubric scores on a 0-10 scale, e.g. clarity, curiosity, relevance, platform_fit.")
+});
+const Assumption = strictObject({
+	field: NonEmptyString.describe("Brief field that was inferred, e.g. `audience`."),
+	value: string(),
+	reason: NonEmptyString
+}).describe("A value Claude inferred rather than received; surfaced to the user for confirmation.");
+const CreativeBrief = strictObject({
+	schema_version: SchemaVersion,
+	id: Id.optional(),
+	created_at: IsoDateTime.optional(),
+	content_ir_id: Id.optional(),
+	goal: Goal,
+	audience: NonEmptyString,
+	platform: Platform,
+	aspect_ratio: AspectRatio,
+	targets: array(PlatformTargetId).optional().describe("Platform contract ids to compile for; copied to the VideoSpec. Defaults to the primary platform's contract."),
+	target_duration_sec: number().positive().max(600),
+	language: LanguageTag,
+	tone: array(NonEmptyString),
+	tone_preset: Id.optional().describe("Nearest tone preset from research-specs/tones.yaml (e.g. polished, playful, deadpan, cinematic, energetic, app-store, parody); sets pacing, transitions, sound density and bed level. Free-text direction stays in tone."),
+	product_flow: array(strictObject({
+		step: NonEmptyString.describe("One step of using the product, e.g. \"drops a PDF on the upload page\"."),
+		evidence_ref: string().optional().describe("ContentIR evidence or asset id that shows this step.")
+	})).min(2).max(4).optional().describe("The product in use: entry → key action → result. Product templates build their centrepiece scenes from it."),
+	desired_action: NonEmptyString.describe("What the viewer should do after watching."),
+	key_messages: array(NonEmptyString).optional(),
+	hook_candidates: array(HookCandidate).min(1),
+	chosen_hook: NonEmptyString.describe("Text of the selected hook; should match a hook candidate."),
+	template: Id.optional(),
+	acceptance: Acceptance.optional().describe("Measurable checks the render must meet; vague asks (\"go all out\") become numbers here. Copied to the VideoSpec."),
+	inputs: record(Id, string()).optional().describe("Answers to the template's inputs, keyed by input id (text, choice value, or project-relative file / asset id)."),
+	assumptions: array(Assumption)
+}).meta({
+	id: "CreativeBrief",
+	title: "CreativeBrief",
+	description: "The creative intent for one video: goal, audience, platform, duration, tone, hooks and surfaced assumptions."
+});
+/** Typical duration and aspect ratio per platform (norms, not hard limits). */
+const PLATFORM_NORMS = {
+	instagram_reels: {
+		min_sec: 7,
+		max_sec: 90,
+		aspect_ratios: ["9:16"]
+	},
+	tiktok: {
+		min_sec: 7,
+		max_sec: 90,
+		aspect_ratios: ["9:16"]
+	},
+	youtube_shorts: {
+		min_sec: 7,
+		max_sec: 90,
+		aspect_ratios: ["9:16"]
+	},
+	youtube: {
+		min_sec: 30,
+		max_sec: 600,
+		aspect_ratios: ["16:9"]
+	},
+	linkedin: {
+		min_sec: 15,
+		max_sec: 180,
+		aspect_ratios: [
+			"1:1",
+			"4:5",
+			"9:16",
+			"16:9"
+		]
+	},
+	x: {
+		min_sec: 7,
+		max_sec: 140,
+		aspect_ratios: [
+			"16:9",
+			"1:1",
+			"9:16"
+		]
+	},
+	generic: {
+		min_sec: 1,
+		max_sec: 600,
+		aspect_ratios: [
+			"9:16",
+			"16:9",
+			"1:1",
+			"4:5"
+		]
+	}
+};
+const normHook = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+/** Cross-field checks for a parsed CreativeBrief (the schema covers structural errors). */
+function validateCreativeBriefSemantics(brief) {
+	const errors = [];
+	const warnings = [];
+	const n = brief.hook_candidates.length;
+	if (n < 3) warnings.push({
+		path: "hook_candidates",
+		message: `only ${n} hook candidate${n === 1 ? "" : "s"}; propose at least 3`,
+		fix: `add ${3 - n} more hook_candidates using different mechanisms (e.g. question, statistic, contrarian) and score each`
+	});
+	const counts = /* @__PURE__ */ new Map();
+	for (const h of brief.hook_candidates) counts.set(h.mechanism, (counts.get(h.mechanism) ?? 0) + 1);
+	const repeated = [...counts].filter(([, c]) => c > 1).map(([m]) => m);
+	if (repeated.length > 0) warnings.push({
+		path: "hook_candidates",
+		message: `hook mechanisms are not distinct (repeated: ${repeated.join(", ")})`,
+		fix: "give each hook candidate a different mechanism so the user gets a real choice"
+	});
+	const chosen = normHook(brief.chosen_hook);
+	if (!brief.hook_candidates.some((h) => normHook(h.text) === chosen)) errors.push({
+		path: "chosen_hook",
+		message: `chosen_hook "${brief.chosen_hook}" is not among hook_candidates`,
+		fix: "set chosen_hook to the exact text of one hook_candidates[].text, or add it as a scored candidate"
+	});
+	if (brief.assumptions.length === 0) warnings.push({
+		path: "assumptions",
+		message: "no assumptions listed",
+		fix: "list every inferred field (audience, platform, duration, tone, goal) with its value and reason so the user can confirm it"
+	});
+	const norm = PLATFORM_NORMS[brief.platform];
+	if (brief.target_duration_sec > norm.max_sec || brief.target_duration_sec < norm.min_sec) warnings.push({
+		path: "target_duration_sec",
+		message: `${brief.target_duration_sec}s is outside the usual ${norm.min_sec}–${norm.max_sec}s for ${brief.platform}`,
+		fix: `choose a duration between ${norm.min_sec} and ${norm.max_sec}s, or record why in assumptions`
+	});
+	if (!norm.aspect_ratios.includes(brief.aspect_ratio)) warnings.push({
+		path: "aspect_ratio",
+		message: `aspect ratio ${brief.aspect_ratio} is unusual for ${brief.platform}`,
+		fix: `use ${norm.aspect_ratios.join(" or ")}`
+	});
+	if (brief.tone.length === 0) warnings.push({
+		path: "tone",
+		message: "tone is empty",
+		fix: "add 1–3 tone words, e.g. clear, confident"
+	});
+	return {
+		ok: errors.length === 0,
+		errors,
+		warnings
+	};
 }
 //#endregion
 //#region ../schema/dist/timing.js
@@ -41348,7 +41416,7 @@ function socialCopyParts(spec, brief) {
 //#endregion
 //#region src/research-specs.ts
 /**
-* `research-specs/`: heuristics kept as dated data (titles today; Phase 9 adds more). Unlike
+* `research-specs/`: heuristics kept as dated data (titles, tone presets, clichés; Phase 9 adds more). Unlike
 * `platform-specs/`, nothing here is a platform limit: lint reports them as warnings only.
 */
 const TITLES = "titles.yaml";
@@ -41369,21 +41437,28 @@ function findResearchSpecsDir(env = process.env, from) {
 	}
 	return null;
 }
-const titleCache = /* @__PURE__ */ new Map();
+const cache = /* @__PURE__ */ new Map();
+/** `<dir>/<name>` validated against `schema`, cached per file; undefined when missing, throws when invalid. */
+async function loadSpec(dir, name, schema) {
+	if (!dir) return void 0;
+	const file = join(dir, name);
+	if (cache.has(file)) return cache.get(file);
+	if (!existsSync(file)) return void 0;
+	const parsed = parseYamlOrJson(schema, await readFile(file, "utf8"));
+	if (!parsed.ok) throw new Error(`invalid ${file}: ${parsed.errors.map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
+	cache.set(file, parsed.data);
+	return parsed.data;
+}
 /**
 * `<dir>/titles.yaml` validated as TitleRules, cached per directory. Undefined when the directory
 * or file is missing (the title lint is then skipped); throws when the file is invalid.
 */
-async function loadTitleRules(dir) {
-	if (!dir) return void 0;
-	const file = join(dir, TITLES);
-	const cached = titleCache.get(file);
-	if (cached) return cached;
-	if (!existsSync(file)) return void 0;
-	const parsed = parseYamlOrJson(TitleRules, await readFile(file, "utf8"));
-	if (!parsed.ok) throw new Error(`invalid ${file}: ${parsed.errors.map((e) => `${e.path || "(root)"}: ${e.message}`).join("; ")}`);
-	titleCache.set(file, parsed.data);
-	return parsed.data;
+function loadTitleRules(dir) {
+	return loadSpec(dir, TITLES, TitleRules);
+}
+/** `<dir>/tones.yaml` (tone presets); undefined when missing. */
+function loadToneRules(dir) {
+	return loadSpec(dir, "tones.yaml", ToneRules);
 }
 //#endregion
 //#region src/lint.ts
@@ -43057,7 +43132,7 @@ async function packageTargets(i, allTargetIds) {
 		const draft = publish ? void 0 : i.generatedCopy(c);
 		const caption = publish?.post_caption ?? draft.post_caption;
 		const hashtags = publish ? publish.hashtags ?? [] : draft.hashtags;
-		const coverTimestamp = c.cover.mode === "frame" || c.cover.mode === "file_or_frame" ? Math.round(i.spec.cover ? i.spec.cover.focal_time_sec * 1e3 : i.coverAtMs ?? 0) : void 0;
+		const coverTimestamp = c.cover.mode === "frame" || c.cover.mode === "file_or_frame" ? Math.round(i.spec.cover?.focal_time_sec != null ? i.spec.cover.focal_time_sec * 1e3 : i.coverAtMs ?? 0) : void 0;
 		const post = {
 			target: c.id,
 			platform: c.name,
@@ -247428,6 +247503,33 @@ function close(a, b) {
 	return edits + (a.length - i) + (b.length - j) <= 1;
 }
 /**
+* Un-match runs of anchors whose heard timing is implausibly compressed: at least MIN_SUSPECT_RUN
+* consecutive matched words heard faster than MAX_ANCHOR_WPS, or in under MIN_ANCHOR_SPAN_SHARE of
+* their estimated span. Their words fall back to estimates placed between trusted anchors.
+* Mutates `match`; returns how many anchors were dropped.
+*/
+function dropCompressedRuns(match, expected, heard) {
+	const idx = match.flatMap((j, i) => j >= 0 ? [i] : []);
+	const compressed = (a, b) => {
+		const dt = heard[match[b]].start_ms - heard[match[a]].start_ms;
+		const de = expected[b].start_ms - expected[a].start_ms;
+		return dt < (b - a) * 1e3 / 6 || de > 0 && dt < de * .4;
+	};
+	const fast = idx.slice(0, -1).map((a, x) => compressed(a, idx[x + 1]));
+	let dropped = 0;
+	let k = 0;
+	while (k < idx.length - 1) {
+		let e = k;
+		while (e < idx.length - 1 && fast[e]) e++;
+		if (e - k + 1 >= 4) {
+			for (let x = k; x <= e; x++) match[idx[x]] = -1;
+			dropped += e - k + 1;
+		}
+		k = Math.max(e, k + 1);
+	}
+	return dropped;
+}
+/**
 * Re-time `expected` (the script's words with estimated times, scene-local ms) from `heard`
 * (whisper's words, same clock). Longest-common-subsequence matching on normalised words; matched
 * words take whisper's times, the rest are placed between their matched neighbours in proportion to
@@ -247438,7 +247540,8 @@ function alignWords(expected, heard, durationMs) {
 	const m = heard.length;
 	if (!n) return {
 		words: [],
-		matched: 0
+		matched: 0,
+		distrusted: 0
 	};
 	const ek = expected.map((w) => key(w.word));
 	const hk = heard.map((w) => key(w.word));
@@ -247451,6 +247554,7 @@ function alignWords(expected, heard, durationMs) {
 		j++;
 	} else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
 	else j++;
+	const distrusted = dropCompressedRuns(match, expected, heard);
 	const matched = match.filter((j) => j >= 0).length;
 	const out = expected.map((w) => ({ ...w }));
 	const anchors = [];
@@ -247496,7 +247600,8 @@ function alignWords(expected, heard, durationMs) {
 	}
 	return {
 		words: out,
-		matched
+		matched,
+		distrusted
 	};
 }
 /** whisper.cpp's binary: WHISPER_CPP_PATH, else whisper-cli / whisper-cpp on PATH. */
@@ -247560,6 +247665,7 @@ async function alignVoiceTracks(tracks, o) {
 			warnings.push(`align: ${t.scene_id}: whisper matched only ${r.matched} of ${t.words.length} words; kept estimated timings`);
 			continue;
 		}
+		if (r.distrusted) warnings.push(`align: ${t.scene_id}: ignored ${r.distrusted} word time(s) whisper compressed (faster than 6 words/s); those words keep estimated timings`);
 		byId.set(t.scene_id, {
 			...t,
 			words: r.words,
@@ -248975,7 +249081,7 @@ async function stageCover(run, input) {
 	const hookIdx = Math.max(0, planScenes.findIndex((s) => s.purpose === "hook"));
 	const hookStart = placements[hookIdx].scene_start_ms;
 	const hookMid = Math.round(hookStart + slotMs[hookIdx] / 2);
-	const coverAt = spec.cover ? Math.round(spec.cover.focal_time_sec * 1e3) : hookMid;
+	const coverAt = spec.cover?.focal_time_sec != null ? Math.round(spec.cover.focal_time_sec * 1e3) : hookMid;
 	const thumbnailKey = sha256Hex(canonicalJson({
 		v: 3,
 		assembly: assemblyKey,
@@ -264617,7 +264723,7 @@ function retimeSpec(spec, target) {
 	const durations = scaleDurations(spec.scenes.map((s) => s.duration_sec), target);
 	spec.scenes.forEach((s, i) => s.duration_sec = durations[i]);
 	spec.target_duration_sec = target;
-	if (spec.cover) spec.cover.focal_time_sec = round1$2(spec.cover.focal_time_sec * factor);
+	if (spec.cover?.focal_time_sec != null) spec.cover.focal_time_sec = round1$2(spec.cover.focal_time_sec * factor);
 	const notes = [];
 	if (voiceMode(spec) === "narrated") for (const s of spec.scenes) {
 		const words = s.voiceover.trim() ? s.voiceover.trim().split(/\s+/).length : 0;
@@ -267719,16 +267825,17 @@ function retime(src, spec, language, notes) {
 		}
 	});
 	if (changed.length) notes.push(`re-timed for ${language} ${narrated ? "speech" : "reading"} speed: ${changed.join(", ")}`);
-	if (spec.cover) {
+	if (spec.cover?.focal_time_sec != null) {
+		const focal = spec.cover.focal_time_sec;
 		let acc = 0;
 		let newAcc = 0;
 		for (const [i, s] of src.scenes.entries()) {
 			const d = s.duration_sec;
 			const nd = spec.scenes[i].duration_sec;
-			if (spec.cover.focal_time_sec < acc + d || i === src.scenes.length - 1) {
-				const f = Math.min(1, Math.max(0, (spec.cover.focal_time_sec - acc) / d));
+			if (focal < acc + d || i === src.scenes.length - 1) {
+				const f = Math.min(1, Math.max(0, (focal - acc) / d));
 				const t = round1$1(newAcc + f * nd);
-				if (t !== spec.cover.focal_time_sec) notes.push(`cover.focal_time_sec ${spec.cover.focal_time_sec} → ${t} (same point of ${s.id})`);
+				if (t !== focal) notes.push(`cover.focal_time_sec ${focal} → ${t} (same point of ${s.id})`);
 				spec.cover.focal_time_sec = t;
 				break;
 			}
@@ -270299,6 +270406,14 @@ async function loadContentIr$1(path) {
 	const r = parseYamlOrJson(ContentIR, text);
 	return r.ok ? r.data : null;
 }
+/** Templates whose centrepiece is the product in use; their briefs should carry a product_flow. */
+const PRODUCT_TEMPLATES = /* @__PURE__ */ new Set([
+	"product-demo",
+	"product-ui",
+	"devtool-launch",
+	"product-launch",
+	"product-hero"
+]);
 /** Validate `<project>/project/creative-brief.yaml` (or .yml/.json): schema, then semantic warnings and template fit. */
 async function validateBrief(projectDir, templatesDir) {
 	const found = await findBrief(projectDir);
@@ -270321,6 +270436,19 @@ async function validateBrief(projectDir, templatesDir) {
 	const sem = validateCreativeBriefSemantics(brief);
 	result.errors.push(...sem.errors);
 	result.warnings.push(...sem.warnings);
+	if (brief.tone_preset) {
+		const tones = await loadToneRules(findResearchSpecsDir());
+		if (tones && !(brief.tone_preset in tones.presets)) result.errors.push({
+			path: "tone_preset",
+			message: `unknown tone preset "${brief.tone_preset}"`,
+			fix: `use one of: ${Object.keys(tones.presets).join(", ")} (research-specs/tones.yaml), and keep free-text direction in tone`
+		});
+	}
+	if (brief.template && PRODUCT_TEMPLATES.has(brief.template) && !brief.product_flow) result.warnings.push({
+		path: "product_flow",
+		message: `template "${brief.template}" shows the product in use, but the brief has no product_flow`,
+		fix: "add product_flow: the 2–4 steps of using it (entry → key action → result) with evidence refs, and build the centrepiece scenes from them (plan references/product-flow.md)"
+	});
 	if (brief.template && templatesDir) {
 		let tpl = null;
 		try {
@@ -270471,6 +270599,7 @@ async function scaffoldSpec(projectDir, templatesDir, opts) {
 	const durations = allocateDurations(beats.map((b) => b.share), target);
 	const mode = opts.voice_mode ?? tpl.voice_mode ?? "narrated";
 	const style = opts.style ?? tpl.default_style;
+	if (style) await getStyle(findStylesDir(), style, projectDir);
 	const music = opts.music ?? tpl.default_music;
 	const footageBeats = beats.some((b) => FOOTAGE_STRATEGIES.has(b.suggested_visual_strategy));
 	if (mode === "none") {
@@ -270640,7 +270769,7 @@ function renderStoryboardMarkdown(spec, ir) {
 	const master = resolveMaster(spec);
 	const targets = resolveTargets(spec);
 	lines.push(`Master: ${master.width}×${master.height} @ ${master.fps} fps · Targets: ${targets.join(", ") || "none"}`, "");
-	if (spec.cover) lines.push(`Cover: "${spec.cover.headline}" at ${spec.cover.focal_time_sec}s`, "");
+	if (spec.cover) lines.push(`Cover: "${spec.cover.headline}" at ${spec.cover.focal_time_sec != null ? `${spec.cover.focal_time_sec}s` : "auto (longest settled hold)"}${spec.cover.bake_first_frame ? ", baked into frame 0" : ""}`, "");
 	for (const [id, p] of Object.entries(spec.publish ?? {})) lines.push(`Post (${id}): ${truncate(p.post_caption, 200)}${p.hashtags?.length ? ` ${p.hashtags.join(" ")}` : ""}`, "");
 	lines.push("| Scene | Time | Purpose | Voiceover | On-screen text | Visual | Refs |");
 	lines.push("|---|---|---|---|---|---|---|");
