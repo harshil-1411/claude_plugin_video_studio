@@ -51,14 +51,14 @@ Turning knowledge into short videos usually means a timeline editor, a caption t
 
 | Area | Features |
 |---|---|
-| **Sources** | Markdown, text, PDF, DOCX, PPTX, web pages, local repos, video/audio files, clip folders, video URLs (YouTube, Vimeo, Loom via your `yt-dlp`) |
-| **Planning** | Story-arc plans with hooks and a hook-strength check, 24 templates that ask for the inputs they need first, a beat-level plan at the approval step, series bibles for recurring characters and looks, A/B `variants` (hooks, covers, 15 s / 30 s cuts) |
-| **Visuals** | 16 scene kinds including Claude-written `motion` pages, 4 style packs with banned-effect lists plus project styles measured from a reference reel, brand kits, camera moves, transitions, word cues that land graphics on spoken words, count-ups, optional motion blur |
-| **Review before render** | `stills` sheets at chosen times, beats or downbeats; a determinism and loop-seam check for every `motion` page |
+| **Sources** | Markdown, text, PDF, DOCX, PPTX, web pages (JavaScript-built pages too, with your approval), local repos, video/audio files, clip folders, video URLs (YouTube, Vimeo, Loom via your `yt-dlp`) |
+| **Planning** | Story-arc plans with hooks and a hook-strength check, 24 templates that ask for the inputs they need first, a beat-level plan at the approval step, series bibles for recurring characters and looks, 7 tone presets (polished, playful, deadpan, cinematic, energetic, app-store, parody), product videos planned around the product in use, a brand kit drafted from your repo or site (`brand_draft`), A/B `variants` (hooks, covers, 15 s / 30 s cuts) |
+| **Visuals** | 16 scene kinds including Claude-written `motion` pages, 4 style packs with banned-effect lists plus project styles measured from a reference reel, brand kits with your project's own fonts, camera moves, transitions, word cues that land graphics on spoken words, text reveals timed to the beat and held long enough to read, count-ups, optional motion blur, a poster baked into frame 0 |
+| **Review before render** | `stills` sheets at chosen times, beats or downbeats (with the music and reveal timing the render uses); a determinism and loop-seam check for every `motion` page; `review` tiles at every transition |
 | **Audio** | System TTS or ElevenLabs, 4 CC0 beds plus locally synthesized scores, beat and downbeat snapping, a synthesized CC0 sound-effect library, sound effects on their peak, motion that reacts to the music, ducking, −14 LUFS |
-| **Footage** | Local transcription (~99 languages, speaker turns) with a glossary for names, best-clip `shorts`, subject tracking for vertical reframes, cutaways, `tighten` for pauses and filler words (paced like your own edits, every join checked for clipped words), redaction, letterbox removal |
+| **Footage** | Local transcription (~99 languages, speaker turns) with a glossary for names, best-clip `shorts`, subject tracking for vertical reframes, cutaways, `tighten` for pauses and filler words (paced like your own edits, every join checked for clipped words), redaction, letterbox removal, an audio offset for recordings whose sound lags the picture |
 | **Captions and languages** | Phrase captions clear of platform UI, keyword emphasis, sound-event captions, `localize` with Devanagari, Japanese and Arabic fonts, RTL and CJK line breaking |
-| **Checks** | 30+ lint rules (UI zones, contrast, reading speed, caption sync, insert timing, cuts on the beat, story arc, title length, brand rules, banned effects, acceptance numbers, loop seams, unsafe motion pages), technical QA (loudness, black, frozen, motion density, loop seam, flashing, A/V sync), `review` contact sheets, `compare` against a reference |
+| **Checks** | 30+ lint rules (UI zones, contrast, reading speed, caption sync, insert timing, cuts on the beat, story arc, title length, brand rules, stock phrases, busy crossfades, reveals too fast to read, sound-effect licence and placement, banned effects, acceptance numbers, loop seams, unsafe motion pages), technical QA (loudness, black, frozen, motion density, share of frames moving, loop seam, flashing, A/V sync), `review` contact sheets, `compare` against a reference |
 | **Export** | Per-platform packages, C2PA signing, and an editable timeline (import-tested) for DaVinci Resolve or Final Cut (FCPXML and OTIO) |
 | **Trust and control** | Claim `verify`, `video.lock`, golden-frame `test`, `diff`, provenance, optional C2PA signing, `policy.yaml` spend limits and consent, `render_cancel` |
 | **Generative (prep)** | Shot cards compiled into ready-to-paste prompt packs for Seedance, Veo, Kling, Wan, Runway and Hailuo, offline with no spend; provider and publishing keys are optional placeholders until Phase 7/9 |
@@ -186,7 +186,7 @@ claude --plugin-dir .
 
 | Tool | Unlocks |
 |---|---|
-| Google Chrome + the HyperFrames producer | `motion` scenes (Claude-written code), richer motion graphics, `stills`, and the determinism check. `doctor` prints the one-time install command |
+| Google Chrome + the HyperFrames producer | `motion` scenes (Claude-written code), richer motion graphics, `stills`, the determinism check, and opening JavaScript-built pages at ingest (`render_js`). `doctor` prints the one-time install command |
 | whisper.cpp (`brew install whisper-cpp`) + a model (about 148 MB; 488 MB for speaker turns, downloaded only with your approval) | Transcribing your footage, `shorts`, `tighten`, and exact word timings for system voices |
 | yt-dlp (`brew install yt-dlp`) | Ingesting YouTube, Vimeo and Loom links |
 | A macOS Premium or Enhanced voice (System Settings → Accessibility → Spoken Content) | Natural-sounding narration with the free system voice |
@@ -228,16 +228,16 @@ flowchart LR
 
 | | |
 |---|---|
-| **Inputs** | Markdown, text, PDF, DOCX, PPTX, web pages, local repos, video and audio files (local transcription in English or ~99 languages with detection, optional speaker turns for English conversations), folders of clips, video URLs (YouTube, Vimeo, Loom through your own optional `yt-dlp`, using their subtitles when present; direct .mp4/.mp3 links need nothing extra) |
+| **Inputs** | Markdown, text, PDF, DOCX, PPTX, web pages (a page built by JavaScript can be opened once in an isolated headless Chrome with `render_js`, after you approve it), local repos, video and audio files (local transcription in English or ~99 languages with detection, optional speaker turns for English conversations), folders of clips, video URLs (YouTube, Vimeo, Loom through your own optional `yt-dlp`, using their subtitles when present; direct .mp4/.mp3 links need nothing extra) |
 | **Templates (24)** | explain · educational · listicle · faceless-listicle · product-launch · devtool-launch · product-demo · product-ui · case-study · before-after · carousel-story · animated-explainer · text-over-music · talking-head · aesthetic-broll · silent-vlog · oddly-satisfying · ambient-slice-of-life · ui-morph-loop · kinetic-type · ambient-loop · slides-narrated · topic-explainer-9 · product-hero; templates can ask for the inputs they need first (reference video, photo, real UI states) |
 | **Scene kinds (16)** | typography · code · chart · stat · diagram · timeline · comparison · split_screen · quote · kinetic_text · lower_third · map · screenshot · cta · end_card, plus **`motion`**: a page Claude writes as code (`seek(t)`, springs, the brand tokens and the music's beat grid), checked for safety and determinism before it renders, with optional motion blur; plus real footage with text overlays |
 | **Voice** | macOS `say` (automatically picks an installed Premium/Enhanced voice; with local whisper installed its word timings are aligned to the audio, so captions and cues land exactly) or espeak-ng, ElevenLabs (optional key), no voice (text over music), or the speech already in your footage; pace set with `voice.rate_wpm` (default 160) |
-| **Audio** | 4 bundled CC0 music beds (ducked under speech), locally synthesized scores (`synth:pulse`, `lofi`, `ambient`, `drive`: CC0, exact beat grid), cuts snapped to beats or downbeats, native clip sound, crossfades, sound effects placed on their peak, −14 LUFS with true-peak headroom |
+| **Audio** | 4 bundled CC0 music beds (ducked under speech), locally synthesized scores (`synth:pulse`, `lofi`, `ambient`, `drive`: CC0, exact beat grid), cuts snapped to beats or downbeats, native clip sound (with `av_offset_ms` when it lags the picture), crossfades, 18 synthesized CC0 sound effects (`bundled:whoosh-soft`, `pop`, `click`, `chime`…, each measured for brightness and level) placed on their peak, motion pages that can breathe with the music's energy, −14 LUFS with true-peak headroom |
 | **Footage** | Crop, contain or blurred-pad fits, trim and speed, text overlays, automatic removal of baked-in letterbox bars, and `redact` regions to blur inboxes, names or dashboards in screen recordings; subject tracking that keeps a moving speaker in frame when a landscape video becomes vertical (`footage_focus`, macOS Vision); `footage_look` shot sheets so Claude sees the footage before choosing clips; cutaways from a talking head to a graphic while the speaker keeps talking; a brand or series glossary that fixes misheard names in transcripts and captions; `tighten` paced from a video you edited, with every cut checked for clipped or repeated words; quality warnings (dark or bright picture, clipped or unclear audio); rotated phone video and HDR handled |
 | **Captions** | 3–7 word phrases on plates, placed clear of each platform's UI, held long enough to read, broken at speaker changes, with keyword emphasis and sound-event cues like `[music]`; turn them off per scene where kinetic text already shows the words |
-| **Looks** | Style packs (minimal, editorial, technical, energetic, or your own in `<project>/styles/`, e.g. measured from a reference reel by `analyze write_style`) and brand kits (colours, fonts, weights, motion, a corner logo, forbidden treatments, banned phrases, pronunciation overrides such as `LLM` → "L L M" that keep captions as written); scene transitions (crossfade, fade to black, slide, zoom, whip) that keep narration in sync; per-scene camera moves (push in, pull out, punch, reveal, drift, hold); word cues that land each list item, step or number on the word that says it |
+| **Looks** | Style packs (minimal, editorial, technical, energetic, or your own in `<project>/styles/`, e.g. measured from a reference reel by `analyze write_style`) and brand kits (colours, fonts, weights, motion, a corner logo, forbidden treatments, drafted from your repo or site by `brand_draft` with evidence for each value, fonts from your project's `fonts/` folder, banned phrases, pronunciation overrides such as `LLM` → "L L M" that keep captions as written); scene transitions (crossfade, fade to black, slide, zoom, whip) that keep narration in sync; per-scene camera moves (push in, pull out, punch, reveal, drift, hold); word cues that land each list item, step or number on the word that says it |
 | **Languages** | `localize` translation sheets; bundled Noto fonts for Japanese, Devanagari and Arabic; CJK line breaking; right-to-left text |
-| **Checks** | 30+ lint rules (platform UI zones, contrast, reading speed, caption timing, cues, data inserts on the words that say them, story arc, cutaway rhythm, title length (a heuristic), brand rules, banned effects, acceptance numbers, loop seams, footage quality), technical QA (loudness, black or frozen frames, motion density, flashing (approximates WCAG 2.3.1; red flashes not measured), A/V sync), `stills` sheets before a render, `review` contact sheets with problem scenes bordered, an automatic review → fix → re-render loop, and `compare` before/after pages or against a reference video with metrics |
+| **Checks** | 30+ lint rules (platform UI zones, contrast, reading speed, caption timing, cues, data inserts on the words that say them, story arc, cutaway rhythm, title length (a heuristic), brand rules, banned effects, acceptance numbers, loop seams, footage quality, stock phrases, busy crossfades, reveal speed, sound effects), technical QA (loudness, black or frozen frames, motion density, share of frames moving, flashing (approximates WCAG 2.3.1; red flashes not measured), A/V sync), `stills` sheets before a render, `review` contact sheets with problem scenes bordered, an automatic review → fix → re-render loop, and `compare` before/after pages or against a reference video with metrics |
 | **Trust** | `verify` claim coverage, `video.lock`, golden-frame `test`, `diff`, provenance, optional C2PA content credentials (`export sign`); secrets found in sources are redacted |
 | **Control** | `policy.yaml` (allowed providers, spend limits, approval threshold), consent recorded in `project/consent.json`, `render_cancel`, one render per project at a time |
 
@@ -249,6 +249,7 @@ flowchart LR
 | [`examples/text-to-motion-graphic`](examples/text-to-motion-graphic) | A 30 s explainer from Markdown notes (also the golden-frame test) |
 | [`examples/reel-grammar`](examples/reel-grammar) | Every Phase 5 scene kind, the `energetic` style and a music bed, with no voiceover |
 | [`examples/code-motion-loop`](examples/code-motion-loop) | A 6 s seamless UI-morph loop written as a `motion` page on a synthesized score, cut to downbeats (needs HyperFrames) |
+| [`examples/launch-video`](examples/launch-video) | A 20 s launch reel for an invented product, made the `/video-studio:launch` way: brand drafted from its site, the product flow as five `motion` pages, a synthesized score, sound effects and a poster on frame 0 (needs HyperFrames) |
 | [`examples/demo-app`](examples/demo-app) | A tiny web app to try `/video-studio:demo` screen recording on |
 
 ## Commands
@@ -262,11 +263,11 @@ flowchart LR
 | `/video-studio:lint` · `verify` | Platform contract checks with a fix loop (UI zones, caption readability and sync, cuts on the beat, story arc); claim coverage against the sources |
 | `/video-studio:stills` | Frames of each scene at chosen times, beats or downbeats, before the full render |
 | `/video-studio:prompt-pack` | Prompts for Seedance, Veo, Kling, Wan, Runway and Hailuo compiled from shot cards (offline: nothing generated or spent) |
-| `/video-studio:review` · `compare` | Contact sheets, frame strips and crops of a render (lint findings bordered), so Claude looks at the video before handing it over; a before/after page that plays two versions in sync (side by side, stacked or wipe) |
+| `/video-studio:review` · `compare` | Contact sheets, frame strips, transition tiles and crops of a render (lint findings bordered), so Claude looks at the video before handing it over; a before/after page that plays two versions in sync (side by side, stacked or wipe) |
 | `/video-studio:test` · `diff` | Golden-frame regression tests; spec, lock and frame diffs between renders |
 | `/video-studio:variants` · `adapt` | Hook × cover A/B sets with an experiment manifest; new aspect, length or platform |
 | `/video-studio:localize` | Language versions from a translation sheet, re-timed for the language |
-| `/video-studio:ingest` · `shorts` · `analyze` | Documents, web pages, repos, media files and video URLs; local transcription (language detection, speaker turns); standalone clips from a long talk, with shot sheets, subject tracking and cutaways; a reference video's format, motion timing and speech pacing (`write_style` saves the timing as a project style) |
+| `/video-studio:ingest` · `shorts` · `analyze` | Documents, web pages (JavaScript-built ones with your approval), repos, media files and video URLs; local transcription (language detection, speaker turns); standalone clips from a long talk, with shot sheets, subject tracking and cutaways; a reference video's format, motion timing and speech pacing (`write_style` saves the timing as a project style) |
 | `/video-studio:tighten` | Cleans up talking-head footage: shortens pauses (optionally paced like a video you edited), cuts filler words and drops retakes, and checks every join for clipped words (dry run first, new asset on apply) |
 | `/video-studio:demo` | Records a scripted walk through **your** running app (inputs are blurred) |
 | `/video-studio:doctor` | Checks ffmpeg, fonts, Chrome, whisper, HyperFrames and keys |
@@ -283,6 +284,7 @@ flowchart LR
 - **Subject tracking is automatic on macOS only.** Elsewhere Claude marks the subject from shot sheets.
 - **No colour grading yet.** Dark or bright footage gets a warning, not a fix.
 - **Demo capture never starts your app.** You start it and give the URL, and every step is approved first.
+- **SVG logos can't be the corner logo** (ffmpeg can't read SVG); use a PNG. Project fonts must be TTF or OTF.
 
 The roadmap is in [`docs/PLAN.md`](docs/PLAN.md) and the current state in [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
@@ -316,13 +318,14 @@ After changing anything under `packages/`, rerun `pnpm bundle` and commit `dist/
 | `packages/prompts` | provider specs and prompt compilers for shot cards |
 | `packages/mcp` | the MCP server (`dist/mcp.mjs`) and every tool |
 
-Data lives next to the code: `skills/`, `templates/`, `styles/` (a project can add its own in `<project>/styles/`), `music/`, `fonts/`, `platform-specs/`, `provider-specs/` and `research-specs/`.
+Data lives next to the code: `skills/`, `templates/`, `styles/` (a project can add its own in `<project>/styles/`), `music/`, `sfx/`, `fonts/`, `platform-specs/`, `provider-specs/` and `research-specs/`.
 
 Tests that need real Chrome or a whisper model are skipped by default:
 
 ```sh
 VS_TEST_RENDER=1 npx vitest run packages/renderer packages/mcp/src/stills.test.ts   # real HyperFrames/Chrome renders
 VS_TEST_RENDER=1 VS_UPDATE_GOLDEN=1 npx vitest run tests/golden-frames              # record the motion example's goldens
+VS_TEST_RENDER=1 npx vitest run packages/mcp/src/render-page.test.ts                # render_js isolation on a local JS page
 VS_TEST_WHISPER_MODEL=<path to a ggml model> npx vitest run packages/mcp/src/tighten.test.ts
 VS_DEBUG_CAPTURE=1 …                                                               # trace every Chrome capture step
 ```
@@ -331,7 +334,7 @@ VS_DEBUG_CAPTURE=1 …                                                          
 
 ## Contributing
 
-Guides for adding [archetypes](docs/contributing/archetypes.md), [style packs](docs/contributing/styles.md), [platform packs](docs/contributing/platform-packs.md) and [providers](docs/contributing/providers.md) are in `docs/contributing/`. Ingested content is always treated as untrusted data: the plugin never executes code from sources.
+Guides for adding [archetypes](docs/contributing/archetypes.md), [style packs](docs/contributing/styles.md), [platform packs](docs/contributing/platform-packs.md) and [providers](docs/contributing/providers.md) are in `docs/contributing/`. Ingested content is always treated as untrusted data: the plugin never executes code from sources in its own process. The one exception is opt-in `render_js`, which opens a page once in an isolated headless Chrome after you approve it, with every request checked by the engine and nothing clicked.
 
 ## Credits
 
@@ -339,4 +342,4 @@ Some ideas re-expressed from latent-spaces/brag (MIT).
 
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE). The bundled fonts are OFL-1.1 (see [`fonts/README.md`](fonts/README.md)), and the bundled music beds are CC0 (see [`music/README.md`](music/README.md)).
+Apache-2.0. See [`LICENSE`](LICENSE). The bundled fonts are OFL-1.1 (see [`fonts/README.md`](fonts/README.md)), the bundled music beds are CC0 (see [`music/README.md`](music/README.md)), and the bundled sound effects are CC0, synthesized by the plugin (see [`sfx/README.md`](sfx/README.md)).
