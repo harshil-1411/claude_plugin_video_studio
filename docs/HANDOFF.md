@@ -1,14 +1,14 @@
-# Handoff: video-studio (2026-09-30, v0.4.0 tagged; Phase 6.7 on main → 0.5.0)
+# Handoff: video-studio (2026-09-30, v0.5.0)
 
-**Version 0.4.0 tagged; 0.5.0 (Phase 6.7) is on `main`, untagged until the user's Mac checks pass** (tags `v0.1.0`, `v0.2.0`, `v0.3.0`, `v0.4.0`). **Git:** branch `main` only, pushed to https://github.com/harshil-1411/claude_plugin_video_studio. The working tree is clean. There is no CI by the user's choice; the user's **pre-push hook** runs `node scripts/check.mjs --push` on every push (8 steps, about 5 min; tags run it too).
+**Version 0.5.0** (tags `v0.1.0` … `v0.5.0`). **Git:** branch `main` only, pushed to https://github.com/harshil-1411/claude_plugin_video_studio. The working tree is clean. There is no CI by the user's choice; the user's **pre-push hook** runs `node scripts/check.mjs --push` on every push (8 steps, about 5 min; tags run it too).
 
 Read this with `.claude/CLAUDE.md` (architecture rules and commands) and `docs/PLAN.md` (roadmap). Everything below "History" is how each phase was built.
 
 ## Start here (read first)
 
-**State (2026-09-30).** Phases 0–6, 6.5 (directed motion), 6.6 (craft and hygiene), **6.7 (launch craft)** and the local part of 8 are done. Phase 6.7 is on `main` (last commit `db02736`) but **not tagged**: 0.5.0 waits for the user's Mac checks below. Phase 7 (paid AI video providers) and Phase 9 (publishing) are not started; both need the user's keys or accounts. The working tree is clean.
+**State (2026-09-30).** Phases 0–6, 6.5 (directed motion), 6.6 (craft and hygiene), **6.7 (launch craft)** and the local part of 8 are done. **Released as `v0.5.0`** after the user's Mac checks passed on 2026-09-30 (real-Chrome motion kit 1.1.0, `render_js` isolation, the loop example's goldens, the HyperFrames render of `examples/launch-video`, sound-effect levels). Phase 7 (paid AI video providers) and Phase 9 (publishing) are not started; both need the user's keys or accounts. The working tree is clean.
 
-**Phase 6.7 in one breath** (plan in `docs/PLAN.md`, details in `CHANGELOG.md` [Unreleased] 0.5.0; ideas from a read-only review of latent-spaces/brag (MIT), re-expressed, nothing copied):
+**Phase 6.7 in one breath** (plan in `docs/PLAN.md`, details in `CHANGELOG.md` 0.5.0; ideas from a read-only review of latent-spaces/brag (MIT), re-expressed, nothing copied):
 - **Launch videos:** `/video-studio:launch` (repo or URL → 18–22 s reel, one approval after the preview); `brand_draft` (Brand v2 draft from a repo's CSS/fonts/logo/package.json or a URL's stylesheets, with evidence); project fonts in `<project>/fonts/`; brief `product_flow` and `tone_preset` (`research-specs/tones.yaml`, applied by `spec_scaffold`); product templates with `flow`/`app_url`/`tone` inputs; plan reference `product-flow.md`.
 - **Sound:** synthesized CC0 `sfx/` (18 sounds, `bundled:<id>`, `scripts/generate-sfx.mjs`), `sound-design.md`, `footage.av_offset_ms`.
 - **Cover:** `cover.bake_first_frame` (poster on frame 0) and automatic cover time (omit `focal_time_sec`).
@@ -18,15 +18,14 @@ Read this with `.claude/CLAUDE.md` (architecture rules and commands) and `docs/P
 - **Fixed:** whisper compressed-anchor runs (captions ahead of the voice); `spec_scaffold` style check; link-local/metadata blocked even with `VS_ALLOW_PRIVATE_URLS=1`; banned phrases checked on generated post copy; `acceptance_unmet` is a warning on ffmpeg stand-ins; no dead-air flags without narration.
 - **Example:** `examples/launch-video/` (Checkmint, an invented notes-to-action-list tool), made the launch way; only previewed with ffmpeg stand-ins so far.
 
-**Do first: the user's Mac checks, then tag 0.5.0.**
-1. `VS_TEST_RENDER=1 npx vitest run packages/renderer/src/hyperframes-renderer.test.ts` (motion kit 1.1.0; a page drawn from `vs.energy`).
-2. `VS_TEST_RENDER=1 npx vitest run packages/mcp/src/render-page.test.ts packages/mcp/src/stills.test.ts packages/mcp/src/review.test.ts` (`render_js` on `fixtures/spa`: JS text extracted, metadata probe blocked, no popups; Chrome's dead-proxy, preflight and 3xx handling are untested until this runs).
-3. `VS_TEST_RENDER=1 npx vitest run tests/golden-frames` (the loop example under kit 1.1.0; its page doesn't use the new helpers, so frames should match).
-4. `node scripts/render-project.mjs examples/launch-video --voice silent --renderer hyperframes --quality final`, then `/video-studio:review` with transitions and `stills` on downbeats. Nobody has seen these pages in a browser: check the note-line wraps in s02–s03 and the match-cut coordinates in `s03.js` (button centre) and `s04.js` (last box). Then decide on goldens for it.
-5. Listen to a narrated render with `bundled:` sound effects: are the catalog's `default_db` levels right under the voice? (They come from a −28 dBFS short-term target, a heuristic.)
-6. Optional: a project with a real `@font-face` font through `brand_draft` and `--renderer hyperframes`, to see project fonts in the HTML path.
+**Done 2026-09-30: the user's Mac checks passed and 0.5.0 is tagged.** The checks were:
+- the HyperFrames renderer test (motion kit 1.1.0, a page drawn from `vs.energy`);
+- `render_js` on `fixtures/spa` (isolation, blocked addresses, no popups), plus stills and review;
+- the golden frames under kit 1.1.0;
+- the final HyperFrames render of `examples/launch-video`;
+- bundled sound-effect levels under a voice.
 
-**To release 0.5.0 after the checks pass:** fix what they find; in `CHANGELOG.md` rename `[Unreleased] - 0.5.0` to `[0.5.0] - <date>`; set `"version": "0.5.0"` in `.claude-plugin/plugin.json` (the only place the plugin version lives; other `0.4.0` hits are renderer versions); update this file; full checks; commit, push, then `git tag v0.5.0 && git push origin v0.5.0`.
+`examples/launch-video` has no golden frames yet: add them only if the user wants that example locked (`VS_TEST_RENDER=1 VS_UPDATE_GOLDEN=1`, following `tests/golden-frames` for `code-motion-loop`).
 
 **Pending, all optional (the user decides):**
 1. `! pnpm install` once. `packages/prompts` was linked by hand, so `pnpm` scripts try to reinstall until then; use `node scripts/check.mjs` meanwhile.

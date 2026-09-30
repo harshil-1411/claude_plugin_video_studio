@@ -3,7 +3,7 @@
 All notable changes to video-studio. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versions may change behaviour).
 
-## [Unreleased] - 0.5.0
+## [0.5.0] - 2026-09-30
 
 The launch-craft release (Phase 6.7): a one-command launch video, a synthesized sound-effect
 library, a poster on frame 0, a brand drafted from the source, music-reactive motion pages,

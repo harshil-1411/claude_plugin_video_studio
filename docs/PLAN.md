@@ -344,7 +344,7 @@ Why: a read-only review of the MIT-licensed tubeai-skills repo found eight ideas
     - the timeline imports into Resolve or Final Cut with clips on the right frames;
     - `tighten` on a real talking-head clip leaves no partial words.
 
-### Phase 6.7: Launch craft (local, no keys; planned 2026-09-29) → 0.5.0
+### Phase 6.7: Launch craft (local, no keys; planned 2026-09-29; released 0.5.0 on 2026-09-30)
 Why: a read-only review of the MIT-licensed latent-spaces/brag skill (a one-command launch video from a web project) found ideas that fill gaps we confirmed in our code. Ideas are re-expressed and nothing is copied (no text, code or assets; its music licence is unverified). The user added known-bug fixes, a brand drafted from the source, music-reactive motion and a one-command launch skill (2026-09-29), and chose synthesized SFX and opt-in JS page rendering.
 
 - **1. Poster on frame 0:** `cover.bake_first_frame` overlays the cover on frame 0 of the reel and each target video (clean master untouched; frame count, duration and audio unchanged), because Slack, X and Discord thumbnail frame 0. An omitted `cover.focal_time_sec` means auto: the longest settled hold, preferring hook and payoff. Refused with `master.loop`; QA spike and scdet stats skip frames 0–1 when baked.
@@ -443,7 +443,7 @@ Updated 2026-09-27: next is **Phase 6.5** (directed motion, local, no keys), wav
 
 Updated 2026-09-27 (later): Phase 6.5 and Phase 7 step 0 are done (released as 0.3.0). **Phase 6.6** (craft and hygiene, from the tubeai-skills (MIT) review) is in progress: W0 (`cd576c7`: glossary, motion timing and pacing contracts, `research-specs/titles.yaml`), W1 (`6b20973`: `flashing` and `av_sync` QA, insert-sync and `title_length` lint) and W2 (`5d1de5a`: motion timing and `write_style` project styles, glossary, measured pacing, `tighten` join checks) are done. W3 is in progress: NLE timeline export (item 8), and the docs, skills and `CHANGELOG` for 0.4.0. The exit's user-Mac checks follow (timeline import into Resolve or Final Cut, `write_style` moving `compare` toward the reference, `tighten` on real footage). Then Phase 7 adapters (keys) and Phase 9.
 
-Updated 2026-09-30: **Phase 6.7** (launch craft, from the latent-spaces/brag (MIT) review) is done on `main` (W0 `06362dd` … W4 `db02736`), untagged. Next: the user's Mac checks listed in `docs/HANDOFF.md` "Start here", then tag 0.5.0. After that, the user's choice: real reels (the eBMR video, a real `/video-studio:launch`), Phase 9, or Phase 7.
+Updated 2026-09-30: **Phase 6.7** (launch craft, from the latent-spaces/brag (MIT) review) is done and released as `v0.5.0` (W0 `06362dd` … W4 `db02736`; the user's Mac checks passed 2026-09-30). Next, the user's choice: real reels (the eBMR video, a real `/video-studio:launch`), Phase 9, or Phase 7.
 
 ## Agent execution model
 Used from Phase 6.5 on. It keeps the user's limit of **at most 2 parallel agents**, with the lead session integrating their work.
