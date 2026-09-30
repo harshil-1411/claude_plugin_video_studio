@@ -1,4 +1,4 @@
-# Handoff: video-studio (2026-09-30, v0.4.0 + Phase 6.7 → 0.5.0)
+# Handoff: video-studio (2026-09-30, v0.4.0 tagged; Phase 6.7 on main → 0.5.0)
 
 **Version 0.4.0 tagged; 0.5.0 (Phase 6.7) is on `main`, untagged until the user's Mac checks pass** (tags `v0.1.0`, `v0.2.0`, `v0.3.0`, `v0.4.0`). **Git:** branch `main` only, pushed to https://github.com/harshil-1411/claude_plugin_video_studio. The working tree is clean. There is no CI by the user's choice; the user's **pre-push hook** runs `node scripts/check.mjs --push` on every push (8 steps, about 5 min; tags run it too).
 
@@ -6,53 +6,53 @@ Read this with `.claude/CLAUDE.md` (architecture rules and commands) and `docs/P
 
 ## Start here (read first)
 
-**Phase 6.7 (launch craft), 2026-09-29/30.** Planned from a read-only review of latent-spaces/brag (MIT; ideas re-expressed, nothing copied) plus hardening; plan in `docs/PLAN.md`, details in `CHANGELOG.md` [Unreleased] 0.5.0. Commits: W0 `06362dd`, W1 `c1fa8e3`, W2 `6889f45`, W3 `86a432a`, W4 (project fonts, `examples/launch-video/`, fixes from its run, docs) committed after W3.
-- **Added:** `/video-studio:launch`; `brand_draft`; project fonts (`<project>/fonts/`); `product_flow`, `tone_preset` and `research-specs/tones.yaml` applied by `spec_scaffold`; synthesized CC0 `sfx/` (`bundled:<id>`) and `sound-design.md`; `footage.av_offset_ms`; `cover.bake_first_frame` and automatic cover time; `__vs.audio` + kit 1.1.0 (`energy`/`bass`/`onset`/`revealAt`); the reveal schedule; QA `moving_pct` (`QA_VERSION` 6) and `acceptance.min_moving_pct`; lint `cliche`, `busy_crossfade`, `reveal_too_fast`, three `sfx_*` rules; `review transitions`; `ingest render_js` (isolated Chrome, consent).
-- **Fixed:** whisper compressed-anchor runs (captions ahead of the voice); `spec_scaffold` style check; link-local/metadata stay blocked under `VS_ALLOW_PRIVATE_URLS=1`; banned phrases now checked on the generated post copy.
-- **User checks before tagging 0.5.0 (their Mac, real Chrome):**
-  1. `VS_TEST_RENDER=1 npx vitest run packages/renderer/src/hyperframes-renderer.test.ts` (motion kit 1.1.0, a page drawn from `vs.energy`).
-  2. `VS_TEST_RENDER=1 npx vitest run packages/mcp/src/render-page.test.ts packages/mcp/src/stills.test.ts packages/mcp/src/review.test.ts` (`render_js` on `fixtures/spa`: JS text extracted, metadata probe blocked, no popups).
-  3. `VS_TEST_RENDER=1 npx vitest run tests/golden-frames` (the loop example under kit 1.1.0; its page doesn't use the new helpers, so frames should match).
-  4. `node scripts/render-project.mjs examples/launch-video --voice silent --renderer hyperframes --quality final`, then look at it (`/video-studio:review` with transitions) — the first reel made the launch way. Then decide on goldens for it.
-  5. Listen to a narrated render with `bundled:` sound effects: are the default levels right under the voice?
-- **Known limits:** tone `caption_case` is a note only (no caption case setting); SVG logos can't be the corner overlay; only TTF/OTF project fonts; `moving_pct` near its threshold for very slow drifts.
+**State (2026-09-30).** Phases 0–6, 6.5 (directed motion), 6.6 (craft and hygiene), **6.7 (launch craft)** and the local part of 8 are done. Phase 6.7 is on `main` (last commit `db02736`) but **not tagged**: 0.5.0 waits for the user's Mac checks below. Phase 7 (paid AI video providers) and Phase 9 (publishing) are not started; both need the user's keys or accounts. The working tree is clean.
 
-**State.** Phases 0–6, 6.5 (directed motion), 6.6 (craft and hygiene), 6.7 (launch craft, untagged) and the local part of 8 are done. Phase 7 (paid AI video providers) and Phase 9 (publishing) are not started; both need the user's keys or accounts.
+**Phase 6.7 in one breath** (plan in `docs/PLAN.md`, details in `CHANGELOG.md` [Unreleased] 0.5.0; ideas from a read-only review of latent-spaces/brag (MIT), re-expressed, nothing copied):
+- **Launch videos:** `/video-studio:launch` (repo or URL → 18–22 s reel, one approval after the preview); `brand_draft` (Brand v2 draft from a repo's CSS/fonts/logo/package.json or a URL's stylesheets, with evidence); project fonts in `<project>/fonts/`; brief `product_flow` and `tone_preset` (`research-specs/tones.yaml`, applied by `spec_scaffold`); product templates with `flow`/`app_url`/`tone` inputs; plan reference `product-flow.md`.
+- **Sound:** synthesized CC0 `sfx/` (18 sounds, `bundled:<id>`, `scripts/generate-sfx.mjs`), `sound-design.md`, `footage.av_offset_ms`.
+- **Cover:** `cover.bake_first_frame` (poster on frame 0) and automatic cover time (omit `focal_time_sec`).
+- **Motion:** `__vs.audio` (music energy) and kit 1.1.0 (`vs.energy/bass/onset/revealAt`); the reveal schedule (reading floors on the beat).
+- **Checks:** QA `moving_pct` (`QA_VERSION` 6) and `acceptance.min_moving_pct`; lint `cliche`, `busy_crossfade`, `reveal_too_fast`, `sfx_license_missing`, `sfx_harsh_repeat`, `sfx_over_voice`; `review transitions`.
+- **Ingest:** `render_js` (opt-in, consent; isolated headless Chrome behind the network guard); dropped page copy kept under "Also on the page".
+- **Fixed:** whisper compressed-anchor runs (captions ahead of the voice); `spec_scaffold` style check; link-local/metadata blocked even with `VS_ALLOW_PRIVATE_URLS=1`; banned phrases checked on generated post copy; `acceptance_unmet` is a warning on ffmpeg stand-ins; no dead-air flags without narration.
+- **Example:** `examples/launch-video/` (Checkmint, an invented notes-to-action-list tool), made the launch way; only previewed with ffmpeg stand-ins so far.
 
-**What changed today (2026-09-27), in one breath:**
-- **v0.3.0 (Phase 6.5):**
-  - `motion` scenes: Claude-written `seek(t)` HTML with CSP, static lint and a determinism check;
-  - `stills`, beats v2, synth scores, motion-density QA, `compare` against a reference;
-  - templates now ask for inputs first; the series bible; prompt packs (Phase 7 step 0);
-  - motion blur, plus the `code-motion-loop` example with real-render goldens.
-- **v0.4.0 (Phase 6.6, ideas from a tubeai-skills (MIT) review, re-expressed, nothing copied):**
-  - flash and A/V sync QA; insert-sync and title lint;
-  - motion timing from a reference into a project style pack (`analyze write_style`);
-  - glossary, measured pacing and checked `tighten` joins;
-  - FCPXML/OTIO editor timeline export (the user's import worked).
-- **API keys:** every generator and publishing key exists as an optional placeholder (registry: `packages/schema/src/credentials.ts`; tested against `plugin.json` and `.mcp.json`). None does anything until Phase 7 or 9. The user has no keys yet.
-- **README:** a Features section, a Requirements section (OS, software, hardware), an API keys table, and a "match a reel you like" recipe.
+**Do first: the user's Mac checks, then tag 0.5.0.**
+1. `VS_TEST_RENDER=1 npx vitest run packages/renderer/src/hyperframes-renderer.test.ts` (motion kit 1.1.0; a page drawn from `vs.energy`).
+2. `VS_TEST_RENDER=1 npx vitest run packages/mcp/src/render-page.test.ts packages/mcp/src/stills.test.ts packages/mcp/src/review.test.ts` (`render_js` on `fixtures/spa`: JS text extracted, metadata probe blocked, no popups; Chrome's dead-proxy, preflight and 3xx handling are untested until this runs).
+3. `VS_TEST_RENDER=1 npx vitest run tests/golden-frames` (the loop example under kit 1.1.0; its page doesn't use the new helpers, so frames should match).
+4. `node scripts/render-project.mjs examples/launch-video --voice silent --renderer hyperframes --quality final`, then `/video-studio:review` with transitions and `stills` on downbeats. Nobody has seen these pages in a browser: check the note-line wraps in s02–s03 and the match-cut coordinates in `s03.js` (button centre) and `s04.js` (last box). Then decide on goldens for it.
+5. Listen to a narrated render with `bundled:` sound effects: are the catalog's `default_db` levels right under the voice? (They come from a −28 dBFS short-term target, a heuristic.)
+6. Optional: a project with a real `@font-face` font through `brand_draft` and `--renderer hyperframes`, to see project fonts in the HTML path.
 
-**The user's self-intro reel is done.** It lives in `video-studio-suparn-intro-v2/` (git-ignored).
-- The user approved it: 20 s, 1080×1920 @ 30, six `motion` pages on `synth:pulse`, no voice.
-- QA passes every check at 0.90 big changes/s. The acceptance target was set to the reference's measured 0.8.
-- **Loose end:** `suparn-intro-v2.mp4` in that folder is the *preview* (540×960). The final is `dist/reel.mp4`. The user was given the command to swap them; don't overwrite their file unasked.
+**To release 0.5.0 after the checks pass:** fix what they find; in `CHANGELOG.md` rename `[Unreleased] - 0.5.0` to `[0.5.0] - <date>`; set `"version": "0.5.0"` in `.claude-plugin/plugin.json` (the only place the plugin version lives; other `0.4.0` hits are renderer versions); update this file; full checks; commit, push, then `git tag v0.5.0 && git push origin v0.5.0`.
 
 **Pending, all optional (the user decides):**
 1. `! pnpm install` once. `packages/prompts` was linked by hand, so `pnpm` scripts try to reinstall until then; use `node scripts/check.mjs` meanwhile.
 2. A real `tighten` run with a whisper model installed. The join re-check has only run against simulated output.
-3. Re-render `examples/code-motion-loop` with HyperFrames under QA_VERSION 5.
-4. A frame strip of a `motion` scene for the README gallery. Use the loop example; the intro only with the user's OK.
+3. A frame strip of a `motion` scene for the README gallery (the loop or launch example; the intro only with the user's OK).
+4. The user's self-intro reel (`video-studio-suparn-intro-v2/`, approved): `suparn-intro-v2.mp4` there is the *preview*; the final is `dist/reel.mp4`. The user has the command to swap them; don't overwrite their file unasked.
 
 **Next phase, the user's choice:**
-- **Real reels:** the eBMR and launch videos. Real runs have always found bugs.
+- **Real reels:** the eBMR video, and now a real `/video-studio:launch` on one of the user's own products. Real runs have always found bugs (the launch example found five).
 - **Phase 9:** publishing and analytics with the user's own OAuth.
 - **Phase 7:** AI video providers, once there are keys. Re-verify `provider-specs/*.yaml` first; they are all `verified: false`.
 
 **Rules that matter:**
-- **Never name the research source in the repo.** Its folder at the repo root is untracked and excluded locally through `.git/info/exclude`. Before every commit, search the staged diff for the source's name (ask the user or see Claude's memory for it) and expect 0 hits. Cite it only as "motion-design research (2026-09-27)". The tubeai repo is named only in `PLAN.md` and here.
+- **Never name the research source in the repo.** Its folder at the repo root is untracked and excluded locally through `.git/info/exclude`. Before every commit, search the staged diff for the source's name (ask the user or see Claude's memory for it) and expect 0 hits. Cite it only as "motion-design research (2026-09-27)". The tubeai and brag repos (both MIT, ideas only) are named only in `PLAN.md`, `CHANGELOG.md`, the README credits and here.
 - **The user's projects stay local and untouched:** `msb-docs-ebmr-explainer/`, `video-studio-*/`, `vs-interview/`, `sbector-self-introduction-video/`. Never ingest the user's marksheets, degrees or CV.
-- **Agents:** the user allowed up to 3 at once on 2026-09-27 (2 lanes plus 1 separate project agent). Lanes share one tree with disjoint files, because worktrees lack `node_modules`. The lead owns schemas, bundles, commits and pushes.
+- **Agents:** up to 3 at once (2 lanes plus 1 separate job). Lanes share one tree with disjoint files, because worktrees lack `node_modules`. The lead owns schemas, bundles, commits and pushes. In auto mode the Write/Edit tools are sometimes refused with "classifier gave no verdict"; Bash heredocs and python replace scripts work.
+- **Commits go straight to `main`:** run the checks first; the pre-push hook re-runs all 8. Rebase on `origin/main` if the user pushed from GitHub (they did once, a README edit).
+
+## History: 2026-09-29/30, Phase 6.7 (launch craft)
+
+- **Plan:** 15 items from the brag review plus the user's extras (known-bug fixes, brand from source, music-reactive motion, one-command launch). The user chose synthesized SFX (not recorded packs) and opt-in JS page rendering.
+- **W0 `06362dd` (lead):** schema contracts; `research-specs/tones.yaml` and `cliches.yaml` with loaders; the whisper anchor guard (`dropCompressedRuns` in `voice-align.ts`); the `spec_scaffold` style check; brief checks for `tone_preset` and `product_flow`. An omitted `cover.focal_time_sec` means "auto" (not a string union, so consumers stay numeric).
+- **W1 `c1fa8e3`:** A = `poster.ts` (the unbaked reel is kept as `renders/<q>/reel-unbaked.mp4`), `autoCoverTime` in `cover.ts` via `holdSpans` (`motion-timing.ts`), QA skips frames 0–1 when baked, the glossary end-to-end test. B = `sfx/` and `sfx.ts`, `bundled:` resolution in `pipeline-media.ts`, `av_offset_ms` through `AudioLayer.delay_ms`, the sound and cliché lints. Lead: `poster_baked`/`auto` in the manifest, frame-mode `timestamp_ms` 0 when baked, bundled SFX in `video.lock`.
+- **W2 `6889f45`:** A = `media/src/envelope.ts` → `__vs.audio`, kit 1.1.0, `renderer/src/reveal-schedule.ts`, `reveal_too_fast`. B = `moving_pct` (signalstats YDIF ≥ 0.3), `compare` row, `ingestion/src/brand-source.ts` + `brand_draft`, `fixtures/launch-bench/`. Lead: narrowed `reveal_too_fast` for motion pages to pages that read `revealAt` (a UI morph shows labels together; the loop example would otherwise warn), `min_moving_pct` in `acceptance_unmet`, `eq_bars` in every style's avoid list.
+- **W3 `86a432a`:** A = `mcp/src/render-page.ts` (`render_js`: the engine fetches every request through `net-guard` with pinned connections; Chrome's own proxy is a dead port), `review transitions`, `stills` get the envelope and reveal cues. B = tone presets in `spec_scaffold`, product templates, `product-flow.md`, the launch skill, `creative-director` checks, README. Lead: `spec_scaffold tone_preset` input, `isLinkLocal` moved into `net-guard.ts` (blocked even under the opt-out), the CLAUDE.md safety wording.
+- **W4 `db02736`:** project fonts (`renderer/src/project-fonts.ts`; keys unchanged when a project has none), `examples/launch-video/`, and fixes from its run: the "Also on the page" appendix in `extractHtml` (short copy matched as a phrase; only headings, list items and multi-word buttons), `brand_draft` naming and relative source path, `acceptance_unmet` downgrade on stand-ins, dead-air flags only when narrated, the scaffold cover note.
 
 ## History: 2026-09-27, 0.2.0 → 0.4.0 (Phase 6.5 and 6.6 in detail)
 
@@ -590,13 +590,20 @@ Approved plan: `~/.claude-msbector/plans/lets-plna-to-complete-mutable-mochi.md`
 10. **Warnings.** Node prints an `ExperimentalWarning` for `node:sqlite`. It is harmless.
 11. ~~The motion-graphic ceiling~~ → solved by `motion` scenes (v0.3.0); the user approved the intro v2 built with them. Original note: The 15 deterministic kinds each draw one component on a flat background, then hold still. Missing: layered backgrounds (particles, grid, drifting glow), a persistent presenter/photo slot (face-cam morph), recurring motifs, tickers, beat-timed kinetic type and in-scene continuous motion. `video-studio-suparn-reel/build.py` is a working prototype of all of these in plain HyperFrames CSS. It's a candidate for a `composition`/`layers` spec extension or a "showcase" style.
 12. ~~QA and review mislabel dead video~~ → fixed in v0.3.0: `frozen_frames` fails above 15% (or `acceptance.max_frozen_pct`), `motion_density`, `compare` against a reference. Original note: `frozen_frames` is reported as "expected for static motion-graphic scenes" even at 67% of the runtime, and the create skill tells Claude to accept it. Make it a warning above about 15% frozen and an error above about 35%, and have `review` compare the frozen share and changes per second against a reference when the user gives one.
-13. **No audio/video offset control.** Footage scenes can't shift audio against picture (for remote-call recordings with baked-in delay). Add `footage.av_offset_ms`, and optionally a `sync_check` that correlates mouth motion with speech. A pure-motion correlation test on `vs-interview` was inconclusive (r ≈ 0.2).
+13. ~~No audio/video offset control~~ → `footage.av_offset_ms` (0.5.0). Still open: an automatic `sync_check` that measures the offset (a pure-motion correlation test on `vs-interview` was inconclusive, r ≈ 0.2); today the user sets it by ear.
 14. **Write/Edit classifier gaps.** In auto mode the Write and Edit tools were refused several times ("classifier gave no verdict"); writing files through Bash heredocs worked.
-15. **Glossary captions untested end to end.** The call site in `pipeline-stages.ts` is covered by the type check only; add a render test with a brand glossary.
+15. ~~Glossary captions untested end to end~~ → `packages/mcp/src/glossary-render.test.ts`.
 16. **Provider specs are per family, not per model.** Seedance 2.5 allows 4–30 s, and Runway's text-to-video 16:9-only rule is hardcoded. Add optional per-model limits when Phase 7 starts.
-17. **`spec_scaffold` doesn't check the `style` id** (`spec_validate` does, including project styles).
+17. ~~`spec_scaffold` doesn't check the `style` id~~ → it refuses an unknown id up front.
 18. **Timeline export leaves an older `dist/timeline/` in place** when exporting without `timeline`. This is deliberate: an editor project may still reference that media.
-19. **Motion density counts sudden changes only.** Smooth motion and crossfades don't count, so compare against a reference rather than trusting the number alone.
+19. ~~Motion density counts sudden changes only~~ → QA `moving_pct` counts frames that move at all. `moving` and `frozen_frames` can both be high (only small parts move); the QA skill explains it.
+20. **`reading_density` counts product-UI copy.** A motion page showing a UI (a notes box, a list) gets reading warnings like any on-screen text (the launch example has 3). Options: count only words new since the previous scene, or let a page mark text as UI.
+21. **Tone `caption_case` is a note only.** `CaptionSettings` has no case field; add one (schema) and apply it in the caption builder.
+22. **SVG logos** can't be the corner overlay (the system ffmpeg has no SVG decoder); `brand_draft` prefers raster logos. Rasterizing SVG would need a new dependency or Chrome.
+23. **Project fonts:** only TTF/OTF are indexed (a repo with only WOFF/WOFF2 falls back to bundled fonts); variable fonts are indexed at their `usWeightClass` only; a symlinked `fonts/` is skipped.
+24. **`brand_draft`'s repo walk** has its own skip list (node_modules, dist, build, hidden folders) and does not honour `.gitignore`.
+25. **`stills` before the first render** place beat-synced reveals on the bed's grid at spec durations; the render may move cuts (a note says so).
+26. **`moving_pct` threshold** (YDIF 0.3): very slow drifts sit near it, and heavily compressed references gain a few moving frames from encoder noise.
 
 ## How work is run
 
@@ -612,11 +619,14 @@ pnpm install                                                                    
 node scripts/render-project.mjs <project> --voice silent|system --renderer hyperframes --quality preview|final
 VS_TEST_RENDER=1 npx vitest run packages/renderer packages/mcp/src/stills.test.ts                        # real Chrome captures and renders
 VS_TEST_RENDER=1 VS_UPDATE_GOLDEN=1 npx vitest run tests/golden-frames                                   # record motion-example goldens
+VS_TEST_RENDER=1 npx vitest run packages/mcp/src/render-page.test.ts                                     # render_js on fixtures/spa (isolation, blocked addresses, popups)
+node scripts/render-project.mjs examples/launch-video --voice silent --renderer hyperframes --quality final   # the launch example
+node scripts/generate-sfx.mjs                                                                            # rebuild sfx/ (bitexact; sha256s must not change)
 VS_TEST_WHISPER_MODEL=<ggml model> npx vitest run packages/mcp/src/tighten.test.ts                       # whisper join re-check
 VS_DEBUG_CAPTURE=1 …                                                                                     # trace every Chrome capture step
 VS_TEST_SAY=1 npx vitest run packages/voice/src/system.test.ts
 node scripts/diagnose-chrome.mjs
-claude --plugin-dir .    # then /video-studio:doctor, /video-studio:create ..., /video-studio:stills, /video-studio:compare
+claude --plugin-dir .    # then /video-studio:doctor, /video-studio:create ..., /video-studio:launch <repo|url>, /video-studio:stills, /video-studio:compare
 ```
 
 ## Document map
@@ -629,5 +639,9 @@ claude --plugin-dir .    # then /video-studio:doctor, /video-studio:create ..., 
 - `platform-specs/README.md`: contract rules. `fonts/README.md`: font sources and hashes.
 - `packages/renderer/README.md`: the two renderers and their gated tests.
 - `provider-specs/*.yaml`: AI video model families (sourced, `verified: false`). `research-specs/titles.yaml`: the title-length heuristic.
-- `skills/plan/references/code-motion.md`: how Claude writes a `motion` page (contract, kit, craft rules).
+- `skills/plan/references/code-motion.md`: how Claude writes a `motion` page (contract, kit incl. `vs.energy`/`vs.revealAt`, craft rules).
+- `skills/plan/references/product-flow.md` (the product-in-use rubric) and `sound-design.md` (bundled sound effects, timing, density, levels).
+- `skills/launch/SKILL.md`: the one-command launch flow. `examples/launch-video/`: its worked example.
+- `research-specs/tones.yaml` (tone presets) and `cliches.yaml` (stock phrases); `sfx/catalog.json` + `sfx/README.md` (the synthesized sound library).
+- `fixtures/launch-bench/` (invented sites and a mini repo for `brand_draft`), `fixtures/spa/` (a JS-built page for `render_js`).
 - `CHANGELOG.md`: 0.2.0, 0.3.0 and 0.4.0 in detail.

@@ -21,9 +21,14 @@ Phases 0–2 are done: ingestion → ContentIR, then planning (templates in `tem
   - flash and A/V sync QA; insert-sync and title lint;
   - `analyze write_style` project style packs; the glossary;
   - `tighten` join checks; FCPXML/OTIO timeline export.
+- **6.7 (launch craft; on `main`, 0.5.0 untagged until the user's Mac checks):**
+  - `/video-studio:launch`, `brand_draft`, project fonts (`<project>/fonts/`), `product_flow` and `tone_preset` (`research-specs/tones.yaml`);
+  - synthesized CC0 `sfx/` (`bundled:<id>`), `footage.av_offset_ms`, `cover.bake_first_frame` and automatic cover time;
+  - `__vs.audio` + kit 1.1.0, the reveal schedule, QA `moving_pct`, lint `cliche`/`busy_crossfade`/`reveal_too_fast`/`sfx_*`, `review transitions`, opt-in `ingest render_js`;
+  - `examples/launch-video/`.
 - **API keys:** every provider and publishing key is an optional placeholder (`packages/schema/src/credentials.ts`); none is used until Phase 7 or 9.
 - **The user's intro reel v2** (`video-studio-suparn-intro-v2/`) is approved.
-- **Next (the user's call):** real reels, Phase 9 or Phase 7. See "Start here" in `docs/HANDOFF.md`.
+- **Next:** the user's Mac checks for 0.5.0, then tag it; after that the user's call: real reels, Phase 9 or Phase 7. See "Start here" in `docs/HANDOFF.md`.
 - **pnpm:** `pnpm` scripts want a reinstall until the user runs `pnpm install`, because `packages/prompts` was linked by hand. Use `node scripts/check.mjs`, and `npx tsc -b && (cd packages/schema && node dist/emit.js)` for schemas.
 
 The user's video projects in the repo folder are git-ignored and must not be touched. See "Start here" in `docs/HANDOFF.md`; paid providers moved to Phase 7. See `docs/PLAN.md` (revised after `deep-research-report_v2.md`). This file lives in `.claude/CLAUDE.md` because the repo root is also the plugin root, and `claude plugin validate --strict` rejects a root `CLAUDE.md`.
